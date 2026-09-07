@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+mod host_functions;
+
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
 use crate::bytecode::{
@@ -480,7 +482,6 @@ pub struct Vm {
     conformance_vec2_metatable: Option<u32>,
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
-    host_functions: Vec<HostFunctionOp>,
     host_function_bindings: Vec<HostFunctionBinding>,
     dynamic_programs: LoadedPrograms,
     module_cohorts: BTreeMap<u32, ModuleCohort>,
@@ -621,11 +622,11 @@ impl RetainedValue {
 enum HostFunctionBinding {
     Global {
         name: String,
-        host: u32,
+        function: HostFunctionOp,
     },
     Module {
         namespace: String,
-        functions: Vec<(String, u32)>,
+        functions: Vec<HostFunctionOp>,
     },
 }
 
@@ -2132,7 +2133,12 @@ type RegisterCells = SmallVec<[Option<u32>; 32]>;
 /// no-op defaults.
 #[doc(hidden)]
 pub trait VmHostDispatcher {
-    fn invoke(&mut self, vm: &mut Vm, key: u32, args: &[Value]) -> Result<Vec<Value>>;
+    fn invoke(
+        &mut self,
+        vm: &mut Vm,
+        handler: &(dyn std::any::Any + Send + Sync),
+        args: &[Value],
+    ) -> Result<Vec<Value>>;
 
     fn begin_savepoint(&mut self) -> Result<()> {
         Ok(())
@@ -2145,18 +2151,28 @@ pub trait VmHostDispatcher {
 
 impl<F> VmHostDispatcher for F
 where
-    F: FnMut(&mut Vm, u32, &[Value]) -> Result<Vec<Value>>,
+    F: FnMut(&mut Vm, &(dyn std::any::Any + Send + Sync), &[Value]) -> Result<Vec<Value>>,
 {
-    fn invoke(&mut self, vm: &mut Vm, key: u32, args: &[Value]) -> Result<Vec<Value>> {
-        self(vm, key, args)
+    fn invoke(
+        &mut self,
+        vm: &mut Vm,
+        handler: &(dyn std::any::Any + Send + Sync),
+        args: &[Value],
+    ) -> Result<Vec<Value>> {
+        self(vm, handler, args)
     }
 }
 
 struct RejectHostDispatcher;
 
 impl VmHostDispatcher for RejectHostDispatcher {
-    fn invoke(&mut self, _vm: &mut Vm, key: u32, _args: &[Value]) -> Result<Vec<Value>> {
-        Err(Error::new(ErrorKind::HostDispatcherUnavailable { key }).without_source_location())
+    fn invoke(
+        &mut self,
+        _vm: &mut Vm,
+        _handler: &(dyn std::any::Any + Send + Sync),
+        _args: &[Value],
+    ) -> Result<Vec<Value>> {
+        Err(Error::new(ErrorKind::HostDispatcherUnavailable).without_source_location())
     }
 }
 
@@ -2400,7 +2416,6 @@ impl Vm {
             conformance_vec2_metatable: standard_globals.conformance_vec2_metatable,
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
             extensions: ExtensionRegistry::default(),
-            host_functions: Vec::new(),
             host_function_bindings: Vec::new(),
             dynamic_programs: LoadedPrograms::default(),
             module_cohorts: BTreeMap::from([(0, ModuleCohort::default())]),
@@ -2806,11 +2821,10 @@ impl Vm {
     fn restore_host_function_bindings(&mut self) {
         for binding in self.host_function_bindings.clone() {
             match binding {
-                HostFunctionBinding::Global { name, host } => {
-                    debug_assert!((host as usize) < self.host_functions.len());
+                HostFunctionBinding::Global { name, function } => {
                     let handle = self
                         .heap
-                        .alloc_host_function(host, self.globals)
+                        .alloc_host_function(function, self.globals)
                         .expect("persisted host function handle must remain representable");
                     self.set_host_configuration_global(name, Value::function(handle))
                         .expect("fresh globals must accept a persisted host function");
@@ -2820,11 +2834,11 @@ impl Vm {
                     functions,
                 } => {
                     let table = self.empty_table();
-                    for (name, host) in functions {
-                        debug_assert!((host as usize) < self.host_functions.len());
+                    for function in functions {
+                        let name = function.name.clone();
                         let handle = self
                             .heap
-                            .alloc_host_function(host, self.globals)
+                            .alloc_host_function(function, self.globals)
                             .expect("persisted module function handle must remain representable");
                         let key = self.string(name);
                         self.raw_table_set_value(table, key, Value::function(handle))
@@ -3017,177 +3031,6 @@ impl Vm {
         let id = self.extensions.register(self.profile, op)?;
         self.mark_control_memory_dirty();
         Ok(id)
-    }
-
-    pub fn register_host_function(&mut self, op: HostFunctionOp) -> Result<Value> {
-        self.validate_hardened_host_function(&op)?;
-        validate_registered_op(self.profile, &op.name, op.fuel_cost, op.capability)?;
-        let id = u32::try_from(self.host_functions.len()).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "host function table exhausted",
-            })
-        })?;
-        let handle = self
-            .heap
-            .alloc_host_function(id, self.globals)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "host function handle overflow",
-                })
-            })?;
-        self.host_functions.push(op);
-        self.mark_control_memory_dirty();
-        Ok(Value::function(handle))
-    }
-
-    pub fn install_host_function(&mut self, op: HostFunctionOp) -> Result<()> {
-        self.install_host_functions(vec![op])
-    }
-
-    /// Atomically installs several host functions as globals.
-    pub fn install_host_functions(&mut self, functions: Vec<HostFunctionOp>) -> Result<()> {
-        if self.guest_environment_sealed {
-            return Err(Error::new(ErrorKind::GuestEnvironmentSealed).without_source_location());
-        }
-        for function in &functions {
-            self.validate_hardened_host_function(function)?;
-            validate_registered_op(
-                self.profile,
-                &function.name,
-                function.fuel_cost,
-                function.capability,
-            )?;
-        }
-        self.host_functions
-            .try_reserve(functions.len())
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        self.host_function_bindings
-            .try_reserve(functions.len())
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        let host_functions_checkpoint = self.host_functions.len();
-        let bindings_checkpoint = self.host_function_bindings.len();
-        self.begin_guest_transaction()?;
-        let install = (|| {
-            for function in functions {
-                let name = function.name.clone();
-                let host = u32::try_from(self.host_functions.len()).map_err(|_| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "host function table exhausted",
-                    })
-                })?;
-                let value = self.register_host_function(function)?;
-                self.set_host_configuration_global(&name, value)?;
-                self.host_function_bindings
-                    .push(HostFunctionBinding::Global { name, host });
-            }
-            Ok(())
-        })();
-        let install = match install {
-            Ok(()) => match self.commit_guest_transaction() {
-                Ok(()) => Ok(()),
-                Err(error) => {
-                    self.host_functions.truncate(host_functions_checkpoint);
-                    self.host_function_bindings.truncate(bindings_checkpoint);
-                    self.rollback_guest_transaction();
-                    Err(error)
-                }
-            },
-            Err(error) => {
-                self.host_functions.truncate(host_functions_checkpoint);
-                self.host_function_bindings.truncate(bindings_checkpoint);
-                self.rollback_guest_transaction();
-                Err(error)
-            }
-        };
-        self.mark_control_memory_dirty();
-        install
-    }
-
-    /// Installs a table of host functions under one global namespace.
-    ///
-    /// The binding is VM configuration rather than guest state and is rebuilt
-    /// automatically by [`Vm::reset_decision`].
-    pub fn install_host_module(
-        &mut self,
-        namespace: impl Into<String>,
-        functions: Vec<HostFunctionOp>,
-    ) -> Result<()> {
-        if self.guest_environment_sealed {
-            return Err(Error::new(ErrorKind::GuestEnvironmentSealed).without_source_location());
-        }
-        let namespace = namespace.into();
-        for function in &functions {
-            self.validate_hardened_host_function(function)?;
-            let qualified_name = format!("{namespace}.{}", function.name);
-            validate_registered_op(
-                self.profile,
-                &qualified_name,
-                function.fuel_cost,
-                function.capability,
-            )?;
-        }
-        self.host_functions
-            .try_reserve(functions.len())
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        self.host_function_bindings
-            .try_reserve(1)
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        let mut bindings = Vec::new();
-        bindings
-            .try_reserve(functions.len())
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        let host_functions_checkpoint = self.host_functions.len();
-        let bindings_checkpoint = self.host_function_bindings.len();
-        self.begin_guest_transaction()?;
-        let install = (|| {
-            let table = self.empty_table();
-            for function in functions {
-                let name = function.name.clone();
-                let host = u32::try_from(self.host_functions.len()).map_err(|_| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "host function table exhausted",
-                    })
-                })?;
-                let value = self.register_host_function(function)?;
-                let key = self.string(&name);
-                self.raw_table_set_value(table, key, value)?;
-                bindings.push((name, host));
-            }
-            if self.settings.guest_surface.is_hardened_leaf() {
-                let module = table
-                    .as_table()
-                    .expect("host module binding must be a table");
-                self.heap
-                    .table_freeze(module)
-                    .expect("new host module table must be valid");
-            }
-            self.set_host_configuration_global(&namespace, table)?;
-            self.host_function_bindings
-                .push(HostFunctionBinding::Module {
-                    namespace,
-                    functions: bindings,
-                });
-            Ok(())
-        })();
-        let install = match install {
-            Ok(()) => match self.commit_guest_transaction() {
-                Ok(()) => Ok(()),
-                Err(error) => {
-                    self.host_functions.truncate(host_functions_checkpoint);
-                    self.host_function_bindings.truncate(bindings_checkpoint);
-                    self.rollback_guest_transaction();
-                    Err(error)
-                }
-            },
-            Err(error) => {
-                self.host_functions.truncate(host_functions_checkpoint);
-                self.host_function_bindings.truncate(bindings_checkpoint);
-                self.rollback_guest_transaction();
-                Err(error)
-            }
-        };
-        self.mark_control_memory_dirty();
-        install
     }
 
     fn validate_hardened_host_function(&self, op: &HostFunctionOp) -> Result<()> {
@@ -11160,9 +11003,9 @@ impl Vm {
                     fuel,
                 )
             }
-            FunctionKind::Host(host) => {
+            FunctionKind::Host => {
                 let (fuel_cost, target) = {
-                    let op = self.host_function(host)?;
+                    let op = self.host_function(handle)?;
                     (op.fuel_cost, op.target.clone())
                 };
                 charge_fuel(
@@ -11172,12 +11015,14 @@ impl Vm {
                 )?;
                 let result = catch_unwind(AssertUnwindSafe(|| match target {
                     HostFunctionTarget::Inline(handler) => handler(self, args),
-                    HostFunctionTarget::Dispatcher(key) => fuel.hosts.invoke(self, key, args),
+                    HostFunctionTarget::Dispatcher(handler) => {
+                        fuel.hosts.invoke(self, handler.as_ref(), args)
+                    }
                 }));
                 let result = match result {
                     Ok(result) => result,
                     Err(_) => {
-                        let function = self.host_function(host)?.name.clone();
+                        let function = self.host_function(handle)?.name.clone();
                         Err(Error::new(ErrorKind::HostPanicked { function })
                             .without_source_location())
                     }
@@ -11448,7 +11293,7 @@ impl Vm {
     }
 
     fn host_function(&self, host: u32) -> Result<&HostFunctionOp> {
-        self.host_functions.get(host as usize).ok_or_else(|| {
+        self.heap.host_function(host).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "host function handle is missing",
             })
@@ -13594,8 +13439,8 @@ impl Vm {
         })?;
         match kind {
             FunctionKind::Native(native) => Ok(debug_info_native_target(function_value, native)),
-            FunctionKind::Host(host) => {
-                let op = self.host_function(host)?;
+            FunctionKind::Host => {
+                let op = self.host_function(handle)?;
                 Ok(DebugInfoTarget {
                     name: op.name.clone(),
                     source: "[Rust]".to_owned(),
@@ -16570,7 +16415,7 @@ impl Vm {
                     &mut entries,
                 )?;
             }
-            FunctionKind::DynamicMain { .. } | FunctionKind::Host(_) | FunctionKind::Native(_) => {}
+            FunctionKind::DynamicMain { .. } | FunctionKind::Host | FunctionKind::Native(_) => {}
         }
 
         let table = self.heap.alloc_array_table(&entries);
@@ -20605,7 +20450,9 @@ mod hardened_leaf_validation_tests {
 
         let entry = HardenedLeafProgram::new(program).expect("valid hardened entry");
         let mut execution = vm.begin_transactional_execution_with_fuel(None);
-        let mut host = |_vm: &mut Vm, _key: u32, _args: &[Value]| Ok(Vec::new());
+        let mut host = |_vm: &mut Vm,
+                        _handler: &(dyn std::any::Any + Send + Sync),
+                        _args: &[Value]| Ok(Vec::new());
         let error = vm
             .run_hardened_leaf_entry_in(&entry, &mut execution, &mut host)
             .expect_err("a hardened transaction must have an explicit fuel budget");
@@ -23274,17 +23121,16 @@ fn add_vm_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
 fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let (extension_live, extension_reserved) = vm.extensions.memory_usage();
     usage.add(extension_live, extension_reserved);
-    usage.add_vec(&vm.host_functions);
-    for op in &vm.host_functions {
-        usage.add(op.name.len(), op.name.capacity());
-        usage.add_vec(&op.parameter_types);
-        usage.add_vec(&op.return_types);
-    }
     usage.add_vec(&vm.host_function_bindings);
     for binding in &vm.host_function_bindings {
         match binding {
-            HostFunctionBinding::Global { name, .. } => {
+            HostFunctionBinding::Global { name, function } => {
                 usage.add(name.len(), name.capacity());
+                let (live, reserved) = function.memory_usage();
+                usage.add(
+                    live.saturating_sub(size_of::<HostFunctionOp>()),
+                    reserved.saturating_sub(size_of::<HostFunctionOp>()),
+                );
             }
             HostFunctionBinding::Module {
                 namespace,
@@ -23292,8 +23138,12 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
             } => {
                 usage.add(namespace.len(), namespace.capacity());
                 usage.add_vec(functions);
-                for (name, _) in functions {
-                    usage.add(name.len(), name.capacity());
+                for function in functions {
+                    let (live, reserved) = function.memory_usage();
+                    usage.add(
+                        live.saturating_sub(size_of::<HostFunctionOp>()),
+                        reserved.saturating_sub(size_of::<HostFunctionOp>()),
+                    );
                 }
             }
         }

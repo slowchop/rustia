@@ -1,4 +1,6 @@
-use crate::function::{host_arg_from_raw, host_return_to_raw, IntoHostFunction, IntoHostReturn};
+use crate::function::{
+    host_arg_from_raw, host_return_to_raw, FromHostArgument, IntoHostFunction, IntoHostReturn,
+};
 use crate::serde_value::from_live;
 use crate::value::{
     load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustiaMulti,
@@ -586,46 +588,23 @@ impl<C> ContextHostFunction<C>
 where
     C: HostSchema,
 {
-    pub(crate) fn into_parts(
-        self,
-        dispatcher_key: u32,
-    ) -> (HostFunctionOp, ContextHandlerEntry<C>) {
+    pub(crate) fn into_op(self) -> HostFunctionOp {
         let handler_name = self.name.clone();
-        let op =
-            HostFunctionOp::dispatched(self.name, self.fuel_cost, self.capability, dispatcher_key)
-                .with_signature(
-                    self.parameter_count,
-                    self.parameter_types,
-                    self.return_types,
-                    self.fallible,
-                );
-        (
-            op,
-            ContextHandlerEntry {
+        HostFunctionOp::dispatched(
+            self.name,
+            self.fuel_cost,
+            self.capability,
+            std::sync::Arc::new(ContextHandlerEntry::<C> {
                 name: handler_name,
                 handler: self.handler,
-            },
+            }),
         )
-    }
-}
-
-enum HostModuleFunction<C>
-where
-    C: HostSchema,
-{
-    Inline(HostFunctionOp),
-    Contextual(ContextHostFunction<C>),
-}
-
-impl<C> HostModuleFunction<C>
-where
-    C: HostSchema,
-{
-    fn name(&self) -> &str {
-        match self {
-            Self::Inline(function) => &function.name,
-            Self::Contextual(function) => &function.name,
-        }
+        .with_signature(
+            self.parameter_count,
+            self.parameter_types,
+            self.return_types,
+            self.fallible,
+        )
     }
 }
 
@@ -642,7 +621,8 @@ where
     C: HostSchema,
 {
     namespace: String,
-    functions: Vec<HostModuleFunction<C>>,
+    functions: Vec<HostFunctionOp>,
+    schema: PhantomData<fn() -> C>,
 }
 
 impl<C> HostModule<C>
@@ -658,12 +638,24 @@ where
         Self {
             namespace: namespace.into(),
             functions: Vec::new(),
+            schema: PhantomData,
         }
     }
 
     /// Returns the guest-visible namespace.
     pub fn namespace(&self) -> &str {
         &self.namespace
+    }
+
+    /// Adds the same callback definition accepted by `Rustia::create_function`
+    /// and `Rustia::register_function` to this persistent namespace.
+    pub fn function<F, S>(mut self, name: impl Into<String>, function: F) -> Self
+    where
+        F: crate::IntoHostFunctionDefinition<C, S>,
+    {
+        self.functions
+            .push(function.into_definition().into_op(name.into()));
+        self
     }
 
     /// Returns the versioned policy used to charge host-call fuel.
@@ -673,46 +665,18 @@ where
 
     /// Iterates over the module's declared function metadata in install order.
     pub fn functions(&self) -> impl Iterator<Item = RustiaHostFunctionInfo<'_>> + '_ {
-        self.functions.iter().map(|function| {
-            let (
-                name,
-                fuel_cost,
-                capability,
-                parameter_count,
-                parameter_types,
-                return_types,
-                fallible,
-            ) = match function {
-                HostModuleFunction::Inline(function) => (
-                    function.name.as_str(),
-                    function.fuel_cost,
-                    function.capability,
-                    function.parameter_count,
-                    function.parameter_types.as_slice(),
-                    function.return_types.as_slice(),
-                    function.fallible,
-                ),
-                HostModuleFunction::Contextual(function) => (
-                    function.name.as_str(),
-                    function.fuel_cost,
-                    function.capability,
-                    function.parameter_count,
-                    function.parameter_types.as_slice(),
-                    function.return_types.as_slice(),
-                    function.fallible,
-                ),
-            };
-            RustiaHostFunctionInfo {
-                name,
+        self.functions
+            .iter()
+            .map(|function| RustiaHostFunctionInfo {
+                name: &function.name,
                 fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
-                fuel_cost,
-                capability,
-                parameter_count,
-                parameter_types,
-                return_types,
-                fallible,
-            }
-        })
+                fuel_cost: function.fuel_cost,
+                capability: function.capability,
+                parameter_count: function.parameter_count,
+                parameter_types: &function.parameter_types,
+                return_types: &function.return_types,
+                fallible: function.fallible,
+            })
     }
 
     /// Adds a context-free function with [`OpCapability::Pure`].
@@ -721,7 +685,7 @@ where
     /// returns use Rustia's normal value conversions. A `Result<R>` return is
     /// exposed as a fallible host call.
     pub fn pure<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -729,13 +693,10 @@ where
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.functions
-            .push(HostModuleFunction::Inline(function.into_host_function(
-                name.into(),
-                fuel_cost,
-                OpCapability::Pure,
-            )));
-        self
+        self.function(
+            name,
+            crate::HostFunction::pure(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a deterministic input reader.
@@ -743,7 +704,7 @@ where
     /// The closure shape is `for<'a> Fn(Input<'a, C>, A, B, ...) -> R`.
     /// Its first argument can access only [`HostContext::input`].
     pub fn input<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -751,10 +712,10 @@ where
     where
         Func: IntoInputFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_input_function(name.into(), fuel_cost),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::input(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a deterministic persistent-slot reader.
@@ -762,7 +723,7 @@ where
     /// The closure shape is `for<'a> Fn(Slots<'a, C>, A, B, ...) -> R`.
     /// Its first argument can access only [`HostContext::slots`].
     pub fn slot_read<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -770,10 +731,10 @@ where
     where
         Func: IntoSlotReadFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_slot_read_function(name.into(), fuel_cost),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::slot_read(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a deterministic effect recorder.
@@ -782,7 +743,7 @@ where
     /// Calls to [`Effects::emit`] stage ordered records in the current
     /// invocation transaction.
     pub fn effect<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -790,10 +751,10 @@ where
     where
         Func: IntoEffectFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_effect_function(name.into(), fuel_cost),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::effect(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a deterministic persistent-slot write recorder.
@@ -803,7 +764,7 @@ where
     /// [`SlotWrites::write`] stage ordered records; they do not mutate slots
     /// directly.
     pub fn slot_write<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -811,10 +772,10 @@ where
     where
         Func: IntoSlotWriteFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_slot_write_function(name.into(), fuel_cost),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::slot_write(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a function that reads or mutates external host state.
@@ -824,7 +785,7 @@ where
     /// rejects the entire module before installation. Mutations through
     /// [`HostMut`] are immediate and cannot be rolled back by Rustia.
     pub fn external<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -832,14 +793,10 @@ where
     where
         Func: IntoExternalFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_external_function(
-                name.into(),
-                fuel_cost,
-                OpCapability::ReadsExternalMutableState,
-            ),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::external(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Adds a host operation explicitly classified as nondeterministic.
@@ -849,7 +806,7 @@ where
     /// whose effect itself is nondeterministic. Deterministic profiles reject
     /// it before installation.
     pub fn nondeterministic<Func, Args, Return>(
-        mut self,
+        self,
         name: impl Into<String>,
         fuel_cost: u32,
         function: Func,
@@ -857,133 +814,36 @@ where
     where
         Func: IntoExternalFunction<C, Args, Return>,
     {
-        self.functions.push(HostModuleFunction::Contextual(
-            function.into_external_function(
-                name.into(),
-                fuel_cost,
-                OpCapability::NondeterministicEffect,
-            ),
-        ));
-        self
+        self.function(
+            name,
+            crate::HostFunction::nondeterministic(function).fuel_cost(fuel_cost),
+        )
     }
 
-    pub(crate) fn install(self, vm: &mut Vm, bindings: &mut HostBindings<C>) -> Result<()> {
+    pub(crate) fn install(self, vm: &mut Vm) -> Result<()> {
         if self.namespace.is_empty() {
             return Err(Error::Embed(
                 "typed host module namespace must not be empty".to_owned(),
             ));
         }
         for (index, function) in self.functions.iter().enumerate() {
-            if function.name().is_empty() {
+            if function.name.is_empty() {
                 return Err(Error::Embed(
                     "typed host function name must not be empty".to_owned(),
                 ));
             }
             if self.functions[..index]
                 .iter()
-                .any(|prior| prior.name() == function.name())
+                .any(|prior| prior.name == function.name)
             {
                 return Err(Error::Embed(format!(
                     "duplicate typed host function `{}` in module `{}`",
-                    function.name(),
-                    self.namespace
+                    function.name, self.namespace
                 )));
             }
         }
-        let contextual_count = self
-            .functions
-            .iter()
-            .filter(|function| matches!(function, HostModuleFunction::Contextual(_)))
-            .count();
-        bindings
-            .handlers
-            .try_reserve(contextual_count)
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
-        let mut ops = Vec::new();
-        ops.try_reserve(self.functions.len())
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
-        let mut handlers = Vec::new();
-        handlers
-            .try_reserve(contextual_count)
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
-        for function in self.functions {
-            match function {
-                HostModuleFunction::Inline(op) => ops.push(op),
-                HostModuleFunction::Contextual(function) => {
-                    let offset = bindings
-                        .handlers
-                        .len()
-                        .checked_add(handlers.len())
-                        .ok_or_else(|| {
-                            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
-                                resource: "typed host binding count",
-                                limit: u64::from(u32::MAX),
-                            }))
-                        })?;
-                    let key = u32::try_from(offset).map_err(|_| {
-                        Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
-                            resource: "typed host binding count",
-                            limit: u64::from(u32::MAX),
-                        }))
-                    })?;
-                    let (op, handler) = function.into_parts(key);
-                    ops.push(op);
-                    handlers.push(handler);
-                }
-            }
-        }
-        vm.install_host_module(self.namespace, ops)
-            .map_err(Error::Vm)?;
-        bindings.handlers.extend(handlers);
-        Ok(())
-    }
-}
-
-pub(crate) struct HostBindings<C>
-where
-    C: HostSchema,
-{
-    pub(crate) handlers: Vec<ContextHandlerEntry<C>>,
-}
-
-impl<C> Default for HostBindings<C>
-where
-    C: HostSchema,
-{
-    fn default() -> Self {
-        Self {
-            handlers: Vec::new(),
-        }
-    }
-}
-
-impl<C> HostBindings<C>
-where
-    C: HostSchema,
-{
-    pub(crate) fn reserve_one(&mut self) -> Result<()> {
-        self.handlers
-            .try_reserve(1)
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))
-    }
-
-    pub(crate) fn install(&mut self, vm: &mut Vm, function: ContextHostFunction<C>) -> Result<()> {
-        if function.name.is_empty() {
-            return Err(Error::Embed(
-                "typed host function name must not be empty".to_owned(),
-            ));
-        }
-        self.reserve_one()?;
-        let key = u32::try_from(self.handlers.len()).map_err(|_| {
-            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
-                resource: "typed host binding count",
-                limit: u64::from(u32::MAX),
-            }))
-        })?;
-        let (op, handler) = function.into_parts(key);
-        vm.install_host_function(op).map_err(Error::Vm)?;
-        self.handlers.push(handler);
-        Ok(())
+        vm.install_host_module(self.namespace, self.functions)
+            .map_err(Error::Vm)
     }
 }
 
@@ -991,7 +851,6 @@ pub(crate) struct TypedHostDispatcher<'call, C>
 where
     C: HostSchema,
 {
-    handlers: &'call [ContextHandlerEntry<C>],
     context: &'call mut dyn HostContext<C>,
     journal: EffectJournal<C::Record>,
     savepoints: Vec<JournalCheckpoint>,
@@ -1002,13 +861,11 @@ where
     C: HostSchema,
 {
     pub(crate) fn new(
-        handlers: &'call [ContextHandlerEntry<C>],
         context: &'call mut dyn HostContext<C>,
         records: Vec<C::Record>,
         limits: InvocationLimits,
     ) -> Self {
         Self {
-            handlers,
             context,
             journal: EffectJournal::new(records, limits),
             savepoints: Vec::new(),
@@ -1018,18 +875,17 @@ where
     fn invoke(
         &mut self,
         vm: &mut Vm,
-        key: u32,
+        handler: &(dyn std::any::Any + Send + Sync),
         args: &[RawValue],
     ) -> rustia_vm::Result<Vec<RawValue>> {
         if let Some(error) = self.journal.hard_error() {
             return Err(error.clone());
         }
-        let index = usize::try_from(key).map_err(|_| {
-            VmError::new(VmErrorKind::HostDispatcherUnavailable { key }).without_source_location()
-        })?;
-        let entry = self.handlers.get(index).ok_or_else(|| {
-            VmError::new(VmErrorKind::HostDispatcherUnavailable { key }).without_source_location()
-        })?;
+        let entry = handler
+            .downcast_ref::<ContextHandlerEntry<C>>()
+            .ok_or_else(|| {
+                VmError::new(VmErrorKind::HostDispatcherUnavailable).without_source_location()
+            })?;
         let checkpoint = self.journal.checkpoint();
         let result = catch_unwind(AssertUnwindSafe(|| {
             (entry.handler)(vm, self.context, &mut self.journal, args)
@@ -1091,10 +947,10 @@ where
     fn invoke(
         &mut self,
         vm: &mut Vm,
-        key: u32,
+        handler: &(dyn std::any::Any + Send + Sync),
         args: &[RawValue],
     ) -> rustia_vm::Result<Vec<RawValue>> {
-        Self::invoke(self, vm, key, args)
+        Self::invoke(self, vm, handler, args)
     }
 
     fn begin_savepoint(&mut self) -> rustia_vm::Result<()> {
@@ -1898,7 +1754,7 @@ macro_rules! context_function {
                 + Sync
                 + 'static,
             Return: IntoHostReturn,
-            $($name: FromRustia,)+
+            $($name: FromHostArgument,)+
         {
         }
 
@@ -1910,7 +1766,7 @@ macro_rules! context_function {
                 + Sync
                 + 'static,
             Return: IntoHostReturn,
-            $($name: FromRustia,)+
+            $($name: FromHostArgument,)+
         {
             #[allow(non_snake_case)]
             fn $method_name(self, name: String, fuel_cost: u32) -> ContextHostFunction<C> {
@@ -1985,7 +1841,7 @@ macro_rules! external_function {
                 + Sync
                 + 'static,
             Return: IntoHostReturn,
-            $($name: FromRustia,)*
+            $($name: FromHostArgument,)*
         {
         }
 
@@ -1997,7 +1853,7 @@ macro_rules! external_function {
                 + Sync
                 + 'static,
             Return: IntoHostReturn,
-            $($name: FromRustia,)*
+            $($name: FromHostArgument,)*
         {
             #[allow(non_snake_case, unused_mut, unused_variables)]
             fn into_external_function(

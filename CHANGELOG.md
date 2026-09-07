@@ -8,6 +8,17 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Synchronous `HostFunction` definitions shared by `create_function`,
+  `register_function`, and `HostModule::function`. Typed signatures support
+  owned and live arguments and mixed tuple results through arity eight.
+  Constructed callbacks follow rooted guest-function lifetime and are reclaimed
+  after their last reachable reference; reset invalidates them and releases
+  their captures. Registrations remain reset-persistent and replacing one
+  releases obsolete configuration ownership without breaking guest aliases.
+  Capability views, fuel, signature metadata, quota admission, and panic
+  containment are shared. Persistent registration requires an idle VM;
+  hardened leaves reject disposable construction before VM allocation.
+
 - Transactional module installation through `load(...).install()` and
   `install(&CompiledModule)`. Each candidate runs in a fresh globals-inheriting
   environment and fresh lazy `require` cache cohort unless the host supplies an
@@ -183,6 +194,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- Low-level VM host functions now own their callback operations in generation-safe
+  heap slots. `FunctionKind::Host` no longer exposes a registry index, and the
+  contextual dispatcher receives owned type-erased handler data instead of an
+  append-only numeric key. `HostDispatcherUnavailable` no longer contains a key.
+  Captured destructors must not panic; opaque Rust captures remain outside VM quota.
 - The unpublished `0.0.x` facade now uses one coherent execution vocabulary:
   `eval`, `eval_live`, `eval_serde`, `exec`, and `install`, configured through
   `load(...).source_name(...).environment(...)`. The former `run*`, named

@@ -1557,7 +1557,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-vm/Cargo.toml",
       "publish": false,
-      "file_count": 23,
+      "file_count": 24,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1580,6 +1580,7 @@
         "src/register_blocks.rs",
         "src/tape.rs",
         "src/value.rs",
+        "src/vm/host_functions.rs",
         "src/vm.rs",
         "tests/core.rs"
       ]
@@ -1589,7 +1590,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 35,
+      "file_count": 37,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1609,6 +1610,7 @@
         "src/chunk.rs",
         "src/extension_api.rs",
         "src/function.rs",
+        "src/host_function.rs",
         "src/invocation.rs",
         "src/lib.rs",
         "src/live_value.rs",
@@ -1619,6 +1621,7 @@
         "tests/bare_wasm_live.rs",
         "tests/chunk_builder.rs",
         "tests/hardened_leaf.rs",
+        "tests/host_functions.rs",
         "tests/live_serde.rs",
         "tests/mixed_heap_pressure.rs",
         "tests/module_resolution.rs",

@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-02.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-07.)
 
 ## One-paragraph state
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
@@ -16,6 +16,8 @@ cross-compiling the declared target matrix; Firefox/Safari browser goldens remai
 embedding facade from [`75-embedded-api.md`](75-embedded-api.md) is implemented at the first useful level:
 owned values with typed and nested table helpers, a composable `load(...).source_name(...)` execution surface,
 typed host functions with fallible `rustia::Result<T>` returns, pre-install host signature/fuel ABI metadata,
+reclaimable `create_function` values and shared `HostFunction` definitions for persistent registrations/modules
+with mixed owned/live arguments and tuple results,
 VM/decision-epoch-safe retained script function handles, public source-span/runtime-location error
 accessors, owned-value/table serde with symmetric externally tagged enum support (including Serde rename
 rules), snapshot-free deserialization from rooted live values, atomic extension registration, host-owned module
@@ -338,8 +340,11 @@ facility is finished. The highest-impact gaps are:
    Hardened leaves reject mutable constructor authorities before allocation and dynamic loading before
    compilation. Snapshot-free serde deserialization now reads rooted `Value`, `Table`, and `Exports` graphs
    directly into owned Rust types while keeping the eager `OwnedValue` snapshot explicit. Before calling this
-   a complete rich embedding boundary, add safe function construction and a concrete public userdata
-   registration contract. A public
+   a complete rich embedding boundary, add a concrete public userdata registration contract.
+   Synchronous function construction now shares typed owned/live conversions, capability/fuel metadata,
+   and contextual dispatch with persistent registrations and host modules. Heap functions own callbacks;
+   guest aliases survive replacement, collection releases unreachable captures, and reset discards
+   disposable ownership while restoring only the newest persistent configuration. A public
    `Thread` handle remains intentionally absent until a real host-side scheduler caller defines its contract.
    Full mlua-style `UserData`/`Scope`, async callbacks, and any mlua migration shim remain later optional
    layers. These APIs serve every builder preset: `deterministic()` enforces replay restrictions, `standard()`
@@ -380,7 +385,8 @@ unreachable suspended-coroutine frames.
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
    [`75-embedded-api.md`](75-embedded-api.md#build-order): the composable chunk builder is now implemented on
    the graph-preserving live `Value`/`Table`/`Function` spine and its live globals/table constructors. Build
-   safe function construction next, then finish stack diagnostics. Transactional installation and host-owned
+   on the implemented synchronous host-function API by completing the controlled-client rollout, then finish
+   stack diagnostics. Transactional installation and host-owned
    replacement are implemented. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
    available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
@@ -709,6 +715,7 @@ invocation, and a separately versioned guest ABI.
 | doc | role | status |
 |---|---|---|
 | **CURRENT.md** (this) | the live canonical state | authoritative |
+| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions and reclaimable live functions | **implemented; controlled-client rollout pending** |
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
@@ -747,8 +754,9 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 The review is actioned (all 8 folded in above + into the docs). The honest residual open items, in order:
 1. **Complete the ordered advanced API boundary:** the composable chunk builder is implemented on the
    graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Atomic
-   installation, fresh dependency cohorts, host-owned replacement, and live-value serde are implemented. Build
-   safe function construction and stronger traceback diagnostics. The
+   installation, fresh dependency cohorts, host-owned replacement, live-value serde, and synchronous
+   host-function construction are implemented. Complete the controlled-client rollout and stronger traceback
+   diagnostics. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
    apply determinism restrictions according to the selected builder: `live()` intentionally promises none.

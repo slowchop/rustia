@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-09-02",
+    "date": "2026-09-07",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -398,13 +398,13 @@
           "complete": 93,
           "confidence": 94,
           "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, raw equality, and snapshot-free serde deserialization without exposing collector lifetimes. Live globals, quota-aware table construction, owned-key/live-value insertion, and the composable chunk builder build and execute against identity-bearing host graphs; hardened leaves reject those authorities before allocation or compilation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, custom lexical environments, serde, and export access.",
-          "future_plan": "Add safe function construction and a concrete public userdata registration contract."
+          "future_plan": "Complete the controlled-client synchronous callback rollout, then define a concrete public userdata registration contract."
         },
         {
           "name": "Typed host functions",
           "complete": 94,
           "confidence": 91,
-          "state": "Plain Rust functions can be registered with typed args/results through arity 8. Typed VMs add sealed Input, Slots, Effects, SlotWrites, and profile-gated HostMut views; namespaced HostModule metadata; explicit fuel; fallible rustia::Result<T> returns; panic containment; parameter-count/type/fallibility metadata; and conversion errors that name the host function plus argument or return position.",
+          "state": "Shared HostFunction definitions support disposable create_function values, persistent register_function bindings, and HostModule::function namespaces with owned/live typed arguments and mixed tuple results through arity 8. Heap-owned callbacks are reclaimed after their final reachable guest reference; reset releases disposable captures while rebuilding persistent configuration, and replacement preserves old guest aliases without an append-only registry. Typed VMs retain sealed Input, Slots, Effects, SlotWrites, and profile-gated HostMut views, metadata, explicit fuel, fallible results, panic containment, and named conversion errors. Quota admission and namespace installation are atomic; hardened leaves reject disposable construction.",
           "future_plan": "Keep tightening diagnostics and decide whether public signature metadata should grow beyond Rust type names."
         },
         {
@@ -447,7 +447,7 @@
           "complete": 96,
           "confidence": 95,
           "state": "Script Value, Table, Function, and Exports handles are true collector roots. They retain VM identity and decision epoch, can be exchanged across live calls, and fail closed after reset or when used with another VM. Repeated slot reuse cannot make stale handles alias replacement objects or programs; successful module replacement does not invalidate old rooted handles, and old functions keep their originating dependency cohort.",
-          "future_plan": "Keep VM and epoch failures explicit while remaining live-object constructors are added."
+          "future_plan": "Keep VM and epoch failures explicit as optional userdata and scheduling interfaces are designed."
         },
         {
           "name": "Transactional module replacement",

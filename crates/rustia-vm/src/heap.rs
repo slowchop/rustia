@@ -1,3 +1,4 @@
+use crate::extension::HostFunctionOp;
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
 use smallvec::SmallVec;
@@ -481,6 +482,7 @@ impl TableData {
 #[derive(Clone)]
 struct FunctionData {
     kind: FunctionKind,
+    host_function: Option<Box<HostFunctionOp>>,
     captures: SmallVec<[FunctionCapture; 2]>,
     environment: u32,
     module_cohort: u32,
@@ -626,7 +628,7 @@ pub enum FunctionKind {
     DynamicMain {
         program: u32,
     },
-    Host(u32),
+    Host,
     Native(NativeFunction),
 }
 
@@ -1412,16 +1414,8 @@ impl VmCell {
             );
         }
         for function in self.functions.values() {
-            usage.add(
-                function
-                    .captures
-                    .len()
-                    .saturating_mul(size_of::<FunctionCapture>()),
-                function
-                    .captures
-                    .capacity()
-                    .saturating_mul(size_of::<FunctionCapture>()),
-            );
+            let function = function_data_memory_usage(function);
+            usage.add(function.live_bytes, function.reserved_bytes);
         }
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
@@ -2042,6 +2036,7 @@ impl VmCell {
     ) -> Option<u32> {
         self.insert_function_data(FunctionData {
             kind: FunctionKind::Bytecode { program, prototype },
+            host_function: None,
             captures: captures.into_iter().collect(),
             environment,
             module_cohort,
@@ -2061,6 +2056,7 @@ impl VmCell {
     ) -> Option<u32> {
         self.insert_function_data(FunctionData {
             kind: FunctionKind::DynamicMain { program },
+            host_function: None,
             captures: SmallVec::new(),
             environment,
             module_cohort,
@@ -2074,20 +2070,32 @@ impl VmCell {
     ) -> Option<u32> {
         self.insert_function_data(FunctionData {
             kind: FunctionKind::Native(native),
+            host_function: None,
             captures: SmallVec::new(),
             environment,
             module_cohort: 0,
         })
     }
 
-    pub fn alloc_host_function(&mut self, host: u32, environment: u32) -> Option<u32> {
+    pub fn alloc_host_function(&mut self, host: HostFunctionOp, environment: u32) -> Option<u32> {
         self.tables.get(environment)?;
         self.insert_function_data(FunctionData {
-            kind: FunctionKind::Host(host),
+            kind: FunctionKind::Host,
+            host_function: Some(Box::new(host)),
             captures: SmallVec::new(),
             environment,
             module_cohort: 0,
         })
+    }
+
+    pub(crate) fn host_function_live_bytes(host: &HostFunctionOp) -> usize {
+        size_of::<ReusableSlot<FunctionData>>().saturating_add(host.memory_usage().0)
+    }
+
+    pub(crate) fn discard_host_function(&mut self, handle: u32) {
+        self.functions
+            .retain_handles(|candidate| candidate != handle);
+        self.recompute_side_usage();
     }
 
     pub fn alloc_native_function_with_upvalues(
@@ -2101,6 +2109,7 @@ impl VmCell {
         }
         self.insert_function_data(FunctionData {
             kind: FunctionKind::Native(native),
+            host_function: None,
             captures: upvalues
                 .into_iter()
                 .map(FunctionCapture::from_cell)
@@ -2115,6 +2124,10 @@ impl VmCell {
         self.functions.get(handle).map(|function| function.kind)
     }
 
+    pub(crate) fn host_function(&self, handle: u32) -> Option<&HostFunctionOp> {
+        self.functions.get(handle)?.host_function.as_deref()
+    }
+
     pub(crate) fn referenced_programs(&self) -> Vec<u32> {
         self.functions
             .values()
@@ -2125,7 +2138,7 @@ impl VmCell {
                 }
                 | FunctionKind::DynamicMain { program } => Some(program),
                 FunctionKind::Bytecode { program: None, .. }
-                | FunctionKind::Host(_)
+                | FunctionKind::Host
                 | FunctionKind::Native(_) => None,
             })
             .collect()
@@ -2145,7 +2158,7 @@ impl VmCell {
                 function.environment,
                 function.module_cohort,
             )),
-            FunctionKind::Host(_) | FunctionKind::Native(_) => None,
+            FunctionKind::Host | FunctionKind::Native(_) => None,
         };
         Some((function.kind, bytecode_data))
     }
@@ -3666,7 +3679,7 @@ fn vec_memory_usage<T>(values: &Vec<T>) -> HeapMemoryUsage {
 }
 
 fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
-    HeapMemoryUsage {
+    let mut usage = HeapMemoryUsage {
         live_bytes: function
             .captures
             .len()
@@ -3675,7 +3688,12 @@ fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
             .captures
             .capacity()
             .saturating_mul(size_of::<FunctionCapture>()),
+    };
+    if let Some(host) = &function.host_function {
+        let (live, reserved) = host.memory_usage();
+        usage.add(live, reserved);
     }
+    usage
 }
 
 fn try_clone_copy_vec<T: Copy>(values: &[T]) -> Result<Vec<T>, ()> {
@@ -3715,6 +3733,7 @@ fn try_clone_function_data(function: &FunctionData) -> Result<FunctionData, ()> 
     captures.extend_from_slice(&function.captures);
     Ok(FunctionData {
         kind: function.kind,
+        host_function: function.host_function.clone(),
         captures,
         environment: function.environment,
         module_cohort: function.module_cohort,

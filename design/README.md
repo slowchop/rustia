@@ -44,6 +44,7 @@ docs are design intent.
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — coherent execution facade, typed schema/context transaction, serde, transactional installation/replacement, extension/linker | **[TRANSACTIONAL INSTALLATION IMPLEMENTED]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
+| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions, live construction, persistent registration, reclamation and reset | **[IMPLEMENTED; CLIENT ROLLOUT PENDING]** |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
 | [`81-benchmark-operations.md`](81-benchmark-operations.md) | qualified-host measurement, freshness/publication state, landscape refresh, and no-scheduled-billing policy | **[ROLLING OUT]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
