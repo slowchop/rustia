@@ -110,8 +110,8 @@ one engine:
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
-   on a real host-side scheduling caller. Still planned: safe host-function construction and later
-   optional `UserData`/`Scope` and async. The composable chunk builder is implemented.
+   on a real host-side scheduling caller. Reclaimable synchronous host-function construction and the
+   composable chunk builder are implemented. Optional `UserData`/`Scope` and async remain later layers.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:

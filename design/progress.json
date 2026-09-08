@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-09-07",
+    "date": "2026-09-08",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -398,7 +398,7 @@
           "complete": 93,
           "confidence": 94,
           "state": "Rooted VM/epoch-safe Value, Table, and Function handles preserve binary strings, buffers, vectors, rich identity-bearing keys, shared/cyclic tables, mutation, iteration, raw equality, and snapshot-free serde deserialization without exposing collector lifetimes. Live globals, quota-aware table construction, owned-key/live-value insertion, and the composable chunk builder build and execute against identity-bearing host graphs; hardened leaves reject those authorities before allocation or compilation. Live arguments/results cross ordinary and typed invocations, and focused tests cover collector rooting, cross-VM rejection, reset invalidation, rich payloads, cycles, shared identity, profiles, quotas, custom lexical environments, serde, and export access.",
-          "future_plan": "Complete the controlled-client synchronous callback rollout, then define a concrete public userdata registration contract."
+          "future_plan": "Controlled-client synchronous callback integrations are verified. Define a concrete public userdata registration contract after the stronger stack-diagnostics pass."
         },
         {
           "name": "Typed host functions",

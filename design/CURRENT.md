@@ -385,7 +385,7 @@ unreachable suspended-coroutine frames.
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
    [`75-embedded-api.md`](75-embedded-api.md#build-order): the composable chunk builder is now implemented on
    the graph-preserving live `Value`/`Table`/`Function` spine and its live globals/table constructors. Build
-   on the implemented synchronous host-function API by completing the controlled-client rollout, then finish
+   on the implemented synchronous host-function API and verified controlled-client integrations by finishing
    stack diagnostics. Transactional installation and host-owned
    replacement are implemented. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
@@ -715,7 +715,7 @@ invocation, and a separately versioned guest ABI.
 | doc | role | status |
 |---|---|---|
 | **CURRENT.md** (this) | the live canonical state | authoritative |
-| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions and reclaimable live functions | **implemented; controlled-client rollout pending** |
+| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions and reclaimable live functions | **implemented; controlled-client integrations verified** |
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
@@ -724,7 +724,7 @@ invocation, and a separately versioned guest ABI.
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
 | [`72-host-services.md`](72-host-services.md) | host services bus: stdout, determinism-labeled clocks and entropy, native/WASI/browser adapters, facade presets, logical `os.clock` | **implemented** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **transactional install + coherent execution API implemented; function construction pending** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **transactional install, coherent execution API, and synchronous function construction implemented** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
 | [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and dedicated Linode lifecycle implemented; standalone split pending** |
@@ -755,8 +755,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 1. **Complete the ordered advanced API boundary:** the composable chunk builder is implemented on the
    graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Atomic
    installation, fresh dependency cohorts, host-owned replacement, live-value serde, and synchronous
-   host-function construction are implemented. Complete the controlled-client rollout and stronger traceback
-   diagnostics. The
+   host-function construction are implemented, with controlled-client integrations verified. Complete stronger
+   traceback diagnostics. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
    apply determinism restrictions according to the selected builder: `live()` intentionally promises none.
