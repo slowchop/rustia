@@ -8,6 +8,18 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Human-facing `Error::report()` with immutable executed-source snapshots,
+  expression spans, bounded logical callers, factual operation explanations,
+  parser-proven unclosed-block notes, typed host causes, serde field paths, and
+  explicit installation rollback context. Configurable host diagnostic limits
+  remain independent of guest fuel/heap quotas; hardened leaves do not retain
+  rich diagnostic source or frames. Console prefix/wrapper mapping is available
+  on ordinary and typed chunk builders. The CLI uses the shared renderer.
+- Pre-release error API cleanup: `Error` is a typed object with `ErrorKind`,
+  `as_vm_error`, `embed`, `external`, and classification-preserving context.
+  Module resolvers return `rustia::Result<ModuleSource>` instead of flattening
+  errors into strings. Guest error strings and protected-call behavior are unchanged.
+
 - Synchronous `HostFunction` definitions shared by `create_function`,
   `register_function`, and `HostModule::function`. Typed signatures support
   owned and live arguments and mixed tuple results through arity eight.

@@ -7,10 +7,10 @@ fn main() -> rustia::Result<()> {
             "modules/game/config.luau",
             "return { difficulty = 6, party_size = 7 }",
         )),
-        _ => Err(format!(
+        _ => Err(rustia::Error::embed(format!(
             "module {requested:?} was not found for {}",
             referrer.unwrap_or("<unknown>")
-        )),
+        ))),
     });
 
     let mut vm = RustiaBuilder::deterministic()

@@ -312,8 +312,16 @@ pub enum TypeExpr {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// The parser knows which construct was still open at the point of failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnclosedBlock {
+    pub start: usize,
+    pub expected: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
+    pub unclosed_block: Option<Box<UnclosedBlock>>,
     pub span: Span,
     pub message: String,
 }
@@ -1026,6 +1034,20 @@ impl Parser {
         Ok(statements)
     }
 
+    fn parse_delimited_block(
+        &mut self,
+        terminators: &[SimpleToken],
+        start: usize,
+        expected: &'static str,
+    ) -> Result<Vec<Stmt>> {
+        self.parse_block_until(terminators).map_err(|mut error| {
+            if self.at_simple(SimpleToken::Eof) && error.unclosed_block.is_none() {
+                error.unclosed_block = Some(Box::new(UnclosedBlock { start, expected }));
+            }
+            error
+        })
+    }
+
     fn parse_statement(&mut self) -> Result<Stmt> {
         if let Some(local_token) = self.eat_simple(SimpleToken::Local) {
             if self.eat_simple(SimpleToken::Function).is_some() {
@@ -1105,6 +1127,7 @@ impl Parser {
         }
         if !matches!(expr, Expr::Call { .. } | Expr::MethodCall { .. }) {
             return Err(ParseError {
+                unclosed_block: None,
                 span: expr.span(),
                 message: "expected statement".to_owned(),
             });
@@ -1255,13 +1278,16 @@ impl Parser {
     fn parse_if_chain(&mut self, start: usize) -> Result<(Stmt, usize)> {
         let condition = self.parse_expr(0, 0)?;
         self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
-        let then_body =
-            self.parse_block_until(&[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End])?;
+        let then_body = self.parse_delimited_block(
+            &[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End],
+            start,
+            "end",
+        )?;
         let (else_body, end) = if let Some(elseif_token) = self.eat_simple(SimpleToken::ElseIf) {
             let (elseif_stmt, end) = self.parse_if_chain(elseif_token.span.start)?;
             (vec![elseif_stmt], end)
         } else if self.eat_simple(SimpleToken::Else).is_some() {
-            let else_body = self.parse_block_until(&[SimpleToken::End])?;
+            let else_body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
             let end_token =
                 self.expect_simple(SimpleToken::End, "expected 'end' after if block")?;
             (else_body, end_token.span.end)
@@ -1284,7 +1310,7 @@ impl Parser {
     fn parse_while(&mut self, start: usize) -> Result<Stmt> {
         let condition = self.parse_expr(0, 0)?;
         self.expect_simple(SimpleToken::Do, "expected 'do' after while condition")?;
-        let body = self.parse_block_until(&[SimpleToken::End])?;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after while block")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::While {
@@ -1314,7 +1340,7 @@ impl Parser {
         self.expect_simple(SimpleToken::In, "expected 'in' after generic for variables")?;
         let iter = self.parse_expr_list()?;
         self.expect_simple(SimpleToken::Do, "expected 'do' after generic for iterator")?;
-        let body = self.parse_block_until(&[SimpleToken::End])?;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForGeneric {
@@ -1335,7 +1361,7 @@ impl Parser {
             None
         };
         self.expect_simple(SimpleToken::Do, "expected 'do' after for loop range")?;
-        let body = self.parse_block_until(&[SimpleToken::End])?;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForNumeric {
@@ -1350,7 +1376,7 @@ impl Parser {
     }
 
     fn parse_repeat(&mut self, start: usize) -> Result<Stmt> {
-        let body = self.parse_block_until(&[SimpleToken::Until])?;
+        let body = self.parse_delimited_block(&[SimpleToken::Until], start, "until")?;
         self.expect_simple(SimpleToken::Until, "expected 'until' after repeat block")?;
         let condition = self.parse_expr(0, 0)?;
         let end = condition.span_end();
@@ -1363,7 +1389,7 @@ impl Parser {
     }
 
     fn parse_do(&mut self, start: usize) -> Result<Stmt> {
-        let body = self.parse_block_until(&[SimpleToken::End])?;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after do block")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::Do {
@@ -1475,6 +1501,7 @@ impl Parser {
                 let (args, end) = self
                     .parse_call_suffix(depth + 1)?
                     .ok_or_else(|| ParseError {
+                        unclosed_block: None,
                         span: self.peek().span,
                         message: "expected arguments after method name".to_owned(),
                     })?;
@@ -1517,6 +1544,7 @@ impl Parser {
             self.parse_explicit_type_instantiation(depth + 1)?;
             let Some(args) = self.parse_call_args_suffix(depth + 1)? else {
                 return Err(ParseError {
+                    unclosed_block: None,
                     span: self.peek().span,
                     message: "expected arguments after explicit type instantiation".to_owned(),
                 });
@@ -1635,6 +1663,7 @@ impl Parser {
             }
             TokenKind::LBrace => self.parse_table_literal(token.span, depth + 1),
             _ => Err(ParseError {
+                unclosed_block: None,
                 span: token.span,
                 message: "expected expression".to_owned(),
             }),
@@ -1666,6 +1695,7 @@ impl Parser {
         )?;
         if expressions.len() != interpolation.expression_count {
             return Err(ParseError {
+                unclosed_block: None,
                 span: interpolation.span,
                 message: "interpolated string expression count mismatch".to_owned(),
             });
@@ -1730,7 +1760,7 @@ impl Parser {
         if self.eat_simple(SimpleToken::Colon).is_some() {
             self.parse_function_return_annotation(0)?;
         }
-        let body = self.parse_block_until(&[SimpleToken::End])?;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
         let end = self
             .expect_simple(SimpleToken::End, "expected 'end' after function body")?
             .span
@@ -1864,6 +1894,7 @@ impl Parser {
     fn parse_type(&mut self, depth: usize) -> Result<TypeExpr> {
         if self.interpolations.contains_key(&self.peek().span.start) {
             return Err(ParseError {
+                unclosed_block: None,
                 span: self.peek().span,
                 message: "interpolated strings are not valid in types".to_owned(),
             });
@@ -2013,6 +2044,7 @@ impl Parser {
                 })
             }
             _ => Err(ParseError {
+                unclosed_block: None,
                 span: token.span,
                 message: "expected type".to_owned(),
             }),
@@ -2053,6 +2085,7 @@ impl Parser {
                 span: token.span,
             }),
             _ => Err(ParseError {
+                unclosed_block: None,
                 span: token.span,
                 message: message.to_owned(),
             }),
@@ -2061,6 +2094,7 @@ impl Parser {
 
     fn expect_simple(&mut self, expected: SimpleToken, message: &'static str) -> Result<Token> {
         self.eat_simple(expected).ok_or_else(|| ParseError {
+            unclosed_block: None,
             span: self.peek().span,
             message: message.to_owned(),
         })
@@ -2176,6 +2210,7 @@ impl Parser {
 
     fn error_here(&self, message: &'static str) -> ParseError {
         ParseError {
+            unclosed_block: None,
             span: self.peek().span,
             message: message.to_owned(),
         }
@@ -2184,6 +2219,7 @@ impl Parser {
     fn check_depth(&self, depth: usize) -> Result<()> {
         if depth > MAX_PARSE_DEPTH {
             Err(ParseError {
+                unclosed_block: None,
                 span: self.peek().span,
                 message: "parser recursion limit exceeded".to_owned(),
             })
@@ -2198,6 +2234,7 @@ impl Parser {
             let token = self.advance().clone();
             if self.interpolations.contains_key(&token.span.start) {
                 return Err(ParseError {
+                    unclosed_block: None,
                     span: token.span,
                     message: "interpolated strings are not valid in types".to_owned(),
                 });
@@ -2214,6 +2251,7 @@ impl Parser {
             }
         }
         Err(ParseError {
+            unclosed_block: None,
             span: Span::new(start, self.peek().span.end),
             message: "unterminated typeof type".to_owned(),
         })
@@ -2230,6 +2268,7 @@ impl Parser {
             let token = self.advance().clone();
             if self.interpolations.contains_key(&token.span.start) {
                 return Err(ParseError {
+                    unclosed_block: None,
                     span: token.span,
                     message: "interpolated strings are not valid in types".to_owned(),
                 });
@@ -2244,6 +2283,7 @@ impl Parser {
             }
         }
         Err(ParseError {
+            unclosed_block: None,
             span: Span::new(open_span.start, self.peek().span.end),
             message: "unterminated type table".to_owned(),
         })
@@ -2388,6 +2428,7 @@ fn assignment_target_from_expr(expr: Expr) -> Result<AssignmentTarget> {
             span,
         }),
         other => Err(ParseError {
+            unclosed_block: None,
             span: other.span(),
             message: "unsupported assignment target".to_owned(),
         }),

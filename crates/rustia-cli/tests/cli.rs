@@ -169,7 +169,7 @@ break
         output.stderr
     );
     assert!(
-        output.stderr.contains("1 | break\n  | ^^^^^"),
+        output.stderr.contains("1 | break\n   | ^^^^^"),
         "{}",
         output.stderr
     );
@@ -231,12 +231,12 @@ fn fuel_exhaustion_is_an_execution_failure() {
     assert!(
         output
             .stderr
-            .contains("<eval>:1: instruction fuel exhausted after 10 instructions"),
+            .contains("instruction fuel exhausted after 10 instructions"),
         "{}",
         output.stderr
     );
     assert!(
-        output.stderr.contains("1 | while true do end\n  | ^"),
+        output.stderr.contains("1 | while true do end\n   | ^"),
         "{}",
         output.stderr
     );
@@ -266,7 +266,7 @@ break
         output.stderr
     );
     assert!(
-        output.stderr.contains("2 | break\n  | ^^^^^"),
+        output.stderr.contains("2 | break\n   | ^^^^^"),
         "{}",
         output.stderr
     );
@@ -296,7 +296,7 @@ values[0 / 0] = 1
         output.stderr
     );
     assert!(
-        output.stderr.contains("2 | values[0 / 0] = 1\n  | ^"),
+        output.stderr.contains("2 | values[0 / 0] = 1\n   | ^"),
         "{}",
         output.stderr
     );
@@ -362,7 +362,7 @@ values[0 / 0] = 1
         output.stderr
     );
     assert!(
-        output.stderr.contains("2 | values[0 / 0] = 1\n  | ^"),
+        output.stderr.contains("2 | values[0 / 0] = 1\n   | ^"),
         "{}",
         output.stderr
     );

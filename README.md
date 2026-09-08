@@ -142,6 +142,36 @@ The advanced embedding API is shared by all three: `deterministic()` enforces lo
 `standard()` has reproducible defaults but permits explicit nondeterministic providers/capabilities, and
 `live()` is the first-class ordinary embedding choice with no reproducibility guarantee.
 
+## Script errors
+
+Use `error.report()` at a terminal, console, or log boundary. It shows the exact
+executed source, an expression span when known, and a bounded call trail. Keep
+`error.kind()` or `error.as_vm_error()` for decisions such as resetting after
+fuel exhaustion; never parse the report text.
+
+```rust
+use rustia::Rustia;
+
+let mut vm = Rustia::default();
+if let Err(error) = vm.load("return missing.health").source_name("combat.luau").exec() {
+    eprintln!("{}", error.report());
+}
+```
+
+`Display` preserves the concise error message. Reports do not change guest
+`pcall`/`xpcall`, execute guest formatting hooks, or read files. Source snapshots
+remain valid after reset or VM destruction. `VmSettings::diagnostic_limits`
+defaults to 4 MiB of retained source charges, 256 KiB per source, 32 frames,
+and 16 KiB of rendered output; unavailable source falls back to location-only
+output. Hardened leaves retain no rich diagnostic source or frames.
+
+Serde errors include paths such as `enemies[3].health` (Lua's one-based indices).
+Use `Error::external` to preserve typed host causes, and `with_context` to add
+context without losing the original classification. Console hosts can map an
+inserted `return ` using `SourceMap::generated_prefix(7)`.
+See [the diagnostics contract](design/79-script-diagnostics.md) and the
+[diagnostics example](crates/rustia/examples/diagnostics.rs).
+
 ## Live values
 
 `eval_live` retains a guest result in its VM and decision epoch. `create_table` and `globals` provide the same
@@ -219,7 +249,7 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-08 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-09 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |

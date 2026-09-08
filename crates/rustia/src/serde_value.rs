@@ -37,7 +37,10 @@ pub fn from_owned<'de, T>(value: &'de OwnedValue) -> Result<T>
 where
     T: Deserialize<'de>,
 {
-    T::deserialize(OwnedDeserializer { value }).map_err(|error| Error::Embed(error.to_string()))
+    serde_path_to_error::deserialize(OwnedDeserializer { value }).map_err(|error| {
+        let path = diagnostic_data_path(error.path());
+        Error::embed(error.into_inner().to_string()).with_data_path(path)
+    })
 }
 
 pub fn to_owned<T>(value: &T) -> Result<OwnedValue>
@@ -46,7 +49,7 @@ where
 {
     value
         .serialize(OwnedSerializer)
-        .map_err(|error| Error::Embed(error.to_string()))
+        .map_err(|error| Error::embed(error.to_string()))
 }
 
 pub(crate) fn from_live<T>(vm: &mut Vm, value: RawValue) -> Result<T>
@@ -54,13 +57,61 @@ where
     T: serde::de::DeserializeOwned,
 {
     let state = LiveTraversalState::default();
-    T::deserialize(LiveDeserializer {
+    serde_path_to_error::deserialize(LiveDeserializer {
         vm,
         value,
         state: &state,
         depth: 0,
     })
-    .map_err(LiveSerdeError::into_rustia)
+    .map_err(|error| {
+        let path = diagnostic_data_path(error.path());
+        error.into_inner().into_rustia().with_data_path(path)
+    })
+}
+
+fn diagnostic_data_path(path: &serde_path_to_error::Path) -> String {
+    use serde_path_to_error::Segment;
+    use std::fmt::Write;
+    let mut result = String::new();
+    for segment in path {
+        if result.len() >= 1024 {
+            result.push_str("...");
+            break;
+        }
+        match segment {
+            Segment::Seq { index } => {
+                let _ = write!(result, "[{}]", index.saturating_add(1));
+            }
+            Segment::Map { key } | Segment::Enum { variant: key } => {
+                if key.len() > 256 {
+                    result.push_str("[field name omitted: too long]");
+                    break;
+                }
+                // Diagnostic paths use Lua's one-based array positions. Never
+                // render an arbitrary key as though it were a field identifier.
+                if !key.is_empty()
+                    && key.bytes().enumerate().all(|(index, byte)| {
+                        byte.is_ascii_alphabetic()
+                            || byte == b'_'
+                            || (index > 0 && byte.is_ascii_digit())
+                    })
+                {
+                    if !result.is_empty() {
+                        result.push('.');
+                    }
+                    result.extend(key.chars().take(256));
+                } else {
+                    let key: String = key.chars().take(256).collect();
+                    let _ = write!(result, "[{key:?}]");
+                }
+            }
+            Segment::Unknown => result.push_str("[?]"),
+        }
+    }
+    if result.is_empty() {
+        result.push_str("<returned value>");
+    }
+    result
 }
 
 impl OwnedValue {
@@ -116,8 +167,8 @@ impl LiveSerdeError {
 
     fn into_rustia(self) -> Error {
         match self {
-            Self::Format(message) => Error::Embed(message),
-            Self::Vm(error) => Error::Vm(error),
+            Self::Format(message) => Error::embed(message),
+            Self::Vm(error) => Error::from(error),
         }
     }
 }

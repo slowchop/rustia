@@ -5,6 +5,7 @@
 //! dispatch, profile-aware extension registration, and a `gc-arena` VM cell scaffold.
 
 pub mod bytecode;
+pub mod diagnostic;
 pub mod error;
 #[cfg(any(test, feature = "executor-diagnostics"))]
 mod executor_census;

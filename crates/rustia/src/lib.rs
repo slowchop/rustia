@@ -1,4 +1,6 @@
 mod chunk;
+mod diagnostic;
+mod error;
 mod extension_api;
 mod function;
 mod host_function;
@@ -6,17 +8,19 @@ mod invocation;
 mod live_value;
 mod macros;
 mod serde_value;
+mod source_map;
 mod value;
 
 use function::IntoHostFunction;
 use invocation::TypedHostDispatcher;
-use rustia_compiler::{compile_with_options, CompileError, CompileOptions};
-use rustia_parser::SourceError;
+use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{HardenedLeafProgram, Program, Vm};
-use std::fmt;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
 pub use chunk::Chunk;
+pub use diagnostic::DiagnosticReason;
+pub use diagnostic::{Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticSpan, ErrorReport};
+pub use error::{Error, ErrorKind};
 pub use extension_api::{
     ModuleSource, RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
     RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, ServiceModuleResolver,
@@ -40,6 +44,7 @@ pub use rustia_vm::{
     MODULE_RESOLUTION_ABI_VERSION as RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
 pub use serde_value::SerdeValueError;
+pub use source_map::SourceMap;
 pub use value::{
     FromRustia, FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedKey, OwnedTable, OwnedValue,
 };
@@ -100,6 +105,11 @@ where
         self.vm.memory_stats()
     }
 
+    /// Host-side source-retention charges, separate from the guest heap quota.
+    pub fn diagnostic_source_bytes(&self) -> usize {
+        self.vm.diagnostic_source_bytes()
+    }
+
     /// Returns the typed core execution semantics read from this live VM.
     pub fn execution_profile(&self) -> RustiaExecutionProfile {
         RustiaExecutionProfile::from_vm(self.vm.profile(), self.vm.settings().guest_surface)
@@ -132,7 +142,7 @@ where
     /// Replay protocols must record
     /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
     pub fn reset_decision(&mut self) -> Result<()> {
-        self.vm.reset_decision().map_err(Error::Vm)?;
+        self.vm.reset_decision().map_err(Error::from)?;
         self.journal.clear();
         Ok(())
     }
@@ -181,14 +191,14 @@ where
     {
         self.ensure_healthy()?;
         let reserve = usize::try_from(limits.max_records()).map_err(|_| {
-            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
+            Error::from(VmError::new(VmErrorKind::HostResourceExhausted {
                 resource: "effect-record count",
                 limit: u64::from(limits.max_records()),
             }))
         })?;
         records
             .try_reserve(reserve)
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
+            .map_err(|_| Error::from(VmError::new(VmErrorKind::OutOfMemory)))?;
         let (value, usage) = self.invoke_core(context, limits, operation)?;
         records.append(&mut self.journal);
         Ok(InvocationReceipt { value, usage })
@@ -236,14 +246,14 @@ where
         self.ensure_healthy()?;
         self.journal.clear();
         let reserve = usize::try_from(limits.max_records()).map_err(|_| {
-            Error::Vm(VmError::new(VmErrorKind::HostResourceExhausted {
+            Error::from(VmError::new(VmErrorKind::HostResourceExhausted {
                 resource: "effect-record count",
                 limit: u64::from(limits.max_records()),
             }))
         })?;
         self.journal
             .try_reserve(reserve)
-            .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
+            .map_err(|_| Error::from(VmError::new(VmErrorKind::OutOfMemory)))?;
 
         let journal = std::mem::take(&mut self.journal);
         let dispatcher = TypedHostDispatcher::new(context, journal, limits);
@@ -255,7 +265,7 @@ where
         self.journal = journal;
         if let Some(error) = hard_error {
             self.journal.clear();
-            return Err(Error::Vm(error));
+            return Err(Error::from(error));
         }
         match result {
             Ok(value) => {
@@ -278,7 +288,7 @@ where
 
     fn ensure_healthy(&self) -> Result<()> {
         if self.vm.is_poisoned() {
-            Err(Error::Vm(VmError::new(VmErrorKind::VmPoisoned)))
+            Err(Error::from(VmError::new(VmErrorKind::VmPoisoned)))
         } else {
             Ok(())
         }
@@ -290,7 +300,7 @@ where
     {
         let value = value.into_rustia()?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::Vm)
+        self.vm.set_global_value(name, value).map_err(Error::from)
     }
 
     pub fn insert_serde<T>(&mut self, name: impl AsRef<str>, value: &T) -> Result<()>
@@ -299,7 +309,7 @@ where
     {
         let value = OwnedValue::from_serialize(value)?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::Vm)
+        self.vm.set_global_value(name, value).map_err(Error::from)
     }
 
     /// Returns a rooted live handle to this VM's real globals table.
@@ -310,7 +320,7 @@ where
     /// [`reset_decision`](Self::reset_decision). Hardened leaves reject this
     /// mutable authority.
     pub fn globals(&mut self) -> Result<Table> {
-        let value = self.vm.retain_globals().map_err(Error::Vm)?;
+        let value = self.vm.retain_globals().map_err(Error::from)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
@@ -319,13 +329,13 @@ where
     /// The table and its root participate in the logical-live memory quota as
     /// one admission. Hardened leaves reject live table construction.
     pub fn create_table(&mut self) -> Result<Table> {
-        let value = self.vm.create_retained_table().map_err(Error::Vm)?;
+        let value = self.vm.create_retained_table().map_err(Error::from)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
     fn ensure_dynamic_source_loading_allowed(&self) -> Result<()> {
         if self.vm.settings().guest_surface.is_hardened_leaf() {
-            return Err(Error::Vm(
+            return Err(Error::from(
                 VmError::new(VmErrorKind::HardenedLeafViolation {
                     feature: "dynamic source loading",
                 })
@@ -510,7 +520,12 @@ impl Rustia<()> {
         source_name: impl Into<String>,
         source: &[u8],
     ) -> Result<CompiledModule> {
-        Self::compile_module_bytes_with_constructor_order(source_name, source, false)
+        Self::compile_module_bytes_with_constructor_order(
+            source_name,
+            source,
+            false,
+            DiagnosticLimits::default(),
+        )
     }
 
     /// Byte-oriented form of [`compile_module_with_profile`](Self::compile_module_with_profile).
@@ -523,6 +538,7 @@ impl Rustia<()> {
             source_name,
             source,
             profile == Profile::Puc51Compat,
+            DiagnosticLimits::default(),
         )
     }
 
@@ -530,15 +546,24 @@ impl Rustia<()> {
         source_name: impl Into<String>,
         source: &[u8],
         puc51_constructor_order: bool,
+        diagnostic_limits: DiagnosticLimits,
     ) -> Result<CompiledModule> {
         let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source_bytes(source).map_err(Error::Source)?;
+        let chunk = rustia_parser::parse_source_bytes(source).map_err(|error| {
+            Error::from(error).with_source(&source_name, source, diagnostic_limits)
+        })?;
         let options = CompileOptions {
             puc51_constructor_order,
             ..CompileOptions::default()
         }
         .with_source_bytes(source_name.clone(), source);
-        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
+        let mut program = compile_with_options(&chunk, options).map_err(|error| {
+            Error::from(error).with_source(&source_name, source, diagnostic_limits)
+        })?;
+        program.diagnostic_source = rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
+            source,
+            diagnostic_limits.source_bytes,
+        );
         Ok(CompiledModule {
             source_name,
             program,
@@ -556,10 +581,10 @@ impl Rustia<()> {
     /// order; see [`compile_module_bytes`](Self::compile_module_bytes).
     pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
         let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source(source).map_err(Error::Source)?;
+        let chunk = rustia_parser::parse_source(source).map_err(Error::from)?;
         let options = CompileOptions::default().with_source(source_name.clone(), source);
-        let program = compile_with_options(&chunk, options).map_err(Error::Compile)?;
-        let program = HardenedLeafProgram::new(program).map_err(Error::Vm)?;
+        let program = compile_with_options(&chunk, options).map_err(Error::from)?;
+        let program = HardenedLeafProgram::new(program).map_err(Error::from)?;
         Ok(CompiledEntry {
             source_name,
             program,
@@ -650,32 +675,32 @@ where
         module: &CompiledModule,
         environment: Option<rustia_vm::Value>,
     ) -> Result<Exports> {
-        self.vm.begin_guest_transaction().map_err(Error::Vm)?;
-        let outcome = (|| {
-            let module_cohort = self.vm.create_module_cohort().map_err(Error::Vm)?;
+        self.vm.begin_guest_transaction().map_err(Error::from)?;
+        let outcome: Result<Exports> = (|| {
+            let module_cohort = self.vm.create_module_cohort().map_err(Error::from)?;
             let environment = match environment {
                 Some(environment) => environment,
-                None => self.vm.create_module_environment().map_err(Error::Vm)?,
+                None => self.vm.create_module_environment().map_err(Error::from)?,
             };
             let value = self
                 .vm
                 .run_installation_with_environment(&module.program, environment, module_cohort)
-                .map_err(Error::Vm)?;
-            let value = self.vm.retain_value(value).map_err(Error::Vm)?;
+                .map_err(Error::from)?;
+            let value = self.vm.retain_value(value).map_err(Error::from)?;
             Ok(Exports::new(value, self.decision_epoch()))
         })();
         match outcome {
             Ok(exports) => {
                 if let Err(error) = self.vm.commit_guest_transaction() {
                     self.vm.rollback_guest_transaction();
-                    Err(Error::Vm(error))
+                    Err(Error::from(error).installation_rolled_back())
                 } else {
                     Ok(exports)
                 }
             }
             Err(error) => {
                 self.vm.rollback_guest_transaction();
-                Err(error)
+                Err(error.installation_rolled_back())
             }
         }
     }
@@ -849,48 +874,6 @@ pub struct SourceLocation<'a> {
     pub source: &'a str,
     pub line: u32,
 }
-
-#[derive(Debug)]
-pub enum Error {
-    Source(SourceError),
-    Compile(CompileError),
-    Vm(VmError),
-    Embed(String),
-}
-
-impl Error {
-    pub fn source_span(&self) -> Option<SourceSpan> {
-        match self {
-            Self::Source(SourceError::Lex(error)) => Some(error.span.into()),
-            Self::Source(SourceError::Parse(error)) => Some(error.span.into()),
-            Self::Compile(error) => error.span.map(Into::into),
-            Self::Vm(_) | Self::Embed(_) => None,
-        }
-    }
-
-    pub fn source_location(&self) -> Option<SourceLocation<'_>> {
-        match self {
-            Self::Vm(error) => error.location.as_ref().map(|location| SourceLocation {
-                source: &location.source,
-                line: location.line,
-            }),
-            Self::Source(_) | Self::Compile(_) | Self::Embed(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Source(error) => error.fmt(formatter),
-            Self::Compile(error) => error.fmt(formatter),
-            Self::Vm(error) => error.fmt(formatter),
-            Self::Embed(error) => formatter.write_str(error),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
@@ -1149,7 +1132,7 @@ return root
         let globals = rustia.globals().expect_err("hardened globals must reject");
         assert!(matches!(
             globals,
-            Error::Vm(ref error)
+            Error { kind: crate::ErrorKind::Vm(ref error), .. }
                 if matches!(
                     &error.kind,
                     VmErrorKind::HardenedLeafViolation {
@@ -1162,7 +1145,7 @@ return root
             .expect_err("hardened table construction must reject");
         assert!(matches!(
             table,
-            Error::Vm(ref error)
+            Error { kind: crate::ErrorKind::Vm(ref error), .. }
                 if matches!(
                     &error.kind,
                     VmErrorKind::HardenedLeafViolation {
@@ -1194,7 +1177,7 @@ return root
         };
         assert!(matches!(
             error,
-            Error::Vm(ref error) if matches!(&error.kind, VmErrorKind::OutOfMemory)
+            Error { kind: crate::ErrorKind::Vm(ref error), .. } if matches!(&error.kind, VmErrorKind::OutOfMemory)
         ));
 
         retained.pop().expect("at least one table fit before OOM");
@@ -1238,9 +1221,11 @@ return root
             &mut records,
             2,
             Ok(Ok(42)),
-            Err(Error::Embed("reset failed".to_owned())),
+            Err(Error::embed("reset failed".to_owned())),
         );
-        assert!(matches!(result, Err(Error::Embed(ref message)) if message == "reset failed"));
+        assert!(
+            matches!(result, Err(Error { kind: crate::ErrorKind::Embed(ref message), .. }) if message == "reset failed")
+        );
         assert_eq!(records, [1, 2]);
     }
 
@@ -1328,7 +1313,11 @@ return t[-0] == 42 and t[0] == 42 and rawget(t, -0) == 42 and rawget(t, 0) == 42
                 ..VmSettings::default()
             };
             let mut rustia = Rustia::with_settings(Profile::DeterministicSim, settings);
-            let Err(Error::Vm(error)) = rustia.eval::<OwnedValue>(source) else {
+            let Err(Error {
+                kind: crate::ErrorKind::Vm(error),
+                ..
+            }) = rustia.eval::<OwnedValue>(source)
+            else {
                 panic!("expected fuel exhaustion to escape protected call: {source}");
             };
             assert!(matches!(
@@ -1692,13 +1681,20 @@ return sum_vec({ 1, 2, 3 }) == 6
     #[test]
     fn deterministic_facade_rejects_external_or_nondeterministic_helpers() {
         let mut external = Rustia::new(Profile::DeterministicSim);
-        let Err(Error::Vm(error)) = external.add_external_state_fn("clock", || 1.0) else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = external.add_external_state_fn("clock", || 1.0)
+        else {
             panic!("expected deterministic profile to reject external-state host function");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
 
         let mut nondeterministic = Rustia::new(Profile::DeterministicSim);
-        let Err(Error::Vm(error)) = nondeterministic.add_nondeterministic_fn("random", || 1.0)
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = nondeterministic.add_nondeterministic_fn("random", || 1.0)
         else {
             panic!("expected deterministic profile to reject nondeterministic host function");
         };
@@ -1745,7 +1741,7 @@ return sum_vec({ 1, 2, 3 }) == 6
         rustia
             .add_fn("checked_div", |x: f64, y: f64| -> Result<f64> {
                 if y == 0.0 {
-                    return Err(Error::Embed("division by zero".to_owned()));
+                    return Err(Error::embed("division by zero".to_owned()));
                 }
                 Ok(x / y)
             })
@@ -1936,7 +1932,11 @@ return {
     fn extension_rejects_zero_fuel_host_functions() {
         let extension = RustiaExtension::new("host").fn_with("free", 0, OpCapability::Pure, || 1.0);
         let result = Rustia::builder().extension(extension).build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected zero-fuel host function to be rejected");
         };
         let VmErrorKind::InvalidProgram { reason } = error.kind else {
@@ -1952,7 +1952,11 @@ return {
             .profile(Profile::DeterministicSim)
             .extension(extension)
             .build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected deterministic profile to reject nondeterministic extension");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
@@ -1965,7 +1969,11 @@ return {
             .profile(Profile::DeterministicSim)
             .extension(extension)
             .build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected deterministic profile to reject external-state extension");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
@@ -2146,7 +2154,13 @@ return {
             panic!("break outside loop should fail compilation");
         };
         assert_eq!(error.source_span(), Some(SourceSpan { start: 0, end: 5 }));
-        assert_eq!(error.source_location(), None);
+        assert_eq!(
+            error.source_location(),
+            Some(crate::SourceLocation {
+                source: "compile-diag.luau",
+                line: 1
+            })
+        );
 
         let mut rustia = Rustia::new(Profile::ReproducibleStandard);
         let Err(error) = rustia
@@ -2166,7 +2180,7 @@ t[0 / 0] = 1
             .expect("runtime error should carry source location");
         assert_eq!(location.source, "runtime-diag.luau");
         assert_eq!(location.line, 2);
-        assert_eq!(error.source_span(), None);
+        assert!(error.source_span().is_some());
     }
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -2632,7 +2646,11 @@ return type(os) == 'table'
         let result = RustiaBuilder::deterministic()
             .wall_clock(ServiceClock::system())
             .build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected deterministic profile to reject a nondeterministic wall clock");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
@@ -2640,7 +2658,11 @@ return type(os) == 'table'
         let result = RustiaBuilder::deterministic()
             .monotonic_clock(ServiceClock::monotonic())
             .build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected deterministic profile to reject a nondeterministic monotonic clock");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));
@@ -2648,7 +2670,11 @@ return type(os) == 'table'
         let result = RustiaBuilder::deterministic()
             .entropy(ServiceEntropy::system())
             .build();
-        let Err(Error::Vm(error)) = result else {
+        let Err(Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        }) = result
+        else {
             panic!("expected deterministic profile to reject nondeterministic entropy");
         };
         assert!(matches!(error.kind, VmErrorKind::CapabilityRemoved { .. }));

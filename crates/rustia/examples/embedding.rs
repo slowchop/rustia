@@ -28,7 +28,7 @@ fn main() -> rustia::Result<()> {
     rustia.add_fn("clamp", |value: f64, lo: f64, hi: f64| value.clamp(lo, hi))?;
     rustia.add_fn("checked_bonus", |value: f64| -> rustia::Result<f64> {
         if value < 0.0 {
-            return Err(rustia::Error::Embed("negative bonus".to_owned()));
+            return Err(rustia::Error::embed("negative bonus".to_owned()));
         }
         Ok(value + 1.0)
     })?;

@@ -118,9 +118,8 @@ pub type LoadStringCompiler = fn(
 
 type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
 type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
-type SharedModuleResolver = Rc<
-    RefCell<dyn FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>>,
->;
+type SharedModuleResolver =
+    Rc<RefCell<dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule>>>;
 
 /// A host-resolved module with its canonical cache identity and compiled body.
 #[derive(Clone, Debug)]
@@ -152,8 +151,7 @@ pub struct ModuleResolver {
 
 impl ModuleResolver {
     pub fn new(
-        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ResolvedModule, String>
-            + 'static,
+        mut resolver: impl FnMut(&str, Option<&str>) -> Result<ResolvedModule> + 'static,
         deterministic: bool,
     ) -> Self {
         Self::new_with_profile(
@@ -165,8 +163,7 @@ impl ModuleResolver {
     /// Creates a resolver that can compile source according to the requesting
     /// VM's execution profile.
     pub fn new_with_profile(
-        resolver: impl FnMut(&str, Option<&str>, Profile) -> std::result::Result<ResolvedModule, String>
-            + 'static,
+        resolver: impl FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule> + 'static,
         deterministic: bool,
     ) -> Self {
         Self {
@@ -185,7 +182,7 @@ impl ModuleResolver {
         requested: &str,
         referrer: Option<&str>,
         profile: Profile,
-    ) -> std::result::Result<ResolvedModule, String> {
+    ) -> Result<ResolvedModule> {
         (self.resolver.borrow_mut())(requested, referrer, profile)
     }
 }
@@ -345,6 +342,7 @@ impl VmServices {
 
 #[derive(Clone, Debug)]
 pub struct VmSettings {
+    pub diagnostic_limits: crate::diagnostic::DiagnosticLimits,
     pub initial_fuel: Option<u64>,
     pub recursion_limit: usize,
     pub deterministic_gc_interval: NonZeroU64,
@@ -382,6 +380,7 @@ pub struct VmSettings {
 impl Default for VmSettings {
     fn default() -> Self {
         Self {
+            diagnostic_limits: crate::diagnostic::DiagnosticLimits::default(),
             initial_fuel: None,
             recursion_limit: MAX_RECURSION_LIMIT,
             deterministic_gc_interval: NonZeroU64::new(10_000)
@@ -471,6 +470,7 @@ impl VmExecution {
 pub struct Vm {
     profile: Profile,
     settings: VmSettings,
+    diagnostic_source_bytes: Arc<std::sync::atomic::AtomicUsize>,
     poisoned: bool,
     hardened_configuration_error: Option<&'static str>,
     guest_environment_sealed: bool,
@@ -2406,6 +2406,7 @@ impl Vm {
             profile,
             settings,
             poisoned: false,
+            diagnostic_source_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             hardened_configuration_error,
             guest_environment_sealed: false,
             hardened_heap_checkpoint: None,
@@ -4109,7 +4110,8 @@ impl Vm {
 
             macro_rules! unwind_stackless_error {
                 ($error:expr) => {{
-                    let error = $error;
+                    let error = attach_existing_instruction_source(program, function, $error);
+                    let error = self.capture_host_diagnostic(error, program_id);
                     if error_is_uncatchable(&error, fuel) {
                         return Err(error);
                     }
@@ -7557,8 +7559,10 @@ impl Vm {
                 }
             }
         })();
-        let result =
-            result.map_err(|error| attach_existing_instruction_source(program, function, error));
+        let result = result.map_err(|error| {
+            let error = attach_existing_instruction_source(program, function, error);
+            self.capture_host_diagnostic(error, program_id)
+        });
         if let Err(error) = &result {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
             self.mark_control_memory_dirty();
@@ -8464,7 +8468,14 @@ impl Vm {
                 self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
             Ok(first_result_or_nil(results))
         } else {
-            Err(arithmetic_error(op, lhs, rhs))
+            Err(self.with_diagnostic_reason(
+                arithmetic_error(op, lhs, rhs),
+                crate::diagnostic::DiagnosticReason::Arithmetic {
+                    operation: arithmetic_error_op_name(op),
+                    left_type: value_type_name(lhs),
+                    right_type: value_type_name(rhs),
+                },
+            ))
         }
     }
 
@@ -9659,17 +9670,30 @@ impl Vm {
     }
 
     fn index_error(&mut self, object: Value, key: Value) -> Result<Error> {
-        let key_text = if let Some(name) = self.string_value(key)? {
+        let key_name = self.string_value(key)?;
+        let key_text = if let Some(name) = &key_name {
             format!("'{name}'")
         } else {
             value_type_name(key).to_owned()
         };
-        Ok(Error::new(ErrorKind::RuntimeError {
+        let error = Error::new(ErrorKind::RuntimeError {
             message: format!(
                 "attempt to index {} with {key_text}",
                 value_type_name(object)
             ),
-        }))
+        });
+        let key = if self.settings.guest_surface.is_hardened_leaf() {
+            None
+        } else {
+            key_name.filter(|key| key.len() <= 128)
+        };
+        Ok(self.with_diagnostic_reason(
+            error,
+            crate::diagnostic::DiagnosticReason::Index {
+                object_type: value_type_name(object),
+                key,
+            },
+        ))
     }
 
     fn get_table_index_with_metamethod(
@@ -11033,7 +11057,12 @@ impl Vm {
                 {
                     self.poisoned = true;
                 }
-                result.map(ReturnValues::from_vec).map(VmFlow::Return)
+                result
+                    .map_err(|error| {
+                        self.annotate_host_boundary(error, program, call_site.as_ref())
+                    })
+                    .map(ReturnValues::from_vec)
+                    .map(VmFlow::Return)
             }
             FunctionKind::Native(native) => self
                 .call_native_function_resumable(
@@ -11302,12 +11331,50 @@ impl Vm {
 
     fn retain_dynamic_program_ref(&mut self, program: &Program) -> Result<u32> {
         self.preflight_dynamic_program_construction(program)?;
-        self.retain_loaded_program(LoadedProgram::new(program.clone()))
+        let mut program = program.clone();
+        self.admit_diagnostic_source(&mut program);
+        self.retain_loaded_program(LoadedProgram::new(program))
     }
 
-    fn retain_dynamic_program(&mut self, program: Program) -> Result<u32> {
+    fn retain_dynamic_program(&mut self, mut program: Program) -> Result<u32> {
         self.preflight_dynamic_program_construction(&program)?;
+        self.admit_diagnostic_source(&mut program);
         self.retain_loaded_program(LoadedProgram::new(program))
+    }
+
+    fn admit_diagnostic_source(&self, program: &mut Program) {
+        program.diagnostic_source = if self.settings.guest_surface.is_hardened_leaf() {
+            None
+        } else {
+            program.diagnostic_source.as_ref().and_then(|source| {
+                source.admit(
+                    &self.diagnostic_source_bytes,
+                    self.settings.diagnostic_limits,
+                )
+            })
+        };
+    }
+
+    /// Source-retention charges, including snapshots held by outstanding errors.
+    pub fn diagnostic_source_bytes(&self) -> usize {
+        self.diagnostic_source_bytes
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Applies this VM's host diagnostic budget to a compilation failure.
+    #[doc(hidden)]
+    pub fn admit_host_diagnostic(&self, diagnostic: &mut crate::diagnostic::Diagnostic) {
+        diagnostic.snapshot = if self.settings.guest_surface.is_hardened_leaf() {
+            None
+        } else {
+            diagnostic.snapshot.as_ref().and_then(|source| {
+                source.admit(
+                    &self.diagnostic_source_bytes,
+                    self.settings.diagnostic_limits,
+                )
+            })
+        };
+        diagnostic.report_bytes = self.settings.diagnostic_limits.report_bytes;
     }
 
     fn preflight_dynamic_program_construction(&mut self, program: &Program) -> Result<()> {
@@ -11686,18 +11753,28 @@ impl Vm {
         match callee.kind() {
             ValueKind::Table | ValueKind::Userdata => {
                 let Some(method) = self.metamethod_for_value(callee, "__call")? else {
-                    return Err(Error::new(ErrorKind::RuntimeError {
-                        message: format!("attempt to call a {} value", value_type_name(callee)),
-                    }));
+                    return Err(self.with_diagnostic_reason(
+                        Error::new(ErrorKind::RuntimeError {
+                            message: format!("attempt to call a {} value", value_type_name(callee)),
+                        }),
+                        crate::diagnostic::DiagnosticReason::Call {
+                            value_type: value_type_name(callee),
+                        },
+                    ));
                 };
                 let mut call_args = Vec::with_capacity(args.len() + 1);
                 call_args.push(callee);
                 call_args.extend_from_slice(args);
                 self.call_value(program, method, &call_args, depth.saturating_add(1), fuel)
             }
-            _ => Err(Error::new(ErrorKind::RuntimeError {
-                message: format!("attempt to call a {} value", value_type_name(callee)),
-            })),
+            _ => Err(self.with_diagnostic_reason(
+                Error::new(ErrorKind::RuntimeError {
+                    message: format!("attempt to call a {} value", value_type_name(callee)),
+                }),
+                crate::diagnostic::DiagnosticReason::Call {
+                    value_type: value_type_name(callee),
+                },
+            )),
         }
     }
 
@@ -13646,13 +13723,21 @@ impl Vm {
         })?;
         let referrer = requiring_program.source_name.as_deref();
         let profile = self.profile;
-        let resolved = self.catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
-            resolver.resolve(requested, referrer, profile)
-        })?;
-        let resolved = resolved.map_err(|message| {
-            Error::new(ErrorKind::RuntimeError {
-                message: format!("error requiring module {requested:?}: {message}"),
+        let resolved = self
+            .catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
+                resolver.resolve(requested, referrer, profile)
             })
+            .map_err(|error| {
+                self.annotate_host_boundary(error, requiring_program, call_site.as_ref())
+            })?;
+        let resolved = resolved.map_err(|mut error| {
+            if let ErrorKind::RuntimeError { message } = &mut error.kind {
+                *message = format!("error requiring module {requested:?}: {message}");
+            }
+            if let Some(diagnostic) = &mut error.diagnostic {
+                self.admit_host_diagnostic(Arc::make_mut(diagnostic));
+            }
+            error
         })?;
         if resolved.identity.is_empty() {
             return Err(Error::new(ErrorKind::RuntimeError {
@@ -13917,6 +14002,190 @@ impl Vm {
             .copied()
             .unwrap_or(0);
         self.call_stack.get(base..).unwrap_or(&[]).to_vec()
+    }
+
+    fn with_diagnostic_reason(
+        &self,
+        mut error: Error,
+        reason: crate::diagnostic::DiagnosticReason,
+    ) -> Error {
+        if !self.settings.guest_surface.is_hardened_leaf() {
+            let diagnostic = error
+                .diagnostic
+                .get_or_insert_with(|| Arc::new(crate::diagnostic::Diagnostic::default()));
+            Arc::make_mut(diagnostic).reason = Some(reason);
+        }
+        error
+    }
+
+    fn annotate_host_boundary(
+        &self,
+        mut error: Error,
+        program: &Program,
+        site: Option<&ErrorLocation>,
+    ) -> Error {
+        if matches!(error.kind, ErrorKind::HostPanicked { .. })
+            && !self.settings.guest_surface.is_hardened_leaf()
+        {
+            if let Some(site) = site {
+                error.diagnostic = Some(Arc::new(crate::diagnostic::Diagnostic {
+                    source: Some(site.source.clone()),
+                    line: Some(site.line),
+                    snapshot: program.diagnostic_source.clone(),
+                    report_bytes: self.settings.diagnostic_limits.report_bytes,
+                    ..crate::diagnostic::Diagnostic::default()
+                }));
+            }
+        }
+        error
+    }
+
+    fn capture_host_diagnostic(&self, mut error: Error, program_id: Option<u32>) -> Error {
+        use crate::diagnostic::{Diagnostic, DiagnosticFrame};
+
+        if self.settings.guest_surface.is_hardened_leaf()
+            || error.location_suppressed
+            || error
+                .diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.trace_captured)
+        {
+            return error;
+        }
+        let Some(location) = &error.location else {
+            return error;
+        };
+        let previous = error.diagnostic.clone();
+        let foreign_source = previous
+            .as_ref()
+            .is_some_and(|diagnostic| diagnostic.source.is_some());
+        // Walk compressed logical frames directly: expanding recursion runs
+        // before applying the bound would allocate in proportion to depth.
+        let frame_limit = self.settings.diagnostic_limits.frames;
+        let mut frames = Vec::new();
+        if frames.try_reserve_exact(frame_limit).is_err() {
+            return error;
+        }
+        let mut truncated = false;
+        let mut visited = 0usize;
+        let mut pending_location: Option<ErrorLocation> = foreign_source.then(|| location.clone());
+        let mut push = |site: &Option<ErrorLocation>, name: &Option<String>| {
+            // Bound work even when compressed frames have no source locations.
+            if visited > frame_limit {
+                truncated = true;
+                return false;
+            }
+            visited += 1;
+            if let Some(location) = &pending_location {
+                if frames.len() == frame_limit {
+                    truncated = true;
+                    return false;
+                }
+                frames.push(DiagnosticFrame {
+                    source: location.source.clone(),
+                    line: location.line,
+                    function: name.as_ref().map(|name| {
+                        if name.len() <= 256 {
+                            name.clone()
+                        } else {
+                            let mut short: String = name.chars().take(128).collect();
+                            short.push_str("... (name truncated)");
+                            short
+                        }
+                    }),
+                });
+            }
+            pending_location = site.clone();
+            true
+        };
+        let base = self
+            .running_coroutine_stack_bases
+            .last()
+            .copied()
+            .unwrap_or(0);
+        'capture: for frame in self.call_stack.get(base..).unwrap_or(&[]).iter().rev() {
+            for run in frame.stackless_debug_frames.iter().rev() {
+                for _ in 0..run.count {
+                    if !push(&run.frame.call_site, &run.frame.debug_name) {
+                        break 'capture;
+                    }
+                }
+            }
+            if !push(&frame.call_site, &frame.debug_name) {
+                break;
+            }
+        }
+        let loaded = program_id.and_then(|id| self.dynamic_program(id).ok());
+        let prefix = loaded
+            .as_ref()
+            .map_or(0, |program| program.diagnostic_prefix_bytes);
+        let mapped_end = loaded
+            .as_ref()
+            .and_then(|program| program.diagnostic_mapped_length)
+            .and_then(|len| prefix.checked_add(len));
+        let generated_source = error.span.is_some_and(|(start, end)| {
+            (start as usize) < prefix || mapped_end.is_some_and(|limit| end as usize > limit)
+        });
+        let span = error
+            .span
+            .filter(|_| !generated_source)
+            .and_then(|(start, end)| {
+                Some(crate::diagnostic::DiagnosticSpan {
+                    start: (start as usize).checked_sub(prefix)?,
+                    end: (end as usize).checked_sub(prefix)?,
+                })
+            });
+        error.diagnostic = Some(Arc::new(Diagnostic {
+            trace_captured: true,
+            unclosed_block: previous
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.unclosed_block),
+            generated_source: if foreign_source {
+                previous
+                    .as_ref()
+                    .is_some_and(|diagnostic| diagnostic.generated_source)
+            } else {
+                generated_source
+            },
+            reason: error
+                .diagnostic
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.reason.clone()),
+            data_path: error
+                .diagnostic
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.data_path.clone()),
+            host_cause: error
+                .diagnostic
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.host_cause.clone()),
+            source: previous
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.source.clone())
+                .or_else(|| Some(location.source.clone())),
+            line: previous
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.line)
+                .or(Some(location.line)),
+            span: if foreign_source {
+                previous.as_ref().and_then(|diagnostic| diagnostic.span)
+            } else {
+                span
+            },
+            snapshot: if foreign_source {
+                previous
+                    .as_ref()
+                    .and_then(|diagnostic| diagnostic.snapshot.clone())
+            } else if generated_source {
+                None
+            } else {
+                loaded.and_then(|program| program.diagnostic_source.clone())
+            },
+            report_bytes: self.settings.diagnostic_limits.report_bytes,
+            frames,
+            frames_truncated: truncated,
+        }));
+        error
     }
 
     fn traceback_snapshot(&self, top_location: Option<ErrorLocation>) -> TracebackSnapshot {
@@ -20420,7 +20689,11 @@ mod hardened_leaf_validation_tests {
     #[test]
     fn hardened_leaf_validator_preserves_the_forbidden_instruction_location() {
         let main = Function::new(vec![Instruction::new(Opcode::SetGlobal, 0, 0, 0)], 1)
-            .with_source_map(vec![InstructionSource { pc: 0, line: 27 }]);
+            .with_source_map(vec![InstructionSource {
+                pc: 0,
+                line: 27,
+                span: None,
+            }]);
         let program =
             Program::new(main, Vec::new()).with_source_name(Some("policy-source.luau".to_owned()));
         let error = validate_hardened_leaf_program(&program)
@@ -23800,7 +24073,21 @@ fn attach_instruction_source(
     pc: usize,
     error: Error,
 ) -> Error {
-    let error = error.at_pc(pc);
+    let mut error = error.at_pc(pc);
+    if error.location.is_none() && !error.location_suppressed {
+        error.span = function
+            .source_map
+            .iter()
+            .rev()
+            .find(|entry| entry.pc <= pc)
+            .and_then(|entry| entry.span)
+            .and_then(|span| {
+                Some((
+                    u32::try_from(span.start).ok()?,
+                    u32::try_from(span.end).ok()?,
+                ))
+            });
+    }
     if let Some(location) = instruction_source_location(program, function, pc) {
         error.at_source(&location.source, location.line)
     } else {
@@ -23811,7 +24098,7 @@ fn attach_instruction_source(
 fn attach_existing_instruction_source(
     program: &Program,
     function: &Function,
-    error: Error,
+    mut error: Error,
 ) -> Error {
     if error.location.is_some() || error.location_suppressed {
         return error;
@@ -23819,6 +24106,18 @@ fn attach_existing_instruction_source(
     let Some(pc) = error.pc else {
         return error;
     };
+    error.span = function
+        .source_map
+        .iter()
+        .rev()
+        .find(|entry| entry.pc <= pc)
+        .and_then(|entry| entry.span)
+        .and_then(|span| {
+            Some((
+                u32::try_from(span.start).ok()?,
+                u32::try_from(span.end).ok()?,
+            ))
+        });
     if let Some(location) = instruction_source_location(program, function, pc) {
         error.at_source(&location.source, location.line)
     } else {
@@ -28529,7 +28828,11 @@ mod inline_cache_tests {
             ],
             5,
         )
-        .with_source_map(vec![InstructionSource { pc: 3, line: 42 }]);
+        .with_source_map(vec![InstructionSource {
+            pc: 3,
+            line: 42,
+            span: None,
+        }]);
         let program = Program::new(
             function,
             vec![Constant::Number(1.0), Constant::String(b"x".to_vec())],

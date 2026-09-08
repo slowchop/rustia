@@ -5,6 +5,12 @@
 > fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-07.)
 
 ## One-paragraph state
+
+Work in progress: [human-friendly script diagnostics](79-script-diagnostics.md)
+adds host-only source snapshots, expression spans, typed errors, bounded
+reports, and console source mapping. The cross-client rollout and release
+validation remain open; this is not a completed release gate.
+
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public

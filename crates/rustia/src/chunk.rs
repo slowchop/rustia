@@ -14,6 +14,7 @@ where
     rustia: &'rustia mut Rustia<C>,
     source: &'source [u8],
     source_name: Option<String>,
+    source_map: crate::SourceMap,
     environment: Option<Table>,
 }
 
@@ -26,6 +27,7 @@ where
             rustia,
             source,
             source_name: None,
+            source_map: crate::SourceMap::default(),
             environment: None,
         }
     }
@@ -34,6 +36,12 @@ where
     /// referrer passed to the host module resolver for `require` calls.
     pub fn source_name(mut self, source_name: impl Into<String>) -> Self {
         self.source_name = Some(source_name.into());
+        self
+    }
+
+    /// Maps a generated console prefix out of human-facing diagnostics.
+    pub fn source_map(mut self, mapping: crate::SourceMap) -> Self {
+        self.source_map = mapping;
         self
     }
 
@@ -54,9 +62,15 @@ where
     where
         T: FromRustia,
     {
+        let name = self
+            .source_name
+            .clone()
+            .unwrap_or_else(|| "chunk".to_owned());
+        let limits = self.rustia.vm().settings().diagnostic_limits;
         let (rustia, value) = self.execute_raw()?;
-        let value = snapshot_value(rustia.vm_mut(), value)?;
-        T::from_rustia(value)
+        snapshot_value(rustia.vm_mut(), value)
+            .and_then(T::from_rustia)
+            .map_err(|error| error.with_result_source(&name, limits))
     }
 
     /// Evaluates the chunk and retains its first result without snapshotting.
@@ -71,8 +85,13 @@ where
     where
         T: serde::de::DeserializeOwned,
     {
+        let name = self
+            .source_name
+            .clone()
+            .unwrap_or_else(|| "chunk".to_owned());
+        let limits = self.rustia.vm().settings().diagnostic_limits;
         let (rustia, value) = self.execute_raw()?;
-        from_live(rustia.vm_mut(), value)
+        from_live(rustia.vm_mut(), value).map_err(|error| error.with_result_source(&name, limits))
     }
 
     /// Executes the chunk and discards its returned value.
@@ -105,8 +124,8 @@ where
             Some(environment) => rustia
                 .vm_mut()
                 .run_with_environment(&module.program, environment)
-                .map_err(Error::Vm)?,
-            None => rustia.vm_mut().run(&module.program).map_err(Error::Vm)?,
+                .map_err(Error::from)?,
+            None => rustia.vm_mut().run(&module.program).map_err(Error::from)?,
         };
         Ok((rustia, value))
     }
@@ -116,6 +135,7 @@ where
             rustia,
             source,
             source_name,
+            source_map,
             environment,
         } = self;
         rustia.ensure_dynamic_source_loading_allowed()?;
@@ -123,11 +143,20 @@ where
             .as_ref()
             .map(|environment| environment.raw(rustia.vm(), "chunk environment handle"))
             .transpose()?;
-        let module = Rustia::compile_module_bytes_with_constructor_order(
+        source_map.validate(source)?;
+        let limits = rustia.vm().settings().diagnostic_limits;
+        let mut module = Rustia::compile_module_bytes_with_constructor_order(
             source_name.unwrap_or_else(|| "chunk".to_owned()),
             source,
             rustia.vm().profile() == crate::Profile::Puc51Compat,
-        )?;
+            rustia.vm().settings().diagnostic_limits,
+        )
+        .map_err(|error| {
+            source_map
+                .apply_error(error, source, limits)
+                .admit_diagnostic(rustia.vm())
+        })?;
+        source_map.apply(&mut module, source, limits);
         Ok((rustia, module, environment))
     }
 }

@@ -239,6 +239,12 @@ impl RustiaBuilder {
         self
     }
 
+    /// Configures host-side reports independently of guest heap and fuel limits.
+    pub fn diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
+        self.settings.diagnostic_limits = limits;
+        self
+    }
+
     /// Sets the VM-wide execution fuel ceiling.
     ///
     /// Direct `Rustia<()>` entry points use this as their top-level budget. A
@@ -313,7 +319,7 @@ impl RustiaBuilder {
     pub fn build(self) -> Result<Rustia> {
         self.validate()?;
         if self.settings.guest_surface.is_hardened_leaf() {
-            return Err(Error::Vm(VmError::new(
+            return Err(Error::from(VmError::new(
                 VmErrorKind::HardenedLeafViolation {
                     feature: "context-free facade",
                 },
@@ -338,7 +344,7 @@ impl RustiaBuilder {
     {
         self.validate()?;
         if !self.extensions.is_empty() {
-            return Err(Error::Embed(
+            return Err(Error::embed(
                 "legacy RustiaExtension values cannot be installed into a typed VM; \
                  use HostModule instead"
                     .to_owned(),
@@ -356,7 +362,7 @@ impl RustiaBuilder {
                 || self.settings.services.monotonic_clock.is_none()
                 || self.settings.services.entropy.is_none())
         {
-            return Err(Error::Vm(VmError::new(VmErrorKind::Unsupported {
+            return Err(Error::from(VmError::new(VmErrorKind::Unsupported {
                 feature: "live() without a complete platform adapter (plug \
                           .wall_clock/.monotonic_clock/.entropy providers, or enable the \
                           default web-live feature for browser/JavaScript wasm hosts)",
@@ -374,7 +380,7 @@ impl RustiaBuilder {
                 ),
             ] {
                 if clock.as_ref().is_some_and(|clock| !clock.deterministic()) {
-                    return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                    return Err(Error::from(VmError::new(VmErrorKind::CapabilityRemoved {
                         feature,
                         operation: None,
                         profile: self.profile,
@@ -388,7 +394,7 @@ impl RustiaBuilder {
                 .as_ref()
                 .is_some_and(|entropy| !entropy.deterministic())
             {
-                return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                return Err(Error::from(VmError::new(VmErrorKind::CapabilityRemoved {
                     feature: "non-deterministic entropy provider",
                     operation: None,
                     profile: self.profile,
@@ -400,7 +406,7 @@ impl RustiaBuilder {
                 .as_ref()
                 .is_some_and(|resolver| !resolver.deterministic())
             {
-                return Err(Error::Vm(VmError::new(VmErrorKind::CapabilityRemoved {
+                return Err(Error::from(VmError::new(VmErrorKind::CapabilityRemoved {
                     feature: "non-deterministic module resolver",
                     operation: Some("require".to_owned()),
                     profile: self.profile,
@@ -409,14 +415,14 @@ impl RustiaBuilder {
         }
         if self.settings.guest_surface.is_hardened_leaf() {
             if !self.profile.is_deterministic_sim() {
-                return Err(Error::Vm(VmError::new(
+                return Err(Error::from(VmError::new(
                     VmErrorKind::HardenedLeafViolation {
                         feature: "non-DeterministicSim profile",
                     },
                 )));
             }
             if self.settings.memory_limit_bytes.is_none() {
-                return Err(Error::Vm(VmError::new(
+                return Err(Error::from(VmError::new(
                     VmErrorKind::HardenedLeafViolation {
                         feature: "missing logical-live memory limit",
                     },
@@ -426,7 +432,7 @@ impl RustiaBuilder {
                 || self.settings.services.wall_clock.is_some()
                 || self.settings.services.monotonic_clock.is_some()
             {
-                return Err(Error::Vm(VmError::new(
+                return Err(Error::from(VmError::new(
                     VmErrorKind::HardenedLeafViolation {
                         feature: "host output or clock services",
                     },
@@ -441,7 +447,7 @@ impl RustiaBuilder {
                 || self.settings.enable_conformance_native_type_checks
                 || self.settings.enable_conformance_pcall_helpers
             {
-                return Err(Error::Vm(VmError::new(
+                return Err(Error::from(VmError::new(
                     VmErrorKind::HardenedLeafViolation {
                         feature: "dynamic-code or conformance-only facilities",
                     },
@@ -517,26 +523,26 @@ impl ServiceModuleResolver {
     /// Host-supplied replay-stable resolver. The determinism assertion is
     /// trusted, not verified.
     pub fn from_fn(
-        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+        resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
         Self::from_fn_with_determinism(resolver, true)
     }
 
     /// Host-supplied live resolver explicitly labeled nondeterministic.
     pub fn from_nondeterministic_fn(
-        resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String> + 'static,
+        resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
         Self::from_fn_with_determinism(resolver, false)
     }
 
     fn from_fn_with_determinism(
-        mut resolver: impl FnMut(&str, Option<&str>) -> std::result::Result<ModuleSource, String>
-            + 'static,
+        mut resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
         deterministic: bool,
     ) -> Self {
         let provider = ModuleResolver::new_with_profile(
             move |requested, referrer, profile| {
-                let module = resolver(requested, referrer)?;
+                let module =
+                    resolver(requested, referrer).map_err(crate::value::embed_to_vm_error)?;
                 compile_module_source(module, profile)
             },
             deterministic,
@@ -552,20 +558,48 @@ impl ServiceModuleResolver {
 fn compile_module_source(
     module: ModuleSource,
     profile: Profile,
-) -> std::result::Result<ResolvedModule, String> {
+) -> rustia_vm::Result<ResolvedModule> {
     if module.identity.is_empty() {
-        return Err("module identity must not be empty".to_owned());
+        return Err(crate::value::embed_to_vm_error(Error::embed(
+            "module identity must not be empty",
+        )));
     }
-    let chunk = rustia_parser::parse_source_bytes(&module.source)
-        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    let chunk = rustia_parser::parse_source_bytes(&module.source).map_err(|error| {
+        module_compile_error(Error::from(error), &module.source_name, &module.source)
+    })?;
     let options = CompileOptions {
         puc51_constructor_order: profile == Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(module.source_name.clone(), &module.source);
-    let program = compile_with_options(&chunk, options)
-        .map_err(|error| format!("{}:1: {error}", module.source_name))?;
+    let mut program = compile_with_options(&chunk, options).map_err(|error| {
+        module_compile_error(Error::from(error), &module.source_name, &module.source)
+    })?;
+    program.diagnostic_source = rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
+        &module.source,
+        crate::DiagnosticLimits::default().source_bytes,
+    );
     Ok(ResolvedModule::new(module.identity, program))
+}
+
+fn module_compile_error(error: Error, name: &str, source: &[u8]) -> rustia_vm::Error {
+    let message = format!("{name}:1: {error}");
+    let mut error = error.with_source(name, source, crate::DiagnosticLimits::default());
+    // Keep a single snapshot lease at the outer diagnostic, not an unbudgeted
+    // copy hidden in the typed cause chain.
+    let mut diagnostic = error.diagnostic.take();
+    let mut error = crate::value::embed_to_vm_error(error);
+    if let Some(diagnostic) = &mut diagnostic {
+        std::sync::Arc::make_mut(diagnostic).host_cause = error
+            .diagnostic
+            .as_ref()
+            .and_then(|diagnostic| diagnostic.host_cause.clone());
+    }
+    error.diagnostic = diagnostic;
+    if let crate::VmErrorKind::RuntimeError { message: raw } = &mut error.kind {
+        *raw = message;
+    }
+    error
 }
 
 /// Host clock provider plugged into a builder clock socket (design/72-host-services.md).
@@ -770,7 +804,13 @@ fn stock_loadstring_compiler(
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name.clone(), source);
-    compile_with_options(&chunk, options).map_err(|error| format!("{source_name}:1: {error}"))
+    let mut program = compile_with_options(&chunk, options)
+        .map_err(|error| format!("{source_name}:1: {error}"))?;
+    program.diagnostic_source = rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
+        source,
+        crate::DiagnosticLimits::default().source_bytes,
+    );
+    Ok(program)
 }
 
 fn loadstring_chunk_name(source: &[u8]) -> String {
@@ -991,12 +1031,12 @@ impl RustiaExtension {
             return rustia
                 .vm_mut()
                 .install_host_functions(self.functions)
-                .map_err(Error::Vm);
+                .map_err(Error::from);
         };
 
         rustia
             .vm_mut()
             .install_host_module(namespace, self.functions)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 }

@@ -214,7 +214,7 @@ fn rejected_constructors_release_their_captures() {
     let before = rustia.memory_stats().live_bytes;
     let (definition, capture) = callback(1);
     assert!(
-        matches!(rustia.create_function(definition), Err(rustia::Error::Vm(error))
+        matches!(rustia.create_function(definition), Err(rustia::Error { kind: rustia::ErrorKind::Vm(error), .. })
         if matches!(error.kind, VmErrorKind::HardenedLeafViolation { .. }))
     );
     assert!(capture.upgrade().is_none());
@@ -287,7 +287,7 @@ fn constructor_quota_failure_drops_candidate_and_recovers_after_root_release() {
             Ok(function) => functions.push(function),
             Err(error) => {
                 assert!(
-                    matches!(error, rustia::Error::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory))
+                    matches!(error, rustia::Error { kind: rustia::ErrorKind::Vm(error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory))
                 );
                 assert!(
                     capture.upgrade().is_none(),
@@ -343,7 +343,7 @@ fn created_host_panics_poison_and_reset_releases_callback() {
         })
         .unwrap();
     assert!(
-        matches!(function.call::<_, i64>(&mut rustia, ()), Err(rustia::Error::Vm(error))
+        matches!(function.call::<_, i64>(&mut rustia, ()), Err(rustia::Error { kind: rustia::ErrorKind::Vm(error), .. })
         if matches!(error.kind, VmErrorKind::HostPanicked { .. }))
     );
     assert!(rustia.eval::<i64>("return 1").is_err());

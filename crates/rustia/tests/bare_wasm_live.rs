@@ -33,7 +33,11 @@ fn bare_wasm_live_accepts_explicit_host_inputs() {
 #[wasm_bindgen_test]
 fn bare_wasm_live_reports_a_missing_platform_adapter() {
     let result = RustiaBuilder::live().build();
-    let Err(Error::Vm(error)) = result else {
+    let Err(Error {
+        kind: rustia::ErrorKind::Vm(error),
+        ..
+    }) = result
+    else {
         panic!("expected a typed missing-adapter error");
     };
     assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));

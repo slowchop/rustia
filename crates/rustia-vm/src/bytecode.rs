@@ -12,6 +12,10 @@ pub struct Program {
     constants: Arc<ConstantStorage>,
     pub functions: Vec<Function>,
     pub source_name: Option<Arc<str>>,
+    /// Host diagnostic source, accounted separately from guest heap quotas.
+    pub diagnostic_source: Option<Arc<crate::diagnostic::SourceSnapshot>>,
+    pub diagnostic_prefix_bytes: usize,
+    pub diagnostic_mapped_length: Option<usize>,
     /// Optional per-instruction logical-unit schedule produced by an
     /// optimizing lowering (`None` for the identity schedule). See
     /// [`ProgramLogicalUnits`].
@@ -153,6 +157,9 @@ pub enum Constant {
 pub struct InstructionSource {
     pub pc: usize,
     pub line: u32,
+    /// Exact source range, when provided by the compiler. Hand-written
+    /// bytecode can retain line-only debug information.
+    pub span: Option<crate::diagnostic::DiagnosticSpan>,
 }
 
 #[repr(u8)]
@@ -491,6 +498,9 @@ impl Program {
             constants: Arc::new(ConstantStorage::new(constants)),
             functions: Vec::new(),
             source_name: None,
+            diagnostic_source: None,
+            diagnostic_prefix_bytes: 0,
+            diagnostic_mapped_length: None,
             logical_units: None,
         }
     }
@@ -505,6 +515,9 @@ impl Program {
             constants: Arc::new(ConstantStorage::new(constants)),
             functions,
             source_name: None,
+            diagnostic_source: None,
+            diagnostic_prefix_bytes: 0,
+            diagnostic_mapped_length: None,
             logical_units: None,
         }
     }
