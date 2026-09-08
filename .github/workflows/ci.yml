@@ -131,8 +131,11 @@ jobs:
         run: |
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test bare_wasm_live
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test mixed_heap_pressure
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test host_functions
 
       - name: Run default web-live adapter tests on Node/V8
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-        run: cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live
+        run: |
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test host_functions

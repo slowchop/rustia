@@ -99,6 +99,128 @@ fn configured_vm() -> Rustia<Host> {
     rustia
 }
 
+#[test]
+fn created_context_callbacks_rebind_inputs_exchange_live_values_and_release_on_reset() {
+    use rustia::{HostFunction, Table};
+    use std::sync::Arc;
+    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let capture = Arc::new(());
+    let weak = Arc::downgrade(&capture);
+    let read = rustia
+        .create_function(
+            HostFunction::input(move |input: Input<'_, Host>| {
+                let _keep = &capture;
+                *input.get()
+            })
+            .fuel_cost(2),
+        )
+        .unwrap();
+    let emit = rustia
+        .create_function(
+            HostFunction::effect(
+                |mut effects: Effects<'_, Host>, value: i64, table: Table| -> Result<Table> {
+                    effects.emit(value)?;
+                    Ok(table)
+                },
+            )
+            .fuel_cost(3),
+        )
+        .unwrap();
+    let table = rustia.create_table().unwrap();
+    for input in [3, 7] {
+        let mut host = Host {
+            input,
+            slots: Vec::new(),
+        };
+        let outcome = rustia
+            .invoke(
+                &mut host,
+                InvocationLimits::new(1000)
+                    .with_max_records(1)
+                    .with_max_record_bytes(16),
+                |invocation| {
+                    let value = read.call_in::<_, _, i64>(invocation, ())?;
+                    assert_eq!(value, input);
+                    let source = format!("return {value}");
+                    let number = invocation.load(&source).eval_live()?;
+                    emit.call_values_in(invocation, &[number, table.as_value()])
+                },
+            )
+            .unwrap();
+        assert_eq!(outcome.records().len(), 1);
+        assert_eq!(outcome.records()[0].kind, RecordKind::Effect(input));
+        let returned = outcome.value()[0].clone();
+        assert!(returned.raw_equal(&mut rustia, &table.as_value()).unwrap());
+    }
+    rustia.reset_decision().unwrap();
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn replacing_typed_registrations_releases_obsolete_handlers() {
+    use rustia::HostFunction;
+    use std::sync::Arc;
+    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let capture = Arc::new(());
+    let weak = Arc::downgrade(&capture);
+    rustia
+        .register_function(
+            "read",
+            HostFunction::input(move |input: Input<'_, Host>| {
+                let _keep = &capture;
+                *input.get()
+            }),
+        )
+        .unwrap();
+    rustia
+        .register_function(
+            "read",
+            HostFunction::input(|input: Input<'_, Host>| *input.get() + 1),
+        )
+        .unwrap();
+    rustia.reset_decision().unwrap();
+    assert!(weak.upgrade().is_none());
+    let mut host = Host {
+        input: 5,
+        slots: Vec::new(),
+    };
+    let outcome = rustia
+        .invoke(&mut host, InvocationLimits::new(1000), |invocation| {
+            invocation.load("return read()").eval::<i64>()
+        })
+        .unwrap();
+    assert_eq!(*outcome.value(), 6);
+}
+
+#[test]
+fn shared_definitions_keep_empty_name_validation_and_live_signature_metadata() {
+    use rustia::{HostFunction, Table};
+    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    assert!(rustia
+        .add_input("", 1, |input: Input<'_, Host>| *input.get())
+        .is_err());
+    assert!(rustia.register_function("", || 1_i64).is_err());
+    let module = HostModule::<Host>::new("api").function(
+        "id",
+        HostFunction::input(|_: Input<'_, Host>, table: Table| -> Result<(Table, i64)> {
+            Ok((table, 1))
+        })
+        .fuel_cost(3),
+    );
+    let metadata = module.functions().next().unwrap();
+    assert_eq!(metadata.name, "id");
+    assert_eq!(metadata.capability, OpCapability::ReadsDeterministicInput);
+    assert_eq!(metadata.parameter_count, 1);
+    assert_eq!(metadata.parameter_types, &[std::any::type_name::<Table>()]);
+    assert_eq!(
+        metadata.return_types,
+        &[std::any::type_name::<Table>(), "i64"]
+    );
+    assert_eq!(metadata.fuel_cost, 3);
+    assert!(metadata.fallible);
+    rustia.install_host_module(module).unwrap();
+}
+
 trait TypedTestSetup {
     fn install_source(&mut self, source: &str) -> Result<Exports>;
     fn install_typed(&mut self, module: &CompiledModule) -> Result<Exports>;

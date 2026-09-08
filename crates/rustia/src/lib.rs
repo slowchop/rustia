@@ -1,6 +1,7 @@
 mod chunk;
 mod extension_api;
 mod function;
+mod host_function;
 mod invocation;
 mod live_value;
 mod macros;
@@ -8,7 +9,7 @@ mod serde_value;
 mod value;
 
 use function::IntoHostFunction;
-use invocation::{HostBindings, TypedHostDispatcher};
+use invocation::TypedHostDispatcher;
 use rustia_compiler::{compile_with_options, CompileError, CompileOptions};
 use rustia_parser::SourceError;
 use rustia_vm::{HardenedLeafProgram, Program, Vm};
@@ -23,6 +24,7 @@ pub use extension_api::{
     RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
 pub use function::{Exports, Function};
+pub use host_function::{HostFunction, IntoHostFunctionDefinition};
 pub use invocation::{
     Effects, HostContext, HostModule, HostMut, HostSchema, Input, IntoEffectFunction,
     IntoExternalFunction, IntoInputFunction, IntoSlotReadFunction, IntoSlotWriteFunction,
@@ -71,7 +73,6 @@ pub use value::{
 /// ```
 pub struct Rustia<C: HostSchema = ()> {
     vm: Vm,
-    bindings: HostBindings<C>,
     journal: Vec<C::Record>,
 }
 
@@ -82,7 +83,6 @@ where
     fn from_profile(profile: Profile) -> Self {
         Self {
             vm: Vm::new(profile),
-            bindings: HostBindings::default(),
             journal: Vec::new(),
         }
     }
@@ -90,7 +90,6 @@ where
     fn from_settings(profile: Profile, settings: VmSettings) -> Self {
         Self {
             vm: Vm::with_settings(profile, settings),
-            bindings: HostBindings::default(),
             journal: Vec::new(),
         }
     }
@@ -247,8 +246,7 @@ where
             .map_err(|_| Error::Vm(VmError::new(VmErrorKind::OutOfMemory)))?;
 
         let journal = std::mem::take(&mut self.journal);
-        let dispatcher =
-            TypedHostDispatcher::new(&self.bindings.handlers, context, journal, limits);
+        let dispatcher = TypedHostDispatcher::new(context, journal, limits);
         let mut invocation = Invocation::new(&mut self.vm, dispatcher, limits);
         let result = operation(&mut invocation);
         let commit_installation = result.is_ok() && invocation.can_commit_installation();
@@ -349,14 +347,7 @@ where
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        let name = name.into();
-        if name.is_empty() {
-            return Err(Error::Embed(
-                "typed host function name must not be empty".to_owned(),
-            ));
-        }
-        let op = function.into_host_function(name, fuel_cost, OpCapability::Pure);
-        self.vm.install_host_function(op).map_err(Error::Vm)
+        self.register_function(name, HostFunction::pure(function).fuel_cost(fuel_cost))
     }
 
     /// Registers a deterministic input reader with closure shape
@@ -370,8 +361,7 @@ where
     where
         Func: IntoInputFunction<C, Args, Return>,
     {
-        let function = function.into_input_function(name.into(), fuel_cost);
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(name, HostFunction::input(function).fuel_cost(fuel_cost))
     }
 
     /// Registers a deterministic slot reader with closure shape
@@ -385,8 +375,7 @@ where
     where
         Func: IntoSlotReadFunction<C, Args, Return>,
     {
-        let function = function.into_slot_read_function(name.into(), fuel_cost);
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(name, HostFunction::slot_read(function).fuel_cost(fuel_cost))
     }
 
     /// Registers a deterministic effect recorder with closure shape
@@ -400,8 +389,7 @@ where
     where
         Func: IntoEffectFunction<C, Args, Return>,
     {
-        let function = function.into_effect_function(name.into(), fuel_cost);
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(name, HostFunction::effect(function).fuel_cost(fuel_cost))
     }
 
     /// Registers a deterministic slot-write recorder with closure shape
@@ -415,8 +403,10 @@ where
     where
         Func: IntoSlotWriteFunction<C, Args, Return>,
     {
-        let function = function.into_slot_write_function(name.into(), fuel_cost);
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(
+            name,
+            HostFunction::slot_write(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Registers an external-state callback with closure shape
@@ -433,12 +423,7 @@ where
     where
         Func: IntoExternalFunction<C, Args, Return>,
     {
-        let function = function.into_external_function(
-            name.into(),
-            fuel_cost,
-            OpCapability::ReadsExternalMutableState,
-        );
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(name, HostFunction::external(function).fuel_cost(fuel_cost))
     }
 
     /// Registers an explicitly nondeterministic `HostMut` callback.
@@ -453,12 +438,10 @@ where
     where
         Func: IntoExternalFunction<C, Args, Return>,
     {
-        let function = function.into_external_function(
-            name.into(),
-            fuel_cost,
-            OpCapability::NondeterministicEffect,
-        );
-        self.bindings.install(&mut self.vm, function)
+        self.register_function(
+            name,
+            HostFunction::nondeterministic(function).fuel_cost(fuel_cost),
+        )
     }
 
     /// Installs a namespaced collection of capability-checked host functions.
@@ -466,7 +449,7 @@ where
     /// Installation is fail-closed: if validation or VM binding fails, no
     /// callable namespace or typed dispatcher bindings are retained.
     pub fn install_host_module(&mut self, module: HostModule<C>) -> Result<()> {
-        module.install(&mut self.vm, &mut self.bindings)
+        module.install(&mut self.vm)
     }
 
     #[inline]
@@ -797,8 +780,10 @@ impl Rustia<()> {
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        let op = function.into_host_function(name.into(), fuel_cost, capability);
-        self.vm.install_host_function(op).map_err(Error::Vm)
+        self.register_function(
+            name,
+            HostFunction::with_capability(capability, function).fuel_cost(fuel_cost),
+        )
     }
 
     pub fn install_extension(&mut self, extension: RustiaExtension) -> Result<()> {

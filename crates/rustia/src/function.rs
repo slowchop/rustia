@@ -1,7 +1,7 @@
 use crate::live_value::{ensure_current_epoch, Value as LiveValue};
 use crate::serde_value::from_live;
 use crate::value::{
-    embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti,
+    embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustia,
     IntoRustiaMulti, OwnedValue,
 };
 use crate::{Error, HostSchema, Invocation, Result, Rustia};
@@ -305,8 +305,76 @@ pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {
     ) -> HostFunctionOp;
 }
 
+pub enum HostReturnValue {
+    Owned(OwnedValue),
+    Live(LiveValue),
+}
+
+pub trait IntoHostValue {
+    fn into_host_value(self) -> Result<HostReturnValue>;
+}
+
+impl<T: IntoRustia> IntoHostValue for T {
+    fn into_host_value(self) -> Result<HostReturnValue> {
+        self.into_rustia().map(HostReturnValue::Owned)
+    }
+}
+
+impl IntoHostValue for LiveValue {
+    fn into_host_value(self) -> Result<HostReturnValue> {
+        Ok(HostReturnValue::Live(self))
+    }
+}
+
+impl IntoHostValue for crate::Table {
+    fn into_host_value(self) -> Result<HostReturnValue> {
+        self.as_value().into_host_value()
+    }
+}
+
+impl IntoHostValue for Function {
+    fn into_host_value(self) -> Result<HostReturnValue> {
+        self.as_value().into_host_value()
+    }
+}
+
+/// Callback arguments may use either ordinary owned conversions or rooted live handles.
+pub trait FromHostArgument: Sized {
+    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self>;
+}
+
+impl<T: FromRustia> FromHostArgument for T {
+    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+        T::from_rustia(snapshot_value(vm, value)?)
+    }
+}
+
+impl FromHostArgument for LiveValue {
+    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+        LiveValue::retain(vm, value)
+    }
+}
+
+impl FromHostArgument for crate::Table {
+    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+        if value.kind() != ValueKind::Table {
+            return Err(Error::Embed("expected table".to_owned()));
+        }
+        Ok(Self::new(LiveValue::retain(vm, value)?))
+    }
+}
+
+impl FromHostArgument for Function {
+    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+        if value.kind() != ValueKind::Function {
+            return Err(Error::Embed("expected function".to_owned()));
+        }
+        Ok(Self::from_value(LiveValue::retain(vm, value)?))
+    }
+}
+
 pub trait IntoHostReturn {
-    fn into_host_return(self) -> Result<Vec<OwnedValue>>;
+    fn into_host_return(self) -> Result<Vec<HostReturnValue>>;
 
     fn rustia_type_names() -> Vec<&'static str>
     where
@@ -320,31 +388,99 @@ pub trait IntoHostReturn {
     }
 }
 
-impl<T> IntoHostReturn for T
-where
-    T: IntoRustiaMulti,
-{
-    fn into_host_return(self) -> Result<Vec<OwnedValue>> {
-        self.into_rustia_multi()
-    }
+macro_rules! impl_single_host_return {
+    ($($ty:ty),+ $(,)?) => {$(
+        impl IntoHostReturn for $ty {
+            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+                Ok(vec![self.into_host_value()?])
+            }
+            fn rustia_type_names() -> Vec<&'static str> {
+                vec![type_name::<Self>()]
+            }
+        }
+    )+};
+}
 
+impl_single_host_return!(
+    OwnedValue,
+    crate::OwnedTable,
+    bool,
+    f64,
+    f32,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    String,
+    &str,
+    LiveValue,
+    crate::Table,
+    Function
+);
+
+macro_rules! impl_owned_container_host_return {
+    ($ty:ty) => {
+        impl<T: IntoRustia> IntoHostReturn for $ty {
+            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+                Ok(vec![self.into_host_value()?])
+            }
+            fn rustia_type_names() -> Vec<&'static str> {
+                vec![type_name::<Self>()]
+            }
+        }
+    };
+}
+
+impl_owned_container_host_return!(Option<T>);
+impl_owned_container_host_return!(Vec<T>);
+impl_owned_container_host_return!(std::collections::BTreeMap<String, T>);
+
+impl IntoHostReturn for () {
+    fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+        Ok(Vec::new())
+    }
     fn rustia_type_names() -> Vec<&'static str> {
-        T::rustia_type_names()
+        Vec::new()
     }
 }
 
-impl<T> IntoHostReturn for Result<T>
-where
-    T: IntoRustiaMulti,
-{
-    fn into_host_return(self) -> Result<Vec<OwnedValue>> {
-        self.and_then(IntoRustiaMulti::into_rustia_multi)
-    }
+macro_rules! impl_tuple_host_return {
+    ($($name:ident),+ $(,)?) => {
+        impl<$($name: IntoHostValue),+> IntoHostReturn for ($($name,)+) {
+            #[allow(non_snake_case)]
+            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+                let ($($name,)+) = self;
+                Ok(vec![$($name.into_host_value()?,)+])
+            }
+            fn rustia_type_names() -> Vec<&'static str> {
+                vec![$(type_name::<$name>()),+]
+            }
+        }
+    };
+}
 
+impl_tuple_host_return!(A);
+impl_tuple_host_return!(A, B);
+impl_tuple_host_return!(A, B, C);
+impl_tuple_host_return!(A, B, C, D);
+impl_tuple_host_return!(A, B, C, D, E);
+impl_tuple_host_return!(A, B, C, D, E, F);
+impl_tuple_host_return!(A, B, C, D, E, F, G);
+impl_tuple_host_return!(A, B, C, D, E, F, G, H);
+
+impl<T: IntoHostReturn> IntoHostReturn for Result<T> {
+    fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+        self.and_then(IntoHostReturn::into_host_return)
+    }
     fn rustia_type_names() -> Vec<&'static str> {
         T::rustia_type_names()
     }
-
     fn is_fallible() -> bool {
         true
     }
@@ -383,7 +519,7 @@ macro_rules! impl_host_function {
         where
             Func: Fn($($name),+) -> Return + Send + Sync + 'static,
             Return: IntoHostReturn,
-            $($name: FromRustia,)+
+            $($name: FromHostArgument,)+
         {
             #[allow(non_snake_case)]
             fn into_host_function(
@@ -434,13 +570,10 @@ pub(crate) fn host_arg_from_raw<T>(
     function_name: &str,
 ) -> rustia_vm::Result<T>
 where
-    T: FromRustia,
+    T: FromHostArgument,
 {
     let value = args.get(index).copied().unwrap_or_else(RawValue::nil);
-    let owned = snapshot_value(vm, value).map_err(|error| {
-        host_embed_error(function_name, format!("argument {}", index + 1), error)
-    })?;
-    T::from_rustia(owned)
+    T::from_host_argument(vm, value)
         .map_err(|error| host_embed_error(function_name, format!("argument {}", index + 1), error))
 }
 
@@ -452,17 +585,43 @@ pub(crate) fn host_return_to_raw<Return>(
 where
     Return: IntoHostReturn,
 {
-    value
+    let values = value
         .into_host_return()
-        .map_err(|error| host_embed_error(function_name, "return value", error))?
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            load_owned_value(vm, &value).map_err(|error| {
-                host_embed_error(function_name, format!("return value {}", index + 1), error)
-            })
-        })
-        .collect()
+        .map_err(|error| host_embed_error(function_name, "return value", error))?;
+    // Validate every live handle before allocating an owned result. Keep all live
+    // values and each newly loaded owned value rooted through later conversions.
+    for value in &values {
+        if let HostReturnValue::Live(value) = value {
+            value
+                .raw(vm, "host function result")
+                .map_err(embed_to_vm_error)?;
+        }
+    }
+    let mut roots = Vec::new();
+    let mut results = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        let raw = match value {
+            HostReturnValue::Owned(value) => {
+                let raw = load_owned_value(vm, value).map_err(|error| {
+                    host_embed_error(function_name, format!("return value {}", index + 1), error)
+                })?;
+                if index + 1 < values.len()
+                    && !matches!(
+                        raw.kind(),
+                        ValueKind::Nil | ValueKind::Boolean | ValueKind::Number
+                    )
+                {
+                    roots.push(vm.retain_value(raw)?);
+                }
+                raw
+            }
+            HostReturnValue::Live(value) => value
+                .raw(vm, "host function result")
+                .map_err(embed_to_vm_error)?,
+        };
+        results.push(raw);
+    }
+    Ok(results)
 }
 
 fn host_embed_error(function_name: &str, slot: impl AsRef<str>, error: Error) -> rustia_vm::Error {

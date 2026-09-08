@@ -2,6 +2,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::profile::Profile;
 use crate::value::Value;
 use crate::vm::Vm;
+use std::any::Any;
 use std::fmt;
 use std::mem::size_of;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ pub type HostFunctionHandler =
 #[derive(Clone)]
 pub(crate) enum HostFunctionTarget {
     Inline(HostFunctionHandler),
-    Dispatcher(u32),
+    Dispatcher(Arc<dyn Any + Send + Sync>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -90,6 +91,27 @@ pub struct HostFunctionOp {
 }
 
 impl HostFunctionOp {
+    /// Logical storage owned by a callback definition, excluding opaque host captures.
+    pub(crate) fn memory_usage(&self) -> (usize, usize) {
+        let live = size_of::<Self>()
+            .saturating_add(self.name.len())
+            .saturating_add(self.parameter_types.len().saturating_mul(size_of::<&str>()))
+            .saturating_add(self.return_types.len().saturating_mul(size_of::<&str>()));
+        let reserved = size_of::<Self>()
+            .saturating_add(self.name.capacity())
+            .saturating_add(
+                self.parameter_types
+                    .capacity()
+                    .saturating_mul(size_of::<&str>()),
+            )
+            .saturating_add(
+                self.return_types
+                    .capacity()
+                    .saturating_mul(size_of::<&str>()),
+            );
+        (live, reserved)
+    }
+
     pub fn new(
         name: impl Into<String>,
         fuel_cost: u32,
@@ -118,7 +140,7 @@ impl HostFunctionOp {
         name: impl Into<String>,
         fuel_cost: u32,
         capability: OpCapability,
-        dispatcher_key: u32,
+        handler: Arc<dyn Any + Send + Sync>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -128,7 +150,7 @@ impl HostFunctionOp {
             parameter_types: Vec::new(),
             return_types: Vec::new(),
             fallible: false,
-            target: HostFunctionTarget::Dispatcher(dispatcher_key),
+            target: HostFunctionTarget::Dispatcher(handler),
         }
     }
 

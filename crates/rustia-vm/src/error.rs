@@ -38,9 +38,7 @@ pub enum ErrorKind {
         expected: &'static str,
     },
     OutOfMemory,
-    HostDispatcherUnavailable {
-        key: u32,
-    },
+    HostDispatcherUnavailable,
     HostResourceExhausted {
         resource: &'static str,
         limit: u64,
@@ -51,6 +49,7 @@ pub enum ErrorKind {
     VmPoisoned,
     YieldAcrossBoundary,
     DecisionResetWhileRunning,
+    HostConfigurationWhileRunning,
     DecisionEpochExhausted,
     StaleRetainedValue {
         retained_epoch: u64,
@@ -140,7 +139,7 @@ impl Error {
         matches!(
             self.kind,
             ErrorKind::FuelExhausted { .. }
-                | ErrorKind::HostDispatcherUnavailable { .. }
+                | ErrorKind::HostDispatcherUnavailable
                 | ErrorKind::HostResourceExhausted { .. }
                 | ErrorKind::HostPanicked { .. }
                 | ErrorKind::VmPoisoned
@@ -184,8 +183,8 @@ impl fmt::Display for Error {
                 write!(formatter, "type error: expected {expected}")
             }
             ErrorKind::OutOfMemory => formatter.write_str("not enough memory"),
-            ErrorKind::HostDispatcherUnavailable { key } => {
-                write!(formatter, "host dispatcher has no binding for key {key}")
+            ErrorKind::HostDispatcherUnavailable => {
+                formatter.write_str("host callback requires an invocation with the matching host schema")
             }
             ErrorKind::HostResourceExhausted { resource, limit } => {
                 write!(formatter, "host {resource} limit exhausted at {limit}")
@@ -201,6 +200,9 @@ impl fmt::Display for Error {
             }
             ErrorKind::DecisionResetWhileRunning => {
                 formatter.write_str("decision reset requires an idle VM")
+            }
+            ErrorKind::HostConfigurationWhileRunning => {
+                formatter.write_str("persistent host configuration requires an idle VM without a guest savepoint")
             }
             ErrorKind::DecisionEpochExhausted => {
                 formatter.write_str("decision epoch counter exhausted")

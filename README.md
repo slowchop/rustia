@@ -11,8 +11,8 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
 > ordinary instruction boundaries. Rooted live values/tables/functions now preserve rich payloads and graph
 > identity, with live globals access and quota-aware table construction. A shared native/Node-V8 test now
 > maintains the mixed-heap pressure and reclamation gate. The composable chunk builder and snapshot-free
-> live-value serde deserializer and transactional installation boundary are implemented; the next
-> release-critical constructor work is safe host-function construction.
+> live-value serde deserializer, transactional installation, and reclaimable synchronous host-function
+> construction are implemented. Stronger stack diagnostics are the next host-facing priority.
 > `spikes/` are throwaway prototypes that validated the design.
 > Read **[`design/CURRENT.md`](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md)** for the canonical state, then
 > [`design/README.md`](https://github.com/slowchop/rustia/blob/main/design/README.md) for the full doc map.
@@ -70,9 +70,11 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   a fresh lazy cache cohort while old functions retain their originating cohort. Live globals access, quota-aware table construction,
   owned-key/live-value insertion, and the composable
   `load(source).source_name(...).environment(...)` chunk builder with `eval`, `eval_live`, `eval_serde`, `exec`,
-  and `install` terminals is implemented. The next advanced
-  slice adds safe host-function construction, followed by optional userdata/scopes, async, and migration
-  compatibility.
+  and `install` terminals is implemented. Synchronous `HostFunction` definitions work with
+  `create_function`, persistent `register_function`, and `HostModule::function`; the same typed signatures
+  accept live tables/functions and return mixed owned/live tuples. Created functions follow guest reachability
+  and are released by collection/reset; replacing a persistent registration preserves old guest aliases.
+  Userdata/scopes, async, and migration compatibility remain optional later layers.
 - Host services are host-pluggable through the facade: `RustiaBuilder::standard()`/`deterministic()`/`live()`
   environment presets, a `.stdout(...)` print sink with the real Luau composition (`tostring` honoring
   `__tostring`, tab-joined, trailing newline), and `.wall_clock(...)`/`.monotonic_clock(...)` sockets taking a
@@ -82,6 +84,25 @@ once its conformance, benchmark, API, memory-lifecycle, and release gates are sa
   pinned. `DeterministicSim` admits only providers labeled replay-stable.
 
 ## Embedding presets
+
+Callback construction and registration share one definition:
+
+```rust
+use rustia::{HostFunction, HostModule, Rustia, Table};
+
+let mut vm = Rustia::default();
+let identity = vm.create_function(|table: Table| table)?;
+vm.globals()?.set_live(&mut vm, "identity", &identity.as_value())?;
+vm.register_function("twice", HostFunction::pure(|n: i64| n * 2).fuel_cost(2))?;
+vm.install_host_module(HostModule::new("maths").function("answer", || 42_i64))?;
+# Ok::<(), rustia::Error>(())
+```
+
+`create_function` is decision-local; guest references keep it alive after the Rust handle is dropped.
+`register_function` and host modules are persistent configuration rebuilt by reset. Typed hosts use
+`HostFunction::input`, `effect`, and the other capability views; captured-state callbacks can declare
+`HostFunction::with_capability`. Destructors of captured Rust values must not panic. Hardened leaves use
+persistent configuration and reject disposable construction.
 
 The facade picks an environment in one word; `Rustia::builder()` delegates to `standard()`, and
 `Rustia::new`/`with_settings` stay service-free. Finish with `build_for_host::<H>()` instead of `build()` when
@@ -198,7 +219,7 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-02 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-07 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |

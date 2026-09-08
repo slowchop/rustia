@@ -25,8 +25,9 @@ overhead across targets.
    binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
    tables, mutation, raw equality, and ordinary or typed invocation exchange.
    Live globals, quota-aware tables, owned-key/live-value insertion, and the
-   composable chunk builder and snapshot-free live serde are implemented. Add safe function construction
-   and a concrete opaque-userdata registration contract. Preserve the
+   composable chunk builder, snapshot-free live serde, and reclaimable synchronous host functions
+   are implemented. Complete the controlled-client migration and define a concrete opaque-userdata
+   registration contract. Preserve the
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.

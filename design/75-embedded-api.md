@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [TRANSACTIONAL INSTALLATION + COHERENT EXECUTION API IMPLEMENTED - function construction pending] (updated 2026-09-02).**
+> **Status: [COHERENT EXECUTION + SYNCHRONOUS HOST FUNCTIONS IMPLEMENTED] (updated 2026-09-07).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -36,14 +36,18 @@ specialized hardened reset preserves only the sealed immutable configuration pre
 Object/program reclamation, real VM-owned live/reserved/peak telemetry, and the correctness-first logical-live
 quota/atomic OOM path are now implemented and validated by the exact-commit `safe-memory-588b541` native Linode
 cohort plus its wasm32 512 KiB quota/recovery probe. The epoch-safe decision reset, host-owned `require`
-resolver, and transactional installation boundary are now implemented; the remaining constructor work is safe
-host-function construction. The
+resolver, transactional installation, and reclaimable synchronous host-function construction are implemented
+([78-host-functions.md](78-host-functions.md)). The
 graph-preserving advanced spine plus its first ergonomic constructors are now implemented:
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
 exposing collector lifetimes. `globals()` exposes the real mutable globals table, `create_table()` admits an
 empty rooted table under the logical-live quota, and `Table::set_live()` bridges owned keys to identity-bearing
-live values. The composable `load(source).source_name(...).environment(...)` builder provides borrowed
+live values. `create_function`, persistent `register_function`, and `HostModule::function` share a
+`HostFunction` definition, capability/fuel metadata, and typed owned/live argument and tuple-result conversions.
+Heap functions own their callbacks; guest aliases keep replaced functions callable, collection reclaims
+unreachable callbacks, and reset releases disposable captures while restoring persistent registrations.
+The composable `load(source).source_name(...).environment(...)` builder provides borrowed
 text/byte source, diagnostic names, exact rooted lexical environments, `eval`, `eval_live`, `eval_serde`,
 `exec`, and `install` terminals,
 side-effect-only execution; custom environments are validated before compilation, nested functions capture
@@ -527,13 +531,15 @@ store authoritative state on the GC heap instead of in captured host slots.
     arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
     identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
     remains intentionally absent until a concrete host-side scheduling caller defines its contract.
-14. 🔨 **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`,
+14. ✅ **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`,
     owned-key/live-value insertion, and the composable
     `load(source).source_name(...).environment(...)` chunk builder is implemented. The builder borrows
     text or bytes, preserves named diagnostics, supports `eval`/`eval_live`/`eval_serde`/`exec`/`install`, executes against globals
     or an exact rooted lexical environment, and rejects invalid environment handles before compilation.
-    `create_function()` remains deferred until disposable callbacks can be reclaimed safely. Keep `eval<T>()`
-    and `add_fn` as concise facade sugar.
+    `create_function()` now admits reclaimable callbacks as rooted values; `HostFunction` definitions share
+    typed owned/live conversions and capability/fuel rules with `register_function` and `HostModule::function`.
+    Reset invalidates disposable handles and releases their captures; persistent replacement releases
+    obsolete configuration while preserving guest aliases. Keep `eval<T>()` and `add_fn` as concise sugar.
 15. ✅ **Add host-owned modules:** script-visible `require`, deterministic module identity where promised,
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
     host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
