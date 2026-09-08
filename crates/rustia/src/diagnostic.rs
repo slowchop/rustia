@@ -577,4 +577,30 @@ mod tests {
             crate::VmErrorKind::HostPanicked { .. }
         ));
     }
+
+    #[test]
+    fn diagnostic_limits_do_not_change_guest_messages_clock_or_live_memory() {
+        fn run(limits: crate::DiagnosticLimits) -> ((bool, String, f64), usize) {
+            let settings = crate::VmSettings {
+                diagnostic_limits: limits,
+                ..Default::default()
+            };
+            let mut vm = crate::RustiaBuilder::standard()
+                .settings(settings)
+                .build()
+                .unwrap();
+            let result = vm.load("local ok, message = pcall(function() return missing.health end)\nreturn {ok, message, os.clock()}")
+                .source_name("protected.luau").eval_serde().unwrap();
+            (result, vm.memory_stats().live_bytes)
+        }
+        assert_eq!(
+            run(crate::DiagnosticLimits::default()),
+            run(crate::DiagnosticLimits {
+                retained_source_bytes: 0,
+                source_bytes: 0,
+                frames: 0,
+                report_bytes: 0,
+            })
+        );
+    }
 }

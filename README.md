@@ -169,8 +169,8 @@ Serde errors include paths such as `enemies[3].health` (Lua's one-based indices)
 Use `Error::external` to preserve typed host causes, and `with_context` to add
 context without losing the original classification. Console hosts can map an
 inserted `return ` using `SourceMap::generated_prefix(7)`.
-See [the diagnostics contract](design/79-script-diagnostics.md) and the
-[diagnostics example](crates/rustia/examples/diagnostics.rs).
+See [the diagnostics contract](https://github.com/slowchop/rustia/blob/main/design/79-script-diagnostics.md) and the
+[diagnostics example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs).
 
 ## Live values
 
