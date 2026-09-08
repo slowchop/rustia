@@ -1,6 +1,6 @@
 # Synchronous host functions
 
-Status: synchronous API implemented; controlled-client rollout pending (2026-09-07).
+Status: synchronous API and controlled-client integrations implemented and verified (2026-09-08).
 
 The authorized rollout completes synchronous function construction and migrates the controlled
 civfun, WOTS, and Grabby clients. A callback has one definition and one set of conversion,
@@ -54,3 +54,26 @@ Run the canonical release preflight and required PR checks. Obtain any performan
 from the PR's `ci-bench` workflow. Merge Rustia before updating client dependency pins/vendor copies.
 Migrate direct client forwarding bindings where useful, preserve wrappers with meaningful argument
 or result transformations, and verify all active clients in the same rollout.
+
+### Delivery record
+
+The runtime merged in [Rustia #30](https://github.com/slowchop/rustia/pull/30) as
+`fc0d19a56ba7cc58a4d4c2f03cd32bf3a6d352c9`, after the canonical release preflight,
+platform checks, native/wasm execution and PR benchmark screening passed. Client pins and vendor
+copies use that exact merged runtime revision, not an unmerged implementation branch.
+
+- WOTS: [#4](https://github.com/slowchop/wots/pull/4) merged. Its board callbacks use shared definitions
+  in a persistent host module; format, strict Clippy and 447 tests pass, including stock/cold-open playthroughs.
+- civfun: [#42](https://github.com/civfun/civfun/pull/42) merged. Direct Map forwarding functions are
+  host-created live values; captured-state callbacks use shared definitions with explicit capabilities.
+  All 49 tests, strict Clippy, two independent reviews, audit and full-map smoke checks pass.
+- Grabby: [#1021](https://github.com/slowchop/grabby-next/pull/1021) adopts shared definitions across
+  scenario generation, both consoles and the typed Leisure module. Its five runtime crates match the exact
+  merged revision; all six roots retain the verified canonical dependency closure. All 3,249 full-suite tests,
+  78 scenario tests, strict Clippy, real native/wasm attestation and independent pre/post reviews pass.
+
+Each client PR records its own required delivery checks and merge state. The rollout does not bypass
+any client repository's merge gate or include production deployment.
+
+No runtime performance improvement is claimed by this rollout. Async callbacks, borrowed scopes,
+userdata registration and stronger stack diagnostics remain separate follow-on work.

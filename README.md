@@ -219,7 +219,7 @@ The canonical decision filter is [`design/02-pillars.md`](https://github.com/slo
 
 ## Project Progress
 The detailed progress view is generated from [`design/progress.json`](https://github.com/slowchop/rustia/blob/main/design/progress.json) into
-[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-07 for the
+[`design/progress.html`](https://github.com/slowchop/rustia/blob/main/design/progress.html). These are rough engineering estimates as of 2026-09-08 for the
 public rustia project; actual grabby integration work is explicitly out of scope.
 
 | goal | complete | confidence |
