@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { readResults: readGrabbyBuilds, renderSection: renderGrabbyBuilds } = require("./grabby-builds/render.js");
 
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
@@ -2632,6 +2633,17 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
 
     * { box-sizing: border-box; }
 
+    .grabby-builds { font-size: 1rem; }
+    .grabby-intro, .grabby-notes { padding: 20px; }
+    .grabby-intro p:last-child, .grabby-notes p:last-child { margin-bottom: 0; }
+    .grabby-builds table { min-width: 690px; }
+    .grabby-builds th, .grabby-builds td { font-size: .875rem; text-transform: none; }
+    .grabby-builds caption { padding: 0 20px 12px; text-align: left; font-size: .875rem; color: var(--muted); }
+    .grabby-builds th[scope="row"] { white-space: normal; min-width: 180px; }
+    .grabby-builds summary { cursor: pointer; font-weight: 700; margin-bottom: 12px; }
+    .grabby-builds li { margin-bottom: 8px; }
+    .grabby-evidence { margin-top: 16px; overflow-wrap: anywhere; }
+
     body {
       margin: 0;
       background: var(--bg);
@@ -3726,7 +3738,8 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
       </div>
     </section>
 
-    <nav class="nav" aria-label="Targets">
+    <nav class="nav" aria-label="Report sections">
+      <a href="#grabby-builds">Grabby Builds</a>
       <a href="#operations-status">Operations Status</a>
       <a href="#optimization-checks">Optimization Checks</a>
       <a href="#linux-comparison">Linux Comparison</a>
@@ -3737,6 +3750,7 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
       <a href="#history">History</a>
     </nav>
 
+    ${renderGrabbyBuilds(readGrabbyBuilds())}
     ${operationsStatusSection(operationsStatus)}
     ${optimizationEvidenceSection(cohorts)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}

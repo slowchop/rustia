@@ -147,13 +147,20 @@ state-preserving line evaluation, expression shorthand, and source-aware diagnos
 failures.
 CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
 and explicit public-example compilation. Hosted workflows validate committed benchmark artifacts but never take
-fresh timings; those come only from the explicit ephemeral Linode Linux lifecycle.
+fresh timings; those come only from the attested owned ci-bench host.
 The operational rollout is specified in
 [`81-benchmark-operations.md`](81-benchmark-operations.md): shared, normally
 CPU-busy self-hosted runners remain valid for correctness and artifact work but
 are not timing authorities; the generated benchmark report now exposes
 machine-readable progress freshness plus explicit landscape pause and active
 artifact-only publication state instead of appearing silently current.
+The dashboard also has a separately typed Grabby application-build section with
+reviewed sequential ci-bench comparisons, debugger/runtime tradeoffs and selected
+public evidence. It does not enter Rustia engine rankings or histories. Memory
+promotion now delegates dashboard publication to the same current-main publisher,
+so historical measurements cannot replace the page with an old renderer. See
+the September 9 section of `81-benchmark-operations.md`; live publication remains
+subject to final PR checks and deployment verification.
 The benchmark harness prepares fresh engine/workload state for calibration and every recorded repetition, warms
 that state once outside the timer, and can write execution-ordered raw samples to a separate
 `rustia.bench.raw-samples.v1` JSON sidecar. `--fixed-n` bypasses calibration and uses exactly the selected work for

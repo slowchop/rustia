@@ -267,6 +267,38 @@ an otherwise green merge.
 
 ## Statistics and presentation
 
+### Grabby build results and one dashboard publisher (2026-09-09)
+
+Gak confirmed `https://slowchop.github.io/rustia-bench-data/` as the destination for
+Grabby's reviewed build-time results. The separate `#grabby-builds` section uses
+`bench/grabby-builds/results.json`, never Rustia workload rows, rankings, histories,
+memory cohorts or claim gates. It presents the two sequential ci-bench A/B runs
+and their exact source-report identities, preserving both contemporary LTO-off
+controls, cold n=1, four paired edits and runtime/debugging costs.
+
+Only selected public benchmark fields are copied into this repository and the
+public `grabby-builds.json`. Full internal reports, machine load/swap diagnostics,
+chat quotes and raw logs stay in their original repository. SHA-256 values identify
+the immutable original reports, not the selected JSON's bytes. The selection was
+compared read-only against those reports; its validator checks field allowlists,
+experiment identity and paired arithmetic. It does not repeat the earlier raw
+compiler, snapshot or screenshot audits or independently approve new adoption.
+
+`publish-benchmark-data.yml` is the sole Pages writer. It is also reusable by the
+memory workflow after a successful data-only promotion. Historical memory code
+can measure and merge memory rows but cannot render or write Pages. The publisher
+checks out current main, hydrates current data-owned memory and live series, keeps
+the selected Grabby source, and serializes its writes under
+`rustia-benchmark-data-publication`. It never measures or needs an actions-write
+token. The benchmark-host group is distinct, preventing a self-deadlock.
+
+This preserves accepted memory/series data and keeps later memory updates from
+replacing the dashboard with a historical renderer. Publication uses the data
+snapshot it reads, not a transaction spanning concurrent measurement appends.
+Failure can be recovered by dispatching only the publisher; no measurement rerun
+is needed. The local page and selected-data validation are implemented; final PR
+CI, merge, publication and live verification remain delivery gates.
+
 - Keep cold preparation, first call, warmed execution, throughput, and memory
   as separate dimensions.
 - Retain ordered raw samples and publish sample count, median, variability or

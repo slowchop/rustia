@@ -69,7 +69,14 @@ function checkActionPins(text, label) {
     const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
     const official = /^actions\/[a-z0-9-]+@[0-9a-f]{40}$/.test(action);
     const rustToolchain = action === "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659";
-    if (!official && !rustToolchain) {
+    // Only this success-dependent job-level local call is permitted. Do not
+    // turn the exception into acceptance of arbitrary local actions/workflows.
+    const publicationCall = "uses: ./.github/workflows/publish-benchmark-data.yml";
+    const reusablePublication = label === ".github/workflows/rustia-memory.yml"
+      && line === publicationCall
+      && text.includes(`\n  publish:\n    needs: benchmark\n    ${publicationCall}\n`)
+      && usesLines(text).filter(use => use === publicationCall).length === 1;
+    if (!official && !rustToolchain && !reusablePublication) {
       fail(`${label} action must be an approved action pinned to a full commit SHA: ${line}`);
     }
   }
@@ -465,6 +472,7 @@ function checkReleasePreflight(text) {
     '"tools/render-benchmark-operations-status.js", "--check"',
     '"tools/check-current-report-summary.js"',
     '"bench/render-current-results.js"',
+    '"tools/check-grabby-build-results.js"',
     '"bench/render-claims.js"',
     '"cargo", ["fmt", "--all", "--manifest-path", "fuzz/Cargo.toml"',
     '"clippy",\n  "--locked",\n  "--manifest-path",\n  "fuzz/Cargo.toml"',
@@ -509,7 +517,12 @@ function checkRustiaMemory(text) {
   // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
   // grow a push of its own.
   forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
-  requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
+  requireIncludes(text, 'git -C "$data_dir" add bench/memory\n', label);
+  requireIncludes(text, "  publish:\n    needs: benchmark\n    uses: ./.github/workflows/publish-benchmark-data.yml\n    permissions:\n      contents: read\n    secrets:\n      BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  forbidIncludes(text, "gh-pages", label);
+  forbidIncludes(text, "render-current-results", label);
+  forbidIncludes(text, "bench/current-results.html", label);
+  forbidIncludes(text, "actions: write", label);
   // This was the last lane that could create a billed instance. These are the
   // strings that would bring that back.
   forbidIncludes(text, "LINODE_TOKEN", label);
@@ -580,6 +593,16 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "name: Publish Benchmark Data\n", label);
   requireIncludes(text, "push:\n    branches:\n      - main\n    paths:\n", label);
   requireIncludes(text, "workflow_dispatch:\n", label);
+  requireIncludes(text, "workflow_call:\n    secrets:\n      BENCH_DATA_DEPLOY_KEY:\n        required: true", label);
+  requireIncludes(text, "group: rustia-benchmark-data-publication", label);
+  requireIncludes(text, "bench/grabby-builds/**", label);
+  requireIncludes(text, "node tools/check-grabby-build-results.js", label);
+  requireIncludes(text, "bench/grabby-builds/results.json \\", label);
+  requireIncludes(text, 'install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"', label);
+  requireIncludes(text, 'git -C "$pages_dir" add index.html grabby-builds.json', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/history/series/ci-bench-main.jsonl"', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl', label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);

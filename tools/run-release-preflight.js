@@ -63,6 +63,7 @@ node("tools/check-benchmark-results.js");
 node("tools/check-wasm-gate-results.js");
 node("tools/render-benchmark-operations-status.js", "--check");
 node("tools/check-current-report-summary.js");
+node("tools/check-grabby-build-results.js");
 node("bench/render-current-results.js", "--check");
 node("bench/render-claims.js", "--check");
 
