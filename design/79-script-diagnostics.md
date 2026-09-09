@@ -1,7 +1,9 @@
 # Human-friendly script diagnostics
 
-Status: implementation in progress on `codex/human-friendly-diagnostics`.
-This document does not mark the rollout or release gate complete.
+Status: runtime/API/CLI implementation merged as `759060b70c8e4f8c29a5bc48782d4e7b304bd204`
+in [Rustia PR #32](https://github.com/slowchop/rustia/pull/32). Its full release preflight,
+correctness/conformance tests, platform and Node/V8 checks, and remote PR screening pass.
+The controlled-client delivery record is below; this is not the entire public-release gate.
 
 ## Contract
 
@@ -52,26 +54,32 @@ inside generated text must not be attributed to the user's input.
   Host causes remain downcastable and render through a bounded cause chain.
 - Failed installations state the guest rollback guarantee and explicitly exclude
   external host effects. Existing resource classifications remain intact.
-- Focused source/limit/lifetime/mapping tests pass. Full preflight, final
-  review, CI evidence, and consumer rollout are not yet complete.
+- Source/limit/lifetime/mapping, typed hard-error and coroutine propagation,
+  O2 remapping, foreign-program errors, resource-failure and host-panic reports
+  are covered by the full passing workspace/conformance and release gates.
 
-## Remaining acceptance work
+## Controlled-client delivery
 
-Audit all execution paths, especially typed
-hard-error latching, coroutines, source-map remapping through compiler
-optimizations, and errors propagated from a different program. Add snapshots
-for remaining resource-failure and host-panic fallbacks. Exact caller naming,
-Unicode/control-character handling, repeated frame bounds, and reused source
-names now have focused regression coverage.
+- [WOTS #5](https://github.com/slowchop/wots/pull/5), merged: stock/cold-open source
+  names, named custom packages and reports at terminal/save-restoration boundaries.
+  Full workspace formatting, strict Clippy, tests and both playthroughs pass.
+- [civfun #43 / CIV-75](https://github.com/civfun/civfun/pull/43), merged: actual map/include
+  paths, typed runner context and I/O/SQL causes, and CLI reports. Includes remain uncached.
+  All 53 mapgen-host tests, strict Clippy, CLI smoke, audit and both independent reviews pass.
+- [Grabby #1025](https://github.com/slowchop/grabby-next/pull/1025):
+  exact five-crate vendor source, canonical dependency closure and six root locks,
+  rotated hardened identities, bounded ASCII console reports, generated-prefix mapping,
+  exactly-once runtime failures and named scenario results. Guest leaf behavior is unchanged.
+  The PR is the authoritative record for its full-suite, rendered, review and merge gates.
 
-Finish README/examples/current-state/progress updates, canonical release
-preflight, required reviews/checks, and PR `ci-bench` evidence. Never run
-performance benchmarks locally. Merge Rustia with a merge commit and
-fast-forward the shared checkout before consumer PR merges.
+Every client uses the exact merged Rustia revision above. The shared checkout was fast-forwarded
+before final client validation and merges. Existing dirty user checkouts were preserved.
+No deployment, standalone Slowchop-console change, or local performance benchmark is included.
+Remote screening success is not a claim of a measured diagnostic speedup or zero overhead.
 
-Then migrate WOTS (both packages), civfun (required CIV issue and independent
-correctness/quality reviews), and Grabby Next (draft claim before edits,
-exact five-crate vendor refresh, all six locks/resolution/digest, required
-reviews, console/scenario diagnostics, and `just merge`). Preserve each
-repository's instructions and existing work. No deployment or standalone
-Slowchop-console change is included.
+## Deliberate boundaries
+
+Keep extending oracle runtime-error-phase parity independently of presentation. This is not a debugger,
+general transpiler source map or reconstruction of metadata lost through guest string rethrows.
+Unicode/tab spans use an honest location-only fallback where a plain-text caret would be misleading.
+Future public-release and real-host/browser goldens remain their own gates.
