@@ -2,6 +2,10 @@ use rustia_compiler::compile;
 use rustia_parser::parse_source_bytes;
 use rustia_vm::{Constant, Function, Instruction, Opcode, Profile, Program, Vm, VmSettings};
 
+mod stateful;
+pub use stateful::{fuzz_stateful, MAX_STATEFUL_INPUT_BYTES};
+pub mod differential;
+
 pub const MAX_LEXER_INPUT_BYTES: usize = 64 * 1024;
 pub const MAX_PARSER_INPUT_BYTES: usize = 32 * 1024;
 pub const MAX_COMPILER_INPUT_BYTES: usize = 16 * 1024;

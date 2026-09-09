@@ -1966,7 +1966,7 @@ impl VmCell {
         let node_len = candidate.puc_hash().map_or(0, |puc| puc.nodes.len());
         self.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
-            puc_resize(&root, &mut candidate, nasize, node_len);
+            puc_resize(&*root, &mut candidate, nasize, node_len);
         });
         candidate.mutation_version = candidate.mutation_version.wrapping_add(1);
         let candidate_usage = table_data_memory_usage(&candidate);
@@ -2968,7 +2968,18 @@ impl VmCell {
         if is_puc {
             self.arena.mutate(|mc, root| {
                 let root = root.unlock(mc).borrow();
-                puc_store(&root, &mut candidate, table_key, key_value, value, false);
+                // The candidate must use the final byte hash even before the
+                // new atom is admitted. Interning first would leak on quota failure.
+                if let Some((short, _, atom)) = pending_inline_atom {
+                    let hashes = PendingPucStringHash {
+                        root: &root,
+                        atom,
+                        hash: luau_string_hash(short.as_bytes()),
+                    };
+                    puc_store(&hashes, &mut candidate, table_key, key_value, value, false);
+                } else {
+                    puc_store(&*root, &mut candidate, table_key, key_value, value, false);
+                }
             });
         } else {
             set_table_data(&mut candidate, table_key, key_value, value);
@@ -3032,7 +3043,7 @@ impl VmCell {
             let key_value = Value::number(one_based_index as f64);
             self.arena.mutate(|mc, root| {
                 let root = root.unlock(mc).borrow();
-                puc_store(&root, &mut candidate, key, key_value, value, false);
+                puc_store(&*root, &mut candidate, key, key_value, value, false);
             });
         } else {
             if one_based_index > candidate.array.len() {
@@ -4159,11 +4170,40 @@ fn puc_number_main_position(nodes_len: usize, bits: u64) -> usize {
     (luau_number_hash(bits) as usize) % ((nodes_len - 1) | 1)
 }
 
+trait PucStringHashes {
+    fn puc_string_hash(&self, atom: u32) -> u32;
+}
+
+impl PucStringHashes for RootData<'_> {
+    fn puc_string_hash(&self, atom: u32) -> u32 {
+        self.strings
+            .get(atom)
+            .map_or(atom, |value| luau_string_hash(value.as_bytes()))
+    }
+}
+
+/// Read-only overlay for one not-yet-admitted short-string atom.
+struct PendingPucStringHash<'a, 'gc> {
+    root: &'a RootData<'gc>,
+    atom: u32,
+    hash: u32,
+}
+
+impl PucStringHashes for PendingPucStringHash<'_, '_> {
+    fn puc_string_hash(&self, atom: u32) -> u32 {
+        if atom == self.atom {
+            self.hash
+        } else {
+            self.root.puc_string_hash(atom)
+        }
+    }
+}
+
 /// `mainposition` (ltable.c:100). Strings and booleans use power-of-two
 /// masking; numbers and raw handles use modulus by `(sizenode-1)|1`. Vectors
 /// do not exist in PUC; they use the deterministic Luau vector hash so a
 /// stray vector key still has well-defined placement.
-fn puc_main_position(root: &RootData<'_>, nodes_len: usize, key: TableKey) -> usize {
+fn puc_main_position(root: &impl PucStringHashes, nodes_len: usize, key: TableKey) -> usize {
     if nodes_len == 0 {
         // The dummynode case: every main position is slot 0, and callers
         // guard against indexing the empty node vector.
@@ -4174,10 +4214,7 @@ fn puc_main_position(root: &RootData<'_>, nodes_len: usize, key: TableKey) -> us
         TableKey::Boolean(value) => usize::from(value) & (nodes_len - 1),
         TableKey::Number(bits) => puc_number_main_position(nodes_len, bits),
         TableKey::String(atom) => {
-            let hash = root
-                .strings
-                .get(atom)
-                .map_or(atom, |value| luau_string_hash(value.as_bytes()));
+            let hash = root.puc_string_hash(atom);
             (hash as usize) & (nodes_len - 1)
         }
         TableKey::Table(handle)
@@ -4190,7 +4227,7 @@ fn puc_main_position(root: &RootData<'_>, nodes_len: usize, key: TableKey) -> us
 
 /// Walks the collision chain from the key's main position looking for a live
 /// node with exactly this key. Dead and free nodes never match.
-fn puc_find_node(root: &RootData<'_>, puc: &PucHashPart, key: TableKey) -> Option<usize> {
+fn puc_find_node(root: &impl PucStringHashes, puc: &PucHashPart, key: TableKey) -> Option<usize> {
     if puc.nodes.is_empty() {
         return None;
     }
@@ -4292,7 +4329,7 @@ enum PucSlot {
 /// range always lands on the array slot; an existing chain node (tombstones
 /// included) is reused; anything absent goes through `newkey`.
 fn puc_set_slot(
-    root: &RootData<'_>,
+    root: &impl PucStringHashes,
     table: &mut TableData,
     key: TableKey,
     key_value: Value,
@@ -4317,7 +4354,7 @@ fn puc_set_slot(
 /// run dry; the recursion through `rehash` therefore bottoms out after one
 /// level.
 fn puc_newkey(
-    root: &RootData<'_>,
+    root: &impl PucStringHashes,
     table: &mut TableData,
     key: TableKey,
     key_value: Value,
@@ -4404,7 +4441,7 @@ fn puc_newkey(
 /// the key's slot, then writes the value — including nil, which is how PUC
 /// creates tombstones for absent keys.
 fn puc_store(
-    root: &RootData<'_>,
+    root: &impl PucStringHashes,
     table: &mut TableData,
     key: TableKey,
     key_value: Value,
@@ -4429,7 +4466,7 @@ fn puc_store(
 /// inside the array part write the slot, everything else goes to the node
 /// part (negative and zero indices included).
 fn puc_store_num(
-    root: &RootData<'_>,
+    root: &impl PucStringHashes,
     table: &mut TableData,
     index: i64,
     value: Value,
@@ -4551,7 +4588,7 @@ fn puc_compute_sizes(nums: &[usize; PUC_MAXBITS + 1], narray: &mut usize) -> usi
 /// reinserted through the numeric store path (those indices all exceed the
 /// new array size, so they land in nodes); old nodes are reinserted in
 /// descending slot order through the general store path.
-fn puc_resize(root: &RootData<'_>, table: &mut TableData, nasize: usize, nhsize: usize) {
+fn puc_resize(root: &impl PucStringHashes, table: &mut TableData, nasize: usize, nhsize: usize) {
     let old_array_len = table.array.len();
     if nasize > old_array_len {
         table.array.resize(nasize, Value::nil());
@@ -4589,7 +4626,7 @@ fn puc_resize(root: &RootData<'_>, table: &mut TableData, nasize: usize, nhsize:
 }
 
 /// `rehash` (ltable.c:333).
-fn puc_rehash(root: &RootData<'_>, table: &mut TableData, triggering_key: TableKey) {
+fn puc_rehash(root: &impl PucStringHashes, table: &mut TableData, triggering_key: TableKey) {
     let mut nums = [0usize; PUC_MAXBITS + 1];
     let mut nasize = puc_num_use_array(table, &mut nums);
     let mut totaluse = nasize;
@@ -7711,6 +7748,43 @@ mod tests {
         VmCell::with_table_layout(TableLayout::Puc51)
     }
 
+    #[test]
+    fn puc_quota_pending_strings_preserve_chains_and_rejected_writes() {
+        let mut heap = puc_heap();
+        let table = heap.alloc_array_table(&[]);
+        for index in 0..128 {
+            let name = format!("key{index}");
+            let key = Value::short_string(name.as_bytes()).unwrap();
+            let count = heap.string_atom_count();
+            let nodes = puc_node_snapshot(&heap, table);
+            assert!(matches!(
+                heap.table_set_with_live_growth_limit(table, key, Value::number(index as f64), 0),
+                QuotaTableWrite::WouldExceed
+            ));
+            assert_eq!(heap.string_atom_count(), count);
+            assert_eq!(puc_node_snapshot(&heap, table).len(), nodes.len());
+            assert!(heap.table_get(table, key).is_none());
+            assert!(matches!(
+                heap.table_set_with_live_growth_limit(
+                    table,
+                    key,
+                    Value::number(index as f64),
+                    usize::MAX
+                ),
+                QuotaTableWrite::Stored
+            ));
+            assert_puc_chain_integrity(&heap, table);
+            for previous in 0..=index {
+                let name = format!("key{previous}");
+                let key = Value::short_string(name.as_bytes()).unwrap();
+                assert_eq!(
+                    heap.table_get(table, key).and_then(Value::as_number),
+                    Some(previous as f64)
+                );
+            }
+        }
+    }
+
     /// Test-only accessor to the raw PUC node vector.
     fn puc_node_snapshot(heap: &VmCell, table: u32) -> Vec<PucNode> {
         let HashPart::Puc(puc) = &heap.tables.get(table).expect("table exists").hash else {
@@ -7744,7 +7818,7 @@ mod tests {
                 let PucNodeKey::Live(key) = puc.nodes[slot].key else {
                     continue;
                 };
-                let mut at = puc_main_position(&root, puc.nodes.len(), key);
+                let mut at = puc_main_position(&*root, puc.nodes.len(), key);
                 loop {
                     assert!(
                         at < puc.nodes.len(),
@@ -7768,7 +7842,7 @@ mod tests {
     fn puc_test_main_position(heap: &VmCell, nodes_len: usize, key: TableKey) -> usize {
         heap.arena.mutate(|mc, root| {
             let root = root.unlock(mc).borrow();
-            puc_main_position(&root, nodes_len, key)
+            puc_main_position(&*root, nodes_len, key)
         })
     }
 
