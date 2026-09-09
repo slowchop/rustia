@@ -1,7 +1,7 @@
 # Error behaviour and fuzzing
 
-Status: runtime acceptance and both six-target remote campaigns pass. Final
-test-only assertion refinements and controlled-client rollout are in progress.
+Status: complete. Runtime acceptance, both six-target remote campaigns, final CI
+and the controlled-client rollout pass; all four implementation PRs are merged.
 
 ## Contract and evidence
 
@@ -88,6 +88,29 @@ Execution counts include rejected mutations, not distinct scripts or unique orac
 comparisons. Campaign artifacts retain
 identity, toolchain, seeds, corpus and termination logs for 30 days.
 
+## Completed rollout
+
+[Rustia #34](https://github.com/slowchop/rustia/pull/34) merged as
+`aee98e7815460c2df014c9b20f92de8de5382814`. Canonical release preflight and final
+PR checks passed, including remote benchmark screening; the
+[merged-main CI](https://github.com/slowchop/rustia/actions/runs/34408292742)
+also passed before any consumer merged. This records correctness and delivery,
+not a new performance claim or completion of the wider public-release gates.
+
+All active consumers were verified against that exact Rustia revision:
+
+- WOTS #6: full workspace formatting, strict Clippy, tests and stock/cold-open
+  playthroughs passed.
+- civfun #44: all 55 mapgen-host tests, strict Clippy, scoped formatting, seeded
+  CLI generation and independent correctness/quality reviews passed.
+- Grabby #1027: exact five-crate vendor identity, unchanged lock/resolution
+  closure across six roots, full seven-crate tests, 81 scenario tests, four
+  server Luau process tests, native/Wasm leaf identity, strict lint, independent
+  reviews and required CI passed before the repository merge command.
+
+Consumer PR references identify the controlled-client delivery; this public
+record deliberately omits private issue and infrastructure details.
+
 ## Delivery checklist
 
 ### Finding EF-1: quota-limited PUC short-string placement
@@ -107,10 +130,10 @@ remote campaign pass with the fix.
 - [x] Add bounded stateful embedding fuzz target and deterministic smoke corpus.
 - [x] Run remote 30-minute campaigns per target, then two-hour differential and stateful campaigns.
 - [x] Minimize confirmed findings; fix and permanently regress each finding.
-- [ ] Run canonical release preflight and required CI; obtain PR ci-bench evidence separately.
-- [ ] Merge Rustia and update WOTS, civfun and Grabby to the exact merged revision.
-- [ ] Run client regression/full gates and required reviews; merge client PRs.
-- [ ] Reconcile CURRENT, progress, fuzz documentation and campaign evidence.
+- [x] Run canonical release preflight and required CI; obtain PR ci-bench evidence separately.
+- [x] Merge Rustia and update WOTS, civfun and Grabby to the exact merged revision.
+- [x] Run client regression/full gates and required reviews; merge client PRs.
+- [x] Reconcile CURRENT, progress, fuzz documentation and campaign evidence.
 
 Campaign artifacts must identify revision, toolchain, seed/corpus and termination
 status. A timeout requires triage, not automatic classification as a language
