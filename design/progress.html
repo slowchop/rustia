@@ -959,7 +959,7 @@
       <div class="entry-top">
         <div>
           <h4>Error/debug behavior</h4>
-          <p>Host-facing typed errors now provide bounded immutable executed-source reports, expression spans, logical callers, factual operation explanations, parser-proven missing block endings, typed host causes, one-based serde paths, module loading context, and console source mapping. Guest error strings and protected-call behavior remain unchanged. Focused regressions pass; final release and client rollout gates remain open.</p>
+          <p>Host-facing typed errors provide bounded immutable executed-source reports, expression spans, logical callers, factual operation explanations, parser-proven missing block endings, typed host causes, one-based serde paths, module loading context, and console source mapping. Guest error strings and protected-call behavior remain unchanged. Rustia PR32 passed full correctness/conformance, canonical release preflight, platform/Node-V8 CI and remote screening. Client adoption is recorded in WOTS PR5, civfun PR43/CIV-75 and Grabby PR1025; their PR records retain validation and delivery evidence.</p>
         </div>
         <div class="entry-score">
           <strong>73%</strong>
@@ -971,7 +971,7 @@
       <div class="meter-fill" style="width: 73%"></div>
     </div>
 
-      <p class="plan"><strong>Future plan:</strong> Finish full correctness/release gates and controlled-client migration; continue oracle runtime-error-phase parity coverage without changing guest errors for presentation.</p>
+      <p class="plan"><strong>Future plan:</strong> Continue oracle runtime-error-phase parity coverage and real-host/browser goldens without changing guest errors for presentation; source reconstruction after guest string rethrows and general transpiler mapping are not promised.</p>
     </article>
 
       </div>

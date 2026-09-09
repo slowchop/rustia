@@ -2,14 +2,17 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-07.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-09.)
 
 ## One-paragraph state
 
-Work in progress: [human-friendly script diagnostics](79-script-diagnostics.md)
-adds host-only source snapshots, expression spans, typed errors, bounded
-reports, and console source mapping. The cross-client rollout and release
-validation remain open; this is not a completed release gate.
+[Human-friendly script diagnostics](79-script-diagnostics.md) merged in
+[PR #32](https://github.com/slowchop/rustia/pull/32), with host-only source
+snapshots, expression spans, typed errors, bounded reports, and console source
+mapping. Canonical release preflight, full correctness/conformance tests,
+platform/Node-V8 CI and remote PR screening pass. Controlled-client changes are
+recorded in WOTS #5, civfun #43 / CIV-75, and Grabby #1025. This completes neither
+the wider public-release gate nor the remaining language error-phase parity work.
 
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
