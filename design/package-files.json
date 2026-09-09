@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 707,
+      "file_count": 709,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -347,6 +347,8 @@
         "evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/remote-run.log",
         "evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/samples.jsonl",
         "evidence/vm-string-memory/1370d6ccefba7a1956441247c3139af2a2cf31fa/warmup-samples.jsonl",
+        "grabby-builds/render.js",
+        "grabby-builds/results.json",
         "history/.gitkeep",
         "history/backfills/7a9e87d0a58c3cd921d794dc08fd47f480573511.json",
         "history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json",
