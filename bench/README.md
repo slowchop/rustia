@@ -901,3 +901,28 @@ Open `http://HOST:8000/bench/current-results.html` over the trusted VPN.
 The earlier alternatives remain under [`chart-mockups/`](chart-mockups/) as
 design references; the ranked bars, heatmap, and cohort-ledger approach is now
 the canonical report.
+
+## Grabby application build results
+
+The same site now renders a separate `#grabby-builds` section from
+[`grabby-builds/results.json`](grabby-builds/results.json), selected from the two
+independently reviewed Grabby ci-bench experiments. It is not a Rustia workload,
+engine score or historical-series row. Both original source-report commits and
+digests are retained; full reports and private machine diagnostics are not copied.
+
+The two LTO-off controls belong to different sequential runs. Preserve both;
+do not multiply paired speedups or call this one three-arm comparison. Normal
+development keeps full debugging; quick mode trades compiler debugger detail for
+faster compilation, and measured development runtime costs remain visible.
+
+Run `node tools/check-grabby-build-results.js` to validate the selected schema,
+pair arithmetic, public-field allowlist and publication routing, then regenerate
+with `node bench/render-current-results.js`. These commands validate/render
+existing evidence and take no performance measurements. New results require
+fresh ci-bench evidence and independent source review before updating this data.
+
+The main-only publisher mirrors the selected JSON to the data repository and
+publishes it beside `index.html` as `grabby-builds.json`. It is the only Pages
+writer, including after memory cohorts; it always uses current main rendering
+code plus the data repository's retained live series and memory. Do not hand-edit
+the generated page or publish from a historical measurement checkout.

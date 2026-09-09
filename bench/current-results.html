@@ -21,6 +21,17 @@
 
     * { box-sizing: border-box; }
 
+    .grabby-builds { font-size: 1rem; }
+    .grabby-intro, .grabby-notes { padding: 20px; }
+    .grabby-intro p:last-child, .grabby-notes p:last-child { margin-bottom: 0; }
+    .grabby-builds table { min-width: 690px; }
+    .grabby-builds th, .grabby-builds td { font-size: .875rem; text-transform: none; }
+    .grabby-builds caption { padding: 0 20px 12px; text-align: left; font-size: .875rem; color: var(--muted); }
+    .grabby-builds th[scope="row"] { white-space: normal; min-width: 180px; }
+    .grabby-builds summary { cursor: pointer; font-weight: 700; margin-bottom: 12px; }
+    .grabby-builds li { margin-bottom: 8px; }
+    .grabby-evidence { margin-top: 16px; overflow-wrap: anywhere; }
+
     body {
       margin: 0;
       background: var(--bg);
@@ -1115,7 +1126,8 @@
       </div>
     </section>
 
-    <nav class="nav" aria-label="Targets">
+    <nav class="nav" aria-label="Report sections">
+      <a href="#grabby-builds">Grabby Builds</a>
       <a href="#operations-status">Operations Status</a>
       <a href="#optimization-checks">Optimization Checks</a>
       <a href="#linux-comparison">Linux Comparison</a>
@@ -1126,6 +1138,36 @@
       <a href="#history">History</a>
     </nav>
 
+    <section class="panel grabby-builds" id="grabby-builds" aria-labelledby="grabby-builds-title">
+    <div class="grabby-intro">
+      <p class="eyebrow">Grabby application builds · 2026-09-09</p>
+      <h2 id="grabby-builds-title">Grabby build times</h2>
+      <p><strong>31m 57s full compilation · 24.76s median incremental</strong> with <code>just dev-quick</code>.</p>
+      <p>Two changes shipped in order. These are application build measurements, separate from Rustia engine benchmarks.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <caption>Separate before/after runs on ci-bench; lower times are better.</caption>
+      <thead><tr><th scope="col">Change</th><th scope="col">Full build<br>before → after</th><th scope="col">Incremental median<br>before → after</th><th scope="col">Paired edit saving</th></tr></thead>
+      <tbody><tr><th scope="row">1. Disable development LTO</th><td>57m 03s → <strong>42m 06s</strong></td><td>147.06s → <strong>80.98s</strong></td><td>45.39%<br><span>66.65s · 4/4 wins</span></td></tr><tr><th scope="row">2. Opt-in reduced debugging</th><td>42m 01s → <strong>31m 57s</strong></td><td>82.13s → <strong>24.76s</strong></td><td>67.44%<br><span>54.22s · 4/4 wins</span></td></tr></tbody>
+    </table></div>
+    <div class="grabby-notes">
+      <p><code>just dev</code> keeps full debugging. <code>just dev-quick</code> omits compiler source/type/line debugging detail and uses a separate build cache. Optimization and runtime checks stay enabled; release settings are unchanged.</p>
+      <p><strong>Development runtime tradeoff:</strong> disabling LTO increased median simulation tick time by 12.42% in Crash Landing and 35.15% in Earth Stations. Reduced debugging then increased Crash Landing’s p95 tick time by <strong>6.84% (+0.301 ms)</strong>, in all four pairs. Runtime is not unchanged.</p>
+      <details><summary>Runtime detail and measurement limits</summary>
+        <div class="table-wrap"><table><caption>Median paired runtime changes; positive is slower.</caption><thead><tr><th scope="col">Experiment</th><th scope="col">Scene</th><th scope="col">Tick median</th><th scope="col">Tick p95</th><th scope="col">Extraction median</th></tr></thead>
+        <tbody><tr><th scope="row">Disable development LTO</th><td>Crash Landing</td><td>+12.42%</td><td>+7.60%</td><td>+18.26%</td></tr><tr><th scope="row">Disable development LTO</th><td>Earth Stations</td><td>+35.15%</td><td>+25.62%</td><td>+17.47%</td></tr><tr><th scope="row">Opt-in reduced debugging</th><td>Crash Landing</td><td>+0.26%</td><td>+6.84%</td><td>-3.94%</td></tr><tr><th scope="row">Opt-in reduced debugging</th><td>Earth Stations</td><td>-1.51%</td><td>-0.41%</td><td>-4.44%</td></tr></tbody></table></div>
+        <ul>
+          <li>Same Ryzen 5 3600X host, two isolated cores (4–5), Rust 1.95. Full builds use empty target directories, control first, one sample per arm—not cold filesystem caches or forecasts for other machines.</li>
+          <li>Incremental results use four retained-source edit pairs, ordered AB/BA/BA/AB. Marginal medians and medians of paired savings differ. These are two sequential experiments, not one three-arm comparison; their paired speedups must not be multiplied.</li>
+          <li>Each simulation scene used four paired processes, 200 warmup and 2000 measured ticks. Snapshots agreed; the recorded independent review found no candidate-only defect in ten software-rendered captures per experiment.</li>
+          <li>Software-Vulkan frame results were mixed at roughly 2.6–2.9 FPS, not physical-GPU capacity. Capture elapsed includes deliberate waits and is not time-to-menu. Stationary captures do not establish large-world or broad gameplay performance.</li>
+          <li>Host-global swap activity and variable wall time remain limitations. The linked data labels GNU-time maximum process/child RSS, not aggregate concurrent memory; target footprints are per arm. Keeping both profiles consumes combined disk space.</li>
+        </ul>
+      </details>
+      <p class="grabby-evidence"><a href="grabby-builds.json">Selected results and paired samples (JSON)</a> · <a href="https://github.com/slowchop/grabby-next/actions/runs/34283789035">Experiment 1 run</a> · <a href="https://github.com/slowchop/grabby-next/pull/1024">Merged PR 1024</a> · <a href="https://github.com/slowchop/grabby-next/blob/f28f4428a6bb9f6b7a09551211840a777f8c686f/design/build-speed-adoption-2026-09-09.json">Reviewed report 1</a> · <a href="https://github.com/slowchop/grabby-next/actions/runs/34303222573">Experiment 2 run</a> · <a href="https://github.com/slowchop/grabby-next/pull/1026">Merged PR 1026</a> · <a href="https://github.com/slowchop/grabby-next/blob/f28f4428a6bb9f6b7a09551211840a777f8c686f/design/build-speed-quick-2026-09-09.json">Reviewed report 2</a></p>
+      <p>GitHub evidence requires repository access; uploaded raw artifacts have seven-day retention. This page contains selected results, not private logs. Consistency checks do not repeat the recorded raw/compiler/screenshot audits.</p>
+    </div>
+  </section>
 
     <section class="panel operations-panel" id="operations-status">
       <div class="operations-banner state-active">

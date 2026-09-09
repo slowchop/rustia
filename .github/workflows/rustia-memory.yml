@@ -80,7 +80,7 @@ jobs:
             --output rustia-memory-summary.md
           cat rustia-memory-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish benchmark history and dashboard
+      - name: Publish measured memory data only
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
           BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
@@ -89,7 +89,6 @@ jobs:
           test -n "$BENCH_DATA_DEPLOY_KEY"
           ssh_dir="$RUNNER_TEMP/rustia-bench-ssh"
           data_dir="$RUNNER_TEMP/rustia-bench-data"
-          pages_dir="$RUNNER_TEMP/rustia-bench-pages"
           install -d -m 700 "$ssh_dir"
           install -m 600 /dev/null "$ssh_dir/id_ed25519"
           printf '%s\n' "$BENCH_DATA_DEPLOY_KEY" > "$ssh_dir/id_ed25519"
@@ -100,24 +99,21 @@ jobs:
             --generated-current bench/memory/current-results.json \
             --generated-history bench/memory/history/runs.jsonl \
             --data-root "$data_dir"
-          install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json
-          install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl
-          node bench/render-current-results.js
-          install -m 644 bench/current-results.html "$data_dir/bench/current-results.html"
           git -C "$data_dir" config user.name "rustia-benchmark"
           git -C "$data_dir" config user.email "benchmark@rustia.invalid"
-          git -C "$data_dir" add bench/memory bench/current-results.html
+          git -C "$data_dir" add bench/memory
           if ! git -C "$data_dir" diff --cached --quiet; then
             git -C "$data_dir" commit -m "Record Rustia memory ${BENCHMARK_COMMIT:0:12}"
             node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind memory
           fi
-          git -C "$data_dir" fetch origin gh-pages
-          git -C "$data_dir" worktree add --detach "$pages_dir" origin/gh-pages
-          install -m 644 bench/current-results.html "$pages_dir/index.html"
-          git -C "$pages_dir" config user.name "rustia-benchmark"
-          git -C "$pages_dir" config user.email "benchmark@rustia.invalid"
-          git -C "$pages_dir" add index.html
-          if ! git -C "$pages_dir" diff --cached --quiet; then
-            git -C "$pages_dir" commit -m "Publish Rustia memory ${BENCHMARK_COMMIT:0:12}"
-            git -C "$pages_dir" push origin HEAD:gh-pages
-          fi
+
+  # Measurement may select historical code. Publication must not: the shared
+  # publisher checks out current main, reads current data-owned memory/series,
+  # and serializes every Pages write in its separate publication group.
+  publish:
+    needs: benchmark
+    uses: ./.github/workflows/publish-benchmark-data.yml
+    permissions:
+      contents: read
+    secrets:
+      BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
