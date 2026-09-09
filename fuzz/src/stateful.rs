@@ -1,9 +1,10 @@
-use rustia::{Profile, RustiaBuilder};
+use rustia::{Error, HostFunction, Profile, RustiaBuilder, VmErrorKind};
 
 pub const MAX_STATEFUL_INPUT_BYTES: usize = 128;
 
 /// Each byte selects an operation; a host-side model tracks decision-local state.
-/// Sources are bounded and loop-free. Retained handles/reports are bounded too.
+/// Sources are bounded, with a fuel-limited loop testing hard-abort recovery.
+/// Retained handles and reports are bounded too.
 pub fn fuzz_stateful(data: &[u8]) -> bool {
     if data.len() > MAX_STATEFUL_INPUT_BYTES {
         return false;
@@ -22,9 +23,17 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
         .unwrap();
     let mut expected = 0;
     vm.insert_global("counter", expected).unwrap();
+    vm.exec("shared = { value = 7 }").unwrap();
+    vm.register_function(
+        "host_fail",
+        HostFunction::pure(|| -> rustia::Result<()> {
+            Err(Error::embed("deliberate host failure"))
+        }),
+    )
+    .unwrap();
     let mut retained = None;
     for (index, operation) in data.iter().enumerate() {
-        match operation % 6 {
+        match operation % 10 {
             0 => {
                 vm.exec("counter = counter + 1").unwrap();
                 expected += 1;
@@ -40,7 +49,7 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 retained = Some((error, report));
             }
             2 => {
-                vm.load("counter = 999; error('candidate', 0)")
+                vm.load("shared.value = 999; counter = 999; error('candidate', 0)")
                     .install()
                     .unwrap_err();
             }
@@ -50,15 +59,51 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 assert!(old.get(&mut vm, "anything").is_err());
                 expected = 0;
                 vm.insert_global("counter", expected).unwrap();
+                vm.exec("shared = { value = 7 }").unwrap();
             }
             4 => {
                 assert!(vm.eval::<bool>("local t = {}; local ok, e = pcall(error, t); return not ok and rawequal(t, e)").unwrap());
             }
-            _ => {
+            5 => {
                 vm.exec("counter = 999; local function bad() local x = end")
                     .unwrap_err();
             }
+            6 => {
+                assert!(vm
+                    .eval::<bool>(
+                        "counter = counter + 1; local ok = pcall(host_fail); return not ok"
+                    )
+                    .unwrap());
+                expected += 1;
+            }
+            7 => {
+                let error = vm
+                    .exec("pcall(function() while true do end end)")
+                    .unwrap_err();
+                assert!(matches!(
+                    error.as_vm_error().map(|e| &e.kind),
+                    Some(VmErrorKind::FuelExhausted { .. })
+                ));
+            }
+            8 => {
+                let error = vm
+                    .load("counter = counter + 1; return {}")
+                    .eval::<i32>()
+                    .unwrap_err();
+                assert!(matches!(error.kind(), rustia::ErrorKind::Embed(_)));
+                expected += 1;
+            }
+            _ => {
+                let table = vm.create_table().unwrap();
+                let value = table.as_value();
+                table.set_live(&mut vm, "self", &value).unwrap();
+                let alias = table.get(&mut vm, "self").unwrap();
+                assert!(alias.raw_equal(&mut vm, &value).unwrap());
+                vm.exec("host_fail()").unwrap_err();
+                assert!(alias.raw_equal(&mut vm, &value).unwrap());
+            }
         }
+        assert_eq!(vm.eval::<i32>("return shared.value").unwrap(), 7);
         assert_eq!(
             vm.eval::<i32>("return counter")
                 .unwrap_or_else(|error| panic!(

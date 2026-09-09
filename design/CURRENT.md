@@ -10,9 +10,10 @@
 cross-profile failure/recovery regressions, a bounded stateful embedding target,
 and an isolated pinned-Luau differential worker are implemented on the working
 branch. The first confirmed finding fixes quota-limited PUC short-string key
-placement before atom admission. Focused tests and deterministic smoke pass;
-long remote campaigns, complete acceptance and controlled-client rollout remain
-pending. This is not a release-completion or performance claim.
+placement before atom admission. Focused tests, deterministic smoke and the first
+six-target remote campaign pass. Expanded stateful coverage still needs its remote
+campaign; final acceptance and controlled-client rollout remain pending.
+This is not a release-completion or performance claim.
 
 [Human-friendly script diagnostics](79-script-diagnostics.md) merged in
 [PR #32](https://github.com/slowchop/rustia/pull/32), with host-only source

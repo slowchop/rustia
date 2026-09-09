@@ -34,6 +34,139 @@ fn profiles() -> [Profile; 4] {
 }
 
 #[test]
+fn optimized_protected_failure_and_recovery_match_unoptimized_execution() {
+    use rustia_compiler::{compile_with_options, CompileOptions, ExperimentalO2Options};
+    let source = r#"
+        local token = {}
+        local saved
+        local ok, caught = pcall(function()
+            local n = 41
+            saved = function() n = n + 1; return n end
+            if true then error(token) end
+            n = 999
+        end)
+        return not ok and rawequal(token, caught) and saved() == 42
+    "#;
+    let chunk = rustia_parser::parse_source_bytes(source.as_bytes()).unwrap();
+    for profile in profiles() {
+        for experimental_o2 in [
+            ExperimentalO2Options::default(),
+            ExperimentalO2Options::reachability_exact(),
+        ] {
+            let program = compile_with_options(
+                &chunk,
+                CompileOptions {
+                    experimental_o2,
+                    puc51_constructor_order: profile == Profile::Puc51Compat,
+                    ..CompileOptions::default()
+                }
+                .with_source("optimized-errors.luau", source),
+            )
+            .unwrap();
+            let mut vm = rustia_vm::Vm::with_settings(
+                profile,
+                rustia_vm::VmSettings {
+                    initial_fuel: Some(10_000),
+                    memory_limit_bytes: Some(2 * 1024 * 1024),
+                    ..rustia_vm::VmSettings::default()
+                },
+            );
+            assert_eq!(vm.run(&program).unwrap().as_bool(), Some(true));
+            assert_eq!(vm.run(&program).unwrap().as_bool(), Some(true));
+            vm.reset_decision().unwrap();
+            assert_eq!(vm.run(&program).unwrap().as_bool(), Some(true));
+        }
+    }
+}
+
+#[test]
+fn compile_rejection_in_uncalled_function_precedes_side_effects() {
+    for profile in profiles() {
+        let mut vm = Rustia::new(profile);
+        vm.insert_global("seen", 0).unwrap();
+        let error = vm
+            .exec("seen = 1; local function unused() break end")
+            .unwrap_err();
+        assert!(matches!(error.kind(), ErrorKind::Compile(_)), "{error:?}");
+        assert_eq!(vm.eval::<i32>("return seen").unwrap(), 0);
+    }
+}
+
+#[test]
+fn owned_conversion_failure_does_not_roll_back_guest_execution() {
+    for profile in profiles() {
+        let mut vm = Rustia::new(profile);
+        let error = vm
+            .load("seen = 42; return {}")
+            .source_name("conversion.luau")
+            .eval::<i32>()
+            .unwrap_err();
+        assert!(matches!(error.kind(), ErrorKind::Embed(_)));
+        assert!(error.report().to_string().contains("returned value"));
+        assert_eq!(vm.eval::<i32>("return seen").unwrap(), 42);
+    }
+}
+
+#[test]
+fn coroutine_failure_closes_upvalues_and_preserves_error_identity() {
+    for profile in profiles() {
+        let mut vm = Rustia::new(profile);
+        assert!(
+            vm.eval::<bool>(
+                r#"
+            local token = {}
+            local saved
+            local worker = coroutine.create(function()
+                local n = 41
+                saved = function() n = n + 1; return n end
+                coroutine.yield('pause')
+                error(token)
+            end)
+            local first, message = coroutine.resume(worker)
+            local second, caught = coroutine.resume(worker)
+            return first and message == 'pause' and not second
+                and rawequal(caught, token) and saved() == 42
+                and coroutine.status(worker) == 'dead'
+        "#
+            )
+            .unwrap(),
+            "{profile:?}"
+        );
+        assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+    }
+}
+
+#[test]
+fn ordinary_quota_oom_is_catchable_and_reset_recovers() {
+    for profile in profiles() {
+        let mut vm = RustiaBuilder::standard()
+            .profile(profile)
+            .memory_limit_bytes(1024 * 1024)
+            .fuel(10_000_000)
+            .build()
+            .unwrap();
+        let error = vm.exec("return string.rep('x', 2000000)").unwrap_err();
+        assert!(
+            matches!(
+                error.as_vm_error().map(|error| &error.kind),
+                Some(rustia::VmErrorKind::OutOfMemory)
+            ),
+            "{error:?}"
+        );
+        assert!(
+            vm.eval::<bool>(
+                "local ok = pcall(function() return string.rep('x', 2000000) end); return not ok"
+            )
+            .unwrap(),
+            "{profile:?}"
+        );
+        assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+        vm.reset_decision().unwrap();
+        assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+    }
+}
+
+#[test]
 fn invalid_uncalled_function_prevents_all_execution() {
     for profile in profiles() {
         let mut vm = Rustia::new(profile);

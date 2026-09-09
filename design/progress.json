@@ -124,7 +124,11 @@
         "vm_mutations": 2048,
         "vm_opcodes": 131,
         "vm_limits": "2 KiB input, 4,096 fuel, recursion depth 32, and 512 KiB logical-live memory",
-        "toolchain": "pinned stable release toolchain; longer coverage-guided cargo-fuzz campaigns remain separate"
+        "toolchain": "stable 1.95.0 smoke; nightly-2026-04-06 and cargo-fuzz 0.13.2 remote campaigns",
+        "stateful_smoke_sequences": 256,
+        "differential_oracle": "Luau 0.709 in an isolated bounded worker",
+        "remote_campaign": "Six targets passed at 0580e4bfb46fb867dd337b972cf426e9e3acd97d: 30 minutes each plus two-hour stateful/differential extensions; expanded stateful coverage awaits a fresh campaign",
+        "evidence": "https://github.com/slowchop/rustia/actions/runs/34312173291"
       },
       "wasm_runtime_ci": {
         "runtime": "Node 22/V8",
