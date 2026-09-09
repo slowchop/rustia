@@ -32,6 +32,11 @@ generator compares frontend rejection versus execution (not internal parser
 versus compiler phases), side effects and explicit protected-call observations;
 resource-policy equivalence is deliberately not inferred from Luau results.
 
+Completed campaign revisions, execution counts, the fixed PUC table-key finding,
+and consumer acceptance are recorded in the
+[error behaviour evidence](../design/82-error-behaviour-fuzzing.md).
+A clean bounded campaign is not proof that no bugs remain.
+
 Install `cargo-fuzz` once, then run a target from the repository root:
 
 ```sh

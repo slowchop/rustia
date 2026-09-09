@@ -2,19 +2,19 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-09.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-10.)
 
 ## One-paragraph state
 
-[Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is in progress:
-cross-profile failure/recovery regressions, a bounded stateful embedding target,
-and an isolated pinned-Luau differential worker are implemented on the working
-branch. The first confirmed finding fixes quota-limited PUC short-string key
-placement before atom admission. Focused tests, deterministic smoke and the first
-six-target remote campaign pass. The expanded stateful harness also passes its
-complete remote campaign at `347b0af`; release preflight, platform/Node-V8 CI and
-remote benchmark screening pass there. Final test-only refinements and the
-controlled-client rollout remain pending.
+[Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is complete in
+[PR #34](https://github.com/slowchop/rustia/pull/34): cross-profile failure/recovery
+regressions, bounded stateful embedding and isolated pinned-Luau differential
+fuzzing, and the quota-limited PUC short-string placement fix are merged.
+Both six-target remote campaigns pass, including expanded stateful coverage at
+`347b0af`. Canonical release preflight, final platform/Node-V8 CI and remote PR
+benchmark screening pass. WOTS #6, civfun #44 and Grabby #1027 are merged after
+their full rollout gates and required reviews, using exact upstream revision
+`aee98e7815460c2df014c9b20f92de8de5382814`.
 This is not a release-completion or performance claim.
 
 [Human-friendly script diagnostics](79-script-diagnostics.md) merged in

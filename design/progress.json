@@ -128,7 +128,8 @@
         "stateful_smoke_sequences": 256,
         "differential_oracle": "Luau 0.709 in an isolated bounded worker",
         "remote_campaign": "All six targets, including expanded stateful coverage, passed at 347b0af7557535227d7b901713f0e3559c621b02: 30 minutes each plus two-hour stateful/differential extensions; no reported crashes, timeouts or mismatches",
-        "evidence": "https://github.com/slowchop/rustia/actions/runs/34334524153"
+        "evidence": "https://github.com/slowchop/rustia/actions/runs/34334524153",
+        "rollout": "Complete: Rustia #34, WOTS #6, civfun #44 and Grabby #1027 merged after final acceptance gates; all consumers verified against aee98e7815460c2df014c9b20f92de8de5382814"
       },
       "wasm_runtime_ci": {
         "runtime": "Node 22/V8",
