@@ -221,6 +221,7 @@ struct Compiler {
     capture_hints: Vec<Vec<u8>>,
     capture_stack: Vec<CaptureScope>,
     source_map: Vec<InstructionSource>,
+    diagnostic_span: Option<Span>,
     current_function_is_vararg: bool,
     next_register: u16,
     max_registers: u16,
@@ -259,6 +260,7 @@ impl Compiler {
             capture_hints,
             capture_stack: Vec::new(),
             source_map: Vec::new(),
+            diagnostic_span: None,
             current_function_is_vararg: true,
             next_register: 0,
             max_registers: 0,
@@ -282,7 +284,7 @@ impl Compiler {
 
     fn compile_chunk(mut self, chunk: &Chunk) -> Result<Program> {
         self.compile_block(&chunk.statements)?;
-        self.code.push(Instruction::new(Opcode::Halt, 0, 0, 0));
+        self.emit_instruction(Instruction::new(Opcode::Halt, 0, 0, 0));
         if !self.capture_hints.is_empty()
             && self.capture_hints.len() != self.functions.len().saturating_add(1)
         {
@@ -327,6 +329,13 @@ impl Compiler {
     }
 
     fn compile_statement(&mut self, statement: &Stmt) -> Result<()> {
+        let previous = self.diagnostic_span.replace(statement_span(statement));
+        let result = self.compile_statement_inner(statement);
+        self.diagnostic_span = previous;
+        result
+    }
+
+    fn compile_statement_inner(&mut self, statement: &Stmt) -> Result<()> {
         self.record_source_for_next_instruction(statement_span(statement));
         match statement {
             Stmt::Local {
@@ -409,7 +418,7 @@ impl Compiler {
         span: Span,
     ) -> Result<()> {
         let Some(first_expr) = value else {
-            self.code.push(Instruction::new(Opcode::Return, 0, 0, 0));
+            self.emit_instruction(Instruction::new(Opcode::Return, 0, 0, 0));
             return Ok(());
         };
 
@@ -451,7 +460,7 @@ impl Compiler {
                 .ok_or_else(|| CompileError::at("return register window overflow", span))?;
             self.compile_expr_to(expr, register)?;
         }
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::Return,
             first_register,
             u8::try_from(result_count)
@@ -545,7 +554,7 @@ impl Compiler {
             Some(name.to_owned()),
             span,
         )?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::LoadFunction,
             register,
             0,
@@ -562,7 +571,7 @@ impl Compiler {
             self.locals.get(name),
             Some(Binding::CapturedLocal(captured)) if *captured == register
         ) {
-            self.code.push(Instruction::new(
+            self.emit_instruction(Instruction::new(
                 Opcode::SetLocalCell,
                 register,
                 register,
@@ -623,7 +632,7 @@ impl Compiler {
         let target = self.compile_assignment_target(target, true)?;
         match target {
             CompiledAssignmentTarget::Local(register) => {
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     register,
                     0,
@@ -631,7 +640,7 @@ impl Compiler {
                     prototype,
                 ));
                 if self.local_register_is_captured(register) {
-                    self.code.push(Instruction::new(
+                    self.emit_instruction(Instruction::new(
                         Opcode::SetLocalCell,
                         register,
                         register,
@@ -640,14 +649,14 @@ impl Compiler {
                 }
             }
             CompiledAssignmentTarget::CapturedLocal(register) => {
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     register,
                     0,
                     0,
                     prototype,
                 ));
-                self.code.push(Instruction::new(
+                self.emit_instruction(Instruction::new(
                     Opcode::SetLocalCell,
                     register,
                     register,
@@ -656,14 +665,14 @@ impl Compiler {
             }
             CompiledAssignmentTarget::Upvalue(index) => {
                 let function_register = self.alloc_register_at(span)?;
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     function_register,
                     0,
                     0,
                     prototype,
                 ));
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::SetUpvalue,
                     function_register,
                     0,
@@ -679,7 +688,7 @@ impl Compiler {
                 stdlib_field,
             } => {
                 let function_register = self.alloc_register_at(span)?;
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     function_register,
                     0,
@@ -704,14 +713,14 @@ impl Compiler {
             }
             CompiledAssignmentTarget::Global { key, name } => {
                 let function_register = self.alloc_register_at(span)?;
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     function_register,
                     0,
                     0,
                     prototype,
                 ));
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::SetGlobal,
                     function_register,
                     0,
@@ -759,7 +768,7 @@ impl Compiler {
             match &target {
                 CompiledAssignmentTarget::Local(register) => {
                     if self.local_register_is_captured(*register) {
-                        self.code.push(Instruction::new(
+                        self.emit_instruction(Instruction::new(
                             Opcode::GetLocalCell,
                             result,
                             *register,
@@ -775,7 +784,7 @@ impl Compiler {
                         .push(Instruction::new(Opcode::GetLocalCell, result, *register, 0));
                 }
                 CompiledAssignmentTarget::Upvalue(index) => {
-                    self.code.push(Instruction::with_aux(
+                    self.emit_instruction(Instruction::with_aux(
                         Opcode::GetUpvalue,
                         result,
                         0,
@@ -809,7 +818,7 @@ impl Compiler {
                 }
             }
             let rhs_register = self.compile_expr(&values[0])?;
-            self.code.push(Instruction::new(
+            self.emit_instruction(Instruction::new(
                 opcode_for_assignment(op),
                 result,
                 result,
@@ -822,7 +831,7 @@ impl Compiler {
                             self.code
                                 .push(Instruction::new(Opcode::Move, *register, result, 0));
                         }
-                        self.code.push(Instruction::new(
+                        self.emit_instruction(Instruction::new(
                             Opcode::SetLocalCell,
                             result,
                             *register,
@@ -840,7 +849,7 @@ impl Compiler {
                         .push(Instruction::new(Opcode::SetLocalCell, result, *register, 0));
                 }
                 CompiledAssignmentTarget::Upvalue(index) => {
-                    self.code.push(Instruction::with_aux(
+                    self.emit_instruction(Instruction::with_aux(
                         Opcode::SetUpvalue,
                         result,
                         0,
@@ -850,14 +859,14 @@ impl Compiler {
                 }
                 CompiledAssignmentTarget::Table { table, key, .. } => {
                     if let Some(key_register) = reusable_string_key {
-                        self.code.push(Instruction::new(
+                        self.emit_instruction(Instruction::new(
                             Opcode::SetIndex,
                             *table,
                             key_register,
                             result,
                         ));
                     } else {
-                        self.code.push(table_set_instruction(*table, *key, result));
+                        self.emit_instruction(table_set_instruction(*table, *key, result));
                     }
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
@@ -1055,7 +1064,7 @@ impl Compiler {
     ) -> Result<()> {
         let condition_register = self.compile_expr(condition)?;
         let false_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::JumpIfNot,
             condition_register,
             0,
@@ -1082,7 +1091,7 @@ impl Compiler {
         let loop_start = self.code.len();
         let condition_register = self.compile_expr(condition)?;
         let false_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::JumpIfNot,
             condition_register,
             0,
@@ -1191,7 +1200,7 @@ impl Compiler {
         self.patch_loop_continues_to(condition_start, span)?;
         let condition_register = self.compile_expr(condition)?;
         let loop_start = self.jump_target(loop_start, span)?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::JumpIfNot,
             condition_register,
             0,
@@ -1301,7 +1310,7 @@ impl Compiler {
                 debug_name,
                 expr.span(),
             )?;
-            self.code.push(Instruction::with_aux(
+            self.emit_instruction(Instruction::with_aux(
                 Opcode::LoadFunction,
                 target,
                 0,
@@ -1316,6 +1325,13 @@ impl Compiler {
     }
 
     fn compile_expr_to(&mut self, expr: &Expr, target: u8) -> Result<()> {
+        let previous = self.diagnostic_span.replace(expr.span());
+        let result = self.compile_expr_to_inner(expr, target);
+        self.diagnostic_span = previous;
+        result
+    }
+
+    fn compile_expr_to_inner(&mut self, expr: &Expr, target: u8) -> Result<()> {
         if let Some(value) = const_eval(expr) {
             self.load_constant_to(target, value)
                 .map_err(|error| error.with_span(expr.span()))?;
@@ -1337,7 +1353,7 @@ impl Compiler {
                     match binding {
                         Binding::Register(source) => {
                             if self.local_register_is_captured(source) {
-                                self.code.push(Instruction::new(
+                                self.emit_instruction(Instruction::new(
                                     Opcode::GetLocalCell,
                                     target,
                                     source,
@@ -1349,7 +1365,7 @@ impl Compiler {
                             }
                         }
                         Binding::CapturedLocal(source) => {
-                            self.code.push(Instruction::new(
+                            self.emit_instruction(Instruction::new(
                                 Opcode::GetLocalCell,
                                 target,
                                 source,
@@ -1357,7 +1373,7 @@ impl Compiler {
                             ));
                         }
                         Binding::Upvalue(index) => {
-                            self.code.push(Instruction::with_aux(
+                            self.emit_instruction(Instruction::with_aux(
                                 Opcode::GetUpvalue,
                                 target,
                                 0,
@@ -1366,7 +1382,7 @@ impl Compiler {
                             ));
                         }
                         Binding::CurrentFunction => {
-                            self.code.push(Instruction::new(
+                            self.emit_instruction(Instruction::new(
                                 Opcode::LoadCurrentFunction,
                                 target,
                                 0,
@@ -1375,7 +1391,7 @@ impl Compiler {
                         }
                     }
                 } else if let Some(index) = self.resolve_upvalue(name)? {
-                    self.code.push(Instruction::with_aux(
+                    self.emit_instruction(Instruction::with_aux(
                         Opcode::GetUpvalue,
                         target,
                         0,
@@ -1457,7 +1473,7 @@ impl Compiler {
                     );
                 } else {
                     let index_register = self.compile_expr(index)?;
-                    self.code.push(Instruction::new(
+                    self.emit_instruction(Instruction::new(
                         Opcode::GetIndex,
                         target,
                         target,
@@ -1482,7 +1498,7 @@ impl Compiler {
                     None,
                     expr.span(),
                 )?;
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::LoadFunction,
                     target,
                     0,
@@ -1618,7 +1634,7 @@ impl Compiler {
                 .insert(param.name.clone(), Binding::Register(register));
         }
         self.compile_block(body)?;
-        self.code.push(Instruction::new(Opcode::Return, 0, 0, 0));
+        self.emit_instruction(Instruction::new(Opcode::Return, 0, 0, 0));
 
         let function_code = std::mem::take(&mut self.code);
         let function_source_map = std::mem::take(&mut self.source_map);
@@ -1715,7 +1731,7 @@ impl Compiler {
     ) -> Result<()> {
         let condition_register = self.compile_expr(condition)?;
         let false_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::JumpIfNot,
             condition_register,
             0,
@@ -1798,7 +1814,7 @@ impl Compiler {
         // collide with the `table.create` builtin arity (1..=2).
         let hash_field_count = fields.len() - array_field_count;
         if array_field_count == 0 {
-            self.code.push(Instruction::with_aux(
+            self.emit_instruction(Instruction::with_aux(
                 Opcode::NewArray,
                 target,
                 0,
@@ -1808,7 +1824,7 @@ impl Compiler {
         } else {
             self.load_constant_to(target, Constant::Number(array_field_count as f64))?;
             let hash_register = self.load_constant(Constant::Number(hash_field_count as f64))?;
-            self.code.push(Instruction::with_aux(
+            self.emit_instruction(Instruction::with_aux(
                 Opcode::TableCreate,
                 target,
                 target,
@@ -1833,7 +1849,7 @@ impl Compiler {
                                     *span,
                                 ));
                             }
-                            self.code.push(Instruction::with_aux(
+                            self.emit_instruction(Instruction::with_aux(
                                 Opcode::AppendVarargs,
                                 target,
                                 0,
@@ -1850,7 +1866,7 @@ impl Compiler {
                     }
                     let key_register = self.load_constant(Constant::Number(array_index))?;
                     let value_register = self.compile_expr(value)?;
-                    self.code.push(Instruction::new(
+                    self.emit_instruction(Instruction::new(
                         Opcode::SetIndex,
                         target,
                         key_register,
@@ -1885,7 +1901,7 @@ impl Compiler {
                     } else {
                         let key_register = self.compile_expr(key)?;
                         let value_register = self.compile_expr(value)?;
-                        self.code.push(Instruction::new(
+                        self.emit_instruction(Instruction::new(
                             Opcode::SetIndex,
                             target,
                             key_register,
@@ -1931,7 +1947,7 @@ impl Compiler {
                                     *span,
                                 ));
                             }
-                            self.code.push(Instruction::with_aux(
+                            self.emit_instruction(Instruction::with_aux(
                                 Opcode::AppendVarargs,
                                 target,
                                 0,
@@ -1990,7 +2006,7 @@ impl Compiler {
                     } else {
                         let key_register = self.compile_expr(key)?;
                         let value_register = self.compile_expr(value)?;
-                        self.code.push(Instruction::new(
+                        self.emit_instruction(Instruction::new(
                             Opcode::SetIndex,
                             target,
                             key_register,
@@ -2019,7 +2035,7 @@ impl Compiler {
         }
         for (offset, value_register) in pending.iter().enumerate() {
             let key_register = self.load_constant(Constant::Number(start_index + offset as f64))?;
-            self.code.push(Instruction::new(
+            self.emit_instruction(Instruction::new(
                 Opcode::SetIndex,
                 target,
                 key_register,
@@ -2462,7 +2478,7 @@ impl Compiler {
         }
 
         let prep_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             iterator.prep_opcode(),
             table_register,
             0,
@@ -2482,7 +2498,7 @@ impl Compiler {
         let continue_target = self.code.len();
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             iterator.loop_opcode(),
             table_register,
             0,
@@ -2544,7 +2560,7 @@ impl Compiler {
             0
         };
         let prep_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::GenericCallPrep,
             iterator_register,
             caller_cell_mode,
@@ -2560,7 +2576,7 @@ impl Compiler {
         let continue_target = self.code.len();
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::GenericCallLoop,
             iterator_register,
             caller_cell_mode,
@@ -2619,7 +2635,7 @@ impl Compiler {
             0
         };
         let prep_jump = self.code.len();
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::GeneralizedIterPrep,
             iterator_register,
             caller_cell_mode,
@@ -2635,7 +2651,7 @@ impl Compiler {
         let continue_target = self.code.len();
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::GeneralizedIterLoop,
             iterator_register,
             caller_cell_mode,
@@ -3354,7 +3370,7 @@ impl Compiler {
             return self.compile_value_call_to(callee, args, target, span);
         };
         let prototype = self.compile_detached_chunk_prototype(&chunk, span)?;
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::LoadFunction,
             target,
             0,
@@ -3405,7 +3421,7 @@ impl Compiler {
         self.current_function_is_vararg = true;
         self.disable_builtin_fastpaths = true;
         self.compile_block(&chunk.statements)?;
-        self.code.push(Instruction::new(Opcode::Return, 0, 0, 0));
+        self.emit_instruction(Instruction::new(Opcode::Return, 0, 0, 0));
 
         let function_code = std::mem::take(&mut self.code);
         let function_source_map = std::mem::take(&mut self.source_map);
@@ -3475,7 +3491,7 @@ impl Compiler {
             ),
             Expr::Varargs(vararg_span) => {
                 self.validate_varargs_available(*vararg_span)?;
-                self.code.push(Instruction::new(
+                self.emit_instruction(Instruction::new(
                     Opcode::ReturnVarargs,
                     prefix_first,
                     u8::try_from(prefix_count)
@@ -4714,7 +4730,7 @@ impl Compiler {
         for arg in args {
             arg_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             spec.opcode,
             target,
             arg_registers[0],
@@ -4737,7 +4753,7 @@ impl Compiler {
         for arg in args.iter().skip(2) {
             ignored_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::RawGet,
             target,
             target,
@@ -4761,7 +4777,7 @@ impl Compiler {
         for arg in args.iter().skip(3) {
             ignored_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::RawSet,
             target,
             key_register,
@@ -4804,7 +4820,7 @@ impl Compiler {
         } else {
             self.load_constant(Constant::Nil)?
         };
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::NextKey,
             target,
             target,
@@ -4828,7 +4844,7 @@ impl Compiler {
         for arg in args.iter().skip(2) {
             range_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::TableConcat,
             target,
             target,
@@ -4855,7 +4871,7 @@ impl Compiler {
             return Err(CompileError::at(format!("unsupported {name} arity"), span));
         }
         self.compile_expr_to(&args[0], target)?;
-        self.code.push(Instruction::new(opcode, target, target, 0));
+        self.emit_instruction(Instruction::new(opcode, target, target, 0));
         Ok(())
     }
 
@@ -4870,7 +4886,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::TableFind,
             target,
             target,
@@ -4895,7 +4911,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::TableCreate,
             target,
             target,
@@ -4920,7 +4936,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::TableInsert,
             target,
             target,
@@ -4945,7 +4961,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::TableRemove,
             target,
             target,
@@ -4970,7 +4986,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::StringSub,
             target,
             target,
@@ -5005,7 +5021,7 @@ impl Compiler {
             index_registers.push(self.compile_expr(arg)?);
         }
         let start_register = index_registers.first().copied().unwrap_or(0);
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::StringByte,
             target,
             target,
@@ -5031,7 +5047,7 @@ impl Compiler {
             return Err(CompileError::at(format!("unsupported {name} arity"), span));
         }
         self.compile_expr_to(&args[0], target)?;
-        self.code.push(Instruction::new(opcode, target, target, 0));
+        self.emit_instruction(Instruction::new(opcode, target, target, 0));
         Ok(())
     }
 
@@ -5048,7 +5064,7 @@ impl Compiler {
         for register in ignored_registers.into_iter().rev() {
             self.free_register(register);
         }
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::StringRep,
             target,
             target,
@@ -5070,7 +5086,7 @@ impl Compiler {
         for arg in args.iter().skip(2) {
             optional_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::StringFind,
             target,
             target,
@@ -5095,7 +5111,7 @@ impl Compiler {
         } else {
             None
         };
-        self.code.push(Instruction::with_aux(
+        self.emit_instruction(Instruction::with_aux(
             Opcode::StringSplit,
             target,
             target,
@@ -5126,7 +5142,7 @@ impl Compiler {
         for arg in args {
             arg_registers.push(self.compile_expr(arg)?);
         }
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::ConcatArgs,
             target,
             arg_registers[0],
@@ -5156,7 +5172,7 @@ impl Compiler {
         } else {
             let constant =
                 i32::try_from(constant).map_err(|_| CompileError::new("constant pool overflow"))?;
-            self.code.push(Instruction::with_aux(
+            self.emit_instruction(Instruction::with_aux(
                 Opcode::LoadConstWide,
                 register,
                 0,
@@ -5532,7 +5548,7 @@ impl Compiler {
                     .push(Instruction::new(Opcode::SetLocalCell, source, *register, 0));
             }
             CompiledAssignmentTarget::Upvalue(index) => {
-                self.code.push(Instruction::with_aux(
+                self.emit_instruction(Instruction::with_aux(
                     Opcode::SetUpvalue,
                     source,
                     0,
@@ -5541,7 +5557,7 @@ impl Compiler {
                 ));
             }
             CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.code.push(table_set_instruction(*table, *key, source));
+                self.emit_instruction(table_set_instruction(*table, *key, source));
             }
             CompiledAssignmentTarget::Global { key, .. } => {
                 self.code
@@ -5639,6 +5655,42 @@ impl Compiler {
 
     fn emit_source_mapped_instruction(&mut self, instruction: Instruction, span: Span) {
         self.record_source_for_next_instruction(span);
+        if let Some(context) = self
+            .diagnostic_span
+            .filter(|context| context.start <= span.start && context.end >= span.end)
+        {
+            if let Some(entry) = self.source_map.last_mut() {
+                entry.span = Some(rustia_vm::diagnostic::DiagnosticSpan {
+                    start: context.start,
+                    end: context.end,
+                });
+            }
+        }
+        self.code.push(instruction);
+    }
+
+    fn emit_instruction(&mut self, instruction: Instruction) {
+        if let (Some(span), Some(last)) = (self.diagnostic_span, self.source_map.last()) {
+            let span = Some(rustia_vm::diagnostic::DiagnosticSpan {
+                start: span.start,
+                end: span.end,
+            });
+            // Preserve the guest's existing line map; expression spans are
+            // host-only annotations and must not change oracle error strings.
+            let pc = self.code.len();
+            if last.pc == pc {
+                self.source_map
+                    .last_mut()
+                    .expect("source entry exists")
+                    .span = span;
+            } else if last.span != span {
+                self.source_map.push(InstructionSource {
+                    pc,
+                    line: last.line,
+                    span,
+                });
+            }
+        }
         self.code.push(instruction);
     }
 
@@ -5650,10 +5702,21 @@ impl Compiler {
         if let Some(last) = self.source_map.last_mut() {
             if last.pc == pc {
                 last.line = line;
+                last.span = Some(rustia_vm::diagnostic::DiagnosticSpan {
+                    start: span.start,
+                    end: span.end,
+                });
                 return;
             }
         }
-        self.source_map.push(InstructionSource { pc, line });
+        self.source_map.push(InstructionSource {
+            pc,
+            line,
+            span: Some(rustia_vm::diagnostic::DiagnosticSpan {
+                start: span.start,
+                end: span.end,
+            }),
+        });
     }
 
     fn source_line(&self, span: Span) -> Option<u32> {
@@ -5710,7 +5773,7 @@ impl Compiler {
             ));
         }
         self.ensure_register_window_len(first_register, result_count, span)?;
-        self.code.push(Instruction::new(
+        self.emit_instruction(Instruction::new(
             Opcode::LoadVarargs,
             first_register,
             u8::try_from(result_count)

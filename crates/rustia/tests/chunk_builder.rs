@@ -136,7 +136,7 @@ fn custom_environment_is_validated_before_source_compilation() {
         .expect_err("cross-VM environment must reject first");
     assert!(matches!(
         error,
-        Error::Embed(ref message) if message.contains("different Rustia VM")
+        Error { kind: rustia::ErrorKind::Embed(ref message), .. } if message.contains("different Rustia VM")
     ));
     let stale = second.create_table().expect("soon-stale environment");
     second.reset_decision().expect("reset");
@@ -147,7 +147,7 @@ fn custom_environment_is_validated_before_source_compilation() {
         .expect_err("stale environment must reject first");
     assert!(matches!(
         error,
-        Error::Embed(ref message) if message.contains("stale chunk environment handle")
+        Error { kind: rustia::ErrorKind::Embed(ref message), .. } if message.contains("stale chunk environment handle")
     ));
 }
 
@@ -184,7 +184,7 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
         .expect_err("dynamic loading must reject");
     assert!(matches!(
         error,
-        Error::Vm(ref error)
+        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
             if matches!(
                 error.kind,
                 VmErrorKind::HardenedLeafViolation {

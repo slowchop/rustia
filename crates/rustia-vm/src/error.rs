@@ -10,6 +10,10 @@ pub struct Error {
     pub pc: Option<usize>,
     pub location: Option<ErrorLocation>,
     pub location_suppressed: bool,
+    /// Host-only metadata; never included in the guest error string.
+    pub diagnostic: Option<Arc<crate::diagnostic::Diagnostic>>,
+    /// Compact byte offsets; sources exceeding u32 offsets use line-only reports.
+    pub span: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,6 +98,8 @@ impl Error {
             pc: None,
             location: None,
             location_suppressed: false,
+            diagnostic: None,
+            span: None,
         }
     }
 
@@ -119,6 +125,16 @@ impl Error {
     #[inline]
     pub fn without_source_location(mut self) -> Self {
         self.location = None;
+        self.diagnostic = self.diagnostic.as_ref().and_then(|diagnostic| {
+            diagnostic.host_cause.clone().map(|cause| {
+                Arc::new(crate::diagnostic::Diagnostic {
+                    host_cause: Some(cause),
+                    report_bytes: diagnostic.report_bytes,
+                    ..crate::diagnostic::Diagnostic::default()
+                })
+            })
+        });
+        self.span = None;
         self.location_suppressed = true;
         self
     }
@@ -154,7 +170,22 @@ impl fmt::Display for Error {
         } else if let Some(pc) = self.pc {
             write!(formatter, "pc {pc}: ")?;
         }
-        match &self.kind {
+        self.message().fmt(formatter)
+    }
+}
+
+/// Original guest message without a source-location prefix.
+pub struct ErrorMessage<'a>(&'a Error);
+
+impl Error {
+    pub fn message(&self) -> ErrorMessage<'_> {
+        ErrorMessage(self)
+    }
+}
+
+impl fmt::Display for ErrorMessage<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0.kind {
             ErrorKind::FuelExhausted { limit } => {
                 write!(
                     formatter,
@@ -250,4 +281,11 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.diagnostic
+            .as_ref()
+            .and_then(|diagnostic| diagnostic.host_cause.as_deref())
+            .map(|cause| cause as &(dyn std::error::Error + 'static))
+    }
+}

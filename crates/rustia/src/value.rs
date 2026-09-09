@@ -252,7 +252,7 @@ macro_rules! impl_signed_integer_value {
                 fn into_rustia(self) -> Result<OwnedValue> {
                     let number = self as f64;
                     if number as i128 != self as i128 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "{} value {self} cannot be represented exactly as a Luau number",
                             stringify!($ty)
                         )));
@@ -265,13 +265,13 @@ macro_rules! impl_signed_integer_value {
                 fn from_rustia(value: OwnedValue) -> Result<Self> {
                     let number = f64::from_rustia(value)?;
                     if !number.is_finite() || number.fract() != 0.0 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "expected integer-compatible number, got {number}"
                         )));
                     }
                     let integer = number as i128;
                     if integer < <$ty>::MIN as i128 || integer > <$ty>::MAX as i128 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "number {number} is outside {} range",
                             stringify!($ty)
                         )));
@@ -290,7 +290,7 @@ macro_rules! impl_unsigned_integer_value {
                 fn into_rustia(self) -> Result<OwnedValue> {
                     let number = self as f64;
                     if number as u128 != self as u128 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "{} value {self} cannot be represented exactly as a Luau number",
                             stringify!($ty)
                         )));
@@ -303,19 +303,19 @@ macro_rules! impl_unsigned_integer_value {
                 fn from_rustia(value: OwnedValue) -> Result<Self> {
                     let number = f64::from_rustia(value)?;
                     if !number.is_finite() || number.fract() != 0.0 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "expected integer-compatible number, got {number}"
                         )));
                     }
                     if number < 0.0 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "number {number} is outside {} range",
                             stringify!($ty)
                         )));
                     }
                     let integer = number as u128;
                     if integer > <$ty>::MAX as u128 {
-                        return Err(Error::Embed(format!(
+                        return Err(Error::embed(format!(
                             "number {number} is outside {} range",
                             stringify!($ty)
                         )));
@@ -390,7 +390,7 @@ where
             OwnedValue::Table(table) if table.entries.is_empty() => {
                 table.array.into_iter().map(T::from_rustia).collect()
             }
-            OwnedValue::Table(_) => Err(Error::Embed(
+            OwnedValue::Table(_) => Err(Error::embed(
                 "expected array table, got table with keyed entries".to_owned(),
             )),
             other => type_error("array table", &other),
@@ -414,7 +414,7 @@ where
     fn from_rustia(value: OwnedValue) -> Result<Self> {
         let table = OwnedTable::from_rustia(value)?;
         if !table.array.is_empty() {
-            return Err(Error::Embed(
+            return Err(Error::embed(
                 "expected string-keyed table, got table with array entries".to_owned(),
             ));
         }
@@ -423,7 +423,7 @@ where
             .into_iter()
             .map(|(key, value)| match key {
                 OwnedKey::String(key) => T::from_rustia(value).map(|value| (key, value)),
-                _ => Err(Error::Embed(
+                _ => Err(Error::embed(
                     "expected string-keyed table, got non-string key".to_owned(),
                 )),
             })
@@ -598,7 +598,7 @@ pub(crate) fn snapshot_value(vm: &mut Vm, value: RawValue) -> Result<OwnedValue>
 
 fn snapshot_value_inner(vm: &mut Vm, value: RawValue, depth: usize) -> Result<OwnedValue> {
     if depth > SNAPSHOT_DEPTH_LIMIT {
-        return Err(Error::Embed(
+        return Err(Error::embed(
             "value snapshot exceeded recursive table depth limit".to_owned(),
         ));
     }
@@ -609,18 +609,18 @@ fn snapshot_value_inner(vm: &mut Vm, value: RawValue, depth: usize) -> Result<Ow
         ValueKind::Number => Ok(OwnedValue::Number(value.as_number().unwrap_or(f64::NAN))),
         ValueKind::String => vm
             .string_value(value)
-            .map_err(Error::Vm)?
+            .map_err(Error::from)?
             .map(OwnedValue::String)
-            .ok_or_else(|| Error::Embed("string value is missing".to_owned())),
+            .ok_or_else(|| Error::embed("string value is missing".to_owned())),
         ValueKind::Table => snapshot_table(vm, value, depth + 1),
-        ValueKind::Function => Err(Error::Embed(
+        ValueKind::Function => Err(Error::embed(
             "function values must be retained as Function handles".to_owned(),
         )),
-        ValueKind::Userdata | ValueKind::Buffer | ValueKind::Vector => Err(Error::Embed(format!(
+        ValueKind::Userdata | ValueKind::Buffer | ValueKind::Vector => Err(Error::embed(format!(
             "{} values cannot be represented as OwnedValue",
             raw_kind_name(value.kind())
         ))),
-        _ => Err(Error::Embed(
+        _ => Err(Error::embed(
             "unknown VM value kind cannot be represented as OwnedValue".to_owned(),
         )),
     }
@@ -630,7 +630,7 @@ fn snapshot_table(vm: &mut Vm, value: RawValue, depth: usize) -> Result<OwnedVal
     let mut ordered = Vec::new();
     let mut all_array_keys = true;
 
-    for (key, value) in vm.raw_table_entries_value(value).map_err(Error::Vm)? {
+    for (key, value) in vm.raw_table_entries_value(value).map_err(Error::from)? {
         let key = snapshot_key(vm, key)?;
         let array_index = match key {
             OwnedKey::Number(number) => number_to_array_index(number),
@@ -683,10 +683,10 @@ fn snapshot_key(vm: &mut Vm, key: RawValue) -> Result<OwnedKey> {
         ValueKind::Number => Ok(OwnedKey::Number(key.as_number().unwrap_or(f64::NAN))),
         ValueKind::String => vm
             .string_value(key)
-            .map_err(Error::Vm)?
+            .map_err(Error::from)?
             .map(OwnedKey::String)
-            .ok_or_else(|| Error::Embed("string key is missing".to_owned())),
-        _ => Err(Error::Embed(format!(
+            .ok_or_else(|| Error::embed("string key is missing".to_owned())),
+        _ => Err(Error::embed(format!(
             "{} table keys cannot be represented as OwnedKey",
             raw_kind_name(key.kind())
         ))),
@@ -705,13 +705,13 @@ pub(crate) fn load_owned_value(vm: &mut Vm, value: &OwnedValue) -> Result<RawVal
                 let key = RawValue::number((index + 1) as f64);
                 let value = load_owned_value(vm, value)?;
                 vm.raw_table_set_value(raw_table, key, value)
-                    .map_err(Error::Vm)?;
+                    .map_err(Error::from)?;
             }
             for (key, value) in &table.entries {
                 let key = load_owned_key(vm, key);
                 let value = load_owned_value(vm, value)?;
                 vm.raw_table_set_value(raw_table, key, value)
-                    .map_err(Error::Vm)?;
+                    .map_err(Error::from)?;
             }
             Ok(raw_table)
         }
@@ -744,7 +744,7 @@ fn expect_table_ref(value: &OwnedValue) -> Result<&OwnedTable> {
 }
 
 fn type_error<T>(expected: &'static str, value: &OwnedValue) -> Result<T> {
-    Err(Error::Embed(format!(
+    Err(Error::embed(format!(
         "expected {expected}, got {}",
         value.type_name()
     )))
@@ -752,10 +752,20 @@ fn type_error<T>(expected: &'static str, value: &OwnedValue) -> Result<T> {
 
 pub(crate) fn embed_to_vm_error(error: Error) -> VmError {
     match error {
-        Error::Vm(error) => error,
-        error => VmError::new(VmErrorKind::RuntimeError {
-            message: error.to_string(),
-        }),
+        Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        } => *error,
+        error => {
+            let mut vm_error = VmError::new(VmErrorKind::RuntimeError {
+                message: error.to_string(),
+            });
+            vm_error.diagnostic = Some(std::sync::Arc::new(crate::Diagnostic {
+                host_cause: Some(std::sync::Arc::new(error)),
+                ..crate::Diagnostic::default()
+            }));
+            vm_error
+        }
     }
 }
 

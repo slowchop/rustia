@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-09-08",
+    "date": "2026-09-09",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -331,8 +331,8 @@
           "name": "Error/debug behavior",
           "complete": 73,
           "confidence": 75,
-          "state": "Debug/error behavior is substantially covered for conformance, and public rustia errors expose source-span/runtime-location accessors for diagnostic renderers.",
-          "future_plan": "Tighten VM stack traces and source diagnostics, and prove valid runtime failures remain catchable at runtime rather than moving into compile-time rejection."
+          "state": "Host-facing typed errors now provide bounded immutable executed-source reports, expression spans, logical callers, factual operation explanations, parser-proven missing block endings, typed host causes, one-based serde paths, module loading context, and console source mapping. Guest error strings and protected-call behavior remain unchanged. Focused regressions pass; final release and client rollout gates remain open.",
+          "future_plan": "Finish full correctness/release gates and controlled-client migration; continue oracle runtime-error-phase parity coverage without changing guest errors for presentation."
         }
       ]
     },

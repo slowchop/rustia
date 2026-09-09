@@ -503,7 +503,7 @@ impl<Record> EffectJournal<Record> {
 
     fn next_sequence(&mut self) -> Result<u32> {
         if let Some(error) = &self.hard_error {
-            return Err(Error::Vm(error.clone()));
+            return Err(Error::from(error.clone()));
         }
         let limit = usize::try_from(self.limits.max_records).unwrap_or(usize::MAX);
         if self.records.len() >= limit {
@@ -535,7 +535,7 @@ impl<Record> EffectJournal<Record> {
         let error = VmError::new(VmErrorKind::HostResourceExhausted { resource, limit })
             .without_source_location();
         self.hard_error = Some(error.clone());
-        Error::Vm(error)
+        Error::from(error)
     }
 
     fn latch_vm_error(&mut self, error: VmError) {
@@ -822,13 +822,13 @@ where
 
     pub(crate) fn install(self, vm: &mut Vm) -> Result<()> {
         if self.namespace.is_empty() {
-            return Err(Error::Embed(
+            return Err(Error::embed(
                 "typed host module namespace must not be empty".to_owned(),
             ));
         }
         for (index, function) in self.functions.iter().enumerate() {
             if function.name.is_empty() {
-                return Err(Error::Embed(
+                return Err(Error::embed(
                     "typed host function name must not be empty".to_owned(),
                 ));
             }
@@ -836,14 +836,14 @@ where
                 .iter()
                 .any(|prior| prior.name == function.name)
             {
-                return Err(Error::Embed(format!(
+                return Err(Error::embed(format!(
                     "duplicate typed host function `{}` in module `{}`",
                     function.name, self.namespace
                 )));
             }
         }
         vm.install_host_module(self.namespace, self.functions)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 }
 
@@ -920,9 +920,13 @@ where
     }
 
     fn latch_if_hard(&mut self, error: &Error) {
-        if let Error::Vm(error) = error {
+        if let Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        } = error
+        {
             if error.is_transaction_abort() {
-                self.journal.latch_vm_error(error.clone());
+                self.journal.latch_vm_error((**error).clone());
             }
         }
     }
@@ -1059,7 +1063,7 @@ where
                     .as_mut()
                     .expect("invocation dispatcher is available")
                     .rollback(checkpoint);
-                Err(Error::Vm(
+                Err(Error::from(
                     self.dispatcher
                         .as_ref()
                         .expect("invocation dispatcher is available")
@@ -1076,7 +1080,7 @@ where
                 dispatcher.rollback(checkpoint);
                 dispatcher.latch_if_hard(&error);
                 if let Some(hard_error) = dispatcher.hard_error() {
-                    Err(Error::Vm(hard_error.clone()))
+                    Err(Error::from(hard_error.clone()))
                 } else {
                     Err(error)
                 }
@@ -1096,7 +1100,7 @@ where
             .as_mut()
             .expect("invocation dispatcher is available");
         vm.call_retained_function_in(function, args, execution, dispatcher)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     pub fn install(&mut self, module: &CompiledModule) -> Result<Exports> {
@@ -1111,7 +1115,10 @@ where
         self.scoped(|invocation| {
             let started_outer = !invocation.installation_transaction_active;
             if started_outer {
-                invocation.vm.begin_guest_transaction().map_err(Error::Vm)?;
+                invocation
+                    .vm
+                    .begin_guest_transaction()
+                    .map_err(Error::from)?;
                 invocation.installation_transaction_active = true;
             }
             if let Err(error) = invocation.vm.begin_guest_transaction() {
@@ -1119,7 +1126,7 @@ where
                     invocation.vm.rollback_guest_transaction();
                     invocation.installation_transaction_active = false;
                 }
-                return Err(Error::Vm(error));
+                return Err(Error::from(error));
             }
             let vm = &mut *invocation.vm;
             let execution = &mut invocation.execution;
@@ -1127,11 +1134,11 @@ where
                 .dispatcher
                 .as_mut()
                 .expect("invocation dispatcher is available");
-            let outcome = (|| {
-                let module_cohort = vm.create_module_cohort().map_err(Error::Vm)?;
+            let outcome: Result<Exports> = (|| {
+                let module_cohort = vm.create_module_cohort().map_err(Error::from)?;
                 let environment = match environment {
                     Some(environment) => environment,
-                    None => vm.create_module_environment().map_err(Error::Vm)?,
+                    None => vm.create_module_environment().map_err(Error::from)?,
                 };
                 let value = vm
                     .run_installation_in_environment(
@@ -1141,8 +1148,8 @@ where
                         execution,
                         dispatcher,
                     )
-                    .map_err(Error::Vm)?;
-                let value = vm.retain_value(value).map_err(Error::Vm)?;
+                    .map_err(Error::from)?;
+                let value = vm.retain_value(value).map_err(Error::from)?;
                 Ok(Exports::new(value, vm.decision_epoch()))
             })();
             match outcome {
@@ -1153,7 +1160,7 @@ where
                             vm.rollback_guest_transaction();
                             invocation.installation_transaction_active = false;
                         }
-                        Err(Error::Vm(error))
+                        Err(Error::from(error).installation_rolled_back())
                     } else {
                         Ok(exports)
                     }
@@ -1164,7 +1171,7 @@ where
                         vm.rollback_guest_transaction();
                         invocation.installation_transaction_active = false;
                     }
-                    Err(error)
+                    Err(error.installation_rolled_back())
                 }
             }
         })
@@ -1192,7 +1199,7 @@ where
                     .as_mut()
                     .expect("invocation dispatcher is available");
                 vm.run_hardened_leaf_entry_in(&entry.program, execution, dispatcher)
-                    .map_err(Error::Vm)?
+                    .map_err(Error::from)?
             };
             let value = snapshot_value(invocation.vm, value)?;
             Return::from_rustia(value)
@@ -1262,6 +1269,7 @@ where
     invocation: &'chunk mut Invocation<'call, C>,
     source: &'source [u8],
     source_name: Option<String>,
+    source_map: crate::SourceMap,
     environment: Option<Table>,
 }
 
@@ -1274,6 +1282,7 @@ where
             invocation,
             source,
             source_name: None,
+            source_map: crate::SourceMap::default(),
             environment: None,
         }
     }
@@ -1282,6 +1291,12 @@ where
     /// referrer passed to the host module resolver for `require` calls.
     pub fn source_name(mut self, source_name: impl Into<String>) -> Self {
         self.source_name = Some(source_name.into());
+        self
+    }
+
+    /// Maps a generated console prefix out of human-facing diagnostics.
+    pub fn source_map(mut self, mapping: crate::SourceMap) -> Self {
+        self.source_map = mapping;
         self
     }
 
@@ -1351,13 +1366,18 @@ where
                 match raw_environment {
                     Some(environment) => vm
                         .run_in_environment(&module.program, environment, execution, dispatcher)
-                        .map_err(Error::Vm),
+                        .map_err(Error::from),
                     None => vm
                         .run_in(&module.program, execution, dispatcher)
-                        .map_err(Error::Vm),
+                        .map_err(Error::from),
                 }?
             };
-            convert(invocation, value)
+            convert(invocation, value).map_err(|error| {
+                error.with_result_source(
+                    module.program.source_name.as_deref().unwrap_or("chunk"),
+                    invocation.vm.settings().diagnostic_limits,
+                )
+            })
         })
     }
 
@@ -1372,10 +1392,11 @@ where
             invocation,
             source,
             source_name,
+            source_map,
             environment,
         } = self;
         if invocation.vm.settings().guest_surface.is_hardened_leaf() {
-            return Err(Error::Vm(
+            return Err(Error::from(
                 VmError::new(VmErrorKind::HardenedLeafViolation {
                     feature: "dynamic source loading",
                 })
@@ -1386,11 +1407,20 @@ where
             .as_ref()
             .map(|environment| environment.raw(invocation.vm, "chunk environment handle"))
             .transpose()?;
-        let module = crate::Rustia::compile_module_bytes_with_constructor_order(
+        source_map.validate(source)?;
+        let limits = invocation.vm.settings().diagnostic_limits;
+        let mut module = crate::Rustia::compile_module_bytes_with_constructor_order(
             source_name.unwrap_or_else(|| "chunk".to_owned()),
             source,
             invocation.vm.profile() == crate::Profile::Puc51Compat,
-        )?;
+            invocation.vm.settings().diagnostic_limits,
+        )
+        .map_err(|error| {
+            source_map
+                .apply_error(error, source, limits)
+                .admit_diagnostic(invocation.vm)
+        })?;
+        source_map.apply(&mut module, source, limits);
         Ok((invocation, module, environment))
     }
 }

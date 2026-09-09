@@ -6,6 +6,54 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[test]
+fn dependency_syntax_error_retains_its_source_and_loading_callers() {
+    let resolver = ServiceModuleResolver::from_fn(|requested, _| {
+        Ok(match requested {
+            "outer" => {
+                ModuleSource::with_source_name("outer", "outer.luau", "return require('broken')")
+            }
+            _ => {
+                ModuleSource::with_source_name("broken", "broken.luau", "-- dependency\nlocal = 1")
+            }
+        })
+    });
+    let mut vm = RustiaBuilder::standard()
+        .module_resolver(resolver)
+        .build()
+        .unwrap();
+    let error = vm
+        .load("return require('outer')")
+        .source_name("entry.luau")
+        .exec()
+        .unwrap_err();
+    let report = error.report().to_string();
+    assert!(report.contains("broken.luau:2"), "{report}");
+    assert!(report.contains("2 | local = 1"), "{report}");
+    assert!(report.contains("outer.luau:1"), "{report}");
+    assert!(report.contains("entry.luau:1"), "{report}");
+    vm.reset_decision().unwrap();
+    assert!(vm.diagnostic_source_bytes() > 0);
+    drop(error);
+    assert_eq!(vm.diagnostic_source_bytes(), 0);
+}
+
+#[test]
+fn dependency_syntax_error_obeys_zero_snapshot_budget() {
+    let resolver =
+        ServiceModuleResolver::from_fn(|_, _| Ok(ModuleSource::new("broken", "local = 1")));
+    let mut settings = VmSettings::default();
+    settings.diagnostic_limits.retained_source_bytes = 0;
+    let mut vm = RustiaBuilder::standard()
+        .settings(settings)
+        .module_resolver(resolver)
+        .build()
+        .unwrap();
+    let error = vm.eval::<()>("require('broken')").unwrap_err();
+    assert!(error.diagnostic().unwrap().snapshot.is_none());
+    assert_eq!(vm.diagnostic_source_bytes(), 0);
+}
+
+#[test]
 fn require_resolves_by_host_identity_and_executes_once() {
     assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 2);
     let resolutions = Rc::new(Cell::new(0_u32));
@@ -88,7 +136,7 @@ fn require_passes_nested_referrers_and_caches_empty_results() {
                 "modules/empty.luau",
                 "_G.empty_runs = (_G.empty_runs or 0) + 1",
             )),
-            _ => Err(format!("unknown module {requested}")),
+            _ => Err(rustia::Error::embed(format!("unknown module {requested}"))),
         }
     });
     let mut vm = RustiaBuilder::deterministic()
@@ -125,7 +173,7 @@ fn require_reports_cycles_and_does_not_cache_failures() {
             "#,
         )),
         "b" => Ok(ModuleSource::new("b", r#"return require("a")"#)),
-        _ => Err(format!("unknown module {requested}")),
+        _ => Err(rustia::Error::embed(format!("unknown module {requested}"))),
     });
     let mut vm = RustiaBuilder::deterministic()
         .module_resolver(resolver)
@@ -185,7 +233,7 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
             "expensive",
             "local n = 0; for i = 1, 1000 do n += i end; return n",
         )),
-        _ => Err(format!("unknown module {requested}")),
+        _ => Err(rustia::Error::embed(format!("unknown module {requested}"))),
     });
     let mut vm = RustiaBuilder::standard()
         .module_resolver(resolver.clone())
@@ -213,7 +261,7 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
         .unwrap_err();
     assert!(matches!(
         error,
-        rustia::Error::Vm(ref error)
+        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
             if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 20 })
     ));
 }
@@ -287,7 +335,7 @@ fn module_identity_quota_rejection_is_atomic_and_catchable() {
 #[test]
 fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
     let nondeterministic =
-        ServiceModuleResolver::from_nondeterministic_fn(|_, _| Err("unused".to_owned()));
+        ServiceModuleResolver::from_nondeterministic_fn(|_, _| Err(rustia::Error::embed("unused")));
     let error = RustiaBuilder::deterministic()
         .module_resolver(nondeterministic)
         .build()
@@ -295,7 +343,7 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         .expect("deterministic profile rejection");
     assert!(matches!(
         error,
-        rustia::Error::Vm(ref error)
+        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
             if matches!(
                 error.kind,
                 VmErrorKind::CapabilityRemoved {
@@ -305,7 +353,7 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
             )
     ));
 
-    let deterministic = ServiceModuleResolver::from_fn(|_, _| Err("unused".to_owned()));
+    let deterministic = ServiceModuleResolver::from_fn(|_, _| Err(rustia::Error::embed("unused")));
     let error = RustiaBuilder::deterministic_leaf()
         .memory_limit_bytes(256 * 1024)
         .module_resolver(deterministic)
@@ -314,7 +362,7 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         .expect("hardened leaf rejection");
     assert!(matches!(
         error,
-        rustia::Error::Vm(ref error)
+        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
             if matches!(
                 error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -327,7 +375,11 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         guest_surface: GuestSurface::HardenedLeaf,
         memory_limit_bytes: Some(256 * 1024),
         module_resolver: Some(rustia_vm::ModuleResolver::new(
-            |_, _| Err("unused".to_owned()),
+            |_, _| {
+                Err(rustia_vm::Error::new(rustia_vm::ErrorKind::RuntimeError {
+                    message: "unused".to_owned(),
+                }))
+            },
             true,
         )),
         ..VmSettings::default()
@@ -355,12 +407,12 @@ fn resolver_panics_poison_until_decision_reset() {
     let first = vm.eval::<f64>(r#"return require("probe")"#).unwrap_err();
     assert!(matches!(
         first,
-        rustia::Error::Vm(ref error)
+        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
             if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
         vm.eval::<f64>("return 1").unwrap_err(),
-        rustia::Error::Vm(ref error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
 
     vm.reset_decision().expect("reset poisoned VM");

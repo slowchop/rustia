@@ -60,7 +60,7 @@ impl Value {
         let decision_epoch = vm.decision_epoch();
         vm.retain_value(value)
             .map(|value| Self::new(value, decision_epoch))
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     pub(crate) fn retain_many(vm: &mut Vm, values: &[RawValue]) -> Result<Vec<Self>> {
@@ -72,7 +72,7 @@ impl Value {
                     .map(|value| Self::new(value, decision_epoch))
                     .collect()
             })
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     /// Returns the decision epoch in which this value was retained.
@@ -136,7 +136,10 @@ impl Value {
         C: HostSchema,
     {
         let value = self.raw(rustia.vm(), "value handle")?;
-        rustia.vm_mut().string_value_bytes(value).map_err(Error::Vm)
+        rustia
+            .vm_mut()
+            .string_value_bytes(value)
+            .map_err(Error::from)
     }
 
     /// Copies the current buffer bytes, or returns `None` for another kind.
@@ -145,7 +148,10 @@ impl Value {
         C: HostSchema,
     {
         let value = self.raw(rustia.vm(), "value handle")?;
-        rustia.vm_mut().buffer_value_bytes(value).map_err(Error::Vm)
+        rustia
+            .vm_mut()
+            .buffer_value_bytes(value)
+            .map_err(Error::from)
     }
 
     /// Returns the canonical three-component vector payload, or `None` for another kind.
@@ -157,7 +163,7 @@ impl Value {
         rustia
             .vm_mut()
             .vector_value_components(value)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     /// Deep-copies this value into the small acyclic owned snapshot model.
@@ -220,13 +226,13 @@ impl Value {
         rustia
             .vm_mut()
             .raw_equal_values(lhs, rhs)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     pub(crate) fn raw(&self, vm: &Vm, label: &str) -> Result<RawValue> {
         ensure_current_epoch(label, self.decision_epoch, vm.decision_epoch())?;
         ensure_same_vm(label, &self.value, vm)?;
-        self.value.value(vm).map_err(Error::Vm)
+        self.value.value(vm).map_err(Error::from)
     }
 }
 
@@ -282,7 +288,7 @@ impl Table {
         let value = rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         Value::retain(rustia.vm_mut(), value)
     }
 
@@ -298,7 +304,7 @@ impl Table {
         let value = rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         Value::retain(rustia.vm_mut(), value)
     }
 
@@ -313,7 +319,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     /// Converts an owned key and writes a live value, bypassing `__newindex`.
@@ -335,7 +341,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     /// Converts owned key/value inputs and performs a raw write, bypassing `__newindex`.
@@ -353,7 +359,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     /// Snapshots the current insertion-ordered entries into separately rooted handles.
@@ -369,7 +375,7 @@ impl Table {
         let entries = rustia
             .vm_mut()
             .raw_table_entries_value(table)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         let raw_values = entries
             .into_iter()
             .flat_map(|(key, value)| [key, value])
@@ -390,7 +396,7 @@ pub(crate) fn ensure_current_epoch(
     if handle_epoch == current_epoch {
         return Ok(());
     }
-    Err(Error::Embed(format!(
+    Err(Error::embed(format!(
         "stale {label} from decision epoch {handle_epoch}; current decision epoch is {current_epoch}"
     )))
 }
@@ -399,7 +405,7 @@ pub(crate) fn ensure_same_vm(label: &str, value: &RetainedValue, vm: &Vm) -> Res
     if value.belongs_to(vm) {
         return Ok(());
     }
-    Err(Error::Embed(format!(
+    Err(Error::embed(format!(
         "{label} belongs to a different Rustia VM"
     )))
 }
@@ -416,7 +422,7 @@ fn raw_value_type(value: RawValue) -> Result<ValueType> {
         ValueKind::Buffer => ValueType::Buffer,
         ValueKind::Vector => ValueType::Vector,
         _ => {
-            return Err(Error::Embed(
+            return Err(Error::embed(
                 "unknown VM value kind cannot be represented as a live value".to_owned(),
             ));
         }

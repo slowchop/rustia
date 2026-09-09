@@ -335,7 +335,7 @@ fn quota_failure_rolls_back_installation_and_keeps_the_vm_reusable() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::Vm(ref error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.eval::<i32>("return shared.value").unwrap(), 1);
     assert_eq!(rustia.eval::<i32>("return 40 + 2").unwrap(), 42);
@@ -369,7 +369,7 @@ fn transaction_snapshot_is_quota_checked_before_guest_mutation() {
             .unwrap_err();
         assert!(matches!(
             error,
-            Error::Vm(ref error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+            Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
         ));
         let after = rustia.memory_stats().live_bytes;
         assert!(
@@ -468,7 +468,7 @@ fn global_extension_batches_are_atomic_on_quota_failure() {
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
         error,
-        Error::Vm(ref error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.memory_stats().live_bytes, before_live);
     assert!(matches!(
@@ -495,7 +495,7 @@ fn namespaced_extension_batches_are_atomic_on_quota_failure() {
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
         error,
-        Error::Vm(ref error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.memory_stats().live_bytes, before_live);
     assert!(matches!(

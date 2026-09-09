@@ -176,7 +176,7 @@ impl<C: HostSchema> Rustia<C> {
     {
         self.ensure_healthy()?;
         if self.vm.settings().guest_surface.is_hardened_leaf() {
-            return Err(Error::Vm(
+            return Err(Error::from(
                 VmError::new(VmErrorKind::HardenedLeafViolation {
                     feature: "live function construction",
                 })
@@ -187,7 +187,7 @@ impl<C: HostSchema> Rustia<C> {
         let value = self
             .vm
             .create_retained_function(function)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         Ok(Function::new(value, self.vm.decision_epoch()))
     }
 
@@ -202,12 +202,12 @@ impl<C: HostSchema> Rustia<C> {
         self.ensure_healthy()?;
         let name = name.into();
         if name.is_empty() {
-            return Err(Error::Embed(
+            return Err(Error::embed(
                 "host function name must not be empty".to_owned(),
             ));
         }
         self.vm
             .install_host_function(function.into_definition().into_op(name))
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 }
