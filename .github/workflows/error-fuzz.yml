@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   differential-smoke:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -32,7 +32,7 @@ jobs:
   campaign:
     # Long campaigns require explicit dispatch or a maintainer-applied PR label.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-error-fuzz')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 170
     strategy:
       fail-fast: false
