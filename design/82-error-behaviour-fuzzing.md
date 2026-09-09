@@ -1,7 +1,7 @@
 # Error behaviour and fuzzing
 
-Status: implementation in progress. The first six-target remote campaign is green;
-expanded stateful coverage and the controlled-client rollout still need final acceptance.
+Status: runtime acceptance and both six-target remote campaigns pass. Final
+test-only assertion refinements and controlled-client rollout are in progress.
 
 ## Contract and evidence
 
@@ -39,6 +39,11 @@ replace them with weaker smoke checks.
 - Transactional memory/fuel: existing `typed_invocation.rs` tests
   `deterministic_oom_escapes_pcall_and_discards_the_outer_journal` and
   `fuel_is_shared_and_uncatchable_across_calls_in_one_invocation`.
+  The first checks the caller lane remains empty; the second attempts `pcall`
+  around each fuel-charged host call rather than relying on the test name.
+- Record and yield boundaries: `record_limit_is_hard_even_if_callback_and_guest_try_to_swallow_it`,
+  `resumed_protected_coroutine_cannot_swallow_a_hard_yield_boundary` and
+  `resumed_xpcall_coroutine_cannot_swallow_a_hard_yield_boundary`.
 - Poisoning: existing `host_panic_rolls_back_poisons_and_reset_recovers_bindings`
   and `host_service_panic_rolls_back_records_poisons_and_leaves_reset_usable`.
 - Installation: existing `quota_failure_rolls_back_installation_and_keeps_the_vm_reusable`
@@ -70,9 +75,17 @@ timeouts or differential mismatches.
 | Stateful | 466,534 |
 | Differential | 1,919,974 |
 
+The expanded ten-operation stateful harness also passed in
+[run 34334524153](https://github.com/slowchop/rustia/actions/runs/34334524153),
+revision `347b0af7557535227d7b901713f0e3559c621b02`, with the same durations and
+limits: lexer 27,116,785; parser 23,274,567; compiler 13,843,528; VM 462,119;
+stateful 294,889; differential 2,045,334 executions. All six jobs succeeded,
+without reported crashes, timeouts or mismatches. Subsequent changes only
+strengthen integration-test assertions and documentation; production and fuzz
+sources remain identical to that tested revision.
+
 Execution counts include rejected mutations, not distinct scripts or unique oracle
-comparisons. This revision predates the expanded ten-operation stateful harness;
-that expansion still requires a fresh remote campaign. Campaign artifacts retain
+comparisons. Campaign artifacts retain
 identity, toolchain, seeds, corpus and termination logs for 30 days.
 
 ## Delivery checklist
@@ -88,12 +101,12 @@ rehash, without interning anything before quota admission. The standalone
 cross-profile regression, PUC chain/rehash/rejected-write regressions and the first
 remote campaign pass with the fix.
 
-- [ ] Audit boundary matrix against existing tests and oracle evidence.
+- [x] Audit boundary matrix against existing tests and oracle evidence.
 - [x] Add focused phase, protected-call, coroutine, resource and recovery regressions.
 - [x] Add bounded differential source harness with isolated pinned oracle.
 - [x] Add bounded stateful embedding fuzz target and deterministic smoke corpus.
-- [ ] Run remote 30-minute campaigns per target, then two-hour differential and stateful campaigns.
-- [ ] Minimize confirmed findings; fix and permanently regress each finding.
+- [x] Run remote 30-minute campaigns per target, then two-hour differential and stateful campaigns.
+- [x] Minimize confirmed findings; fix and permanently regress each finding.
 - [ ] Run canonical release preflight and required CI; obtain PR ci-bench evidence separately.
 - [ ] Merge Rustia and update WOTS, civfun and Grabby to the exact merged revision.
 - [ ] Run client regression/full gates and required reviews; merge client PRs.

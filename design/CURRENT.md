@@ -11,8 +11,10 @@ cross-profile failure/recovery regressions, a bounded stateful embedding target,
 and an isolated pinned-Luau differential worker are implemented on the working
 branch. The first confirmed finding fixes quota-limited PUC short-string key
 placement before atom admission. Focused tests, deterministic smoke and the first
-six-target remote campaign pass. Expanded stateful coverage still needs its remote
-campaign; final acceptance and controlled-client rollout remain pending.
+six-target remote campaign pass. The expanded stateful harness also passes its
+complete remote campaign at `347b0af`; release preflight, platform/Node-V8 CI and
+remote benchmark screening pass there. Final test-only refinements and the
+controlled-client rollout remain pending.
 This is not a release-completion or performance claim.
 
 [Human-friendly script diagnostics](79-script-diagnostics.md) merged in
