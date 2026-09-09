@@ -839,7 +839,7 @@ fn fuel_is_shared_and_uncatchable_across_calls_in_one_invocation() {
             r#"
 return {
     once = function(value)
-        expensive_emit(value)
+        pcall(expensive_emit, value)
         return value
     end,
 }
@@ -1786,12 +1786,14 @@ return {
         input: 0,
         slots: vec![],
     };
+    let mut lane = Vec::new();
     let error = rustia
-        .invoke(
+        .invoke_into(
             &mut host,
             InvocationLimits::new(10_000_000)
                 .with_max_records(8)
                 .with_max_record_bytes(128),
+            &mut lane,
             |invocation| {
                 let decide = exports.function_in(invocation, "decide")?;
                 decide.call_in::<_, _, bool>(invocation, ())
@@ -1804,5 +1806,9 @@ return {
             Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
         ),
         "unexpected deterministic OOM error: {error:?}"
+    );
+    assert!(
+        lane.is_empty(),
+        "OOM must not publish earlier staged effects"
     );
 }

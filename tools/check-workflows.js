@@ -136,6 +136,7 @@ const RUNNER_CLASSES = new Map([
 // a file that quietly inherits whatever the loop happens to allow. `null` means
 // the workflow may only use GitHub-hosted runners.
 const WORKFLOW_RUNNER_CLASS = new Map([
+  ["error-fuzz.yml", "general-linux"],
   ["ci.yml", "general-linux"],
   ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],

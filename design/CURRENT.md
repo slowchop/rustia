@@ -6,6 +6,17 @@
 
 ## One-paragraph state
 
+[Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is in progress:
+cross-profile failure/recovery regressions, a bounded stateful embedding target,
+and an isolated pinned-Luau differential worker are implemented on the working
+branch. The first confirmed finding fixes quota-limited PUC short-string key
+placement before atom admission. Focused tests, deterministic smoke and the first
+six-target remote campaign pass. The expanded stateful harness also passes its
+complete remote campaign at `347b0af`; release preflight, platform/Node-V8 CI and
+remote benchmark screening pass there. Final test-only refinements and the
+controlled-client rollout remain pending.
+This is not a release-completion or performance claim.
+
 [Human-friendly script diagnostics](79-script-diagnostics.md) merged in
 [PR #32](https://github.com/slowchop/rustia/pull/32), with host-only source
 snapshots, expression spans, typed errors, bounded reports, and console source

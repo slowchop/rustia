@@ -10,6 +10,9 @@ license = "MIT OR Apache-2.0"
 cargo-fuzz = true
 
 [dependencies]
+mlua = { version = "=0.11.6", default-features = false, features = ["luau"], optional = true }
+luau0-src = { version = "=0.18.3", optional = true }
+rustia = { path = "../crates/rustia", default-features = false }
 libfuzzer-sys = "0.4.13"
 rustia-compiler = { path = "../crates/rustia-compiler" }
 rustia-lexer = { path = "../crates/rustia-lexer" }
@@ -47,3 +50,27 @@ bench = false
 [workspace]
 members = ["."]
 
+[features]
+oracle = ["dep:mlua", "dep:luau0-src"]
+
+[[bin]]
+name = "error-oracle-worker"
+path = "src/bin/error_oracle_worker.rs"
+required-features = ["oracle"]
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stateful"
+path = "fuzz_targets/stateful.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false
