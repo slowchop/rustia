@@ -50,9 +50,24 @@ scheduler, SMT disabled, timed work pinned to one isolated core, and one job on
 the box at a time. It is a timing authority precisely because those properties
 are checked rather than asserted — `tools/run-dedicated-benchmark.js` compares
 the machine's own report against the frozen config before it ships anything,
-including that every pinned core appears in the kernel's isolated set. A pinned
-core the scheduler still uses is the failure this arrangement exists to prevent,
-and it does not show up in the timings.
+including that every pinned core appears in the kernel's isolated set and is
+held at its ceiling. A pinned core the scheduler still uses is the failure this
+arrangement exists to prevent, and it does not show up in the timings.
+
+Neither does a pinned core left on a dynamic frequency governor, and that one
+was measured before it was checked. On an isolated, tickless core nothing
+drives the governor's next decision while a single process runs, so the first
+process after a long idle can run to completion at the floor: the first leg of
+an acceptance run read `dense_tables` at a median of 65,325 ns/unit against
+37,824-39,205 on every other leg of its side (a ratio of 1.68 to the core's
+3.8/2.2 GHz range of 1.73), the next process on the same core ran at full
+speed, and the leg passed every idle and steal gate. The attestation therefore refuses a pinned core
+unless it runs the `performance` governor or has `scaling_min_freq` equal to
+`scaling_max_freq`, and refuses it again when the kernel exposes a boost knob
+for it that is on: the governor holds the ceiling, boost lets the part float
+above it on thermal headroom. The acceptance summary names any leg that sits
+apart from the rest of its side, so the next such event is visible from the
+workflow rather than from a login.
 
 At most one class may be authoritative, so the shared pool cannot be promoted
 later by adding a second. Measurement is reachable from a workflow only through
@@ -91,23 +106,38 @@ dispatch-only, so until the host is configured it fails immediately and costs
 nothing; the alternative, restoring the cloud lane, would reintroduce the ability
 to spend money to work around a one-line host setting.
 
-### Known gap: the A/B acceptance runner
+### Acceptance: two historical commits, eight legs a side
 
-`tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
-`/root/.cargo`, and permanent masking of the host's package timers. Nothing
-executes it any more: no workflow reaches it, and the only remaining caller is
-`validate`, which reads a frozen config and takes no timing. It therefore has not
-been ported, and porting it is the prerequisite for running a full A/B acceptance
-campaign on the owned host rather than a screening comparison. The three runners
-that do execute there — history, matrix, memory — have had those assumptions
-removed and are checked for their absence.
+A full A/B acceptance runs through the same attesting entrypoint as screening:
+`acceptance-bench.yml` dispatches `run-dedicated-benchmark.js accept` with a
+baseline and a candidate, both of which must already be in the checked-out
+history. It measures the pair in eight passes by default (`--passes` takes any
+even count from two to sixteen), A B B A repeated, at the screening
+calibration's repetition count of five a leg, and reads each workload through
+the same hierarchical bootstrap the screening lane uses, against that
+calibration's thresholds. Those thresholds were measured at two legs a side;
+carried to eight they are conservative, which is the right direction for a
+guard. The summary lands in the job's step summary and reports, per workload,
+the delta, the interval, the threshold, the direction, and — because one leg
+can widen an interval across zero on its own — any leg whose median sits more
+than the larger of 5% and three times the workload's threshold from the median
+leg of its side, named by the pass it came from. A side of fewer than three
+legs has no median to stand apart from and is never flagged.
+
+The lane replaced rather than ported the rented-model A/B runner.
+`tools/run-linux-fixed-benchmark.js` still assumes root, `/root/.cargo`, and
+permanent masking of the host's package timers; nothing executes it, and its
+only remaining caller is `validate`, which reads a frozen config and takes no
+timing. It is due for deletion with that caller once the acceptance lane has a
+second campaign behind it.
 
 ### Cost
 
 **Nothing in this repository creates or pays for a cloud instance.** Not on a
 timer, not on a push, not by dispatch, and not by a justfile recipe. Every lane
-— the reconstruction, the per-commit series, pull-request screening, the
-cross-engine matrix and the memory cohort — runs on the owned host, so the cloud
+— the reconstruction, the per-commit series, pull-request screening, A/B
+acceptance, the cross-engine matrix and the memory cohort — runs on the owned
+host, so the cloud
 lifecycle's cost ceilings, ownership journal and deletion gate have nothing left
 to govern and are retired with it.
 

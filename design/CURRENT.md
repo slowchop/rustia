@@ -599,10 +599,12 @@ unreachable suspended-coroutine frames.
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
-   asserted: cores held off the scheduler, SMT disabled, timed work pinned to one isolated core, one job on
-   the box at a time, and every run attested against the frozen config before it builds. Four lanes reach it,
-   all through `tools/run-dedicated-benchmark.js`: the reconstruction (`history`), the per-commit series
-   (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
+   asserted: cores held off the scheduler, SMT disabled, each pinned core held at its ceiling with boost off,
+   timed work pinned to one isolated core, one job on the box at a time, and every run attested against the
+   frozen config before it builds. Six lanes reach it, all through `tools/run-dedicated-benchmark.js`: the
+   reconstruction (`history`), the per-commit series (`main`), pull-request screening (`pr`), the cross-engine
+   matrix (`matrix`), the memory cohort (`memory`), and A/B acceptance of two historical commits (`accept`,
+   eight legs a side).
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
@@ -627,8 +629,9 @@ unreachable suspended-coroutine frames.
    without one would produce numbers that look like measurements and are not. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
    the matrix and memory acceptance rules the owned-host coordinator borrows, is documented as retired, and
-   is invoked by nothing. Not ported: `tools/run-linux-fixed-benchmark.js`, the A/B acceptance runner, which
-   nothing executes — its only caller validates a frozen config without measuring.
+   is invoked by nothing. Superseded rather than ported: `tools/run-linux-fixed-benchmark.js`, the rented-model
+   A/B acceptance runner, which nothing executes — its only caller validates a frozen config without
+   measuring — is replaced by `accept` on the owned host and is due for deletion with that caller.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

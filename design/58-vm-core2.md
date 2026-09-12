@@ -3,7 +3,9 @@
 > **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts were
 > remotely accepted with 8.1651% lower ns/unit; the C2.2 mode-selected whole-function plain tape is
 > implemented, correctness-validated, and remotely accepted with 4.0059% lower `generic_iteration`
-> ns/unit against the receipt baseline.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> ns/unit against the receipt baseline. On the owned host (2026-09-05 to 2026-09-12, three runs agreeing)
+> the tape reads faster on `sparse_tables`, `closures_upvalues` and `stdlib_math_table`, about 4% slower on
+> `generic_iteration`, and about 10% slower on `dense_tables`.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -232,6 +234,58 @@ workload the tape barely touches (about 1% dynamic share), and the accepted
 `generic_iteration` interval is wholly below zero, so the tape slice is
 accepted on its diagnostic workload with the remaining per-workload gates
 deferred to a quieter host window or the next full cross-engine matrix.
+
+#### The tape on the owned host, all five workloads
+
+The deferred per-workload gates were taken on `ci-bench` through the
+acceptance lane (`run-dedicated-benchmark.js accept`;
+[`81`](81-benchmark-operations.md)) three times: 2026-09-05, 2026-09-08 and
+2026-09-12. Each run compared the receipt baseline `84e732a` against candidate
+`141bdaa`, whose only change to `crates/` past the baseline is the tape commit
+`77e0d92`; the seven other commits between them freeze gate configs and
+publish evidence. Eight passes a side in A B B A order, five repetitions a
+leg, on the fixed work the host template pins (`dense_tables` n=2,786,
+`sparse_tables` n=1,449, `closures_upvalues` n=759,888, `generic_iteration`
+n=9,969, `stdlib_math_table` n=107,256), read through the screening lane's
+hierarchical bootstrap against its calibrated thresholds. Deltas are
+candidate against baseline, intervals conservative nominal 95%:
+
+| workload | run 1 | run 2 | run 3 | threshold | reading |
+| --- | --- | --- | --- | --- | --- |
+| `dense_tables` | +10.18% (+8.87..+12.58) | +10.52% (-17.66..+12.76) | +10.28% (+9.39..+13.09) | 1.68% | slower |
+| `sparse_tables` | -5.26% (-7.04..-3.91) | -5.08% (-6.38..-3.01) | -4.95% (-6.27..-3.66) | 1.83% | faster |
+| `closures_upvalues` | -22.73% (-24.69..-15.65) | -22.59% (-23.82..-17.71) | -23.75% (-25.66..-22.03) | 3.88% | faster |
+| `generic_iteration` | +4.15% (+1.93..+5.51) | +4.30% (+3.26..+6.01) | +3.90% (+3.32..+6.26) | 1.61% | slower |
+| `stdlib_math_table` | -8.38% (-10.04..-6.41) | -8.68% (-10.51..-7.07) | -7.38% (-8.27..-6.22) | 2.35% | faster |
+
+Three readings stand out of this:
+
+- `sparse_tables` did not regress. The tape is about 5% faster on it with all
+  three intervals wholly below zero, which closes the question this campaign
+  was opened on. `closures_upvalues` (about 23%) and `stdlib_math_table`
+  (7-9%) are faster by the same standard.
+- `dense_tables` is about 10% slower, in all three runs, and the two sides
+  never overlap leg for leg: baseline legs read 37.6-39.2 thousand ns/unit,
+  candidate legs 42.4-43.4 thousand. The reading is of the whole commit —
+  the tape becoming the plain-mode executor, with the Region suffix map and
+  the per-PC RegisterBlock map retired in the same change — not of the tape
+  in isolation, and the mechanism has not been isolated on a workload the
+  tape barely touches. Run 2's interval spans zero for a reason that is not
+  the change: its first baseline leg read 65,325 because the whole leg ran at
+  the isolated core's 2.2 GHz floor under the `schedutil` governor, and run
+  3's first leg was caught the same way part-way through (median 66,026 over
+  a 38,228 minimum). That is a host event, now attested against
+  ([`81`](81-benchmark-operations.md)), and it does not move the point
+  estimate. The O2 reachability-exact track (§C2.3) is measured against this
+  pair on the same lane next.
+- `generic_iteration` reads about 4% slower here, against the 4.0059% faster
+  DigitalOcean reading above; the refused DigitalOcean `dense_tables` attempt
+  (+0.881%, inconclusive) sits the same way against the 10% here. The two
+  protocols share neither host (an owned Ryzen 3600X core against a shared
+  Intel droplet), fixed work (n=9,969 against 4,000), nor candidate
+  (`141bdaa` against `77e0d92`, which differ only under `bench/`), and neither
+  has been re-run on the other's terms, so the disagreement is recorded, not
+  adjudicated. The owned-host reading is the one the series tracks from here.
 
 ### C2.3 — complete compiler O2 and cleanup liveness (receipts connected; reachability-exact track corpus-green)
 

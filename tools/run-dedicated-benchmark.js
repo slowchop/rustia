@@ -217,7 +217,90 @@ function compareAttestation(declared, observed) {
         `(${observed.isolated_cpus || "none"})`,
     );
   }
+  // A pinned core must also be held at its ceiling. A dynamic governor on an
+  // isolated, tickless core is not merely noisy: with the tick stopped and no
+  // wakeups there is nothing to drive its next decision, so the first process
+  // after a long idle can run to completion at the floor. Measured: the first
+  // leg of an acceptance run read dense_tables at a median of 65,325 ns/unit
+  // against 37,824-39,205 on every other leg of its side -- a ratio of 1.68 to
+  // the core's 3.8/2.2 GHz range of 1.73 -- while the next process on the same
+  // core ran at full speed, and the leg passed every idle and steal gate. The governor
+  // is not the whole policy: boost lets the part float above scaling_max_freq
+  // on thermal headroom, so it must be off wherever the kernel exposes it. A
+  // core with no cpufreq node is not being scaled and needs no policy; a host
+  // that reports nothing at all is refused, as every other attested field is.
+  if (observed.cpufreq === undefined) {
+    problems.push("the host did not report its cpufreq policies");
+    return problems;
+  }
+  let policies;
+  try {
+    policies = parseFrequencyPolicies(observed.cpufreq);
+  } catch (error) {
+    problems.push(`cpufreq: ${error.message}`);
+    return problems;
+  }
+  for (const cpu of declaredPinned) {
+    const policy = policies.get(cpu);
+    if (!policy) continue;
+    if (policy.governor === "unknown" || policy.max_khz === 0) {
+      problems.push(
+        `the cpufreq policy of pinned CPU ${cpu} could not be read ` +
+          `(governor ${policy.governor}, range ${policy.min_khz}-${policy.max_khz} kHz)`,
+      );
+      continue;
+    }
+    if (!heldAtCeiling(policy)) {
+      problems.push(
+        `pinned CPU ${cpu} runs the ${policy.governor} governor over ` +
+          `${policy.min_khz}-${policy.max_khz} kHz; a timed core must be held at its ceiling ` +
+          "(the performance governor, or scaling_min_freq equal to scaling_max_freq)",
+      );
+    }
+    if (policy.boost === "1") {
+      problems.push(
+        `pinned CPU ${cpu} has frequency boost enabled; a timed core must be held at its ` +
+          "ceiling with boost off",
+      );
+    }
+  }
   return problems;
+}
+
+// The attestation script reports every cpufreq policy as
+// `cpu:governor:min_khz:max_khz:boost`, space separated, where boost is the
+// knob the kernel exposes for that core -- acpi-cpufreq's per-core `cpb`, the
+// global `cpufreq/boost`, or intel_pstate's `no_turbo` inverted -- as `1`,
+// `0`, or `none` when there is no such knob.
+function parseFrequencyPolicies(text) {
+  const policies = new Map();
+  for (const entry of String(text).trim().split(/\s+/).filter(Boolean)) {
+    const match = /^([0-9]+):([A-Za-z0-9_-]+):([0-9]+):([0-9]+):(0|1|none)$/.exec(entry);
+    if (!match) throw new Error(`unreadable cpufreq policy ${JSON.stringify(entry)}`);
+    policies.set(Number(match[1]), {
+      governor: match[2],
+      min_khz: Number(match[3]),
+      max_khz: Number(match[4]),
+      boost: match[5],
+    });
+  }
+  return policies;
+}
+
+function heldAtCeiling(policy) {
+  return (
+    policy.governor === "performance" || (policy.min_khz > 0 && policy.min_khz === policy.max_khz)
+  );
+}
+
+// The policies of the pinned cores, keyed by CPU, for the provider evidence.
+function pinnedFrequencyPolicies(pinnedCpus, cpufreq) {
+  const policies = parseFrequencyPolicies(cpufreq ?? "");
+  const pinned = {};
+  for (const cpu of parseCpuList(pinnedCpus)) {
+    pinned[String(cpu)] = policies.get(cpu) ?? null;
+  }
+  return pinned;
 }
 
 /// Where a promoted run lands in the working tree.
@@ -328,7 +411,7 @@ function parseArgs(argv) {
       return null;
     }
   }
-  // --out is shared by the four lanes that write a file; --previous-binary is
+  // --out is shared by the five lanes that write a file; --previous-binary is
   // the per-commit lane's alone.
   if (parsed.out !== undefined && !["main", "pr", "accept", "live-serde", "calibrate"].includes(command)) {
     return null;
@@ -373,6 +456,7 @@ printf 'kernel=%s\\n' "$(uname -r)"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
+printf 'cpufreq=%s\\n' "$(for d in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do [ -d "$d" ] || continue; printf '%s:%s:%s:%s:%s ' "$(basename "$(dirname "$d")" | sed 's/^cpu//')" "$(cat "$d/scaling_governor" 2>/dev/null || echo unknown)" "$(cat "$d/scaling_min_freq" 2>/dev/null || echo 0)" "$(cat "$d/scaling_max_freq" 2>/dev/null || echo 0)" "$(cat "$d/cpb" 2>/dev/null || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || { t=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null) && echo $((1 - t)); } || echo none)"; done)"
 `;
 
 function attestHost(config) {
@@ -407,6 +491,7 @@ function attestHost(config) {
     kernel: observed.kernel,
     cpu_isolation: observed.isolation,
     pinned_cpus: declared.pinned_cpus,
+    pinned_cpu_frequency_policy: pinnedFrequencyPolicies(declared.pinned_cpus, observed.cpufreq),
     node_version: observed.node,
     cargo_version: observed.cargo,
   };
@@ -451,7 +536,7 @@ function promote(runDirectory, config, replace) {
   if (!fs.existsSync(statusFile)) fail("the export contains no status.json");
   const status = JSON.parse(fs.readFileSync(statusFile, "utf8"));
   if (status.status !== "backfill_complete") {
-    fail(`remote run did not complete: ${status.status}${status.reason ? ` (${status.reason})` : ""}`);
+    fail(`remote run did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
   const publicationSource = path.join(runDirectory, "publication/bench/history/backfill.json");
   const evidenceSource = path.join(runDirectory, "evidence/history-backfill");
@@ -658,7 +743,7 @@ function commandMain(options) {
   const extracted = fetchExport(runDirectory);
   const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
   if (status.status !== "backfill_complete") {
-    fail(`remote run did not complete: ${status.status}${status.reason ? ` (${status.reason})` : ""}`);
+    fail(`remote run did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
   const publication = JSON.parse(
     fs.readFileSync(path.join(extracted, "publication/bench/history/backfill.json"), "utf8"),
@@ -1026,7 +1111,7 @@ function runPass(configFile, label, isLocal) {
   const extracted = fetchExport(runDirectory);
   const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
   if (status.status !== "backfill_complete") {
-    fail(`${label} did not complete: ${status.status}${status.reason ? ` (${status.reason})` : ""}`);
+    fail(`${label} did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
   return extracted;
 }
@@ -1591,16 +1676,17 @@ function commandAccept(options) {
   // Pass i measures the pair in AB order when i is even and BA when it is odd,
   // so the session reads A B B A repeated. Each side therefore sits at both an
   // early and a late position within every block of four legs, which is the
-  // arrangement the calibration's straddling split is measured in.
+  // arrangement the calibration's straddling split is measured in. Leg i of
+  // either side is its measurement in pass i.
+  const passLabel = (index) => `p${index}${index % 2 === 0 ? "ab" : "ba"}`;
   const extracted = [];
   for (let index = 0; index < passes; index += 1) {
     const baselineFirst = index % 2 === 0;
-    const order = baselineFirst ? "ab" : "ba";
-    const passLabel = `${label}-p${index}${order}`;
+    const fullLabel = `${label}-${passLabel(index)}`;
     const first = baselineFirst ? baseline : candidate;
     const second = baselineFirst ? candidate : baseline;
     extracted.push(
-      runPass(freezePairConfig(first, second, repetitions, passLabel), passLabel, options.local),
+      runPass(freezePairConfig(first, second, repetitions, fullLabel), fullLabel, options.local),
     );
   }
 
@@ -1637,6 +1723,10 @@ function commandAccept(options) {
     const threshold = screening.workloads[workload].material_threshold_percent;
     const analysis = analyzeWorkload(workload, baselineLegs, candidateLegs, threshold, confidence);
     const direction = analysis.comparison.direction.status;
+    const legMedians = {
+      baseline: baselineLegs.map((file) => legMedian(file, baseline, workload)),
+      candidate: candidateLegs.map((file) => legMedian(file, candidate, workload)),
+    };
     workloads.push({
       workload,
       delta_percent: analysis.comparison.candidate_delta_percent,
@@ -1646,6 +1736,11 @@ function commandAccept(options) {
       verdict: analysis.comparison.verdict.status,
       reading:
         direction === "faster" ? "faster" : direction === "slower" ? "slower" : "no change measured",
+      leg_medians_ns_per_unit: legMedians,
+      outlier_legs: outlierLegs(legMedians, threshold).map((leg) => ({
+        ...leg,
+        pass: passLabel(leg.leg),
+      })),
     });
   }
 
@@ -1707,7 +1802,75 @@ function acceptanceSummary(result) {
         `${entry.threshold_percent.toFixed(2)}% | ${entry.reading} |`,
     );
   }
+  const outliers = result.workloads.flatMap((entry) =>
+    (entry.outlier_legs ?? []).map((leg) => ({ workload: entry.workload, ...leg })),
+  );
+  if (outliers.length > 0) {
+    lines.push("");
+    lines.push(
+      "Legs that sit apart from the rest of their side. The interval above carries each of them; " +
+        "a leg this far out is a host event, not a reading of the change, and the run should be repeated.",
+    );
+    lines.push("");
+    for (const leg of outliers) {
+      const sign = leg.deviation_percent >= 0 ? "above" : "below";
+      lines.push(
+        `- \`${leg.workload}\` ${leg.side} in pass ${leg.pass} read ` +
+          `${leg.median_ns_per_unit.toFixed(2)} ns/unit, ` +
+          `${Math.abs(leg.deviation_percent).toFixed(1)}% ${sign} that side's median leg ` +
+          `(${leg.side_median_ns_per_unit.toFixed(2)}).`,
+      );
+    }
+  }
   return `${lines.join("\n")}\n`;
+}
+
+// One leg's harness median for one commit and workload, read from the raw
+// sidecar the analyzer consumes so the figure quoted is the figure analyzed.
+function legMedian(file, commit, workload) {
+  const sidecar = JSON.parse(fs.readFileSync(file, "utf8"));
+  const measurement = (Array.isArray(sidecar.measurements) ? sidecar.measurements : []).find(
+    (entry) => entry.commit === commit && entry.workload === workload,
+  );
+  if (!measurement || !Number.isFinite(measurement.ns_per_unit_median)) {
+    fail(`${path.relative(STATE_ROOT, file)} carries no ${workload} median for ${commit.slice(0, 8)}`);
+  }
+  return measurement.ns_per_unit_median;
+}
+
+function medianOf(values) {
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 === 1 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2;
+}
+
+// A leg whose median sits further from its side's median leg than the wider
+// of 5% and three thresholds. The hierarchical bootstrap resamples legs, so
+// one such leg can widen an interval across zero on its own: the acceptance
+// run that motivated this reported dense_tables at +10.52% as "no change
+// measured" because one of sixteen legs read 69% high. The verdict stays the
+// analyzer's; this only makes the cause visible from the summary.
+function outlierLegs(legMedians, thresholdPercent) {
+  const limit = Math.max(5, 3 * thresholdPercent);
+  const flagged = [];
+  for (const side of ["baseline", "candidate"]) {
+    const medians = legMedians[side];
+    if (medians.length < 3) continue;
+    const sideMedian = medianOf(medians);
+    medians.forEach((median, leg) => {
+      const deviation = ((median - sideMedian) / sideMedian) * 100;
+      if (Math.abs(deviation) > limit) {
+        flagged.push({
+          side,
+          leg,
+          median_ns_per_unit: median,
+          side_median_ns_per_unit: sideMedian,
+          deviation_percent: deviation,
+        });
+      }
+    });
+  }
+  return flagged;
 }
 
 // An acceptance run measures history, so both sides must be reachable from the
@@ -1767,6 +1930,7 @@ function selfTest() {
     logical_cpus: 6,
     smt: "off",
     isolated_cpus: "4-5",
+    cpufreq: "0:schedutil:2200000:3800000:0 4:performance:3800000:3800000:0 5:performance:3800000:3800000:0",
   };
   assert.deepEqual(compareAttestation(declared, good), []);
   // /proc/cpuinfo's trailing marketing text must not read as a different chip.
@@ -1793,6 +1957,76 @@ function selfTest() {
   // SMT so the kernel cannot control it. Accepted, because logical_cpus ===
   // physical_cores is what establishes SMT is off.
   assert.deepEqual(compareAttestation(declared, { ...good, smt: "notsupported" }), []);
+  // A pinned core must be held at its ceiling with boost off. The floor-speed
+  // first leg this catches passed every idle and steal gate, so nothing else
+  // would.
+  const dynamic =
+    "0:schedutil:2200000:3800000:0 4:schedutil:2200000:3800000:0 5:schedutil:2200000:3800000:0";
+  assert.match(
+    compareAttestation(declared, { ...good, cpufreq: dynamic }).join("|"),
+    /pinned CPU 4 runs the schedutil governor over 2200000-3800000 kHz/,
+  );
+  assert.deepEqual(
+    compareAttestation(declared, {
+      ...good,
+      cpufreq: "0:schedutil:2200000:3800000:0 4:performance:2200000:3800000:0",
+    }),
+    [],
+    "the performance governor holds the ceiling whatever the range says",
+  );
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, cpufreq: "4:userspace:3800000:3800000:none" }),
+    [],
+    "a pinned range is one frequency under any governor, and no boost knob is boost off",
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, cpufreq: "4:performance:3800000:3800000:1" }).join("|"),
+    /pinned CPU 4 has frequency boost enabled/,
+  );
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, cpufreq: "" }),
+    [],
+    "no cpufreq node means the kernel is not scaling the core",
+  );
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, cpufreq: "0:schedutil:2200000:3800000:1" }),
+    [],
+    "an unpinned core may scale and boost",
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, cpufreq: undefined }).join("|"),
+    /did not report its cpufreq policies/,
+    "a missing report fails closed like every other attested field",
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, cpufreq: "4:unknown:0:0:none" }).join("|"),
+    /cpufreq policy of pinned CPU 4 could not be read/,
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, cpufreq: "4:schedutil:2200000:3800000" }).join("|"),
+    /unreadable cpufreq policy/,
+  );
+  assert.deepEqual(pinnedFrequencyPolicies("4", "4:performance:3800000:3800000:0"), {
+    4: { governor: "performance", min_khz: 3800000, max_khz: 3800000, boost: "0" },
+  });
+  assert.deepEqual(pinnedFrequencyPolicies("4", ""), { 4: null });
+
+  // One leg 69% out is flagged; ordinary spread is not; two legs cannot say
+  // which of them is apart; three thresholds applies once wider than 5%.
+  const steady = [42284, 42364, 42594, 42697];
+  assert.deepEqual(
+    outlierLegs({ baseline: [38337, 38381, 38708, 65066], candidate: steady }, 1.68).map((leg) => [
+      leg.side,
+      leg.leg,
+    ]),
+    [["baseline", 3]],
+  );
+  assert.deepEqual(outlierLegs({ baseline: [38337, 38381, 38708, 38941], candidate: steady }, 1.68), []);
+  assert.deepEqual(outlierLegs({ baseline: [38000, 65000], candidate: [42000, 42500] }, 1.68), []);
+  assert.equal(outlierLegs({ baseline: [100, 100, 100, 112], candidate: [100, 100, 100] }, 3.88).length, 1);
+  assert.equal(outlierLegs({ baseline: [100, 100, 100, 111], candidate: [100, 100, 100] }, 3.88).length, 0);
+  assert.equal(medianOf([3, 1, 2]), 2);
+  assert.equal(medianOf([4, 1, 3, 2]), 2.5);
 
   const harness = "a".repeat(40);
   const paths = promotionPaths(harness);
