@@ -57,6 +57,14 @@ const FULL_COMMIT = /^[0-9a-f]{40}$/;
 // acceptance interval; it is even so that A B B A stays balanced.
 const DEFAULT_ACCEPTANCE_PASSES = 8;
 
+// Free space the host must have under $HOME before a run may start. The lanes'
+// working roots and the runner's own work directory all live there, and on
+// 2026-09-06 a filled disk failed the weekly matrix before this script ran,
+// as a runner-level error that named no cause. This is a floor that catches
+// that failure, not a measurement of what a build needs; a run that
+// legitimately needs more should raise it with the figure it observed.
+const MINIMUM_FREE_GIB = 20;
+
 // A non-interactive ssh session does not read the login profile, so neither
 // rustup's nor a home-directory node install is on PATH by default. Both are
 // user-local by design (nothing on this host needs root), so the coordinator
@@ -193,6 +201,16 @@ function compareAttestation(declared, observed) {
   // rejects a machine that reports SMT explicitly switched on.
   if (observed.smt !== "off" && observed.smt !== "notsupported") {
     problems.push(`SMT must be off, host reports ${JSON.stringify(observed.smt)}`);
+  }
+  // Checked here rather than left to the build: a disk that fills mid-run
+  // wastes the whole measurement, and the error it produces names the
+  // symptom, not the cause.
+  const freeKib = Number(observed.free_kib);
+  if (!Number.isFinite(freeKib) || freeKib < MINIMUM_FREE_GIB * 1024 * 1024) {
+    const reported = Number.isFinite(freeKib) ? `${(freeKib / 1024 / 1024).toFixed(1)} GiB` : "unknown";
+    problems.push(
+      `free space: at least ${MINIMUM_FREE_GIB} GiB needed under $HOME, host reports ${reported}`,
+    );
   }
   let declaredPinned;
   try {
@@ -370,6 +388,7 @@ printf 'logical_cpus=%s\\n' "$(nproc --all)"
 printf 'smt=%s\\n' "$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
 printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
 printf 'kernel=%s\\n' "$(uname -r)"
+printf 'free_kib=%s\\n' "$(df -Pk "$HOME" | awk 'NR==2{print $4}')"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
@@ -383,6 +402,7 @@ function attestHost(config) {
     if (at > 0) observed[line.slice(0, at)] = line.slice(at + 1).trim();
   }
   observed.logical_cpus = Number(observed.logical_cpus);
+  observed.free_kib = Number(observed.free_kib);
   const declared = config.provider.host;
   const problems = compareAttestation(declared, observed);
   if (observed.node === "missing") {
@@ -405,6 +425,7 @@ function attestHost(config) {
     smt: observed.smt,
     isolated_cpus: observed.isolated_cpus,
     kernel: observed.kernel,
+    free_gib: Number((observed.free_kib / 1024 / 1024).toFixed(1)),
     cpu_isolation: observed.isolation,
     pinned_cpus: declared.pinned_cpus,
     node_version: observed.node,
@@ -514,6 +535,7 @@ function commandPlan(options) {
     `config     ${path.relative(REPO, configFile)}\n` +
       `host       ${provider.host} (${provider.cpu_model}, ${provider.logical_cpus} CPUs, SMT ${provider.smt})\n` +
       `isolation  ${provider.cpu_isolation || "none"}\n` +
+      `free       ${provider.free_gib} GiB under $HOME (floor ${MINIMUM_FREE_GIB})\n` +
       `pinned     CPU ${config.host_gate.benchmark_cpu} of ${provider.pinned_cpus}\n` +
       `revisions  ${config.source.target_commits.length}\n` +
       `repairs    ${config.source.source_modifications.length}\n` +
@@ -1767,8 +1789,24 @@ function selfTest() {
     logical_cpus: 6,
     smt: "off",
     isolated_cpus: "4-5",
+    free_kib: 64 * 1024 * 1024,
   };
   assert.deepEqual(compareAttestation(declared, good), []);
+  // The floor is inclusive, and a host that cannot report its free space is
+  // refused rather than assumed fine: the filled-disk failure this guards
+  // against never reached this script, so silence is not evidence.
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, free_kib: MINIMUM_FREE_GIB * 1024 * 1024 }),
+    [],
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, free_kib: MINIMUM_FREE_GIB * 1024 * 1024 - 1 }).join("|"),
+    /free space: at least \d+ GiB needed under \$HOME, host reports \d+\.\d GiB/,
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, free_kib: Number.NaN }).join("|"),
+    /free space: .* host reports unknown/,
+  );
   // /proc/cpuinfo's trailing marketing text must not read as a different chip.
   assert.deepEqual(
     compareAttestation(declared, { ...good, cpu_model: "AMD Ryzen 5 3600X 6-Core Processor" }),
