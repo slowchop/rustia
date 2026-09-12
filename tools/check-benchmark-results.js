@@ -11,6 +11,7 @@ const historyPath = path.join(root, "bench", "history", "runs.jsonl");
 const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
 const expectedClaims = path.join(root, "bench", "CLAIMS.md");
+const operationsStatusPath = path.join(root, "bench", "operations-status.json");
 const dedicatedLinuxTarget = "linux-x86_64";
 // Cohorts whose rows must retain the extended harness provenance (prepare /
 // first-call / cold-start timings and verified mlua-luau native-JIT identity).
@@ -435,7 +436,78 @@ function validateDedicatedLinuxMatrix() {
   }
 }
 
+// The one machine the operations policy qualifies as a timing authority. Read
+// rather than restated, so this check and the published dashboard can never
+// disagree about which machine is allowed to produce a number.
+function authoritativeHost() {
+  const status = JSON.parse(read(operationsStatusPath));
+  const classes = Object.entries(status.runner_classes ?? {}).filter(
+    ([, runner]) => runner?.timing_authority === true,
+  );
+  if (classes.length !== 1) {
+    fail(
+      `${relative(operationsStatusPath)} must declare exactly one timing-authoritative runner class, ` +
+      `got ${classes.length}`,
+    );
+  }
+  const [name, runner] = classes[0];
+  if (typeof runner.host !== "string" || runner.host === "") {
+    fail(`${relative(operationsStatusPath)} runner class ${name} is a timing authority but names no host`);
+  }
+  return runner.host;
+}
+
+// Provenance, per row and for the table as a whole.
+//
+// bench/current-results.json is a per-slot merge -- the latest row per (target,
+// engine, workload) across every cohort in the history. A run that re-measures
+// only some slots therefore leaves the rest standing, and before rows named
+// their machine that is exactly what happened: a table announced one machine in
+// its metadata while most of its rows had been measured on a rented cloud host
+// six weeks earlier, and only the per-row commit revealed it. A comparison
+// between two machines is not a comparison between two engines, so the table
+// must come from one machine, and that machine must be the one the operations
+// policy qualifies to produce timings.
+function validateMeasurementHosts() {
+  const expectedHost = authoritativeHost();
+  for (const [index, row] of readHistory().entries()) {
+    if (typeof row.host !== "string" || row.host === "") {
+      fail(
+        `${relative(historyPath)} line ${index + 1} does not name the machine it was measured on; ` +
+        "a row that cannot say where it came from can outlive the machine that produced it",
+      );
+    }
+  }
+
+  const table = JSON.parse(read(expectedJson));
+  const rows = Array.isArray(table.rows) ? table.rows : fail(`${relative(expectedJson)}.rows must be an array`);
+  const hosts = [...new Set(rows.map((row) => row.host))].sort();
+  if (hosts.length !== 1 || typeof hosts[0] !== "string" || hosts[0] === "") {
+    const byHost = hosts.map(
+      (host) =>
+        `${host ?? "unnamed"}: ${[...new Set(rows.filter((row) => row.host === host).map((row) => row.engine))].sort().join(", ")}`,
+    );
+    fail(
+      `${relative(expectedJson)} publishes rows measured on ${hosts.length} machines (${byHost.join("; ")}); ` +
+      "a published table is one machine, so re-measure the stale slots or retire their rows",
+    );
+  }
+  if (hosts[0] !== expectedHost) {
+    fail(
+      `${relative(expectedJson)} was measured on ${JSON.stringify(hosts[0])}, but ` +
+      `${relative(operationsStatusPath)} qualifies ${JSON.stringify(expectedHost)} as the timing authority`,
+    );
+  }
+  if (JSON.stringify(table.metadata?.hosts) !== JSON.stringify(hosts)) {
+    fail(
+      `${relative(expectedJson)}.metadata.hosts is ${JSON.stringify(table.metadata?.hosts)}, ` +
+      `but its rows were measured on ${JSON.stringify(hosts)}`,
+    );
+  }
+}
+
 validateDedicatedLinuxMatrix();
+validateMeasurementHosts();
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-bench-results-"));
 try {

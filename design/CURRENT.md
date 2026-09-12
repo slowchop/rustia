@@ -587,7 +587,14 @@ unreachable suspended-coroutine frames.
    reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
    the ratio ranges 0.71x to 1.86x by engine, so absolute nanoseconds do not carry across the change while
-   the published same-run ratios do. Nothing in this repository can start a billed instance, on a timer or
+   the published same-run ratios do. Every emitted row now names its machine in a `host` field
+   — provenance published in row data, never an address — and the single-host rule is mechanical: the
+   acceptance rules recompute the expected label from the frozen config, and `tools/check-benchmark-results.js`,
+   `tools/merge-rustia-ci-memory-data.js`, `bench/publish-memory-analysis.js` and the renderer each refuse a
+   table whose rows disagree rather than labelling the mix, because every figure on that page is a ratio
+   between two rows. That closes the way the memory table silently mixed hosts on 2026-09-05, when a
+   rustia-only refresh left 99 six-week-old cloud rows beside 11 new ones under metadata naming one host
+   (`81-benchmark-operations.md`, "Row provenance"). Nothing in this repository can start a billed instance, on a timer or
    otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
    because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:

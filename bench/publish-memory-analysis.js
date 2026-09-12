@@ -75,9 +75,19 @@ function validateAnalysis(analysis, config) {
   for (const row of analysis.rows) {
     if (row.commit !== config.commit) fail("analysis contains a different commit");
     if (typeof row.target !== "string" || row.target === "") fail("analysis row target is missing");
+    if (typeof row.host !== "string" || row.host === "") fail("analysis row host is missing");
     if (row.classification === "detector_failed") {
       fail(`${row.engine}/${row.workload} failed the intentional-retention detector`);
     }
+  }
+  // One cohort is one run on one machine. Two hosts here means the analysis was
+  // assembled from separate runs, and the memory table would inherit the mix.
+  const hosts = [...new Set(analysis.rows.map((row) => row.host))].sort();
+  if (hosts.length !== 1) {
+    fail(`analysis rows name ${hosts.length} hosts (${hosts.join(", ")}); a cohort is one machine`);
+  }
+  if (analysis.host !== hosts[0]) {
+    fail(`analysis names host ${JSON.stringify(analysis.host)} but its rows name ${JSON.stringify(hosts[0])}`);
   }
   const identities = new Set(
     analysis.rows.map((row) =>
@@ -122,6 +132,7 @@ function publish(config) {
     fail(`memory history already contains cohort ${config.cohortId}`);
   }
   const targets = [...new Set(analysis.rows.map((row) => row.target))].sort();
+  const host = analysis.rows[0].host;
   const engines = [...new Set(analysis.rows.map((row) => row.engine))].sort();
   const workloads = [...new Set(analysis.rows.map((row) => row.workload))].sort();
   const cohort = {
@@ -130,6 +141,7 @@ function publish(config) {
     cohort_id: config.cohortId,
     created_at: new Date().toISOString(),
     commit: config.commit,
+    host,
     evidence: config.evidence,
     analysis_sha256: sha256File(config.analysis),
     raw_sample_count: analysis.raw_sample_count,
@@ -148,6 +160,7 @@ function publish(config) {
       description: "Latest coherent dedicated-Linux cross-engine memory cohort.",
       cohort_id: config.cohortId,
       commit: config.commit,
+      host,
       evidence: config.evidence,
       history: path.relative(path.dirname(config.current), config.history),
       targets,
@@ -183,11 +196,13 @@ function selfTest() {
       schema_version: 1,
       schema: ANALYSIS_SCHEMA,
       raw_sample_count: 9,
+      host: "fixture-host",
       method: { fixture: true },
       detector_coverage: [{ engine: "rustia", detector_validated: true }],
       rows: [{
         commit,
         target: "linux-x86_64",
+        host: "fixture-host",
         engine: "rustia",
         execution_mode: "interpreter",
         workload: "memory_churn",
@@ -206,6 +221,32 @@ function selfTest() {
     });
     if (current.status !== "ready" || parseHistory(historyPath).length !== 1) {
       fail("publish self-test produced the wrong artifacts");
+    }
+    if (current.metadata.host !== "fixture-host") fail("publication did not record its host");
+    const analysis = JSON.parse(fs.readFileSync(analysisPath, "utf8"));
+    // A row that cannot name its machine, and a cohort assembled from two, are
+    // both refused -- the memory table is per-slot merged across cohorts, so an
+    // unlabelled row here is a row that can outlive the machine it came from.
+    for (const rows of [
+      [{ ...analysis.rows[0], host: undefined }],
+      [analysis.rows[0], { ...analysis.rows[0], workload: "memory_burst", host: "other-host" }],
+    ]) {
+      const strayPath = path.join(temporary, `stray-${rows.length}.json`);
+      fs.writeFileSync(strayPath, `${JSON.stringify({ ...analysis, rows })}\n`);
+      let refused = false;
+      try {
+        publish({
+          analysis: strayPath,
+          cohortId: "stray",
+          evidence: "bench/memory/raw/stray",
+          history: path.join(temporary, "stray-runs.jsonl"),
+          current: path.join(temporary, "stray-current.json"),
+          commit,
+        });
+      } catch (_) {
+        refused = true;
+      }
+      if (!refused) fail("publication accepted memory rows that disagree about their host");
     }
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });

@@ -86,6 +86,13 @@ function validateCurrent(current, label, rustiaOnly) {
   if (rustiaOnly && current.rows.some((row) => row.engine !== "rustia")) {
     fail(`${label} must contain only Rustia rows`);
   }
+  const unlabelled = current.rows.filter((row) => typeof row.host !== "string" || row.host === "");
+  if (unlabelled.length !== 0) {
+    fail(
+      `${label} has ${unlabelled.length} row(s) that do not name the machine they were measured on; ` +
+      "a row that cannot say where it came from cannot be merged with one that can",
+    );
+  }
 }
 
 function merge(config) {
@@ -123,6 +130,24 @@ function merge(config) {
       left.workload.localeCompare(right.workload) ||
       left.engine.localeCompare(right.engine),
   );
+  // This merge is per-engine: a Rustia-only run replaces the Rustia rows and
+  // keeps every competitor row standing. That is how a table came to hold six
+  // weeks of rented-cloud competitor rows under metadata announcing the owned
+  // host -- the mix was invisible because no row said where it came from. Now
+  // they do, so the merge stops rather than publishing a table whose rows were
+  // measured on different machines. The way forward is to re-measure the
+  // retained engines on the same machine, or to retire their rows; it is not to
+  // publish a comparison between two boxes as though it were one.
+  const hosts = [...new Set(rows.map((row) => row.host))].sort();
+  if (hosts.length !== 1) {
+    const byHost = hosts.map(
+      (host) => `${host}: ${[...new Set(rows.filter((row) => row.host === host).map((row) => row.engine))].sort().join(", ")}`,
+    );
+    fail(
+      `merging would publish a memory table measured on ${hosts.length} machines ` +
+      `(${byHost.join("; ")}); re-measure the retained engines on ${generated.rows[0].host} or retire their rows`,
+    );
+  }
   const detectorCoverage = [
     ...(existingCurrent?.detector_coverage ?? []).filter((entry) => entry.engine !== "rustia"),
     ...generated.detector_coverage,
@@ -141,6 +166,7 @@ function merge(config) {
       description: "Latest compatible dedicated-Linux memory rows by engine; Rustia is refreshed by successful main CI.",
       history: "history/runs.jsonl",
       targets: [...new Set(rows.map((row) => row.target))].sort(),
+      hosts,
       engines: [...new Set(rows.map((row) => row.engine))].sort(),
       workloads: [...new Set(rows.map((row) => row.workload))].sort(),
       row_count: rows.length,
@@ -173,9 +199,10 @@ function selfTest() {
     const currentPath = path.join(dataRoot, "bench", "memory", "current-results.json");
     const historyPath = path.join(dataRoot, "bench", "memory", "history", "runs.jsonl");
     const metric = { sample_count: 9, median: 16 };
-    const row = (engine, commit) => ({
+    const row = (engine, commit, host = "ci-bench") => ({
       commit,
       target: "linux-x86_64",
+      host,
       engine,
       workload: "dense_tables",
       metrics: { peak_delta_kib: metric },
@@ -224,6 +251,28 @@ function selfTest() {
     ) {
       fail("self-test did not preserve competitors or idempotent history");
     }
+    if (JSON.stringify(current.metadata.hosts) !== JSON.stringify(["ci-bench"])) {
+      fail("self-test did not record the machine behind the merged table");
+    }
+
+    // The defect this merge produced once: a Rustia-only run refreshes the
+    // Rustia rows and every competitor row stays, so a table can end up holding
+    // rows from two machines under metadata naming only one. It must now stop.
+    writeAtomic(currentPath, `${JSON.stringify({
+      schema_version: 1,
+      schema: CURRENT_SCHEMA,
+      status: "ready",
+      metadata: { cohort_id: "baseline" },
+      detector_coverage: [{ engine: "mlua-luau-jit" }],
+      rows: [row("mlua-luau-jit", "a".repeat(40), "a-retired-rental")],
+    })}\n`);
+    let refused = false;
+    try {
+      merge({ generatedCurrent, generatedHistory, dataRoot });
+    } catch (error) {
+      refused = /2 machines/.test(error.message);
+    }
+    if (!refused) fail("self-test merged competitor rows measured on a different machine");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

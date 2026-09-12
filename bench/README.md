@@ -784,6 +784,7 @@ Each line in `history/runs.jsonl` is a JSON object:
   "timestamp_unix": 0,
   "commit": "8c0211d",
   "target": "linux-x86_64",
+  "host": "ci-bench",
   "engine": "rustia",
   "dialect": "luau",
   "workload": "dense_tables",
@@ -807,6 +808,30 @@ Each line in `history/runs.jsonl` is a JSON object:
   "native_verification_ratio": null
 }
 ```
+
+`host` names the machine the row was measured on. It is provenance published in
+row data and nothing more: no tool resolves it, connects to it, or derives an
+address from it. Runners pass it as `--host`, derived from the frozen config, so
+a row cannot claim a machine the run was not qualified for.
+
+The field exists because `current-results.json` and `memory/current-results.json`
+are per-slot merges — the newest row per target, engine, and workload across
+every cohort in history — so a partial re-measurement refreshes the slots it
+covered and leaves the others in place. Once those others came from a different
+machine, the table was a mix and nothing said so. A published table is therefore
+required to be one machine's readings: `current-results.json` carries
+`metadata.hosts`, `tools/check-benchmark-results.js` requires that list to hold
+exactly the one host its rows name and to match the qualified timing authority in
+`operations-status.json`, and `render-current-results.js` refuses to render a
+table whose rows disagree rather than labelling the mix — every figure on the
+page is a ratio between two rows, and an annotated cross-host ratio is still a
+wrong number. The era charts already draw separate hosts on separate scales,
+which is the honest presentation when the machine genuinely changes.
+
+Rows written before the field existed do not carry it, and the harness reads it
+as optional for that reason: the absence means "measured before hosts were
+recorded", not "measured somewhere unnamed". A row that carries the key must
+carry a non-empty value. The committed history names a host on every row.
 
 The future website should treat the versioned JSONL snapshot as the summary
 source of truth and generate charts from `engine × target × workload`

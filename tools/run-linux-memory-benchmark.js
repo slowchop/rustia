@@ -47,6 +47,11 @@ function integer(value, label, minimum = 0) {
   return value;
 }
 
+function string(value, label) {
+  if (typeof value !== "string" || value.length === 0) fail(`${label} must be a non-empty string`);
+  return value;
+}
+
 function exactKeys(value, expected, label) {
   const actual = Object.keys(object(value, label)).sort();
   if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) fail(`${label} has unexpected keys`);
@@ -134,6 +139,13 @@ function validateConfig(config) {
         fail(`host_gate.${field} ${cpu} is not one of provider.host.pinned_cpus (${pinned.join(",")})`);
       }
     }
+  } else {
+    // Both feed hostLabel. Unvalidated they would produce
+    // "linode-undefined-undefined": a provenance label that looks like one and
+    // identifies nothing.
+    const provider = object(config.provider, "provider");
+    string(provider.region, "provider.region");
+    string(object(provider.size, "provider.size").id, "provider.size.id");
   }
   const source = object(config.source, "source");
   exactKeys(source, ["benchmark_commit", "expected_sha256"], "source");
@@ -355,6 +367,22 @@ async function waitForQuiet(config) {
   fail("memory cohort did not obtain a quiet pre-run host window");
 }
 
+// The machine a memory row was measured on, as a label the row carries into
+// published data. The owned host has a name; a rented instance is created and
+// destroyed per run and has none, so the honest label there is the class of
+// machine the frozen config bought. The two lifecycles produce different
+// strings, which is the point: rows from both can no longer merge into one
+// published table without the data saying so.
+//
+// Deliberately duplicated in each on-host runner rather than shared. Only the
+// single runner file is copied to the benchmark host (see shipAndRun in
+// run-dedicated-benchmark.js), so requiring a sibling module would resolve on a
+// developer machine and fail on the host.
+function hostLabel(config) {
+  if (config.schema === DEDICATED_SCHEMA) return config.provider.host.name;
+  return `linode-${config.provider.region}-${config.provider.size.id}`;
+}
+
 function memoryProtocol(config) {
   const measurement = config.measurement;
   return {
@@ -366,6 +394,7 @@ function memoryProtocol(config) {
     bootstrap_seed: measurement.bootstrap_seed,
     growth_thresholds: measurement.growth_thresholds,
     host: {
+      name: hostLabel(config),
       benchmark_cpu: config.host_gate.benchmark_cpu,
       supervisor_cpu: config.host_gate.supervisor_cpu,
       sample_interval_ms: measurement.sample_interval_ms,
@@ -591,6 +620,8 @@ function selfTest() {
     steal_percent: 0,
   });
   const config = {
+    schema: DEDICATED_SCHEMA,
+    provider: { host: { name: "fixture-host" } },
     source: { benchmark_commit: "a".repeat(40) },
     measurement: {
       cohort_id: "fixture",
@@ -605,6 +636,7 @@ function selfTest() {
     host_gate: { benchmark_cpu: 3, supervisor_cpu: 2 },
   };
   assert.equal(memoryProtocol(config).host.benchmark_cpu, 3);
+  assert.equal(memoryProtocol(config).host.name, "fixture-host");
   // The load-bearing link: what the freezer writes is what this runner accepts,
   // for both lifecycles, asserted against the freezer's own functions rather
   // than a fixture that resembles their output.
@@ -623,6 +655,15 @@ function selfTest() {
   const pinnedCpus = parseCpuList(dedicated.provider.host.pinned_cpus);
   assert(pinnedCpus.includes(dedicated.host_gate.benchmark_cpu));
   assert(pinnedCpus.includes(dedicated.host_gate.supervisor_cpu));
+
+  // Every memory row carries the machine it was measured on, and the two
+  // lifecycles label differently -- a rented instance has no name, only a
+  // class -- so rows from both can never merge into one table unnoticed.
+  assert.equal(hostLabel(dedicated), "ci-bench");
+  assert.equal(hostLabel(rented), "linode-ap-southeast-g6-dedicated-4");
+  assert.notEqual(hostLabel(rented), hostLabel(dedicated));
+  assert.equal(memoryProtocol(dedicated).host.name, "ci-bench");
+  assert.equal(memoryProtocol(rented).host.name, hostLabel(rented));
   // A core outside the pinned set must be refused.
   assert.throws(
     () =>

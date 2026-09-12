@@ -117,6 +117,70 @@ borrows them rather than carrying a second copy that agrees until one is edited.
 It is documented as retired at the top of the file, nothing invokes it, and it
 goes when those rules move to a shared module.
 
+## Row provenance
+
+Every measurement row names the machine that produced it, in a `host` field
+carried from the runner through the harness into `history/runs.jsonl` and on
+into the published tables. The label is provenance published in row data and
+nothing else: no tool resolves it, connects to it, or derives an address from
+it. An owned machine's label is the name in its frozen config; a rented
+instance had no stable identity to name, so its honest label is its machine
+class (`linode-<region>-<size.id>`). The two are different strings, which is
+the property that matters.
+
+The rule the field enforces is that **a published table is one machine's
+readings**. Both `bench/current-results.json` and
+`bench/memory/current-results.json` are per-slot merges — newest row per
+(target, engine, workload) across every cohort in their history — so a partial
+re-measurement refreshes the slots it covered and silently leaves the rest as
+they were. On 2026-09-05 a rustia-only memory run did exactly that: 11 rows
+moved to the owned host, 99 competitor rows stayed on a rented instance
+measured six weeks earlier, and the metadata named the owned host for all 110. Only `row.commit` revealed the split. Every figure
+on that page is a ratio between two rows, so this was not a labelling gap; it
+was wrong numbers that looked measured.
+
+The field is therefore asserted at each point a row can move, and each
+assertion is a refusal:
+
+- **Emission.** The on-host runners derive the label from the frozen config and
+  pass it as `--host`; the memory analyzer requires `--host` with no default,
+  because a default would be a guess published as provenance.
+- **Acceptance.** `tools/run-linode-benchmark.js` — the shared matrix and
+  memory acceptance rules — recomputes the expected label from the config and
+  rejects rows that name anything else, so validation restates the label rather
+  than trusting the runner's copy of it.
+- **Publication.** `bench/publish-memory-analysis.js` refuses an analysis whose
+  rows disagree about their host: a cohort is one run on one machine.
+- **Merge.** `tools/merge-rustia-ci-memory-data.js`, the step that produced the
+  2026-09-05 mix, now refuses to publish a merged table spanning two machines
+  and names the engines on each.
+- **Validation.** `tools/check-benchmark-results.js` requires every history row
+  to name a host, requires the published table to name exactly one, and
+  requires that one to be the host of the runner class marked
+  `timing_authority` in `bench/operations-status.json` — so the machine
+  boundary above is checked in the data, not only in the workflow.
+- **Render.** `bench/render-current-results.js` refuses to render a table whose
+  rows disagree.
+
+That last one was the open choice: label the mix or refuse it. The page refuses,
+because a labelled ratio between two boxes is still a wrong number, just an
+annotated one. The era charts are unaffected — they already draw separate
+hosts on separate scales, which is the presentation a genuine host change
+calls for.
+
+The harness reads the field as optional when parsing history, because rows
+written before it existed do not carry it and that absence is readable: it means
+"measured before hosts were recorded", not "measured somewhere unnamed". A row
+that *does* carry the key must carry a non-empty value, or the label would be a
+way to look labelled while saying nothing. The committed history carries a host
+on every row, and the validator keeps it that way.
+
+The wasm lane is outside this rule and does not need it.
+`bench/wasm/current-results.json` is rewritten whole by one invocation, and its
+checker requires every run to carry the file's single commit, so it cannot
+accumulate a cross-cohort mix in the first place. Its existing `runtime.host`
+(`linux-x64`) is a platform string, not a machine.
+
 ## Evidence lanes
 
 ### 1. Rustia progress

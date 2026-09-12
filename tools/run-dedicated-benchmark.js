@@ -1794,6 +1794,25 @@ function selfTest() {
   // physical_cores is what establishes SMT is off.
   assert.deepEqual(compareAttestation(declared, { ...good, smt: "notsupported" }), []);
 
+  // The label a row carries must be the machine the coordinator attested.
+  // attestHost() reports config.provider.host.name and compares the machine's
+  // own /sys and /proc readings against the rest of that block, so a row
+  // labelled with the same field is labelled with a machine that was checked.
+  // Three separately shipped runners stamp it -- they cannot share a module,
+  // because only one file at a time is copied to the host -- so the agreement is
+  // asserted here, where every lane is driven from.
+  const head = git(["rev-parse", "HEAD"]).trim();
+  const matrixFreezer = require("./create-linode-matrix-config.js");
+  const memoryFreezer = require("./create-rustia-ci-memory-config.js");
+  const dedicatedMatrix = matrixFreezer.toDedicated(matrixFreezer.createConfig(head));
+  const dedicatedMemory = memoryFreezer.toDedicated(memoryFreezer.createConfig(head));
+  for (const [lane, config, label] of [
+    ["matrix", dedicatedMatrix, matrixRules.matrixHostLabel(dedicatedMatrix)],
+    ["memory", dedicatedMemory, matrixRules.memoryHostLabel(dedicatedMemory)],
+  ]) {
+    assert.equal(label, config.provider.host.name, `${lane} rows must be labelled with the attested host`);
+  }
+
   const harness = "a".repeat(40);
   const paths = promotionPaths(harness);
   assert.ok(paths.publication.endsWith(`${harness}.json`));

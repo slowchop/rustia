@@ -57,7 +57,7 @@ function readData() {
   if (data.metadata == null || typeof data.metadata !== "object" || Array.isArray(data.metadata)) {
     fail("metadata must be an object");
   }
-  for (const key of ["targets", "engines", "workloads", "commits"]) {
+  for (const key of ["targets", "engines", "workloads", "commits", "hosts"]) {
     if (!Array.isArray(data.metadata[key])) {
       fail(`metadata.${key} must be an array`);
     }
@@ -87,7 +87,37 @@ function readData() {
 
   data.rows.forEach(validateRow);
   validateMetadataMatchesRows(data);
+  requireSingleHost(
+    data.rows,
+    relative(sourcePath),
+    "every ratio on this page divides one row by another",
+  );
   return data;
+}
+
+// A published table is one machine.
+//
+// The source files are per-slot merges -- the newest row per slot across every
+// cohort -- so a run that re-measures only part of a matrix leaves the rest
+// standing. That is how a table came to announce one machine in its metadata
+// while most of its rows had been measured on a rented cloud host six weeks
+// earlier. Every number this page draws is a comparison between rows, and a
+// comparison between two machines is not a comparison between two engines, so
+// the page refuses to render rather than labelling the mix: a labelled ratio
+// between two boxes is still a wrong number, just an annotated one. The way
+// forward is to re-measure the stale slots on the same machine or to retire
+// their rows, which is what tools/record-host-bridge.js and
+// tools/retire-cloud-history.js are for.
+function requireSingleHost(rows, label, why) {
+  const hosts = unique(rows.map((row) => row.host));
+  if (hosts.length === 1) return hosts[0];
+  const byHost = hosts.map(
+    (host) => `${host}: ${unique(rows.filter((row) => row.host === host).map((row) => row.engine)).join(", ")}`,
+  );
+  fail(
+    `${label} holds rows measured on ${hosts.length} machines (${byHost.join("; ")}); ` +
+    `${why}, so re-measure the stale rows on one machine or retire them`,
+  );
 }
 
 function readOperationsStatus(data) {
@@ -322,7 +352,7 @@ function readMemoryResults() {
   }
   data.rows.forEach((row, index) => {
     const label = `memory results row ${index + 1}`;
-    for (const key of ["commit", "target", "engine", "dialect", "execution_mode", "workload", "classification"]) {
+    for (const key of ["commit", "target", "host", "engine", "dialect", "execution_mode", "workload", "classification"]) {
       if (typeof row[key] !== "string" || row[key] === "") fail(`${label}.${key} must be a string`);
     }
     if (row.metrics == null || typeof row.metrics !== "object" || Array.isArray(row.metrics)) {
@@ -340,6 +370,32 @@ function readMemoryResults() {
       }
     }
   });
+  if (data.status === "ready") {
+    // The memory table is merged the same way and ranks engines against each
+    // other, so it is subject to the same rule. This is the merge that actually
+    // published a mix: a Rustia-only run on the owned host refreshed eleven rows
+    // and left ninety-nine competitor rows from a rented cloud host standing.
+    const host = requireSingleHost(
+      data.rows,
+      relative(memoryResultsPath),
+      "the memory panel ranks engines against each other",
+    );
+    // Whichever provenance field the publication carries -- one cohort names
+    // `host`, a merge across engines names `hosts` -- must agree with the rows
+    // under it, so the summary can never outlive what it summarises.
+    if (data.metadata?.host != null && data.metadata.host !== host) {
+      fail(
+        `${relative(memoryResultsPath)}.metadata.host is ${JSON.stringify(data.metadata.host)}, ` +
+        `but its rows were measured on ${JSON.stringify(host)}`,
+      );
+    }
+    if (data.metadata?.hosts != null && JSON.stringify(data.metadata.hosts) !== JSON.stringify([host])) {
+      fail(
+        `${relative(memoryResultsPath)}.metadata.hosts is ${JSON.stringify(data.metadata.hosts)}, ` +
+        `but its rows were measured on ${JSON.stringify([host])}`,
+      );
+    }
+  }
   return data;
 }
 
@@ -463,7 +519,7 @@ function normalizeCohortEvidence(data, filePath) {
 
 function validateRow(row, index) {
   const label = `rows[${index}]`;
-  for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
+  for (const key of ["commit", "target", "host", "engine", "dialect", "workload", "unit", "checksum"]) {
     if (typeof row[key] !== "string" || row[key].trim() === "") {
       fail(`${label}.${key} must be a non-empty string`);
     }
@@ -573,6 +629,7 @@ function validateMetadataMatchesRows(data) {
     engines: unique(data.rows.map((row) => row.engine)),
     workloads: unique(data.rows.map((row) => row.workload)),
     commits: unique(data.rows.map((row) => row.commit)),
+    hosts: unique(data.rows.map((row) => row.host)),
   };
 
   for (const [key, values] of Object.entries(expected)) {

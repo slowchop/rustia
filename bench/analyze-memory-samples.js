@@ -12,6 +12,9 @@ const DEFAULT_BOOTSTRAP_SEED = 1_381_323_604;
 const DEFAULT_ABSOLUTE_GROWTH_KIB_PER_EPOCH = 4;
 const DEFAULT_PROPORTIONAL_GROWTH_PERCENT_PER_EPOCH = 0.05;
 const RETAINED_CONTROLS = new Set(["memory_retained_control", "todo_retained_control"]);
+// Provenance labels only ever name a machine in published row data; they are
+// never resolved or connected to, so the character set is deliberately narrow.
+const SAFE_HOST = /^[A-Za-z0-9._-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -26,6 +29,7 @@ function parseArgs(argv) {
   let bootstrapSeed = DEFAULT_BOOTSTRAP_SEED;
   let absoluteThreshold = DEFAULT_ABSOLUTE_GROWTH_KIB_PER_EPOCH;
   let proportionalThreshold = DEFAULT_PROPORTIONAL_GROWTH_PERCENT_PER_EPOCH;
+  let host = null;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -54,12 +58,21 @@ function parseArgs(argv) {
       case "--proportional-growth-percent-per-epoch":
         proportionalThreshold = positiveNumber(value, flag);
         break;
+      case "--host":
+        if (host != null) fail("--host was supplied more than once");
+        host = value;
+        break;
       default:
         fail(`unknown argument ${JSON.stringify(flag)}`);
     }
     index += 1;
   }
   if (inputs.length === 0) fail("at least one --input is required");
+  // Required, not defaulted. The samples themselves cannot say which machine
+  // produced them, so this is the only place the answer can enter the row -- and
+  // a default would be a guess published as provenance.
+  if (host == null) fail("--host is required: name the machine these samples were measured on");
+  if (!SAFE_HOST.test(host)) fail("--host must be a safe identifier");
   return {
     command: "analyze",
     inputs,
@@ -69,6 +82,7 @@ function parseArgs(argv) {
     bootstrapSeed,
     absoluteThreshold,
     proportionalThreshold,
+    host,
   };
 }
 
@@ -381,6 +395,7 @@ function summarizeGroup(samples, config) {
   return {
     commit: samples[0].commit,
     target: samples[0].target,
+    host: config.host,
     engine: samples[0].engine,
     dialect: samples[0].dialect,
     execution_mode: samples[0].execution_mode,
@@ -478,6 +493,7 @@ function analyze(config) {
       proportional_growth_percent_per_epoch: config.proportionalThreshold,
       rss_hwm_role: "diagnostic only",
     },
+    host: config.host,
     raw_sample_count: samples.length,
     row_count: rows.length,
     detector_coverage: detectorCoverage(rows),

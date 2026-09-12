@@ -42,8 +42,17 @@ Split by what's measurable; never use one for the other's job:
   `string_building`.
 
 **Canonical record** (one JSON line/measurement):
-`{timestamp_unix, commit, target, engine, dialect, workload, unit, n, reps, ns_per_unit_min,
+`{timestamp_unix, commit, target, host, engine, dialect, workload, unit, n, reps, ns_per_unit_min,
 ns_per_unit_median, units_per_sec, checksum}`.
+
+`host` names the machine the row was measured on — a provenance label published
+in row data, never an address. The harness accepts its absence when reading
+history, because rows written before the field existed do not carry it and that
+absence means "measured before hosts were recorded" rather than "measured
+somewhere unnamed"; a row that carries the key must carry a non-empty value.
+Published tables must name exactly one host, which is enforced rather than
+documented — see [`81-benchmark-operations.md`](81-benchmark-operations.md),
+"Row provenance".
 
 The stable JSONL record deliberately remains a min/median summary. An optional
 `rustia.bench.raw-samples.v1` JSON sidecar stores execution-ordered per-repetition `ns/unit` values plus the

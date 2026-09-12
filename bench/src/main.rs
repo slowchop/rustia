@@ -416,6 +416,7 @@ struct ResultRow {
     timestamp_unix: u64,
     commit: String,
     target: String,
+    host: Option<String>,
     engine: String,
     dialect: String,
     workload: String,
@@ -443,6 +444,7 @@ struct HistoryRecord {
     timestamp_unix: u64,
     commit: String,
     target: String,
+    host: Option<String>,
     engine: String,
     dialect: String,
     workload: String,
@@ -488,6 +490,7 @@ impl ResultRow {
             timestamp_unix: record.timestamp_unix,
             commit: record.commit.clone(),
             target: record.target.clone(),
+            host: record.host.clone(),
             engine: record.engine.clone(),
             dialect: record.dialect.to_owned(),
             workload: record.workload.clone(),
@@ -2242,6 +2245,15 @@ fn write_latest_json(
         .iter()
         .map(|row| row.commit.as_str())
         .collect::<BTreeSet<_>>();
+    // The machines behind the published table. Rows are merged per
+    // (target, engine, workload), so a stale row from a retired machine can
+    // survive a refresh that only re-measured part of the matrix; more than one
+    // entry here is that having happened, stated once rather than left for a
+    // reader to reconstruct from commits.
+    let hosts = rows
+        .iter()
+        .filter_map(|row| row.host.as_deref())
+        .collect::<BTreeSet<_>>();
     let first_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).min().unwrap_or(0);
     let last_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).max().unwrap_or(0);
     let row_values = rows
@@ -2250,7 +2262,7 @@ fn write_latest_json(
             let speed_vs_rustia = rustia_baselines
                 .get(&(row.target.as_str(), row.workload.as_str()))
                 .map(|baseline| baseline / row.ns_per_unit_min);
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "timestamp_unix": row.timestamp_unix,
                 "commit": row.commit,
                 "target": row.target,
@@ -2275,7 +2287,18 @@ fn write_latest_json(
                 "native_verified": row.native_verified,
                 "native_verification": row.native_verification,
                 "native_verification_ratio": row.native_verification_ratio,
-            })
+            });
+            // Same rule as the history row this was merged from: the key exists
+            // only when the machine was named, so an unlabelled row is visibly
+            // unlabelled rather than quietly attributed to whoever else is in
+            // the table.
+            if let Some(host) = &row.host {
+                value
+                    .as_object_mut()
+                    .expect("result row JSON is an object")
+                    .insert("host".to_owned(), serde_json::Value::String(host.clone()));
+            }
+            value
         })
         .collect::<Vec<_>>();
     let value = serde_json::json!({
@@ -2294,6 +2317,7 @@ fn write_latest_json(
             "engines": engines.into_iter().collect::<Vec<_>>(),
             "workloads": workloads.into_iter().collect::<Vec<_>>(),
             "commits": commits.into_iter().collect::<Vec<_>>(),
+            "hosts": hosts.into_iter().collect::<Vec<_>>(),
             "measurement_window_unix": {
                 "start": first_timestamp_unix,
                 "end": last_timestamp_unix,
@@ -2381,6 +2405,7 @@ fn latest_result_rows(history: Option<&Path>, records: &[Measurement]) -> Result
                 timestamp_unix: record.timestamp_unix,
                 commit: record.commit,
                 target: record.target,
+                host: record.host,
                 engine: record.engine,
                 dialect: record.dialect,
                 workload: record.workload,
@@ -2510,6 +2535,7 @@ fn history_record_from_json(
         )));
     }
     let target = json_non_empty_string(path, line_number, value, "target")?;
+    let host = json_optional_non_empty_string(path, line_number, value, "host")?;
     let engine = json_non_empty_string(path, line_number, value, "engine")?;
     let dialect = json_non_empty_string(path, line_number, value, "dialect")?;
     let workload = json_non_empty_string(path, line_number, value, "workload")?;
@@ -2621,6 +2647,7 @@ fn history_record_from_json(
         timestamp_unix,
         commit,
         target,
+        host,
         engine,
         dialect,
         workload,
@@ -2746,6 +2773,24 @@ fn json_optional_positive_f64(
         return Ok(None);
     }
     json_positive_f64(path, line_number, value, field).map(Some)
+}
+
+/// Reads a provenance label that older rows do not carry.
+///
+/// Absent means "measured before the field existed", which is a different claim
+/// from "measured somewhere unnamed": a row that carries the key must carry a
+/// real value, or the label would be a way to look labelled while saying
+/// nothing.
+fn json_optional_non_empty_string(
+    path: &Path,
+    line_number: usize,
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<Option<String>> {
+    if value.get(field).is_none_or(serde_json::Value::is_null) {
+        return Ok(None);
+    }
+    json_non_empty_string(path, line_number, value, field).map(Some)
 }
 
 fn history_field_error(path: &Path, line_number: usize, field: &str, expected: &str) -> Error {
@@ -3441,6 +3486,84 @@ mod tests {
         let mut without_host = labelled.as_object().expect("object").clone();
         without_host.remove("host");
         assert_eq!(serde_json::Value::Object(without_host), anonymous);
+    }
+
+    #[test]
+    fn latest_json_carries_each_row_s_host_and_names_every_machine_in_the_table() {
+        // Two slots, two machines. This is the shape the merge produces when a
+        // partial re-measurement leaves an older machine's row standing, and it
+        // is the shape the published-table validator has to be able to see.
+        let mut here = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+        here.host = Some("ci-bench".to_owned());
+        let mut elsewhere = sample_measurement(101, "koto", "koto", "sparse_tables", "test");
+        elsewhere.host = Some("somewhere-else".to_owned());
+        let history = write_temp_history(
+            "latest-json-hosts",
+            &format!("{}\n{}\n", record_json(&here), record_json(&elsewhere)),
+        );
+        let latest = temp_path("latest-json-hosts", "json");
+
+        write_latest_json(&latest, Some(&history), &[]).expect("write latest JSON");
+        let text = fs::read_to_string(&latest).expect("read latest JSON");
+        let value = serde_json::from_str::<serde_json::Value>(&text).expect("parse latest JSON");
+        let _ = fs::remove_file(&history);
+        let _ = fs::remove_file(&latest);
+
+        assert_eq!(value["rows"][0]["host"], "ci-bench");
+        assert_eq!(value["rows"][1]["host"], "somewhere-else");
+        assert_eq!(
+            value["metadata"]["hosts"],
+            serde_json::json!(["ci-bench", "somewhere-else"])
+        );
+    }
+
+    #[test]
+    fn latest_json_leaves_an_unnamed_machine_unnamed() {
+        // A row with no host must not acquire one from the rows beside it, and
+        // the table must not claim a single machine when one of its rows cannot
+        // say which machine it came from.
+        let named = {
+            let mut record = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+            record.host = Some("ci-bench".to_owned());
+            record
+        };
+        let anonymous = sample_measurement(101, "koto", "koto", "sparse_tables", "test");
+        let history = write_temp_history(
+            "latest-json-anonymous",
+            &format!("{}\n{}\n", record_json(&named), record_json(&anonymous)),
+        );
+        let latest = temp_path("latest-json-anonymous", "json");
+
+        write_latest_json(&latest, Some(&history), &[]).expect("write latest JSON");
+        let text = fs::read_to_string(&latest).expect("read latest JSON");
+        let value = serde_json::from_str::<serde_json::Value>(&text).expect("parse latest JSON");
+        let _ = fs::remove_file(&history);
+        let _ = fs::remove_file(&latest);
+
+        assert_eq!(value["rows"][0]["host"], "ci-bench");
+        assert!(value["rows"][1]
+            .as_object()
+            .expect("object")
+            .get("host")
+            .is_none());
+        assert_eq!(value["metadata"]["hosts"], serde_json::json!(["ci-bench"]));
+    }
+
+    #[test]
+    fn history_rows_reject_a_host_key_that_names_nothing() {
+        let mut record = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
+        record.host = Some("ci-bench".to_owned());
+        let row = record_json(&record).replace("\"host\":\"ci-bench\"", "\"host\":\"\"");
+        let history = write_temp_history("history-empty-host", &format!("{row}\n"));
+
+        let error = read_history_records(&history).expect_err("empty host is rejected");
+        let _ = fs::remove_file(&history);
+        assert!(
+            error
+                .to_string()
+                .contains("\"host\" to be a non-empty string"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -251,9 +251,17 @@ Proposed schemas:
 - `rustia.bench.memory-run.v1` — one summarized engine/workload/mode/cohort row;
 - `rustia.bench.memory-current-results.v1` — latest coherent complete cohort selected for the dashboard.
 
-Every summary names its source hash, exact commit, mode, target, protocol version, sample count, problem size,
-work/epoch count, memory source, and confidence method. Promotion remains fail-closed and occurs only after the
-ephemeral VM is confirmed deleted.
+Every summary names its source hash, exact commit, host, mode, target, protocol version, sample count, problem
+size, work/epoch count, memory source, and confidence method. Promotion remains fail-closed and occurs only
+after the ephemeral VM is confirmed deleted.
+
+A cohort is one run on one machine, and that is checked rather than assumed. The analyzer requires `--host` with
+no default and stamps it on every row; `publish-memory-analysis.js` refuses an analysis whose rows disagree about
+it; `tools/merge-rustia-ci-memory-data.js` refuses to merge a table spanning two machines; and the dashboard
+refuses to render one. `bench/memory/current-results.json` is a per-slot merge across cohorts, so without that
+rule a rustia-only refresh leaves every competitor row on whatever machine last measured it — which is what
+happened on 2026-09-05, when 11 new rows joined 99 six-week-old cloud rows under metadata naming a single host.
+See [`81-benchmark-operations.md`](81-benchmark-operations.md), "Row provenance".
 
 ## Dashboard
 

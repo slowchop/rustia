@@ -174,6 +174,23 @@ Current unpublished workspace version: `0.0.1`.
   disables checkout credentials, and removes its temporary deploy key and
   worktrees on every exit before the persistent runner can be reused.
 
+- Machine provenance on every benchmark row. Emitted timing and memory rows
+  carry a `host` field — a provenance label published in row data, never an
+  address — and `bench/current-results.json` carries a matching
+  `metadata.hosts`. The on-host runners derive the label from the frozen
+  config, the shared acceptance rules recompute it independently and reject
+  rows naming anything else, and `tools/check-benchmark-results.js`,
+  `tools/merge-rustia-ci-memory-data.js`, `bench/publish-memory-analysis.js`,
+  and `bench/render-current-results.js` each require a published table to name
+  exactly one machine. The renderer refuses such a table rather than labelling
+  the mix: every figure on the page is a ratio between two rows, so an
+  annotated cross-host ratio is still a wrong number. Both published tables are
+  per-slot merges across cohorts, so before this a partial re-measurement left
+  every slot it did not cover on whatever machine last measured it, with only
+  `row.commit` to reveal it. Committed history is stamped; the harness reads
+  the field as optional, because its absence means "measured before hosts were
+  recorded" rather than "measured somewhere unnamed".
+
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,
   Brent-style relocation, `computesizes` rehash, tombstone deletion, `luaH_next`

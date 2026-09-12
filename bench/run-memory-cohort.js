@@ -103,9 +103,14 @@ function validateProtocol(value) {
   }
   exactKeys(
     value.host,
-    ["benchmark_cpu", "supervisor_cpu", "sample_interval_ms", "timeout_ms"],
+    ["name", "benchmark_cpu", "supervisor_cpu", "sample_interval_ms", "timeout_ms"],
     "protocol.host",
   );
+  // The machine, as a label. Every row this cohort publishes carries it, so a
+  // later table can never merge rows from two machines without the data saying
+  // so. It is provenance published in row data, never an address: nothing
+  // resolves or connects to it.
+  if (!SAFE_ID.test(value.host.name)) fail("protocol.host.name is not a safe identifier");
   for (const field of ["benchmark_cpu", "supervisor_cpu"]) {
     if (!Number.isSafeInteger(value.host[field]) || value.host[field] < 0) fail(`protocol.host.${field}`);
   }
@@ -188,14 +193,20 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
 }
 
-function collectHost() {
+function collectHost(protocol) {
   return {
     captured_at: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,
     release: os.release(),
-    hostname: os.hostname(),
-    uname: run("uname", ["-a"]).stdout.trim(),
+    // The protocol's label, not the machine's own name. This evidence is
+    // mirrored into the published data repository, and an owned box's node name
+    // is a real, reachable machine -- `uname -a` and os.hostname() both carry
+    // it, which is why neither is recorded here. What the evidence is actually
+    // for is the kernel, release and architecture, so it records those. Matches
+    // the rule the matrix runner already applies to its own host.json.
+    host: protocol.host.name,
+    uname: run("uname", ["-srvm"]).stdout.trim(),
     cgroup_filesystems: fs.readFileSync("/proc/filesystems", "utf8"),
     cpuinfo_sha256: sha256File("/proc/cpuinfo"),
   };
@@ -219,7 +230,7 @@ function runCohort(config) {
   fs.mkdirSync(rawDirectory);
   const protocolDestination = path.join(config.outputDirectory, "protocol.json");
   fs.copyFileSync(config.config, protocolDestination, fs.constants.COPYFILE_EXCL);
-  writeJson(path.join(config.outputDirectory, "host.json"), collectHost());
+  writeJson(path.join(config.outputDirectory, "host.json"), collectHost(protocol));
 
   const binaries = { all: config.binaryAll, lua54: config.binaryLua54 };
   const allCases = cases(protocol, binaries);
@@ -300,6 +311,8 @@ function runCohort(config) {
     String(protocol.growth_thresholds.absolute_kib_per_epoch),
     "--proportional-growth-percent-per-epoch",
     String(protocol.growth_thresholds.proportional_percent_per_epoch),
+    "--host",
+    protocol.host.name,
   ];
   run(process.execPath, analyzerArgs, { capture: false });
 
@@ -350,6 +363,7 @@ function selfTest() {
       proportional_percent_per_epoch: 0.05,
     },
     host: {
+      name: "fixture-host",
       benchmark_cpu: 3,
       supervisor_cpu: 2,
       sample_interval_ms: 10,
@@ -366,6 +380,18 @@ function selfTest() {
   assert.deepEqual(roundOrder(fixtures, 1), fixtures);
   assert.deepEqual(roundOrder(fixtures, 2), fixtures);
   assert.throws(() => validateProtocol({ ...protocol, samples: 8 }));
+  // Every row this cohort publishes carries protocol.host.name, so a protocol
+  // that cannot name its machine must not start a run: the label has to be
+  // frozen before the first sample, not chosen when the rows are published.
+  const { name: _named, ...hostWithoutName } = protocol.host;
+  assert.throws(
+    () => validateProtocol({ ...protocol, host: hostWithoutName }),
+    /protocol\.host keys must be exactly/,
+  );
+  assert.throws(
+    () => validateProtocol({ ...protocol, host: { ...protocol.host, name: "not a safe id" } }),
+    /protocol\.host\.name/,
+  );
 
   // The delegated root is found from the process's own cgroup, never from a
   // path guessed from the uid: a subtree delegated beside the unit that runs
