@@ -244,8 +244,8 @@ continuation remains part of the semantic-tail blocker.
 - Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
   a single blanket multiplier. The current generated claim gate approves no
   global speed headline.
-- Fresh performance data comes only from the explicit ephemeral Linode
-  Linux/x86_64 lifecycle. macOS and Windows remain build targets, not active
+- Fresh performance data comes only from the owned benchmark host lanes
+  (`ci-bench`, Linux/x86_64). macOS and Windows remain build targets, not active
   benchmark targets, until dedicated hosts exist.
 
 ## Release Process Gate
@@ -278,9 +278,11 @@ continuation remains part of the semantic-tail blocker.
   then runs its seed tests plus deterministic 2,048-case frontend and VM
   mutation sweeps. The VM decoder covers every production opcode exactly once
   under bounded input, fuel, recursion, and a 512 KiB logical-live limit.
-- The explicit Linode matrix command provisions, measures, validates, deletes,
-  and only then promotes a coherent native-plus-wasm Linux result set. Hosted
-  workflows do not provision billed resources or publish timings.
+- The cross-engine matrix workflow measures on the owned benchmark host,
+  validates, and only then promotes a coherent single-revision native-plus-wasm
+  Linux result set; it lands that cohort on `main` through the repository's
+  single sanctioned CI contents-write grant. No workflow can provision a billed
+  resource.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.

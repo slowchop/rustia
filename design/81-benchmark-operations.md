@@ -63,19 +63,23 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
-### Blocked: the memory cohort needs a delegated cgroup
+### The memory cohort and its delegated cgroup
 
-The memory lane is ported and its workflow runs on the owned host, but it cannot
-complete there yet, and the reason is a property of the machine rather than of
-the code. Per-VM memory is measured inside a dedicated cgroup; the benchmark
-host runs its CI as an unprivileged user (`uid 1001`), and that user has no
-cgroup-v2 subtree it can create children in.
+Per-VM memory is measured inside a dedicated cgroup, so the memory lane needs
+something the timing lanes do not: a cgroup-v2 subtree the unprivileged CI user
+can create children in. The owned host has one, and the lane completed there on
+2026-09-05, producing its first cohort — `rustia-ci-070c387b173c` at commit
+`070c387`, 11 Rustia rows from 99 raw samples. That cohort is Rustia-only: no
+lane measures competitor memory on the owned host today, so the memory
+comparison, and with it the mlua/Luau/JIT memory reference, waits on a
+competitor cohort measured there.
 
-Root is one way to have one. The other, which keeps the runner unprivileged, is
-a systemd-delegated subtree that *contains the job's own process*: on the unit
-that runs the runner, `Delegate=memory` plus `DelegateSubgroup=` (so the
-unit's own cgroup holds no processes and may enable the controller for its
-children) and no `ProtectControlGroups=`. A subtree delegated beside that
+Root is one way to have such a subtree. The other, which keeps the runner
+unprivileged and is the arrangement in place, is a systemd-delegated subtree
+that *contains the job's own process*: on the unit that runs the runner,
+`Delegate=memory` plus `DelegateSubgroup=` (so the unit's own cgroup holds no
+processes and may enable the controller for its children) and no
+`ProtectControlGroups=`. A subtree delegated beside that
 unit — a lingering `user@<uid>.service` — is no use, because cgroup v2 refuses
 to move a process across a common ancestor the mover cannot write. The tools
 find the delegated root by walking up from the process's own cgroup
@@ -87,29 +91,43 @@ controller — is the one present.
 **The check must not be relaxed to make the lane pass.** Without the cgroup there
 is no per-VM figure — the accounting is the cgroup's — so a run that skipped it
 would produce numbers that look like measurements and are not. The lane is
-dispatch-only, so until the host is configured it fails immediately and costs
-nothing; the alternative, restoring the cloud lane, would reintroduce the ability
-to spend money to work around a one-line host setting.
+dispatch-only and the check is a preflight that fails closed before anything is
+cloned, so a host that loses the delegation costs a dispatch and nothing else;
+the alternative, restoring the cloud lane, would reintroduce the ability to
+spend money to work around a one-line host setting.
 
-### Known gap: the A/B acceptance runner
+### A/B acceptance on the owned host
+
+`.github/workflows/acceptance-bench.yml` answers what screening cannot: not "did
+this pull request move anything" against a merge base, but "did this change move
+this workload, and by how much" for a pair of commits named explicitly. It takes
+a baseline, a candidate, and an even number of legs per side between 2 and 16,
+and measures on `bench-solo` through the same attesting entrypoint as every
+other lane. It is dispatch-only — a run holds the host for the length of its
+passes, so it is never on a timer and never on a push — and it records nothing:
+the reading lands in the job summary, not in the published history, because a
+comparison of two arbitrary historical commits is evidence for a decision
+rather than a row in a series.
+
+### Known gap: the unported fixed-benchmark runner
 
 `tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
 `/root/.cargo`, and permanent masking of the host's package timers. Nothing
 executes it any more: no workflow reaches it, and the only remaining caller is
-`validate`, which reads a frozen config and takes no timing. It therefore has not
-been ported, and porting it is the prerequisite for running a full A/B acceptance
-campaign on the owned host rather than a screening comparison. The three runners
-that do execute there — history, matrix, memory — have had those assumptions
-removed and are checked for their absence.
+`validate`, which reads a frozen config and takes no timing. It is unported dead
+code rather than a missing capability: acceptance runs on the owned host without
+it, and what remains is to delete it. The three runners that do execute there —
+history, matrix, memory — have had those assumptions removed and are checked for
+their absence.
 
 ### Cost
 
 **Nothing in this repository creates or pays for a cloud instance.** Not on a
 timer, not on a push, not by dispatch, and not by a justfile recipe. Every lane
-— the reconstruction, the per-commit series, pull-request screening, the
-cross-engine matrix and the memory cohort — runs on the owned host, so the cloud
-lifecycle's cost ceilings, ownership journal and deletion gate have nothing left
-to govern and are retired with it.
+— the reconstruction, the per-commit series, pull-request screening, A/B
+acceptance, the cross-engine matrix and the memory cohort — runs on the owned
+host, so the cloud lifecycle's cost ceilings, ownership journal and deletion
+gate have nothing left to govern and are retired with it.
 
 One file remains from that model. `tools/run-linode-benchmark.js` is the only
 home of the matrix and memory acceptance rules, and the owned-host coordinator
@@ -255,8 +273,9 @@ an otherwise green merge.
    changes; merging an update marks the landscape pending but spends no money.
 4. An operator explicitly plans and starts a qualified progress, bridge,
    landscape, or candidate campaign.
-5. Promotion requires a complete cohort, semantic checks, provenance, accepted
-   host gates, and confirmed resource deletion.
+5. Promotion requires a complete cohort, semantic checks, provenance, and the
+   accepted host gates — the attestation against the frozen config plus the
+   committed checkers.
 6. Artifact-only publication validates committed evidence, renders the report,
    and pushes Pages directly. Data-repository updates are one commit on a
    fresh clone of that repository's `main`, pushed there as a fast-forward by
@@ -323,9 +342,7 @@ CI, merge, publication and live verification remain delivery gates.
 
 ## Cost policy
 
-- No scheduled job may create a billed host.
+- No job can create a billed host, because no path in this repository can.
 - Progress runs are batched around relevant changes and decisions.
 - Landscape runs occur at most monthly by default.
 - Candidate runs require a concrete, credible optimization hypothesis.
-- Every campaign freezes a maximum runtime, rounded billing ceiling, cleanup
-  reserve, and exact resource scope before the first billable request.

@@ -600,9 +600,12 @@ unreachable suspended-coroutine frames.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
    asserted: cores held off the scheduler, SMT disabled, timed work pinned to one isolated core, one job on
-   the box at a time, and every run attested against the frozen config before it builds. Four lanes reach it,
-   all through `tools/run-dedicated-benchmark.js`: the reconstruction (`history`), the per-commit series
-   (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
+   the box at a time, and every run attested against the frozen config before it builds. Every workflow that
+   measures reaches it through `tools/run-dedicated-benchmark.js`: the cross-engine matrix (`matrix`), the
+   per-commit series (`main`), pull-request screening (`pr`, plus its `live-serde` and `calibrate` jobs),
+   dispatch-only A/B acceptance (`accept`, `.github/workflows/acceptance-bench.yml`: two to sixteen legs, a
+   summary only, recording nothing), and the memory cohort (`memory`). The reconstruction (`history`) uses the
+   same entrypoint but is operator-run rather than workflow-triggered.
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
@@ -617,14 +620,18 @@ unreachable suspended-coroutine frames.
    the published same-run ratios do. Nothing in this repository can start a billed instance, on a timer or
    otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
-   because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:
-   per-VM memory is measured inside a dedicated cgroup and the host's unprivileged CI user has no cgroup-v2
-   subtree it can write to, so it needs either root or a systemd-delegated subtree containing the job's own
-   process (`Delegate=memory` plus `DelegateSubgroup=` on the unit that runs the runner, without
-   `ProtectControlGroups=`); the tools find it by walking up from the process's own cgroup, check it before
-   anything is cloned, and name which fault is present.
+   because the supervisor samples while the benchmark runs. That lane has completed there: on 2026-09-05 it
+   produced the rustia-only cohort `rustia-ci-070c387b173c` at `070c387`, 11 rustia rows from 99 raw samples,
+   which is now the whole of `bench/memory`. Per-VM memory is measured inside a dedicated cgroup, and the
+   host's unprivileged CI user cannot write a cgroup-v2 subtree of its own, so the lane needs either root or a
+   systemd-delegated subtree containing the job's own process (`Delegate=memory` plus `DelegateSubgroup=` on
+   the unit that runs the runner, without `ProtectControlGroups=`) — the delegation the host now provides;
+   the tools find it by walking up from the process's own cgroup, check it before anything is cloned, and
+   name which fault is present.
    The check is deliberately not relaxed: the cgroup is what the per-VM figure is measured in, so a run
-   without one would produce numbers that look like measurements and are not. Three cloud coordinators are deleted and the
+   without one would produce numbers that look like measurements and are not. The cohort is rustia-only, and
+   no lane measures competitor memory on the owned host today, so the memory comparison stays pending until a
+   competitor cohort is measured on `ci-bench`. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
    the matrix and memory acceptance rules the owned-host coordinator borrows, is documented as retired, and
    is invoked by nothing. Not ported: `tools/run-linux-fixed-benchmark.js`, the A/B acceptance runner, which
