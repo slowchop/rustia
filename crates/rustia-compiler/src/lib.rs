@@ -105,7 +105,7 @@ fn collect_capture_hints(main: &BTreeSet<u8>, functions: &[Function]) -> Vec<Vec
     capture_hints
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompileOptions {
     pub builtins: BuiltinEnvironment,
     pub source_name: Option<String>,
@@ -127,6 +127,23 @@ pub struct CompileOptions {
     /// therefore the fuel/deterministic-GC schedule; that is gated on C2.2's
     /// block receipts per `design/58-vm-core2.md`.
     pub experimental_o2: ExperimentalO2Options,
+}
+
+// MEASUREMENT CANDIDATE, NOT FOR MERGE. Enables the C2.3 reachability-exact O2
+// track by default so an acceptance run can measure it against main through the
+// unchanged benchmark harness (which compiles with `CompileOptions::default()`).
+// See design/58-vm-core2.md §C2.3: enabling a family is a per-workload executor
+// trade, and this measures the combined executor-swap-plus-rewrite result.
+impl Default for CompileOptions {
+    fn default() -> Self {
+        Self {
+            builtins: BuiltinEnvironment::default(),
+            source_name: None,
+            source_line_starts: Vec::new(),
+            puc51_constructor_order: false,
+            experimental_o2: ExperimentalO2Options::reachability_exact(),
+        }
+    }
 }
 
 impl CompileOptions {
