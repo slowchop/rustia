@@ -111,9 +111,13 @@ bench-history-plan:
 bench-history-fetch replace="":
     node tools/run-dedicated-benchmark.js fetch {{ if replace == "" { "" } else { "--replace" } }}
 
-# Clear a lock a killed run left on the benchmark host.
+# Clear the lane locks a killed run left on the benchmark host.
 bench-history-unlock:
     node tools/run-dedicated-benchmark.js unlock
+
+# Read-only: free space, journal size, load and driver state on the host.
+bench-host-check:
+    node tools/run-dedicated-benchmark.js host-check
 
 # Reports only: no row is recorded and nothing is published. CI runs this per
 # pull request; this recipe is the same lane driven by hand.

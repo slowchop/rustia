@@ -495,10 +495,13 @@ Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
 usable rows, so the runner takes an exclusive lock naming its pid and refuses to
 start while a live one is held. A lock left by a killed run is taken over
-automatically once its pid is gone; `just bench-history-unlock` clears one by
-hand. A run wipes its working state at startup but keeps the cargo target
-directory warm, which is what makes each revision cost about 26 seconds rather
-than minutes.
+automatically once its pid is gone; `just bench-history-unlock` clears the
+history, matrix and memory lanes' locks by hand. A run wipes its working state
+at startup but keeps the cargo target directory warm, which is what makes each
+revision cost about 26 seconds rather than minutes. `just bench-host-check`
+prints the host's free space, journal size, load average and driver state
+without touching anything; it is the first thing to run when a lane refuses a
+quiet window twice in a row.
 
 Revisions that predate the harness entry point need source changes to be
 drivable at all: the workspace must declare the overlaid `bench` crate, and a
