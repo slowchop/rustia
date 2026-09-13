@@ -109,16 +109,15 @@ the reading lands in the job summary, not in the published history, because a
 comparison of two arbitrary historical commits is evidence for a decision
 rather than a row in a series.
 
-### Known gap: the unported fixed-benchmark runner
-
-`tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
-`/root/.cargo`, and permanent masking of the host's package timers. Nothing
-executes it any more: no workflow reaches it, and the only remaining caller is
-`validate`, which reads a frozen config and takes no timing. It is unported dead
-code rather than a missing capability: acceptance runs on the owned host without
-it, and what remains is to delete it. The three runners that do execute there —
-history, matrix, memory — have had those assumptions removed and are checked for
-their absence.
+The frozen owned-host config, `bench/cloud/dedicated-core2-tape-sparse.json`,
+is the one place the repository records what the host guarantees. The matrix
+and memory config generators copy its provider block, and the history freezer
+cross-checks host identity against it, so `tools/check-dedicated-config.js`
+validates it — exact provider keys, SMT off, the timed core inside the pinned
+set — on every `just check-benchmark-results` and release-preflight run. The
+rented-model A/B runner that once carried that check is deleted; the three
+runners that execute on the host — history, matrix, memory — are checked for
+the absence of its assumptions.
 
 ### Cost
 
@@ -132,8 +131,9 @@ gate have nothing left to govern and are retired with it.
 One file remains from that model. `tools/run-linode-benchmark.js` is the only
 home of the matrix and memory acceptance rules, and the owned-host coordinator
 borrows them rather than carrying a second copy that agrees until one is edited.
-It is documented as retired at the top of the file, nothing invokes it, and it
-goes when those rules move to a shared module.
+It is documented as retired at the bottom of the file; nothing runs its
+lifecycle, release preflight runs only its offline self-test, and it goes when
+those rules move to a shared module.
 
 ## Evidence lanes
 

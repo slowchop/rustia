@@ -238,6 +238,13 @@ Current unpublished workspace version: `0.0.1`.
   never ran on: `linode-build.json` and `linode-run-gate.json` become
   `build.json` and `run-gate.json` for that lifecycle. The validator accepts both,
   so committed evidence from the retired lane keeps validating.
+- The rented-model A/B runner `tools/run-linux-fixed-benchmark.js` is deleted.
+  Nothing measured through it: acceptance runs on the owned host through
+  `tools/run-dedicated-benchmark.js accept`. Its one live job — validating the
+  frozen owned-host config that every lane copies its host block from — moves
+  to `tools/check-dedicated-config.js`, which `just check-benchmark-results`
+  and release preflight both run. The `bench-validate` recipe goes with the
+  runner.
 
 - **Removed the ten accepted fixed-work A/B evidence cohorts measured on rented
   cloud hosts** from `bench/history/evidence/`: seven DigitalOcean Droplets and

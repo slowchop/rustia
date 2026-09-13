@@ -156,6 +156,8 @@ const MEASUREMENT_COMMANDS = Object.freeze([
   RAW_HARNESS,
   "node tools/run-wasm-gate.js",
   "node tools/run-wasm-dispatch-gate.js",
+  // Deleted runner. The entry stays so the name cannot return through a
+  // workflow; a forbid needs no file to exist.
   "node tools/run-linux-fixed-benchmark.js",
   "node tools/run-linux-matrix-benchmark.js",
   "node tools/run-linux-history-backfill.js",
@@ -459,6 +461,9 @@ function checkReleasePreflight(text) {
     '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
+    // The frozen owned-host config: exact provider keys, SMT off, and the
+    // timed core inside the pinned set. Every lane copies that block.
+    '"tools/check-dedicated-config.js"',
     '"tools/push-benchmark-data-publication.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',

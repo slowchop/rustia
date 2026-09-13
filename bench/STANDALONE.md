@@ -38,9 +38,9 @@ workspace coupling is intentional:
   `../crates/`.
 - The root `Justfile` owns convenience recipes while the project remains in this
   workspace.
-- The root `Justfile` and `tools/run-linode-benchmark.js` own the explicit,
-  operator-started Linux matrix lifecycle. Hosted CI checks committed artifacts
-  and never records fresh timings.
+- The root `Justfile` and `tools/run-dedicated-benchmark.js` own the explicit
+  Linux measurement lifecycle on the owned host. Hosted CI checks committed
+  artifacts and never records fresh timings.
 - Root license files cover the current in-repo copy.
 
 When the project splits, either publish `rustia-*` crates first, move the rustia

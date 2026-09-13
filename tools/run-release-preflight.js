@@ -49,6 +49,8 @@ node("tools/record-host-bridge.js", "--self-test");
 node("tools/retire-cloud-history.js", "--self-test");
 node("tools/run-linux-history-backfill.js", "self-test");
 node("tools/freeze-history-backfill.js", "--self-test");
+node("tools/check-dedicated-config.js");
+node("tools/check-dedicated-config.js", "--self-test");
 node("tools/push-benchmark-data-publication.js", "self-test");
 node("tools/run-linux-matrix-benchmark.js", "self-test");
 node("bench/run-memory-supervisor.js", "self-test");

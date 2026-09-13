@@ -633,9 +633,10 @@ unreachable suspended-coroutine frames.
    no lane measures competitor memory on the owned host today, so the memory comparison stays pending until a
    competitor cohort is measured on `ci-bench`. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
-   the matrix and memory acceptance rules the owned-host coordinator borrows, is documented as retired, and
-   is invoked by nothing. Not ported: `tools/run-linux-fixed-benchmark.js`, the A/B acceptance runner, which
-   nothing executes — its only caller validates a frozen config without measuring.
+   the matrix and memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle,
+   and release preflight runs only its offline self-test. The rented-model A/B runner,
+   `tools/run-linux-fixed-benchmark.js`, is deleted; the frozen-config validation it carried lives in
+   `tools/check-dedicated-config.js`.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

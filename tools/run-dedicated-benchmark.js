@@ -422,6 +422,15 @@ function attestHost(config) {
   if (problems.length > 0) {
     fail(`host attestation failed:\n  - ${problems.join("\n  - ")}`);
   }
+  return providerRecord(declared, observed);
+}
+
+// The provider block written beside every run. Matrix evidence commits it into
+// a public-bound repository, so its field names are held to the rule the
+// self-test checks: nothing that names an address, an account or an
+// identifier. The rented lanes let 16 provider IPs into the repository through
+// exactly such a block.
+function providerRecord(declared, observed) {
   return {
     schema: "rustia.bench.dedicated-provider.v1",
     host: declared.name,
@@ -1844,6 +1853,21 @@ function selfTest() {
     free_kib: 64 * 1024 * 1024,
   };
   assert.deepEqual(compareAttestation(declared, good), []);
+  // The record written beside every run must not carry a field that could
+  // hold an address, an account or an identifier. The host field is the
+  // provenance label the config declares, never a machine name.
+  const record = providerRecord(declared, {
+    ...good,
+    kernel: "6.8.0-generic",
+    isolation: "isolcpus=4,5 nohz_full=4,5",
+    node: "v22.0.0",
+    cargo: "cargo 1.95.0",
+  });
+  const forbidden = /ip|addr|account|token|key|user|label|region|instance|id$/i;
+  const leaked = Object.keys(record).filter((field) => forbidden.test(field));
+  assert.deepEqual(leaked, [], `provider record field(s) may carry infrastructure detail: ${leaked}`);
+  assert.equal(record.host, declared.name);
+  assert.equal(record.pinned_cpus, declared.pinned_cpus);
   // The floor is inclusive, and a host that cannot report its free space is
   // refused rather than assumed fine: the filled-disk failure this guards
   // against never reached this script, so silence is not evidence.
