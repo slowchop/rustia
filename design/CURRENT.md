@@ -594,7 +594,11 @@ unreachable suspended-coroutine frames.
    table whose rows disagree rather than labelling the mix, because every figure on that page is a ratio
    between two rows. That closes the way the memory table silently mixed hosts on 2026-09-05, when a
    rustia-only refresh left 99 six-week-old cloud rows beside 11 new ones under metadata naming one host
-   (`81-benchmark-operations.md`, "Row provenance"). Nothing in this repository can start a billed instance, on a timer or
+   (`81-benchmark-operations.md`, "Row provenance"). The rule reaches the memory table and each memory cohort
+   in the checker, and the history charts read the field: a host change is always an era boundary in the
+   recorded timing series, and the memory history draws one machine against a reference from that same
+   machine. The published data repository's memory artifacts must carry the field before the publication
+   lane renders again; the stamped copies committed here differ from them only by it. Nothing in this repository can start a billed instance, on a timer or
    otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
    because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:

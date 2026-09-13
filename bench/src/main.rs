@@ -882,6 +882,7 @@ fn print_usage() {
     println!("  --latest-json bench/current-results.json");
     println!("  --samples-json <path>");
     println!("  --commit <clean-git-id>");
+    println!("  --host <label>  provenance label stamped on every row; never an address");
     println!("  --no-history");
     println!("  --no-results");
     println!("  --no-latest-json");
@@ -2249,11 +2250,14 @@ fn write_latest_json(
     // (target, engine, workload), so a stale row from a retired machine can
     // survive a refresh that only re-measured part of the matrix; more than one
     // entry here is that having happened, stated once rather than left for a
-    // reader to reconstruct from commits.
+    // reader to reconstruct from commits. The list is only written when every
+    // row names its machine: a table with one unnamed row cannot say which
+    // machines it holds, and a list naming only the rows that know would read
+    // as a single-machine table when it is not.
     let hosts = rows
         .iter()
-        .filter_map(|row| row.host.as_deref())
-        .collect::<BTreeSet<_>>();
+        .map(|row| row.host.as_deref())
+        .collect::<Option<BTreeSet<_>>>();
     let first_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).min().unwrap_or(0);
     let last_timestamp_unix = rows.iter().map(|row| row.timestamp_unix).max().unwrap_or(0);
     let row_values = rows
@@ -2317,7 +2321,6 @@ fn write_latest_json(
             "engines": engines.into_iter().collect::<Vec<_>>(),
             "workloads": workloads.into_iter().collect::<Vec<_>>(),
             "commits": commits.into_iter().collect::<Vec<_>>(),
-            "hosts": hosts.into_iter().collect::<Vec<_>>(),
             "measurement_window_unix": {
                 "start": first_timestamp_unix,
                 "end": last_timestamp_unix,
@@ -2325,6 +2328,10 @@ fn write_latest_json(
         },
         "rows": row_values,
     });
+    let mut value = value;
+    if let Some(hosts) = hosts {
+        value["metadata"]["hosts"] = serde_json::json!(hosts.into_iter().collect::<Vec<_>>());
+    }
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| Error::new(format!("latest JSON failed: {error}")))?;
     fs::write(path, format!("{text}\n")).map_err(|error| Error::io(path, error))?;
@@ -3520,8 +3527,9 @@ mod tests {
     #[test]
     fn latest_json_leaves_an_unnamed_machine_unnamed() {
         // A row with no host must not acquire one from the rows beside it, and
-        // the table must not claim a single machine when one of its rows cannot
-        // say which machine it came from.
+        // the table must not claim any list of machines when one of its rows
+        // cannot say which machine it came from: `metadata.hosts` naming only
+        // the rows that know would read as a single-machine table.
         let named = {
             let mut record = sample_measurement(100, "rustia", "luau", "dense_tables", "test");
             record.host = Some("ci-bench".to_owned());
@@ -3546,7 +3554,11 @@ mod tests {
             .expect("object")
             .get("host")
             .is_none());
-        assert_eq!(value["metadata"]["hosts"], serde_json::json!(["ci-bench"]));
+        assert!(value["metadata"]
+            .as_object()
+            .expect("metadata object")
+            .get("hosts")
+            .is_none());
     }
 
     #[test]

@@ -189,7 +189,21 @@ Current unpublished workspace version: `0.0.1`.
   every slot it did not cover on whatever machine last measured it, with only
   `row.commit` to reveal it. Committed history is stamped; the harness reads
   the field as optional, because its absence means "measured before hosts were
-  recorded" rather than "measured somewhere unnamed".
+  recorded" rather than "measured somewhere unnamed", and omits
+  `metadata.hosts` when any row is unnamed rather than listing only the rows
+  that know. The checker covers the memory table and each memory cohort too,
+  and self-tests its refusals before reading committed data. The history
+  charts read the field as well: a host change is always an era boundary in
+  the recorded timing series, and the memory history plots one machine against
+  a reference from that same machine, counting the cohorts it leaves undrawn.
+  The memory panel names the machine from its rows, not from prose.
+  `tools/record-host-bridge.js` records `from_host`/`to_host` and refuses a
+  same-machine bridge; the memory merge requires a host only on the rows it
+  keeps, so a stale unlabelled Rustia row cannot block the run that replaces
+  it. Raw memory samples no longer record the node name, and fixed-run host
+  evidence records `uname -srvm`. The published data repository's memory
+  artifacts must carry the field before the publication lane renders again;
+  the copies committed here differ from them only by it.
 
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,

@@ -11,10 +11,16 @@ const {
   linuxComparisonSection,
   languagesByTargetSection,
   memoryComparisonCharts,
+  memoryCohortHost,
   memoryHistoryModel,
   memoryHistorySection,
+  memoryResultsSection,
+  mluaJitHistoryReference,
+  normalizeHistoryRecord,
   optimizationEvidenceSection,
   operationsStatusSection,
+  requireSingleHost,
+  rustiaHistoryEras,
   summarizeLanguageTargets,
   wasmTargetRows,
 } = require("../bench/render-current-results.js");
@@ -357,7 +363,8 @@ function main() {
   assert.equal(memoryHistoryModelValue.points[0].retained, 0.25);
   assert.equal(memoryHistoryModelValue.points[1].peak, 2);
   assert.equal(memoryHistoryModelValue.points[1].retained, 2);
-  const memoryHistoryHtml = memoryHistorySection(memoryHistory);
+  assert.equal(memoryHistoryModelValue.excluded, 0);
+  const memoryHistoryHtml = memoryHistorySection(memoryHistory, "ci-bench");
   assert.match(memoryHistoryHtml, /rustia Memory History/);
   assert.match(memoryHistoryHtml, /data-memory-history-metric="peak" aria-pressed="true"/);
   assert.match(memoryHistoryHtml, /data-memory-history-metric="retained" aria-pressed="false"/);
@@ -366,6 +373,175 @@ function main() {
   assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="peak"'), 2);
   assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="retained" hidden'), 2);
   assert.match(memoryHistoryHtml, /mlua<\/strong> \/ Luau \/ JIT · 1×/);
+
+  // A cohort names one machine, read from its rows; the record may repeat it
+  // but may not contradict it, and rows may not half-say it.
+  const hostedRows = (host) => memoryHistory[0].rows.map((row) => ({ ...row, host }));
+  assert.equal(memoryCohortHost({ rows: hostedRows("ci-bench") }, "fixture"), "ci-bench");
+  assert.equal(memoryCohortHost({ rows: hostedRows(undefined) }, "fixture"), null);
+  assert.equal(memoryCohortHost({ host: "ci-bench", rows: hostedRows("ci-bench") }, "fixture"), "ci-bench");
+  assert.throws(
+    () => memoryCohortHost({ rows: [...hostedRows("ci-bench"), { ...hostedRows("rented")[0], workload: "x" }] }, "fixture"),
+    /fixture was measured on 2 machines \(ci-bench, rented\)/,
+  );
+  assert.throws(
+    () => memoryCohortHost({ rows: [...hostedRows("ci-bench"), { ...hostedRows(undefined)[0], workload: "x" }] }, "fixture"),
+    /2 machines \(unnamed, ci-bench\)/,
+  );
+  assert.throws(() => memoryCohortHost({ host: "ci-bench", rows: hostedRows("rented") }, "fixture"), /fixture\.host is "ci-bench"/);
+  assert.throws(() => memoryCohortHost({ rows: hostedRows("") }, "fixture"), /non-empty string/);
+
+  // The memory history is one machine's series. The reference must come from
+  // the machine the latest cohort ran on; cohorts from any other machine are
+  // counted and named as not drawn, never plotted on the same line.
+  const hostedCohort = (record, host) => ({ ...record, host, rows: record.rows.map((row) => ({ ...row, host })) });
+  const movedHistory = [hostedCohort(memoryHistory[0], "rented"), hostedCohort(memoryHistory[1], "ci-bench")];
+  assert.equal(memoryHistoryModel(movedHistory), null);
+  const movedHtml = memoryHistorySection(movedHistory, "ci-bench");
+  assert.match(movedHtml, /1 cohort\(s\) on <code>ci-bench<\/code>; no reference to plot against yet/);
+  assert.match(movedHtml, /no mlua\/JIT memory cohort has been measured on <code>ci-bench<\/code>/);
+  assert.match(movedHtml, /1 earlier cohort\(s\) were measured on another machine and are not drawn/);
+  assert.doesNotMatch(movedHtml, /<code>baseline<\/code>/);
+  const rehomedHistory = [
+    ...movedHistory,
+    hostedCohort({
+      ...memoryHistory[0],
+      cohort_id: "rehomed",
+      commit: "rehomed-commit",
+      created_at: "2026-07-03T00:00:00.000Z",
+    }, "ci-bench"),
+  ];
+  const rehomedModel = memoryHistoryModel(rehomedHistory);
+  assert.equal(rehomedModel.host, "ci-bench");
+  assert.equal(rehomedModel.excluded, 1);
+  assert.equal(rehomedModel.reference.cohort, "rehomed");
+  assert.deepEqual(rehomedModel.points.map((point) => point.cohort), ["current", "rehomed"]);
+  assert.equal(rehomedModel.points[0].peak, 2);
+  assert.equal(rehomedModel.points[1].peak, 0.5);
+  const rehomedHtml = memoryHistorySection(rehomedHistory, "ci-bench");
+  assert.match(rehomedHtml, /2 complete Rustia cohorts on <code>ci-bench<\/code>/);
+  assert.match(rehomedHtml, /1 cohort\(s\) measured on another machine are not drawn/);
+  assert.match(rehomedHtml, /measured on the same machine as every Rustia point/);
+  // With no cohorts at all, the only machine the section can name is the
+  // qualified timing authority it was handed.
+  assert.match(memoryHistorySection([], "some-authority"), /starts again on <code>some-authority<\/code>/);
+
+  // The memory panel names the machine its rows name, never a literal.
+  const memoryResultRow = (engine, host) => ({
+    commit: "c".repeat(40),
+    target: "linux-x86_64",
+    host,
+    engine,
+    dialect: engine === "rustia" ? "luau" : "koto",
+    execution_mode: "interpreter",
+    workload: "memory_churn",
+    classification: "stable_in_tested_window",
+    metrics: {
+      spawned_anon_kib: { median: 1024 },
+      prepared_delta_anon_kib: { median: 64 },
+      peak_delta_kib: { median: 256 },
+      quiescent_retained_delta_anon_kib: { median: 32 },
+      tail_growth_kib_per_epoch: { median: 0 },
+    },
+  });
+  const soloMemoryHtml = memoryResultsSection(
+    { status: "ready", rows: [memoryResultRow("rustia", "box-a")], detector_coverage: [] },
+    "some-authority",
+  );
+  assert.match(soloMemoryHtml, /<h2>rustia Memory on box-a<\/h2>/);
+  assert.match(soloMemoryHtml, /Competitors return when the memory matrix runs on <code>box-a<\/code>/);
+  assert.doesNotMatch(soloMemoryHtml, /some-authority|ci-bench/);
+  const pendingMemoryHtml = memoryResultsSection({ status: "pending", rows: [], detector_coverage: [] }, "some-authority");
+  assert.match(pendingMemoryHtml, /measured on <code>some-authority<\/code>/);
+  assert.throws(
+    () => memoryResultsSection(
+      { status: "ready", rows: [memoryResultRow("rustia", "box-a"), memoryResultRow("koto", "box-b")], detector_coverage: [] },
+      "some-authority",
+    ),
+    /2 machines/,
+  );
+
+  // The single-host rule, as the readers apply it.
+  const hostRow = (engine, host) => ({ engine, host });
+  assert.equal(requireSingleHost([hostRow("rustia", "box-a"), hostRow("koto", "box-a")], "fixture", "why"), "box-a");
+  assert.throws(
+    () => requireSingleHost([hostRow("rustia", "box-a"), hostRow("koto", "box-b")], "fixture", "every ratio divides one row by another"),
+    /fixture holds rows measured on 2 machines \(box-a: rustia; box-b: koto\); every ratio divides one row by another/,
+  );
+
+  // Timing history rows keep their host through normalisation: absent stays
+  // absent (null) rather than being guessed, and present must name something.
+  const rawHistoryRecord = {
+    commit: "d".repeat(40),
+    target: "linux-x86_64",
+    engine: "rustia",
+    dialect: "luau",
+    workload: "dense_tables",
+    unit: "unit",
+    checksum: "integer:1",
+    timestamp_unix: 1_000,
+    n: 10,
+    reps: 3,
+    ns_per_unit_min: 100,
+    ns_per_unit_median: 110,
+    units_per_sec: 1e7,
+  };
+  assert.equal(normalizeHistoryRecord(rawHistoryRecord, 1).host, null);
+  assert.equal(normalizeHistoryRecord({ ...rawHistoryRecord, host: "ci-bench" }, 1).host, "ci-bench");
+  assert.throws(() => normalizeHistoryRecord({ ...rawHistoryRecord, host: "" }, 1), /host must be a non-empty string when present/);
+  assert.throws(() => normalizeHistoryRecord({ ...rawHistoryRecord, host: 7 }, 1), /host must be a non-empty string when present/);
+
+  // Recorded timing eras: a change of machine is always an era boundary, each
+  // era is normalised to its own first run, and an era whose machine did not
+  // cover every workload is refused rather than folded into a neighbour.
+  const snapshot = (timestamp, commit, minimum, host, engine = "rustia") =>
+    REQUIRED_COMMON_WORKLOADS.map((workload) => ({
+      target: "linux-x86_64",
+      engine,
+      dialect: "luau",
+      workload,
+      timestamp_unix: timestamp,
+      commit,
+      ns_per_unit_min: minimum,
+      host,
+    }));
+  const eraReference = mluaJitHistoryReference(snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"));
+  const day = 24 * 60 * 60;
+  const oneHostEras = rustiaHistoryEras(
+    [...snapshot(1_000, "first", 200, "ci-bench"), ...snapshot(1_000 + 2 * day, "second", 100, "ci-bench")],
+    eraReference,
+  );
+  assert.deepEqual(oneHostEras.map((era) => era.title), ["Earlier Linux history", "Current dedicated Linux history"]);
+  const twoHostEras = rustiaHistoryEras(
+    [
+      ...snapshot(1_000, "rented-first", 400, "linode-ap-southeast-g6-dedicated-4"),
+      ...snapshot(2_000, "rented-second", 200, "linode-ap-southeast-g6-dedicated-4"),
+      ...snapshot(3_000, "owned-first", 100, "ci-bench"),
+      ...snapshot(4_000, "owned-second", 50, "ci-bench"),
+    ],
+    eraReference,
+  );
+  assert.deepEqual(
+    twoHostEras.map((era) => era.label),
+    ["Recorded · linode-ap-southeast-g6-dedicated-4", "Recorded · ci-bench"],
+  );
+  assert.deepEqual(twoHostEras.map((era) => era.snapshotCount), [2, 2]);
+  // Each era starts at its own 1×: the owned host's first run is not 4× the
+  // rented host's, it is the first run of a series of its own.
+  assert.deepEqual(twoHostEras.map((era) => era.overall[0].gain), [1, 1]);
+  assert.deepEqual(twoHostEras.map((era) => era.overall.at(-1).gain), [2, 2]);
+  const unnamedEras = rustiaHistoryEras(
+    [...snapshot(1_000, "old", 400, undefined), ...snapshot(2_000, "new", 100, "ci-bench")],
+    eraReference,
+  );
+  assert.deepEqual(unnamedEras.map((era) => era.label), ["Recorded · before hosts were recorded", "Recorded · ci-bench"]);
+  assert.throws(
+    () => rustiaHistoryEras(
+      [...snapshot(1_000, "old", 400, "ci-bench"), ...snapshot(2_000, "partial", 100, "elsewhere").slice(0, 2)],
+      eraReference,
+    ),
+    /rustia rows measured on "elsewhere" for only closures_upvalues, dense_tables; an era needs every required workload/,
+  );
 
   const wasmRows = wasmTargetRows({
     runs: [

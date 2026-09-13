@@ -12,6 +12,8 @@ const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
 const expectedClaims = path.join(root, "bench", "CLAIMS.md");
 const operationsStatusPath = path.join(root, "bench", "operations-status.json");
+const memoryResultsPath = path.join(root, "bench", "memory", "current-results.json");
+const memoryHistoryPath = path.join(root, "bench", "memory", "history", "runs.jsonl");
 const dedicatedLinuxTarget = "linux-x86_64";
 // Cohorts whose rows must retain the extended harness provenance (prepare /
 // first-call / cold-start timings and verified mlua-luau native-JIT identity).
@@ -259,9 +261,11 @@ const expectedWorkloads = [
 const fullCommit = /^[0-9a-f]{40}$/;
 const maximumMatrixCohortSeconds = 55 * 60;
 
+// Thrown, not exited: the self-test below hands the validators tables they
+// must refuse, and it needs to see the refusal to assert on it. The one
+// catch at the bottom of the file turns any refusal into the exit status.
 function fail(message) {
-  console.error(`check-benchmark-results: ${message}`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function slash(value) {
@@ -459,83 +463,184 @@ function authoritativeHost() {
 
 // Provenance, per row and for the table as a whole.
 //
-// bench/current-results.json is a per-slot merge -- the latest row per (target,
-// engine, workload) across every cohort in the history. A run that re-measures
-// only some slots therefore leaves the rest standing, and before rows named
-// their machine that is exactly what happened: a table announced one machine in
-// its metadata while most of its rows had been measured on a rented cloud host
-// six weeks earlier, and only the per-row commit revealed it. A comparison
-// between two machines is not a comparison between two engines, so the table
-// must come from one machine, and that machine must be the one the operations
-// policy qualifies to produce timings.
-function validateMeasurementHosts() {
-  const expectedHost = authoritativeHost();
-  for (const [index, row] of readHistory().entries()) {
-    if (typeof row.host !== "string" || row.host === "") {
+// bench/current-results.json and bench/memory/current-results.json are per-slot
+// merges -- the latest row per (target, engine, workload) across every cohort
+// in their histories. A run that re-measures only some slots therefore leaves
+// the rest standing, and before rows named their machine that is exactly what
+// happened: a table announced one machine in its metadata while most of its
+// rows had been measured on a rented cloud host six weeks earlier, and only
+// the per-row commit revealed it. A comparison between two machines is not a
+// comparison between two engines, so each table must come from one machine,
+// and that machine must be the one the operations policy qualifies to produce
+// timings. The checks below are pure so the self-test can hand them tables
+// that must be refused.
+function requireLabelledRows(rows, label) {
+  for (const [index, row] of rows.entries()) {
+    if (typeof row?.host !== "string" || row.host === "") {
       fail(
-        `${relative(historyPath)} line ${index + 1} does not name the machine it was measured on; ` +
+        `${label} row ${index + 1} does not name the machine it was measured on; ` +
         "a row that cannot say where it came from can outlive the machine that produced it",
       );
     }
   }
+}
 
-  const table = JSON.parse(read(expectedJson));
-  const rows = Array.isArray(table.rows) ? table.rows : fail(`${relative(expectedJson)}.rows must be an array`);
+function requireSingleHostTable(table, label, expectedHost) {
+  const rows = Array.isArray(table?.rows) ? table.rows : fail(`${label}.rows must be an array`);
+  if (rows.length === 0) fail(`${label}.rows must not be empty`);
+  requireLabelledRows(rows, label);
   const hosts = [...new Set(rows.map((row) => row.host))].sort();
-  if (hosts.length !== 1 || typeof hosts[0] !== "string" || hosts[0] === "") {
+  if (hosts.length !== 1) {
     const byHost = hosts.map(
-      (host) =>
-        `${host ?? "unnamed"}: ${[...new Set(rows.filter((row) => row.host === host).map((row) => row.engine))].sort().join(", ")}`,
+      (host) => `${host}: ${[...new Set(rows.filter((row) => row.host === host).map((row) => row.engine))].sort().join(", ")}`,
     );
     fail(
-      `${relative(expectedJson)} publishes rows measured on ${hosts.length} machines (${byHost.join("; ")}); ` +
+      `${label} publishes rows measured on ${hosts.length} machines (${byHost.join("; ")}); ` +
       "a published table is one machine, so re-measure the stale slots or retire their rows",
     );
   }
   if (hosts[0] !== expectedHost) {
     fail(
-      `${relative(expectedJson)} was measured on ${JSON.stringify(hosts[0])}, but ` +
+      `${label} was measured on ${JSON.stringify(hosts[0])}, but ` +
       `${relative(operationsStatusPath)} qualifies ${JSON.stringify(expectedHost)} as the timing authority`,
     );
   }
-  if (JSON.stringify(table.metadata?.hosts) !== JSON.stringify(hosts)) {
+  // The metadata is what a reader sees first, so it may not disagree with the
+  // rows. Either spelling is checked when present: the harness and the merge
+  // write `hosts`, a memory cohort publication writes `host`.
+  const metadata = table.metadata ?? {};
+  if (metadata.hosts !== undefined && JSON.stringify(metadata.hosts) !== JSON.stringify(hosts)) {
     fail(
-      `${relative(expectedJson)}.metadata.hosts is ${JSON.stringify(table.metadata?.hosts)}, ` +
+      `${label}.metadata.hosts is ${JSON.stringify(metadata.hosts)}, ` +
       `but its rows were measured on ${JSON.stringify(hosts)}`,
     );
   }
+  if (metadata.host !== undefined && metadata.host !== hosts[0]) {
+    fail(
+      `${label}.metadata.host is ${JSON.stringify(metadata.host)}, ` +
+      `but its rows were measured on ${JSON.stringify(hosts[0])}`,
+    );
+  }
+  return hosts[0];
 }
 
-validateDedicatedLinuxMatrix();
-validateMeasurementHosts();
+function readMemoryHistoryCohorts() {
+  const text = read(memoryHistoryPath);
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        fail(`${relative(memoryHistoryPath)} line ${index + 1} is not JSON: ${error.message}`);
+      }
+    });
+}
 
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-bench-results-"));
+function validateMeasurementHosts() {
+  const expectedHost = authoritativeHost();
+  requireLabelledRows(readHistory(), relative(historyPath));
+  requireSingleHostTable(JSON.parse(read(expectedJson)), relative(expectedJson), expectedHost);
+
+  // The memory table is published beside the timing table and its ratios are
+  // read the same way, so it answers to the same machine. A pending table has
+  // no rows to place anywhere and is left alone; a cohort in the memory history
+  // is one run on one machine, so each is checked as a table of its own.
+  const memory = JSON.parse(read(memoryResultsPath));
+  if (memory.status === "ready") {
+    requireSingleHostTable(memory, relative(memoryResultsPath), expectedHost);
+  }
+  for (const [index, cohort] of readMemoryHistoryCohorts().entries()) {
+    const label = `${relative(memoryHistoryPath)} line ${index + 1}`;
+    if (!Array.isArray(cohort.rows) || cohort.rows.length === 0) fail(`${label}.rows must be a non-empty array`);
+    requireLabelledRows(cohort.rows, label);
+    const hosts = [...new Set(cohort.rows.map((row) => row.host))].sort();
+    if (hosts.length !== 1) {
+      fail(`${label} was measured on ${hosts.length} machines (${hosts.join(", ")}); a cohort is one run on one machine`);
+    }
+    if (cohort.host !== undefined && cohort.host !== hosts[0]) {
+      fail(`${label}.host is ${JSON.stringify(cohort.host)}, but its rows were measured on ${JSON.stringify(hosts[0])}`);
+    }
+  }
+}
+
+// The refusals above are the whole point of this file, so they are exercised
+// on fixtures before the committed data is checked: a validator that accepts
+// everything would otherwise pass this script without anyone noticing.
+function selfTest() {
+  const row = (engine, host) => ({ target: dedicatedLinuxTarget, engine, workload: "dense_tables", host });
+  const refuses = (pattern, thunk) => {
+    let message = null;
+    try {
+      thunk();
+    } catch (error) {
+      message = error.message;
+    }
+    if (message == null || !pattern.test(message)) {
+      fail(`self-test expected a refusal matching ${pattern}, got ${JSON.stringify(message)}`);
+    }
+  };
+  const table = (rows, metadata = {}) => ({ metadata, rows });
+
+  if (requireSingleHostTable(table([row("rustia", "ci-bench"), row("koto", "ci-bench")], { hosts: ["ci-bench"] }), "fixture", "ci-bench") !== "ci-bench") {
+    fail("self-test did not accept a single-host table");
+  }
+  refuses(/2 machines \(ci-bench: rustia; elsewhere: koto\)/, () =>
+    requireSingleHostTable(table([row("rustia", "ci-bench"), row("koto", "elsewhere")]), "fixture", "ci-bench"));
+  refuses(/fixture row 2 does not name the machine/, () =>
+    requireSingleHostTable(table([row("rustia", "ci-bench"), row("koto", undefined)]), "fixture", "ci-bench"));
+  refuses(/measured on "elsewhere", but .* qualifies "ci-bench"/, () =>
+    requireSingleHostTable(table([row("rustia", "elsewhere")]), "fixture", "ci-bench"));
+  refuses(/metadata\.hosts is \["elsewhere"\]/, () =>
+    requireSingleHostTable(table([row("rustia", "ci-bench")], { hosts: ["elsewhere"] }), "fixture", "ci-bench"));
+  refuses(/metadata\.host is "elsewhere"/, () =>
+    requireSingleHostTable(table([row("rustia", "ci-bench")], { host: "elsewhere" }), "fixture", "ci-bench"));
+  refuses(/rows must not be empty/, () => requireSingleHostTable(table([]), "fixture", "ci-bench"));
+  refuses(/row 2 does not name the machine/, () =>
+    requireLabelledRows([row("rustia", "ci-bench"), row("koto", "")], "fixture"));
+}
+
+function main() {
+  selfTest();
+  validateDedicatedLinuxMatrix();
+  validateMeasurementHosts();
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-bench-results-"));
+  try {
+    const actualResults = path.join(tempDir, "RESULTS.md");
+    const actualJson = path.join(tempDir, "current-results.json");
+    const actualClaims = path.join(tempDir, "CLAIMS.md");
+    runCargo([
+      "run",
+      "-p",
+      "script-bench-harness",
+      "--",
+      "--refresh-results",
+      "--results",
+      actualResults,
+      "--latest-json",
+      actualJson,
+    ]);
+    compare(expectedResults, actualResults, "just gen-current-results");
+    compare(expectedJson, actualJson, "just gen-current-results");
+    runNode([
+      path.join(root, "bench", "render-claims.js"),
+      "--source",
+      actualJson,
+      "--output",
+      actualClaims,
+    ]);
+    compare(expectedClaims, actualClaims, "just gen-current-results");
+    console.log("dedicated Linux benchmark matrix, markdown, JSON, and claim results are current");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 try {
-  const actualResults = path.join(tempDir, "RESULTS.md");
-  const actualJson = path.join(tempDir, "current-results.json");
-  const actualClaims = path.join(tempDir, "CLAIMS.md");
-  runCargo([
-    "run",
-    "-p",
-    "script-bench-harness",
-    "--",
-    "--refresh-results",
-    "--results",
-    actualResults,
-    "--latest-json",
-    actualJson,
-  ]);
-  compare(expectedResults, actualResults, "just gen-current-results");
-  compare(expectedJson, actualJson, "just gen-current-results");
-  runNode([
-    path.join(root, "bench", "render-claims.js"),
-    "--source",
-    actualJson,
-    "--output",
-    actualClaims,
-  ]);
-  compare(expectedClaims, actualClaims, "just gen-current-results");
-  console.log("dedicated Linux benchmark matrix, markdown, JSON, and claim results are current");
-} finally {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  main();
+} catch (error) {
+  console.error(`check-benchmark-results: ${error.message}`);
+  process.exit(1);
 }

@@ -224,16 +224,23 @@ function selfTest() {
     }
     if (current.metadata.host !== "fixture-host") fail("publication did not record its host");
     const analysis = JSON.parse(fs.readFileSync(analysisPath, "utf8"));
-    // A row that cannot name its machine, and a cohort assembled from two, are
-    // both refused -- the memory table is per-slot merged across cohorts, so an
-    // unlabelled row here is a row that can outlive the machine it came from.
-    for (const rows of [
-      [{ ...analysis.rows[0], host: undefined }],
-      [analysis.rows[0], { ...analysis.rows[0], workload: "memory_burst", host: "other-host" }],
-    ]) {
-      const strayPath = path.join(temporary, `stray-${rows.length}.json`);
-      fs.writeFileSync(strayPath, `${JSON.stringify({ ...analysis, rows })}\n`);
-      let refused = false;
+    // A row that cannot name its machine, a cohort assembled from two, and an
+    // analysis whose own host label disagrees with its rows are all refused --
+    // the memory table is per-slot merged across cohorts, so an unlabelled or
+    // mislabelled row here is a row that can outlive the machine it came from.
+    const strays = [
+      ["unlabelled row", { rows: [{ ...analysis.rows[0], host: undefined }] }, /host is missing/],
+      [
+        "two machines",
+        { rows: [analysis.rows[0], { ...analysis.rows[0], workload: "memory_burst", host: "other-host" }] },
+        /name 2 hosts/,
+      ],
+      ["analysis host disagrees with its rows", { host: "other-host" }, /names host "other-host" but its rows name "fixture-host"/],
+    ];
+    for (const [name, override, expected] of strays) {
+      const strayPath = path.join(temporary, `stray-${name.replace(/[^a-z]+/g, "-")}.json`);
+      fs.writeFileSync(strayPath, `${JSON.stringify({ ...analysis, ...override })}\n`);
+      let message = null;
       try {
         publish({
           analysis: strayPath,
@@ -243,10 +250,12 @@ function selfTest() {
           current: path.join(temporary, "stray-current.json"),
           commit,
         });
-      } catch (_) {
-        refused = true;
+      } catch (error) {
+        message = error.message;
       }
-      if (!refused) fail("publication accepted memory rows that disagree about their host");
+      if (message == null || !expected.test(message)) {
+        fail(`publication did not refuse ${name} as expected (got ${JSON.stringify(message)})`);
+      }
     }
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });

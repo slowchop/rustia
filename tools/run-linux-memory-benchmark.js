@@ -664,6 +664,16 @@ function selfTest() {
   assert.notEqual(hostLabel(rented), hostLabel(dedicated));
   assert.equal(memoryProtocol(dedicated).host.name, "ci-bench");
   assert.equal(memoryProtocol(rented).host.name, hostLabel(rented));
+  // A rented config that cannot name its class is refused before it can label
+  // a row "linode-undefined-undefined".
+  assert.throws(
+    () => validateConfig({ ...rented, provider: { ...rented.provider, region: undefined } }),
+    /provider\.region/,
+  );
+  assert.throws(
+    () => validateConfig({ ...rented, provider: { ...rented.provider, size: { ...rented.provider.size, id: undefined } } }),
+    /provider\.size\.id/,
+  );
   // A core outside the pinned set must be refused.
   assert.throws(
     () =>

@@ -515,6 +515,16 @@ function selfTest() {
   });
   const interval = bootstrapMedianInterval([10, 10, 10], 100, 7);
   assert.deepEqual(interval, { lower: 10, upper: 10 });
+
+  // The host label is the only provenance a row gets, so it is required, must
+  // be a label rather than anything resolvable, and may be given once.
+  const input = ["--input", "samples.json"];
+  assert.equal(parseArgs([...input, "--host", "ci-bench"]).host, "ci-bench");
+  assert.throws(() => parseArgs(input), /--host is required/);
+  assert.throws(() => parseArgs([...input, "--host", ""]), /requires a value|safe identifier/);
+  assert.throws(() => parseArgs([...input, "--host", "bench.example.com:22"]), /safe identifier/);
+  assert.throws(() => parseArgs([...input, "--host", "a b"]), /safe identifier/);
+  assert.throws(() => parseArgs([...input, "--host", "ci-bench", "--host", "ci-bench"]), /more than once/);
   process.stdout.write("memory analyzer self-test passed\n");
 }
 

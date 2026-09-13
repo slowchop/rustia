@@ -1329,7 +1329,8 @@ function collectHost(config, build) {
   const microcode = cpuInfo.match(/^microcode\s*:\s*(.+)$/m);
   return {
     captured_at: new Date().toISOString(),
-    uname: runText("uname", ["-a"]),
+    // -srvm, not -a: the node name would put a hostname into committed evidence.
+    uname: runText("uname", ["-srvm"]),
     os_release: fs.readFileSync("/etc/os-release", "utf8"),
     lscpu: runText("lscpu", ["--json"]),
     virtualization: runText("systemd-detect-virt", [], { allowFailure: true }),

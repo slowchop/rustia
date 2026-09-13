@@ -825,13 +825,19 @@ exactly the one host its rows name and to match the qualified timing authority i
 `operations-status.json`, and `render-current-results.js` refuses to render a
 table whose rows disagree rather than labelling the mix — every figure on the
 page is a ratio between two rows, and an annotated cross-host ratio is still a
-wrong number. The era charts already draw separate hosts on separate scales,
-which is the honest presentation when the machine genuinely changes.
+wrong number. The same check covers `memory/current-results.json` and every
+cohort in `memory/history/runs.jsonl`. The history charts apply the rule from
+the row data: a change of `host` is always an era boundary in the recorded
+timing series, each era normalised to its own first run, and the memory history
+draws one machine — the latest cohort's — against a mlua/JIT reference measured
+on that same machine, saying how many cohorts from other machines it leaves
+undrawn.
 
 Rows written before the field existed do not carry it, and the harness reads it
 as optional for that reason: the absence means "measured before hosts were
 recorded", not "measured somewhere unnamed". A row that carries the key must
-carry a non-empty value. The committed history names a host on every row.
+carry a non-empty value, and `metadata.hosts` is written only when every row
+names its machine. The committed history names a host on every row.
 
 The future website should treat the versioned JSONL snapshot as the summary
 source of truth and generate charts from `engine × target × workload`

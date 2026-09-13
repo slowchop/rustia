@@ -86,10 +86,19 @@ function validateCurrent(current, label, rustiaOnly) {
   if (rustiaOnly && current.rows.some((row) => row.engine !== "rustia")) {
     fail(`${label} must contain only Rustia rows`);
   }
-  const unlabelled = current.rows.filter((row) => typeof row.host !== "string" || row.host === "");
+}
+
+// Every row that will stand in the merged table must name its machine. The
+// generated rows are checked whole; the stored table is checked only on the
+// rows the merge keeps, because a stored Rustia row is about to be replaced
+// and refusing over it would make a stale, unlabelled Rustia row permanent --
+// the one row this merge exists to replace.
+function requireLabelledRows(rows, label) {
+  const unlabelled = rows.filter((row) => typeof row.host !== "string" || row.host === "");
   if (unlabelled.length !== 0) {
     fail(
-      `${label} has ${unlabelled.length} row(s) that do not name the machine they were measured on; ` +
+      `${label} has ${unlabelled.length} row(s) that do not name the machine they were measured on ` +
+      `(${[...new Set(unlabelled.map((row) => row.engine))].sort().join(", ")}); ` +
       "a row that cannot say where it came from cannot be merged with one that can",
     );
   }
@@ -98,6 +107,7 @@ function validateCurrent(current, label, rustiaOnly) {
 function merge(config) {
   const generated = readJson(config.generatedCurrent, "generated current memory results");
   validateCurrent(generated, "generated current memory results", true);
+  requireLabelledRows(generated.rows, "generated current memory results");
   const generatedHistory = readHistory(config.generatedHistory);
   const cohortId = generated.metadata?.cohort_id;
   const commit = generated.metadata?.commit;
@@ -121,9 +131,10 @@ function merge(config) {
     ? [...existingHistory, generatedCohorts[0]]
     : existingHistory;
 
-  const priorRows = existingCurrent?.rows ?? [];
+  const retainedRows = (existingCurrent?.rows ?? []).filter((row) => row.engine !== "rustia");
+  requireLabelledRows(retainedRows, "stored current memory results");
   const rows = [
-    ...priorRows.filter((row) => row.engine !== "rustia"),
+    ...retainedRows,
     ...generated.rows,
   ].sort(
     (left, right) =>
@@ -273,6 +284,56 @@ function selfTest() {
       refused = /2 machines/.test(error.message);
     }
     if (!refused) fail("self-test merged competitor rows measured on a different machine");
+
+    // A stored Rustia row that predates host labels is about to be replaced,
+    // so it must not block the merge that replaces it; a stored competitor row
+    // that predates them is about to be published, so it must.
+    const storedTable = (storedRows) => ({
+      schema_version: 1,
+      schema: CURRENT_SCHEMA,
+      status: "ready",
+      metadata: { cohort_id: "baseline" },
+      detector_coverage: [{ engine: "mlua-luau-jit" }],
+      rows: storedRows,
+    });
+    writeAtomic(currentPath, `${JSON.stringify(storedTable([
+      row("mlua-luau-jit", "a".repeat(40)),
+      { ...row("rustia", "a".repeat(40)), host: undefined },
+    ]))}\n`);
+    const replaced = merge({ generatedCurrent, generatedHistory, dataRoot });
+    const replacedCurrent = readJson(currentPath, "self-test current");
+    if (
+      replaced.rowCount !== 2 ||
+      !replacedCurrent.rows.every((entry) => entry.host === "ci-bench")
+    ) {
+      fail("self-test did not replace an unlabelled stored Rustia row");
+    }
+    writeAtomic(currentPath, `${JSON.stringify(storedTable([
+      { ...row("mlua-luau-jit", "a".repeat(40)), host: undefined },
+    ]))}\n`);
+    let refusedUnlabelled = false;
+    try {
+      merge({ generatedCurrent, generatedHistory, dataRoot });
+    } catch (error) {
+      refusedUnlabelled = /do not name the machine/.test(error.message) && /mlua-luau-jit/.test(error.message);
+    }
+    if (!refusedUnlabelled) fail("self-test merged an unlabelled stored competitor row");
+    const generatedUnlabelled = path.join(temporary, "generated-unlabelled.json");
+    writeAtomic(generatedUnlabelled, `${JSON.stringify({
+      schema_version: 1,
+      schema: CURRENT_SCHEMA,
+      status: "ready",
+      metadata: { cohort_id: generatedCohort.cohort_id, commit: generatedCohort.commit },
+      detector_coverage: [{ engine: "rustia" }],
+      rows: [{ ...row("rustia", "b".repeat(40)), host: "" }],
+    })}\n`);
+    let refusedGenerated = false;
+    try {
+      merge({ generatedCurrent: generatedUnlabelled, generatedHistory, dataRoot });
+    } catch (error) {
+      refusedGenerated = /generated current memory results has 1 row/.test(error.message);
+    }
+    if (!refusedGenerated) fail("self-test merged a generated row with an empty host");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

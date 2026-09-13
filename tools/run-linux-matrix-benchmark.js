@@ -1015,6 +1015,19 @@ async function selfTest() {
     const args = nativeArgs(config, ALL_ENGINES, "samples.json");
     assert.equal(args[args.indexOf("--host") + 1], hostLabel(config));
   }
+  // A rented config that cannot name its class is refused before it can label
+  // a row "linode-undefined-undefined".
+  assert.throws(
+    () => validateConfig({ ...linodeConfig, provider: { ...linodeConfig.provider, region: undefined } }),
+    /provider\.region/,
+  );
+  assert.throws(
+    () => validateConfig({
+      ...linodeConfig,
+      provider: { ...linodeConfig.provider, size: { ...linodeConfig.provider.size, id: undefined } },
+    }),
+    /provider\.size\.id/,
+  );
 
   // Steal is structurally zero on bare metal, so the owned lifecycle requires
   // exactly zero and must refuse the rented one's tolerances.

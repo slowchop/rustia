@@ -155,25 +155,51 @@ assertion is a refusal:
   2026-09-05 mix, now refuses to publish a merged table spanning two machines
   and names the engines on each.
 - **Validation.** `tools/check-benchmark-results.js` requires every history row
-  to name a host, requires the published table to name exactly one, and
-  requires that one to be the host of the runner class marked
-  `timing_authority` in `bench/operations-status.json` — so the machine
-  boundary above is checked in the data, not only in the workflow.
+  to name a host, requires each published table — timing and memory — to name
+  exactly one, requires that one to be the host of the runner class marked
+  `timing_authority` in `bench/operations-status.json`, requires each memory
+  cohort to be one machine, and exercises those refusals on fixtures before
+  reading the committed data — so the machine boundary above is checked in the
+  data, not only in the workflow.
 - **Render.** `bench/render-current-results.js` refuses to render a table whose
-  rows disagree.
+  rows disagree, and names the machine in the memory panel from the rows rather
+  than from prose.
+- **Bridge.** `tools/record-host-bridge.js`, which writes down how two
+  machines compared before the earlier one's rows are retired, reads each
+  side's host from its rows into `from_host`/`to_host` and refuses a bridge
+  whose two sides are the same machine, or neither of which names one.
 
-That last one was the open choice: label the mix or refuse it. The page refuses,
-because a labelled ratio between two boxes is still a wrong number, just an
-annotated one. The era charts are unaffected — they already draw separate
-hosts on separate scales, which is the presentation a genuine host change
-calls for.
+That last refusal was the open choice: label the mix or refuse it. The page
+refuses, because a labelled ratio between two boxes is still a wrong number,
+just an annotated one. The history charts follow the same rule from the row
+data. In the recorded timing series a change of `host` is always an era
+boundary: each era is normalised to its own first run, never to another
+machine's, and rows from a machine that did not cover every required workload
+are refused rather than folded into a neighbouring era. The memory history is
+one machine's series — the machine of the latest cohort — plotted against a
+mlua/JIT reference measured on that same machine, and it states how many
+cohorts from other machines it is not drawing.
 
 The harness reads the field as optional when parsing history, because rows
 written before it existed do not carry it and that absence is readable: it means
 "measured before hosts were recorded", not "measured somewhere unnamed". A row
 that *does* carry the key must carry a non-empty value, or the label would be a
-way to look labelled while saying nothing. The committed history carries a host
-on every row, and the validator keeps it that way.
+way to look labelled while saying nothing. For the same reason
+`metadata.hosts` is written only when every row names its machine: a list
+naming just the rows that know would read as a single-machine table when it is
+not. The committed history carries a host on every row, and the validator keeps
+it that way.
+
+The label is the only place a machine is named. Raw memory samples and
+fixed-run host evidence are copied whole into public artifacts, so the memory
+supervisor records no node name and the fixed-run runner records `uname -srvm`
+rather than `uname -a`; the owned lane's acceptance already refuses matrix
+evidence that carries one.
+
+The published data repository holds the memory table and history the
+publication lane installs before rendering, and it is subject to the same rule:
+its rows must name their host before that lane renders again. The copies
+committed here are identical to its files apart from the field.
 
 The wasm lane is outside this rule and does not need it.
 `bench/wasm/current-results.json` is rewritten whole by one invocation, and its
