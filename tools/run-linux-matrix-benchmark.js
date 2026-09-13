@@ -642,9 +642,18 @@ async function timedGroup(config, label, command, args, gateFile, options = {}, 
 // single runner file is copied to the benchmark host (see shipAndRun in
 // run-dedicated-benchmark.js), so a require() of a sibling module would resolve
 // on a developer machine and fail on the host.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
 function hostLabel(config) {
-  if (config.schema === DEDICATED_SCHEMA) return config.provider.host.name;
-  return `linode-${config.provider.region}-${config.provider.size.id}`;
+  const label = config.schema === DEDICATED_SCHEMA
+    ? config.provider.host.name
+    : `linode-${config.provider.region}-${config.provider.size.id}`;
+  if (!HOST_LABEL.test(label)) {
+    fail(`host label ${JSON.stringify(label)} is not a label: it may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return label;
 }
 
 function nativeArgs(config, engines, samplesFile) {
@@ -1011,6 +1020,14 @@ async function selfTest() {
   assert.equal(hostLabel(frozenDedicated), "ci-bench");
   assert.equal(hostLabel(linodeConfig), "linode-ap-southeast-g6-dedicated-4");
   assert.notEqual(hostLabel(linodeConfig), hostLabel(frozenDedicated));
+  // A label is never an address: a name with a dot or a colon is refused
+  // before it can be stamped on a row.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(
+      () => hostLabel({ ...frozenDedicated, provider: { ...frozenDedicated.provider, host: { ...frozenDedicated.provider.host, name } } }),
+      /not a label/,
+    );
+  }
   for (const config of [frozenDedicated, linodeConfig]) {
     const args = nativeArgs(config, ALL_ENGINES, "samples.json");
     assert.equal(args[args.indexOf("--host") + 1], hostLabel(config));

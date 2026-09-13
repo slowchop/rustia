@@ -192,11 +192,21 @@ Current unpublished workspace version: `0.0.1`.
   recorded" rather than "measured somewhere unnamed", and omits
   `metadata.hosts` when any row is unnamed rather than listing only the rows
   that know. The checker covers the memory table and each memory cohort too,
-  and self-tests its refusals before reading committed data. The history
-  charts read the field as well: a host change is always an era boundary in
-  the recorded timing series, and the memory history plots one machine against
-  a reference from that same machine, counting the cohorts it leaves undrawn.
-  The memory panel names the machine from its rows, not from prose.
+  and self-tests its refusals before reading committed data; the renderer pins
+  the timing table, the memory table, and the memory history's latest cohort
+  to the timing authority itself, since the publication lane installs the data
+  repository's memory files after the checker has run, and the checker pins
+  that latest cohort too. The history charts read the field as well: the
+  recorded timing chart draws only the reference machine's rows and counts
+  the rest as runs not drawn, a reconstruction or live series from another
+  machine is refused, and the memory history plots one machine against a
+  reference from that same machine, saying how many cohorts from another
+  machine or from before hosts were recorded it leaves undrawn. The memory
+  panel names the machine from its rows, not from prose. Every label emitter
+  and validator, the publication gate included, now accepts only
+  `[A-Za-z0-9_-]{1,128}`, so a dotted name or an IP address is refused as a
+  label, and the checker's self-test asserts that every one of those files
+  carries the same literal.
   `tools/record-host-bridge.js` records `from_host`/`to_host` and refuses a
   same-machine bridge; the memory merge requires a host only on the rows it
   keeps, so a stale unlabelled Rustia row cannot block the run that replaces

@@ -6,6 +6,7 @@ const {
   REQUIRED_COMMON_WORKLOADS,
   bestAvailableRows,
   coldStartSection,
+  historySection,
   implementationLabel,
   languageLabel,
   linuxComparisonSection,
@@ -19,7 +20,10 @@ const {
   normalizeHistoryRecord,
   optimizationEvidenceSection,
   operationsStatusSection,
+  requireAuthorityHost,
+  requirePublishedHosts,
   requireSingleHost,
+  rustiaBackfillEras,
   rustiaHistoryEras,
   summarizeLanguageTargets,
   wasmTargetRows,
@@ -363,7 +367,6 @@ function main() {
   assert.equal(memoryHistoryModelValue.points[0].retained, 0.25);
   assert.equal(memoryHistoryModelValue.points[1].peak, 2);
   assert.equal(memoryHistoryModelValue.points[1].retained, 2);
-  assert.equal(memoryHistoryModelValue.excluded, 0);
   const memoryHistoryHtml = memoryHistorySection(memoryHistory, "ci-bench");
   assert.match(memoryHistoryHtml, /rustia Memory History/);
   assert.match(memoryHistoryHtml, /data-memory-history-metric="peak" aria-pressed="true"/);
@@ -400,7 +403,12 @@ function main() {
   const movedHtml = memoryHistorySection(movedHistory, "ci-bench");
   assert.match(movedHtml, /1 cohort\(s\) on <code>ci-bench<\/code>; no reference to plot against yet/);
   assert.match(movedHtml, /no mlua\/JIT memory cohort has been measured on <code>ci-bench<\/code>/);
-  assert.match(movedHtml, /1 earlier cohort\(s\) were measured on another machine and are not drawn/);
+  assert.match(movedHtml, /1 cohort\(s\) measured on another machine is not drawn beside these/);
+  // A cohort from before hosts were recorded is a different fact from a cohort
+  // measured on another machine, and the prose says which.
+  const predatingHtml = memoryHistorySection([memoryHistory[0], hostedCohort(memoryHistory[1], "ci-bench")], "ci-bench");
+  assert.match(predatingHtml, /1 cohort\(s\) measured before hosts were recorded is not drawn beside these/);
+  assert.doesNotMatch(predatingHtml, /another machine/);
   assert.doesNotMatch(movedHtml, /<code>baseline<\/code>/);
   const rehomedHistory = [
     ...movedHistory,
@@ -413,14 +421,13 @@ function main() {
   ];
   const rehomedModel = memoryHistoryModel(rehomedHistory);
   assert.equal(rehomedModel.host, "ci-bench");
-  assert.equal(rehomedModel.excluded, 1);
   assert.equal(rehomedModel.reference.cohort, "rehomed");
   assert.deepEqual(rehomedModel.points.map((point) => point.cohort), ["current", "rehomed"]);
   assert.equal(rehomedModel.points[0].peak, 2);
   assert.equal(rehomedModel.points[1].peak, 0.5);
   const rehomedHtml = memoryHistorySection(rehomedHistory, "ci-bench");
   assert.match(rehomedHtml, /2 complete Rustia cohorts on <code>ci-bench<\/code>/);
-  assert.match(rehomedHtml, /1 cohort\(s\) measured on another machine are not drawn/);
+  assert.match(rehomedHtml, /1 cohort\(s\) measured on another machine is not drawn beside these/);
   assert.match(rehomedHtml, /measured on the same machine as every Rustia point/);
   // With no cohorts at all, the only machine the section can name is the
   // qualified timing authority it was handed.
@@ -490,57 +497,142 @@ function main() {
   assert.equal(normalizeHistoryRecord({ ...rawHistoryRecord, host: "ci-bench" }, 1).host, "ci-bench");
   assert.throws(() => normalizeHistoryRecord({ ...rawHistoryRecord, host: "" }, 1), /host must be a non-empty string when present/);
   assert.throws(() => normalizeHistoryRecord({ ...rawHistoryRecord, host: 7 }, 1), /host must be a non-empty string when present/);
+  // A label, never an address: the page refuses a dotted name or an IP as a
+  // machine label wherever it reads one.
+  for (const address of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(() => normalizeHistoryRecord({ ...rawHistoryRecord, host: address }, 1), /not a label/);
+    assert.throws(() => memoryCohortHost({ rows: hostedRows(address) }, "fixture"), /not a label/);
+  }
 
-  // Recorded timing eras: a change of machine is always an era boundary, each
-  // era is normalised to its own first run, and an era whose machine did not
-  // cover every workload is refused rather than folded into a neighbour.
+  // Recorded timing eras are one machine's -- the machine the mlua/JIT
+  // reference was measured on. Rows from another machine, or from before hosts
+  // were recorded, are counted and named rather than drawn, and a history with
+  // nothing from that machine is refused rather than drawn against it.
+  // A matrix run stamps each row as it finishes, so a run's rows do not share
+  // a timestamp; the fixture stamps them a second apart the same way.
   const snapshot = (timestamp, commit, minimum, host, engine = "rustia") =>
-    REQUIRED_COMMON_WORKLOADS.map((workload) => ({
+    REQUIRED_COMMON_WORKLOADS.map((workload, index) => ({
       target: "linux-x86_64",
       engine,
       dialect: "luau",
       workload,
-      timestamp_unix: timestamp,
+      timestamp_unix: timestamp + index,
       commit,
       ns_per_unit_min: minimum,
       host,
     }));
   const eraReference = mluaJitHistoryReference(snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"));
+  assert.equal(eraReference.host, "ci-bench");
+  // The reference is one machine, checked rather than assumed.
+  assert.throws(
+    () => mluaJitHistoryReference([
+      ...snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit").slice(0, 3),
+      ...snapshot(1_000, "reference", 100, "linode-ap-southeast-g6-dedicated-4", "mlua-luau-jit").slice(3),
+    ]),
+    /the mlua\/JIT reference holds rows measured on 2 machines/,
+  );
   const day = 24 * 60 * 60;
-  const oneHostEras = rustiaHistoryEras(
+  const oneHost = rustiaHistoryEras(
     [...snapshot(1_000, "first", 200, "ci-bench"), ...snapshot(1_000 + 2 * day, "second", 100, "ci-bench")],
     eraReference,
   );
-  assert.deepEqual(oneHostEras.map((era) => era.title), ["Earlier Linux history", "Current dedicated Linux history"]);
-  const twoHostEras = rustiaHistoryEras(
+  assert.deepEqual(oneHost.eras.map((era) => era.title), ["Earlier Linux history", "Current dedicated Linux history"]);
+  assert.deepEqual(oneHost.elsewhere, []);
+  const rented = "linode-ap-southeast-g6-dedicated-4";
+  const twoHosts = rustiaHistoryEras(
     [
-      ...snapshot(1_000, "rented-first", 400, "linode-ap-southeast-g6-dedicated-4"),
-      ...snapshot(2_000, "rented-second", 200, "linode-ap-southeast-g6-dedicated-4"),
+      ...snapshot(1_000, "rented-first", 400, rented),
+      ...snapshot(2_000, "rented-second", 200, rented),
       ...snapshot(3_000, "owned-first", 100, "ci-bench"),
       ...snapshot(4_000, "owned-second", 50, "ci-bench"),
     ],
     eraReference,
   );
-  assert.deepEqual(
-    twoHostEras.map((era) => era.label),
-    ["Recorded · linode-ap-southeast-g6-dedicated-4", "Recorded · ci-bench"],
-  );
-  assert.deepEqual(twoHostEras.map((era) => era.snapshotCount), [2, 2]);
-  // Each era starts at its own 1×: the owned host's first run is not 4× the
-  // rented host's, it is the first run of a series of its own.
-  assert.deepEqual(twoHostEras.map((era) => era.overall[0].gain), [1, 1]);
-  assert.deepEqual(twoHostEras.map((era) => era.overall.at(-1).gain), [2, 2]);
-  const unnamedEras = rustiaHistoryEras(
+  assert.deepEqual(twoHosts.eras.map((era) => era.label), ["Recorded Linux history"]);
+  // Only the reference machine's rows are on the chart, at their own 1×; the
+  // rented rows are counted, never divided into ci-bench's reference.
+  assert.deepEqual(twoHosts.eras[0].overall.map((point) => point.commit), ["owned-first", "owned-second"]);
+  assert.deepEqual(twoHosts.eras[0].overall.map((point) => point.gain), [1, 2]);
+  assert.deepEqual(twoHosts.elsewhere, [{ host: rented, runCount: 2 }]);
+  const unnamed = rustiaHistoryEras(
     [...snapshot(1_000, "old", 400, undefined), ...snapshot(2_000, "new", 100, "ci-bench")],
     eraReference,
   );
-  assert.deepEqual(unnamedEras.map((era) => era.label), ["Recorded · before hosts were recorded", "Recorded · ci-bench"]);
+  assert.deepEqual(unnamed.eras[0].overall.map((point) => point.commit), ["new"]);
+  assert.deepEqual(unnamed.elsewhere, [{ host: null, runCount: 1 }]);
+  // Undrawn runs are counted the way drawn ones are -- one row per workload
+  // per run -- so two commits at one timestamp are two runs and a partial
+  // matrix is at most one, whatever their timestamps say.
+  const tied = rustiaHistoryEras(
+    [
+      ...snapshot(1_000, "rented-a", 400, rented),
+      ...snapshot(1_000, "rented-b", 400, rented),
+      ...snapshot(2_000, "partial", 400, "elsewhere").slice(0, 2),
+      ...snapshot(3_000, "owned", 100, "ci-bench"),
+    ],
+    eraReference,
+  );
+  assert.deepEqual(tied.elsewhere, [{ host: "elsewhere", runCount: 1 }, { host: rented, runCount: 2 }]);
   assert.throws(
-    () => rustiaHistoryEras(
-      [...snapshot(1_000, "old", 400, "ci-bench"), ...snapshot(2_000, "partial", 100, "elsewhere").slice(0, 2)],
-      eraReference,
-    ),
-    /rustia rows measured on "elsewhere" for only closures_upvalues, dense_tables; an era needs every required workload/,
+    () => rustiaHistoryEras(snapshot(1_000, "old", 400, rented), eraReference),
+    /no recorded rustia rows measured on "ci-bench", the machine the mlua\/JIT reference was measured on/,
+  );
+  // The section's prose names the machine drawn and says, precisely, what is
+  // not drawn: rows from another machine and rows from before hosts were
+  // recorded are different facts.
+  const mixedHistory = { rows: [...snapshot(1_000, "rented-first", 400, rented), ...snapshot(2_000, "old", 400, undefined), ...snapshot(3_000, "owned-first", 100, "ci-bench")] };
+  const historyHtml = historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), []);
+  assert.match(historyHtml, /1 recorded Linux matrix runs on <code>ci-bench<\/code> across one era/);
+  assert.match(historyHtml, /Not drawn: 1 run\(s\) measured before hosts were recorded; 1 run\(s\) measured on <code>linode-ap-southeast-g6-dedicated-4<\/code>\./);
+  assert.doesNotMatch(historyHtml, /rented-first/);
+  // When a live series (or a reconstruction) is the whole chart, the recorded
+  // runs from other machines are still named as not drawn, and the series is
+  // passed in rather than read from wherever the checkout happens to have it.
+  const liveSeries = (host) => ({
+    manifest: { harness_commit: "1".repeat(40), host },
+    rows: [...snapshot(5_000, "series-a", 100, host), ...snapshot(6_000, "series-b", 50, host)],
+  });
+  const seriesHtml = historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), [liveSeries("ci-bench")]);
+  assert.match(seriesHtml, /2 historical Rustia revisions replayed against one fixed harness/);
+  assert.match(seriesHtml, /Not drawn: 1 run\(s\) measured before hosts were recorded; 1 run\(s\) measured on <code>linode-ap-southeast-g6-dedicated-4<\/code>\./);
+  assert.doesNotMatch(seriesHtml, /recorded Linux matrix runs/);
+  // Every point on the chart is divided into the reference, so a series or a
+  // reconstruction from another machine is refused, never drawn against it.
+  assert.throws(
+    () => rustiaBackfillEras([], eraReference, [liveSeries(rented)]),
+    /the live series with harness 1111111 was measured on "linode-ap-southeast-g6-dedicated-4", but the mlua\/JIT reference was measured on "ci-bench"/,
+  );
+  assert.throws(
+    () => rustiaBackfillEras([{ harness_commit: "2".repeat(40), host: rented, targets: [], rows: [] }], eraReference, []),
+    /the reconstruction with harness 2222222 was measured on "linode-ap-southeast-g6-dedicated-4"/,
+  );
+  assert.throws(
+    () => rustiaBackfillEras([{ harness_commit: "2".repeat(40), targets: [], rows: [] }], eraReference, []),
+    /was measured on an unnamed machine, but the mlua\/JIT reference was measured on "ci-bench"/,
+  );
+  // The page pins each published table to the timing authority itself: the
+  // publication lane installs the data repository's memory table after the
+  // checker has run, so the checker's pin never sees the rows that are
+  // rendered.
+  assert.equal(requireAuthorityHost("ci-bench", "fixture", "ci-bench"), undefined);
+  assert.throws(
+    () => requireAuthorityHost(rented, "bench/memory/current-results.json", "ci-bench"),
+    /bench\/memory\/current-results.json was measured on "linode-ap-southeast-g6-dedicated-4", but .*operations-status.json qualifies "ci-bench" as the timing authority; the page publishes only the qualified machine/,
+  );
+  assert.throws(() => requireAuthorityHost(null, "fixture", "ci-bench"), /was measured on null, but/);
+  const policy = { runner_classes: { rented: { timing_authority: false, host: rented }, owned: { timing_authority: true, host: "ci-bench" } } };
+  const table = (host) => ({ status: "ready", rows: [{ host }] });
+  assert.equal(requirePublishedHosts(table("ci-bench"), table("ci-bench"), [{ host: rented }, { host: "ci-bench" }], policy), "ci-bench");
+  assert.equal(requirePublishedHosts(table("ci-bench"), { status: "pending" }, [], policy), "ci-bench");
+  assert.throws(() => requirePublishedHosts(table(rented), table("ci-bench"), [], policy), /bench\/current-results\.json was measured on "linode/);
+  assert.throws(() => requirePublishedHosts(table("ci-bench"), table(rented), [], policy), /bench\/memory\/current-results\.json was measured on "linode/);
+  assert.throws(
+    () => requirePublishedHosts(table("ci-bench"), table("ci-bench"), [{ host: "ci-bench" }, { host: rented }], policy),
+    /bench\/memory\/history\/runs\.jsonl latest cohort was measured on "linode/,
+  );
+  assert.throws(
+    () => requirePublishedHosts(table("ci-bench"), table("ci-bench"), [{ host: null }], policy),
+    /latest cohort was measured on null/,
   );
 
   const wasmRows = wasmTargetRows({

@@ -825,13 +825,22 @@ exactly the one host its rows name and to match the qualified timing authority i
 `operations-status.json`, and `render-current-results.js` refuses to render a
 table whose rows disagree rather than labelling the mix — every figure on the
 page is a ratio between two rows, and an annotated cross-host ratio is still a
-wrong number. The same check covers `memory/current-results.json` and every
-cohort in `memory/history/runs.jsonl`. The history charts apply the rule from
-the row data: a change of `host` is always an era boundary in the recorded
-timing series, each era normalised to its own first run, and the memory history
-draws one machine — the latest cohort's — against a mlua/JIT reference measured
-on that same machine, saying how many cohorts from other machines it leaves
-undrawn.
+wrong number. The same check covers `memory/current-results.json`; it requires
+every cohort in `memory/history/runs.jsonl` to be one machine and pins the
+latest cohort — the one the page draws — to the authority, while older cohorts
+may name the machine they were measured on. The renderer pins the same three
+things itself, because the publication lane installs the data repository's
+memory table and history after the checker has run. The history charts apply
+the rule from the row data: the recorded timing chart draws only rows measured
+on the machine the mlua/JIT reference was measured on and counts the rest as
+runs not drawn, a reconstruction or live series from another machine is
+refused, and the memory history draws one machine — the latest cohort's —
+against a mlua/JIT reference measured on that same machine, saying how many
+cohorts from another machine, or from before hosts were recorded, it leaves
+undrawn. The label itself may contain only `[A-Za-z0-9_-]{1,128}`: no dots, no
+colons, so it can never be a fully qualified name or an address, and the
+checker's self-test asserts that every emitter and validator carries that same
+literal.
 
 Rows written before the field existed do not carry it, and the harness reads it
 as optional for that reason: the absence means "measured before hosts were

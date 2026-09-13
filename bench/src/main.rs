@@ -842,6 +842,20 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
                 if trimmed != value {
                     return Err(Error::new("--host must not be padded with whitespace"));
                 }
+                // A label, never an address: no dots and no colons, so it can
+                // be neither a fully qualified name nor an IPv4 or IPv6
+                // address, whatever an operator types.
+                if !value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Err(Error::new(
+                        "--host must be a label of [A-Za-z0-9_-] characters, never an address",
+                    ));
+                }
+                if value.len() > 128 {
+                    return Err(Error::new("--host must be at most 128 characters"));
+                }
                 config.host = Some(value);
             }
             "--help" | "-h" => {
@@ -3206,6 +3220,33 @@ mod tests {
             .expect_err("dirty commit override should fail");
 
         assert!(error.to_string().contains("clean benchmark baseline"));
+    }
+
+    #[test]
+    fn parse_args_accepts_a_host_label_and_rejects_an_address() {
+        let config = parse_args(["--host".to_owned(), "ci-bench".to_owned()].into_iter())
+            .expect("host label");
+        assert_eq!(config.host.as_deref(), Some("ci-bench"));
+
+        // A label is never an address: a dot or a colon is refused before the
+        // value can be stamped on a row.
+        for address in [
+            "bench.example.com",
+            "10.0.0.5",
+            "fe80::1",
+            "user@box",
+            "ci bench",
+        ] {
+            let error = parse_args(["--host".to_owned(), address.to_owned()].into_iter())
+                .expect_err("an address is not a label");
+            assert!(
+                error.to_string().contains("never an address"),
+                "{address}: {error}"
+            );
+        }
+        let error = parse_args(["--host".to_owned(), "a".repeat(129)].into_iter())
+            .expect_err("an overlong label is refused");
+        assert!(error.to_string().contains("at most 128"));
     }
 
     #[test]

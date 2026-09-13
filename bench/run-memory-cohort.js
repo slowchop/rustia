@@ -13,6 +13,9 @@ const PROTOCOL_SCHEMA = "rustia.bench.memory-protocol.v1";
 const MANIFEST_SCHEMA = "rustia.bench.memory-cohort-evidence.v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SAFE_ID = /^[A-Za-z0-9._-]{1,128}$/;
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 const ROOT = path.resolve(__dirname, "..");
 const SUPERVISOR = path.join(__dirname, "run-memory-supervisor.js");
 const ANALYZER = path.join(__dirname, "analyze-memory-samples.js");
@@ -110,7 +113,7 @@ function validateProtocol(value) {
   // later table can never merge rows from two machines without the data saying
   // so. It is provenance published in row data, never an address: nothing
   // resolves or connects to it.
-  if (!SAFE_ID.test(value.host.name)) fail("protocol.host.name is not a safe identifier");
+  if (!HOST_LABEL.test(value.host.name)) fail("protocol.host.name must be a label of [A-Za-z0-9_-] characters, never an address");
   for (const field of ["benchmark_cpu", "supervisor_cpu"]) {
     if (!Number.isSafeInteger(value.host[field]) || value.host[field] < 0) fail(`protocol.host.${field}`);
   }
@@ -392,6 +395,11 @@ function selfTest() {
     () => validateProtocol({ ...protocol, host: { ...protocol.host, name: "not a safe id" } }),
     /protocol\.host\.name/,
   );
+  // A label, never an address: a dotted name is a safe identifier for a
+  // cohort or a workload, but not a machine label.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(() => validateProtocol({ ...protocol, host: { ...protocol.host, name } }), /never an address/);
+  }
 
   // The delegated root is found from the process's own cgroup, never from a
   // path guessed from the uid: a subtree delegated beside the unit that runs

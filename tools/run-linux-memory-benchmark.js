@@ -378,9 +378,18 @@ async function waitForQuiet(config) {
 // single runner file is copied to the benchmark host (see shipAndRun in
 // run-dedicated-benchmark.js), so requiring a sibling module would resolve on a
 // developer machine and fail on the host.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
 function hostLabel(config) {
-  if (config.schema === DEDICATED_SCHEMA) return config.provider.host.name;
-  return `linode-${config.provider.region}-${config.provider.size.id}`;
+  const label = config.schema === DEDICATED_SCHEMA
+    ? config.provider.host.name
+    : `linode-${config.provider.region}-${config.provider.size.id}`;
+  if (!HOST_LABEL.test(label)) {
+    fail(`host label ${JSON.stringify(label)} is not a label: it may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return label;
 }
 
 function memoryProtocol(config) {
@@ -662,6 +671,14 @@ function selfTest() {
   assert.equal(hostLabel(dedicated), "ci-bench");
   assert.equal(hostLabel(rented), "linode-ap-southeast-g6-dedicated-4");
   assert.notEqual(hostLabel(rented), hostLabel(dedicated));
+  // A label is never an address: a name with a dot or a colon is refused
+  // before it can be stamped on a row.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(
+      () => hostLabel({ ...dedicated, provider: { ...dedicated.provider, host: { ...dedicated.provider.host, name } } }),
+      /not a label/,
+    );
+  }
   assert.equal(memoryProtocol(dedicated).host.name, "ci-bench");
   assert.equal(memoryProtocol(rented).host.name, hostLabel(rented));
   // A rented config that cannot name its class is refused before it can label

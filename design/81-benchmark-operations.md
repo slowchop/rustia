@@ -162,8 +162,13 @@ assertion is a refusal:
   reading the committed data — so the machine boundary above is checked in the
   data, not only in the workflow.
 - **Render.** `bench/render-current-results.js` refuses to render a table whose
-  rows disagree, and names the machine in the memory panel from the rows rather
-  than from prose.
+  rows disagree, names the machine in the memory panel from the rows rather
+  than from prose, and pins everything it draws as the current machine — the
+  timing table, a ready memory table, and the memory history's latest cohort —
+  to the timing authority itself rather than relying on the checker to have
+  done so: the publication lane installs the data repository's memory table
+  and history after the checker has run and renders from those, and the page
+  is where the claim becomes public.
 - **Bridge.** `tools/record-host-bridge.js`, which writes down how two
   machines compared before the earlier one's rows are retired, reads each
   side's host from its rows into `from_host`/`to_host` and refuses a bridge
@@ -172,13 +177,22 @@ assertion is a refusal:
 That last refusal was the open choice: label the mix or refuse it. The page
 refuses, because a labelled ratio between two boxes is still a wrong number,
 just an annotated one. The history charts follow the same rule from the row
-data. In the recorded timing series a change of `host` is always an era
-boundary: each era is normalised to its own first run, never to another
-machine's, and rows from a machine that did not cover every required workload
-are refused rather than folded into a neighbouring era. The memory history is
-one machine's series — the machine of the latest cohort — plotted against a
-mlua/JIT reference measured on that same machine, and it states how many
-cohorts from other machines it is not drawing.
+data. The recorded timing chart draws only rows measured on the machine the
+mlua/JIT reference was measured on — the current table's machine — because its
+y-axis divides the reference's nanoseconds by each row's, and that quotient
+means something only when both ran on one box; rows from any other machine, or
+from before hosts were recorded, are counted in runs and named as not drawn,
+whether the recorded runs or a reconstruction is the chart. A reconstruction or
+a live per-commit series is divided into the same reference and is refused when
+it names another machine, and a history with no recorded run from the
+reference machine is refused rather than drawn against it. Within that machine
+the series still splits on a gap of a day or more, and the table's improvement
+column is each era against its own first run. The memory history is one
+machine's series — the machine of the latest cohort — plotted against a
+mlua/JIT reference measured on that same machine; that latest cohort is pinned
+to the timing authority by the checker and by the page, older cohorts may name
+the machine they were measured on, and the section says how many cohorts from
+another machine, or from before hosts were recorded, it is not drawing.
 
 The harness reads the field as optional when parsing history, because rows
 written before it existed do not carry it and that absence is readable: it means
@@ -190,11 +204,20 @@ naming just the rows that know would read as a single-machine table when it is
 not. The committed history carries a host on every row, and the validator keeps
 it that way.
 
-The label is the only place a machine is named. Raw memory samples and
-fixed-run host evidence are copied whole into public artifacts, so the memory
-supervisor records no node name and the fixed-run runner records `uname -srvm`
-rather than `uname -a`; the owned lane's acceptance already refuses matrix
-evidence that carries one.
+The label is the only place a machine is named, and it is kept a label
+mechanically: every emitter and validator — the harness's `--host`, the memory
+analyzer, the three on-host runners (matrix, memory, history backfill), the
+memory cohort protocol, the coordinator's acceptance rules, and the publication
+gate in `tools/check-benchmark-results.js` and the renderer — accepts only
+`[A-Za-z0-9_-]{1,128}`, so a value with a dot or a colon (a fully qualified
+name, an IPv4 or IPv6 address) is refused before it can reach a row and again
+before a row can be published. The files cannot share a module (a runner is
+copied to the machine one file at a time), so the checker's self-test reads
+each of them and refuses to run if any carries a different literal.
+Raw memory samples and fixed-run host evidence are copied whole into public
+artifacts, so the memory supervisor records no node name and the fixed-run
+runner records `uname -srvm` rather than `uname -a`; the owned lane's
+acceptance already refuses matrix evidence that carries one.
 
 The published data repository holds the memory table and history the
 publication lane installs before rendering, and it is subject to the same rule:

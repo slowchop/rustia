@@ -4138,9 +4138,20 @@ function requireFreshMatrixTimestamp(value, status, location) {
 // because only that one file is copied to the benchmark host. Restating it here
 // is what makes the check adversarial: acceptance derives the expected label
 // from the frozen config rather than trusting whatever the runner wrote.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
+function requireHostLabel(label) {
+  if (!HOST_LABEL.test(label)) {
+    fail(`host label ${JSON.stringify(label)} is not a label: it may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return label;
+}
+
 function matrixHostLabel(config) {
-  if (config.schema === "rustia.dedicated-cross-engine-matrix.v1") return config.provider.host.name;
-  return `linode-${config.provider.region}-${config.provider.size.id}`;
+  if (config.schema === "rustia.dedicated-cross-engine-matrix.v1") return requireHostLabel(config.provider.host.name);
+  return requireHostLabel(`linode-${config.provider.region}-${config.provider.size.id}`);
 }
 
 function validateMatrixNativeRows(config, file, historyPrefixFile, status) {
@@ -4970,8 +4981,8 @@ function validateCrossEngineMemoryStatus(status) {
 // what makes the check adversarial: acceptance derives the expected label from
 // the frozen config rather than trusting what the runner wrote.
 function memoryHostLabel(config) {
-  if (config.schema === "rustia.dedicated-memory-benchmark.v1") return config.provider.host.name;
-  return `linode-${config.provider.region}-${config.provider.size.id}`;
+  if (config.schema === "rustia.dedicated-memory-benchmark.v1") return requireHostLabel(config.provider.host.name);
+  return requireHostLabel(`linode-${config.provider.region}-${config.provider.size.id}`);
 }
 
 function expectedMemoryProtocol(config) {
@@ -5834,6 +5845,17 @@ async function selfTest(config) {
   assert.equal(config.provider.image, "linode/ubuntu24.04");
   assert.equal(config.provider.size.id, "g6-dedicated-2");
   assert.equal(config.provider.size.class, "dedicated");
+  // The label acceptance recomputes is a label, never an address.
+  assert.equal(matrixHostLabel(config), "linode-ap-southeast-g6-dedicated-2");
+  assert.throws(() => matrixHostLabel({ ...config, provider: { ...config.provider, region: "ap.southeast" } }), /not a label/);
+  assert.throws(
+    () => matrixHostLabel({ schema: "rustia.dedicated-cross-engine-matrix.v1", provider: { host: { name: "10.0.0.5" } } }),
+    /not a label/,
+  );
+  assert.throws(
+    () => memoryHostLabel({ schema: "rustia.dedicated-memory-benchmark.v1", provider: { host: { name: "bench.example.com" } } }),
+    /not a label/,
+  );
   assert.deepEqual(
     config.measurement.run_order.map((entry) => entry.variant),
     ["baseline", "candidate", "candidate", "baseline", "candidate", "baseline", "baseline", "candidate"],

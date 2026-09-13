@@ -474,6 +474,11 @@ function authoritativeHost() {
 // and that machine must be the one the operations policy qualifies to produce
 // timings. The checks below are pure so the self-test can hand them tables
 // that must be refused.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+// Every emitter and validator carries this same literal; selfTest() asserts it.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
 function requireLabelledRows(rows, label) {
   for (const [index, row] of rows.entries()) {
     if (typeof row?.host !== "string" || row.host === "") {
@@ -482,6 +487,39 @@ function requireLabelledRows(rows, label) {
         "a row that cannot say where it came from can outlive the machine that produced it",
       );
     }
+    if (!HOST_LABEL.test(row.host)) {
+      fail(
+        `${label} row ${index + 1} names its machine ${JSON.stringify(row.host)}, which is not a label: ` +
+        "a label may contain only [A-Za-z0-9_-], never an address",
+      );
+    }
+  }
+}
+
+// Every cohort in the memory history is one run on one machine, and the
+// cohort the page draws -- the latest, the machine the memory history chart
+// is keyed on -- is the timing authority's. Older cohorts may name another
+// machine: they are history, kept undrawn and never mixed.
+function requireMemoryHistory(cohorts, label, expectedHost) {
+  let latestHost = null;
+  for (const [index, cohort] of cohorts.entries()) {
+    const line = `${label} line ${index + 1}`;
+    if (!Array.isArray(cohort.rows) || cohort.rows.length === 0) fail(`${line}.rows must be a non-empty array`);
+    requireLabelledRows(cohort.rows, line);
+    const hosts = [...new Set(cohort.rows.map((row) => row.host))].sort();
+    if (hosts.length !== 1) {
+      fail(`${line} was measured on ${hosts.length} machines (${hosts.join(", ")}); a cohort is one run on one machine`);
+    }
+    if (cohort.host !== undefined && cohort.host !== hosts[0]) {
+      fail(`${line}.host is ${JSON.stringify(cohort.host)}, but its rows were measured on ${JSON.stringify(hosts[0])}`);
+    }
+    latestHost = hosts[0];
+  }
+  if (cohorts.length > 0 && latestHost !== expectedHost) {
+    fail(
+      `${label} line ${cohorts.length} is the latest cohort, the one the page draws, and was measured on ` +
+      `${JSON.stringify(latestHost)}, but ${relative(operationsStatusPath)} qualifies ${JSON.stringify(expectedHost)} as the timing authority`,
+    );
   }
 }
 
@@ -551,18 +589,7 @@ function validateMeasurementHosts() {
   if (memory.status === "ready") {
     requireSingleHostTable(memory, relative(memoryResultsPath), expectedHost);
   }
-  for (const [index, cohort] of readMemoryHistoryCohorts().entries()) {
-    const label = `${relative(memoryHistoryPath)} line ${index + 1}`;
-    if (!Array.isArray(cohort.rows) || cohort.rows.length === 0) fail(`${label}.rows must be a non-empty array`);
-    requireLabelledRows(cohort.rows, label);
-    const hosts = [...new Set(cohort.rows.map((row) => row.host))].sort();
-    if (hosts.length !== 1) {
-      fail(`${label} was measured on ${hosts.length} machines (${hosts.join(", ")}); a cohort is one run on one machine`);
-    }
-    if (cohort.host !== undefined && cohort.host !== hosts[0]) {
-      fail(`${label}.host is ${JSON.stringify(cohort.host)}, but its rows were measured on ${JSON.stringify(hosts[0])}`);
-    }
-  }
+  requireMemoryHistory(readMemoryHistoryCohorts(), relative(memoryHistoryPath), expectedHost);
 }
 
 // The refusals above are the whole point of this file, so they are exercised
@@ -599,6 +626,48 @@ function selfTest() {
   refuses(/rows must not be empty/, () => requireSingleHostTable(table([]), "fixture", "ci-bench"));
   refuses(/row 2 does not name the machine/, () =>
     requireLabelledRows([row("rustia", "ci-bench"), row("koto", "")], "fixture"));
+  for (const address of ["bench.example.com", "10.0.0.5", "fe80::1", "user@box", "a".repeat(129)]) {
+    refuses(/row 1 names its machine .* which is not a label/, () => requireLabelledRows([row("rustia", address)], "fixture"));
+  }
+
+  // The memory history: every cohort one machine, the latest the authority's,
+  // older cohorts free to name the machine they were measured on.
+  const cohort = (host, rows = [row("rustia", host), row("mlua-luau-jit", host)]) => ({ rows });
+  requireMemoryHistory([], "fixture", "ci-bench");
+  requireMemoryHistory([cohort("elsewhere"), cohort("ci-bench")], "fixture", "ci-bench");
+  refuses(/line 2 is the latest cohort, the one the page draws, and was measured on "elsewhere"/, () =>
+    requireMemoryHistory([cohort("ci-bench"), cohort("elsewhere")], "fixture", "ci-bench"));
+  refuses(/line 1 was measured on 2 machines \(ci-bench, elsewhere\)/, () =>
+    requireMemoryHistory([cohort("ci-bench", [row("rustia", "ci-bench"), row("koto", "elsewhere")])], "fixture", "ci-bench"));
+  refuses(/line 1\.host is "elsewhere", but its rows were measured on "ci-bench"/, () =>
+    requireMemoryHistory([{ ...cohort("ci-bench"), host: "elsewhere" }], "fixture", "ci-bench"));
+  refuses(/line 1\.rows must be a non-empty array/, () => requireMemoryHistory([{ rows: [] }], "fixture", "ci-bench"));
+
+  // The label character set is one literal carried by every file that emits
+  // or validates a label; they cannot share a module (the on-host runners are
+  // copied to the machine one file at a time), so their agreement is asserted
+  // here by reading the files, and the harness's Rust arm alongside.
+  const labelLiteral = "const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;";
+  for (const file of [
+    "tools/check-benchmark-results.js",
+    "bench/render-current-results.js",
+    "bench/analyze-memory-samples.js",
+    "bench/run-memory-cohort.js",
+    "tools/run-linode-benchmark.js",
+    "tools/run-linux-matrix-benchmark.js",
+    "tools/run-linux-memory-benchmark.js",
+    "tools/run-linux-history-backfill.js",
+  ]) {
+    if (!read(path.join(root, file)).includes(labelLiteral)) {
+      fail(`${file} does not carry the label character set ${labelLiteral}; every emitter and validator must agree`);
+    }
+  }
+  const harness = read(path.join(root, "bench", "src", "main.rs"));
+  for (const fragment of ["c.is_ascii_alphanumeric() || c == '-' || c == '_'", "value.len() > 128"]) {
+    if (!harness.includes(fragment)) {
+      fail(`bench/src/main.rs --host does not carry the label character set (${fragment}); every emitter and validator must agree`);
+    }
+  }
 }
 
 function main() {
