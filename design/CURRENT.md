@@ -279,8 +279,8 @@ dispatch-dominated synthetic, and a per-call-site generalized-iterator leaf-step
 A follow-up profile-driven slice promotes the pure register-bookkeeping opcodes `Move` and
 `ClearLocalCell` (42-61% of executed instructions on four tracked workloads) into the common-instruction
 fast path; its accepted controlled-host A/B measured -8.4508% candidate median ns/unit on
-`generic_iteration` (conservative interval -9.064% to -7.348%, evidence at
-`bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/`), with public-history publication
+`generic_iteration` (conservative interval -9.064% to -7.348%; its rented-host evidence was removed on
+2026-09-13 and remains in Git history), with public-history publication
 deferred to the next full-matrix cohort under the dedicated-cohort policy.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 

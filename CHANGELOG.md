@@ -133,9 +133,9 @@ Current unpublished workspace version: `0.0.1`.
   ns/unit against the receipt baseline (pooled medians 13,092.320 versus
   12,567.856), with a conservative nominal 95% interval from -7.1417% to
   -2.8710%. All 808 formal samples matched the checksum, all 19 timed legs
-  observed zero steal, and the Droplet/key cleanup gate passed. Evidence is
-  retained under
-  `bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/`.
+  observed zero steal, and the Droplet/key cleanup gate passed. Its evidence
+  was measured on a rented Droplet and removed on 2026-09-13 (see Changed);
+  the samples remain in Git history.
 
 - VM Core 2 C2.2 adds frame-local immutable execution receipts over unchanged
   public bytecode. Region Engine can execute the compiler's exact
@@ -156,8 +156,9 @@ Current unpublished workspace version: `0.0.1`.
   lower candidate `generic_iteration` ns/unit, with a conservative nominal 95%
   interval from -10.2126% to -5.9577%. All 808 formal samples matched the
   checksum, three final-binary measurements were retained as sidecars, and the
-  Droplet/key cleanup gate passed. Evidence is retained under
-  `bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`.
+  Droplet/key cleanup gate passed. Its evidence was measured on a rented
+  Droplet and removed on 2026-09-13 (see Changed); the samples remain in Git
+  history.
 
 - Region Engine v1 precomputes private side metadata for consecutive,
   effect-certified primitive-constant, register-bookkeeping, guarded-numeric,
@@ -170,9 +171,9 @@ Current unpublished workspace version: `0.0.1`.
   coverage fallback, deterministic collection cadence, and coexistence with
   HotIR. The accepted controlled DigitalOcean A/B measured +1.3181% candidate
   ns/unit with a conservative 95% interval from -4.5763% to +3.9306%. That
-  excludes a material 5% regression but does not establish a speedup; evidence
-  is retained under
-  `bench/history/evidence/b861ee998ebb986b662cd6249e61169f86d685ac/`.
+  excludes a material 5% regression but does not establish a speedup. Its
+  evidence was measured on a rented Droplet and removed on 2026-09-13 (see
+  Changed); the samples remain in Git history.
 
 - Benchmark operations now have a versioned policy, generated machine-readable
   freshness status, and a prominent generated-dashboard notice. The status
@@ -238,6 +239,16 @@ Current unpublished workspace version: `0.0.1`.
   `build.json` and `run-gate.json` for that lifecycle. The validator accepts both,
   so committed evidence from the retired lane keeps validating.
 
+- **Removed the ten accepted fixed-work A/B evidence cohorts measured on rented
+  cloud hosts** from `bench/history/evidence/`: seven DigitalOcean Droplets and
+  three Linode instances, 265 files. They were the only source of the
+  dashboard's "Accepted Optimization Checks" table, so that table showed
+  rented-host timings directly under the sentence that every timing on the page
+  comes from the owned host. The table now says what happened and stays wired,
+  so it returns the day an owned-host comparison lands with a manifest. The
+  measured deltas stay in this changelog and in `design/`, and the samples
+  remain in this repository's Git history. The one owned-host comparison,
+  `eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/`, is kept.
 - **Removed 1,230 cross-engine rows measured on retired cloud hosts** from
   `bench/history/runs.jsonl`, leaving the single cohort measured on the owned
   host. This is a destructive change to a published dataset and is recorded as
@@ -306,9 +317,9 @@ Current unpublished workspace version: `0.0.1`.
   instructions on four tracked workloads. A controlled dedicated-host A/B
   (baseline `6d22fa3`, `generic_iteration`, fixed `n=4000`, interleaved
   ABBA/BAAB) measured -8.45% candidate median ns/unit with a conservative 95%
-  interval of -9.06% to -7.35%; evidence under
-  `bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/`. The
-  single-workload rows stay out of public history per the dedicated-cohort
+  interval of -9.06% to -7.35%. Its evidence was measured on a rented Linode
+  and removed on 2026-09-13 (see Changed); the samples remain in Git history.
+  The single-workload rows stay out of public history per the dedicated-cohort
   policy and land in the published results with the next full-matrix cohort.
 
 - `LoadStringCompiler` now receives the VM's `Profile` as a third parameter so

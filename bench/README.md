@@ -232,8 +232,8 @@ protocol and bounded idle/steal gates described below. Its exact AMS3 Basic
 Intel 4-vCPU/8-GiB shape is frozen in the config; the plan fails instead of
 substituting a different size or region. The accepted eight-leg comparison
 measured 8.1651% lower candidate ns/unit with a conservative nominal 95%
-interval of -10.2126% to -5.9577%. Evidence is retained under
-[`history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`](history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/).
+interval of -10.2126% to -5.9577%. Its evidence was measured on a rented
+Droplet and was removed on 2026-09-13; the samples remain in Git history.
 
 The earlier Region Engine v1 comparison remains frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
@@ -332,16 +332,18 @@ candidate pooled median at 302,665.974 ns/unit versus 310,170.536 for the
 baseline (-2.4195%). Its conservative nominal 95% interval was -3.3478% to
 -1.5699%, so the predeclared +5% material-regression threshold was excluded.
 The three actual final-candidate medians were 303,918.403, 303,335.093, and
-300,979.767 ns/unit; their raw sidecars and the complete comparison evidence are
-retained under `history/evidence/ed65077c2e779ec6a641b8ca2f8c8258b2508a2d/`.
+300,979.767 ns/unit. Their raw sidecars and the complete comparison evidence
+were measured on a rented Linode and were removed on 2026-09-13; the samples
+remain in Git history.
 This is acceptance evidence for that exact workload and host protocol, not a
 cross-engine or blanket speed claim.
 
 The accepted OOP run compared baseline `ae3beae2025feb21d0e37c70168204ae154ae125` with exact candidate
 `f208c12d0ce266117743569d736346fae9a35db2` at fixed `n=24000`. Its pooled medians were 21,633.014 and 7,364.006
 ns/unit, a -65.9594% candidate delta; the conservative nominal 95% interval was -66.3876% to -65.5482%, excluding
-the predeclared zero-regression threshold. Three actual final-candidate rows and all raw evidence are retained
-under `history/evidence/f208c12d0ce266117743569d736346fae9a35db2/`. The complete candidate includes both the
+the predeclared zero-regression threshold. Three actual final-candidate rows and all raw evidence were measured
+on a rented Linode and were removed on 2026-09-13; the samples remain in Git history. The complete candidate
+includes both the
 constant-field/method work and a weak-table GC-scan correction, so the result is not attributed to one opcode
 family alone.
 

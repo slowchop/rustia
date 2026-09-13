@@ -2140,7 +2140,7 @@ function optimizationEvidenceSection(cohorts) {
         <div class="section-head">
           <div>
             <h2>Accepted Optimization Checks</h2>
-            <p>No accepted fixed-work A/B comparisons are available yet.</p>
+            <p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>
           </div>
         </div>
       </section>

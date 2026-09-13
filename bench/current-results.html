@@ -1210,122 +1210,14 @@
     </section>
 
 
-    <section class="panel" id="optimization-checks">
-      <div class="section-head">
-        <div>
-          <h2>Accepted Optimization Checks</h2>
-          <p>Independent fixed-work A/B evidence. Negative deltas are faster; intervals are the conservative 95% bootstrap envelope. These checks do not replace the complete engine-comparison cohort.</p>
+      <section class="panel" id="optimization-checks">
+        <div class="section-head">
+          <div>
+            <h2>Accepted Optimization Checks</h2>
+            <p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>
+          </div>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Date</th><th>Workload</th><th>Candidate</th><th>Measured delta</th><th>95% interval</th><th>Verdict</th><th>Evidence</th></tr></thead>
-          <tbody>
-
-                <tr>
-                  <td>2026-08-25</td>
-                  <td>array_mutation</td>
-                  <td><code>accca92</code></td>
-                  <td><span class="trend trend-good">-8.25%</span></td>
-                  <td>-12.84% to -3.19%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 1,608 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-24</td>
-                  <td>dense_tables</td>
-                  <td><code>0a31255</code></td>
-                  <td><span class="trend trend-good">-1.88%</span></td>
-                  <td>-18.12% to +0.37%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-24</td>
-                  <td>dense_tables</td>
-                  <td><code>2082436</code></td>
-                  <td><span class="trend trend-good">-0.45%</span></td>
-                  <td>-2.58% to +1.60%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-24</td>
-                  <td>dense_tables</td>
-                  <td><code>066ce1f</code></td>
-                  <td><span class="trend trend-bad">+0.62%</span></td>
-                  <td>-0.16% to +2.26%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-24</td>
-                  <td>generic_iteration</td>
-                  <td><code>77e0d92</code></td>
-                  <td><span class="trend trend-good">-4.01%</span></td>
-                  <td>-7.14% to -2.87%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-24</td>
-                  <td>generic_iteration</td>
-                  <td><code>84e732a</code></td>
-                  <td><span class="trend trend-good">-8.17%</span></td>
-                  <td>-10.21% to -5.96%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-14</td>
-                  <td>generic_iteration</td>
-                  <td><code>b861ee9</code></td>
-                  <td><span class="trend trend-bad">+1.32%</span></td>
-                  <td>-4.58% to +3.93%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 808 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-08-13</td>
-                  <td>generic_iteration</td>
-                  <td><code>f412e2d</code></td>
-                  <td><span class="trend trend-good">-8.45%</span></td>
-                  <td>-9.06% to -7.35%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 120 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-07-20</td>
-                  <td>oop_metamethods</td>
-                  <td><code>f208c12</code></td>
-                  <td><span class="trend trend-good">-65.96%</span></td>
-                  <td>-66.39% to -65.55%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 120 samples</td>
-                </tr>
-
-                <tr>
-                  <td>2026-07-20</td>
-                  <td>dense_tables</td>
-                  <td><code>ed65077</code></td>
-                  <td><span class="trend trend-good">-2.42%</span></td>
-                  <td>-3.35% to -1.57%</td>
-                  <td>Material regression excluded</td>
-                  <td>8 legs · 120 samples</td>
-                </tr>
-
-          </tbody>
-        </table>
-      </div>
-    </section>
+      </section>
 
 
     <section class="panel metric-panel" id="linux-comparison">
