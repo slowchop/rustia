@@ -295,6 +295,13 @@ function checkCi(text) {
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/run-release-preflight.js", label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
+  // Preflight lints the benchmark adapter for wasm32. The action's `rustup
+  // override` bypasses rust-toolchain.toml's target list, so the job names it.
+  requireIncludes(
+    releasePreflightJob,
+    "target: wasm32-unknown-unknown",
+    `${label} release-preflight job`,
+  );
   forbidIncludes(text, "cargo clippy --workspace", label);
   forbidIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "node tools/check-package-files.js", label);
@@ -443,6 +450,16 @@ function checkReleasePreflight(text) {
     '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
+    // The builds only the owned benchmark host compiles. Without these, a
+    // break under their cfgs is found by the weekly matrix or a memory run,
+    // after merge. The host denies warnings through the toolchain action's
+    // RUSTFLAGS, so each check denies them too.
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "all-engines",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "mlua-lua54",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/wasm/adapter-runner/Cargo.toml",\n' +
+      '  "--target",\n  "wasm32-unknown-unknown",\n  "--",\n  "-D",\n  "warnings",\n',
     '"tools/check-release-notes.js"',
     '"tools/check-crate-metadata.js"',
     '"tools/check-workflows.js"',

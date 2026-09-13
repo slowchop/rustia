@@ -358,6 +358,23 @@ Current unpublished workspace version: `0.0.1`.
   manifest beside every committed `Cargo.lock`, so a stale nested lock turns
   the pull request's preflight check red before the change reaches the host.
 
+- **Release preflight now compiles the builds that only the benchmark host
+  used to compile.** The weekly matrix and the memory lanes build `bench`
+  with every competitor engine (`--features all-engines`), `bench` with
+  `rustia-engine` off (`--features mlua-lua54`), and the wasm adapter
+  against rustia's API. CI built none of them, so a compile error under
+  their cfgs was first seen on the host, after merge. Preflight, and so the
+  pull request's CI check, now runs Clippy with `-D warnings` on all three.
+  That is warnings as errors, as on the host, where both workflows inherit the
+  pinned toolchain action's default `RUSTFLAGS=-D warnings`. The CI
+  preflight job now installs the `wasm32-unknown-unknown` target for the
+  adapter check. On an M4 Max already running other builds, the three checks
+  add about 0.4 s to a warm preflight with nothing changed, about 2.3 s after
+  an engine-crate edit, and about 51 s from cold. Bringing the mlua
+  checksum helpers in `bench` under the gate fixed two `useless_format`
+  lints that had never been linted. The benchmark checksum strings are
+  unchanged.
+
 - Quiescent spare-capacity release now bumps a table's mutation version when
   it pops trailing array nils: the pop moves the observable length border,
   and version consumers (the `table.sort` mutation guard) previously saw no
