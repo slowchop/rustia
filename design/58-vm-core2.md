@@ -3,7 +3,10 @@
 > **Status (2026-08-24): C2.1 was remotely falsified; C2.2 Region-integrated private receipts were
 > remotely accepted with 8.1651% lower ns/unit; the C2.2 mode-selected whole-function plain tape is
 > implemented, correctness-validated, and remotely accepted with 4.0059% lower `generic_iteration`
-> ns/unit against the receipt baseline.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
+> ns/unit against the receipt baseline. The C2.3 reachability-exact track was measured as the default on the
+> owned host on 2026-09-13 and refused: 2.9x and 2.1x slower on `closures_upvalues` and `generic_iteration`
+> through the program-wide executor gate, plus an open determinism bug in the unit-charged collection
+> lattice.** This is the execution plan for the largest safe non-JIT performance programme. It refines the
 > performance queue in [`56-performance-research.md`](56-performance-research.md); it does not change Luau
 > semantics, the deterministic number contract, or the public no-unsafe policy.
 
@@ -339,6 +342,89 @@ working: the reduction the preview reports is in dispatched work, not in the cha
 of the trade therefore differs per workload — `dense_tables` swaps HotIR for near-total tape coverage,
 `closures_upvalues` loses its closure-call fast entries outright — so enablement needs a per-workload
 controlled gate, not one gate generalized across the cohort.
+
+#### Measured on the owned host: the default is refused, and why (2026-09-13)
+
+`reachability_exact()` was made the `CompileOptions` default on a throwaway candidate (`17e64af`: main `16b3c26`
+plus that one change) and measured through the acceptance lane on `ci-bench`, eight legs a side at the lane's
+fixed work (`dense_tables` n=2,786, `sparse_tables` n=1,449, `closures_upvalues` n=759,888, `generic_iteration`
+n=9,969, `stdlib_math_table` n=107,256), checksums identical on both sides of every workload:
+
+| workload | candidate vs main | interval | reading |
+| --- | --- | --- | --- |
+| `dense_tables` | -13.58% | -14.04%..-13.19% | faster |
+| `stdlib_math_table` | -9.63% | -10.70%..-7.24% | faster |
+| `sparse_tables` | +0.83% | -0.31%..+1.60% | no change measured |
+| `generic_iteration` | +114.41% | +111.89%..+117.66% | slower |
+| `closures_upvalues` | +188.00% | +183.47%..+194.13% | slower |
+
+Both regressions are uniform across all sixteen legs (`closures_upvalues` 183-188 -> 527-554 ns/unit on every
+pass), so they are the compiler's output, not the host. The mechanism was established by counting on the
+`executor-diagnostics` census — no developer-host timing — at the fixed n of `dedicated-history-7a9e87d.json`
+(per-unit deltas were linear in n), with each of the four families ablated alone and two counterfactuals: the
+rewritten bytecode with its schedule stripped restores every fast path, and the unrewritten bytecode with an
+artificial non-identity schedule reproduces the whole regression profile. Three independent attempts to refute
+it failed.
+
+- **Responsible family: `commit_late_compound_locals`, alone.** It fires once per regressed workload, on the
+  `acc = acc + rhs` self-update, deleting three instructions per site; the other three families are
+  byte-identical to all-off on these workloads. The rewritten shape itself is benign: it removes 3 (closures)
+  and 96 (generic) dispatched operations per unit and would be a small win on its own.
+- **The loss is the program-wide gate described above as the trade.** `Vm::load_program` and
+  `recognize_leaf_call_plan` skip HotIR and every leaf-call plan for the whole program once any function carries
+  a non-identity schedule. The hot callees — the `UpvalueCounter` closure in `closures_upvalues` and the
+  `ArrayIterator` `__iter` closure in `generic_iteration` — are byte-identical on both sides and still match
+  their recognisers; they lose their plans only because a *different* function was rewritten. Every such call
+  then builds a full bytecode frame. At n=742,545, closure fast entries go 741,951 -> 0 and GC root refreshes
+  2,681 -> 742,558 per timed call; at n=10,364, `Len`-triggered refreshes go 648 -> 342,012 (33 lost iterator
+  replays per unit), tape entries rise by 131 per unit, and Rust allocations go 1.80M -> 4.82M per call.
+- **Two rows of the table above are wrong**, because `try_leaf_bytecode_handle` — the iterator-path leaf
+  replay — records no census counter, so `executor_ownership.rs` cannot see it. `generic_iteration`'s executor
+  is not "effectively constant" across the sides: it loses 33 `ArrayIterator` replays per unit. And
+  `stdlib_math_table` is not "unchanged (no rewrite fired)": commit-late fires at two sites plus one dead-tail
+  fold, static 110 -> 102, schedule attached. The enablement-gate argument built on the first of those rows
+  does not hold.
+- **The wins are not pure rewrite wins either.** `dense_tables` sums the rewrite (dispatched operations
+  -11.0%), the HotIR -> tape swap (1,146,459 HotIR iterations -> 0, 576,255 fused receipts at n=2,251), and the
+  schedule effect described next; `stdlib_math_table` sums the rewrite (-5.67% dispatched) and that effect;
+  `sparse_tables`, where the rewrite removes 0.09%, is the one workload that did not move. Counting cannot
+  apportion the wins; only the measurements listed below can.
+
+**A determinism bug in the schedule (open, blocks the track on its own).** The scalar dispatcher advances
+`executed_instructions` by `1 + extra_units` for a folded instruction, `maybe_collect` tests the
+deterministic-collection lattice for exact equality, and the lattice advances only on a hit. A multi-unit
+instruction that steps over the boundary therefore disables the boundary collection for the rest of the VM's
+life: `weak_collection_due_within` wraps, the tape's admitted window becomes unbounded, and only
+`reset_decision` re-arms it. Under the candidate the timed call performs almost no boundary collections
+(`dense_tables` 1,568 -> 3 per call at n=2,251; `stdlib_math_table` 616 -> 25 then 0; `closures_upvalues`
+2,079 -> 4), `ReproducibleStandard` heaps grow unreclaimed across calls (`generic_iteration` 3.2 -> 6.6 -> 10.0
+MB after three calls on one VM), the measured wins include skipped collections, and the regressions understate
+the executor loss. Two programs with identical charged `executed_instructions` collect on different schedules,
+which is the invariant the logical receipts exist to hold; `tests/o2_schedule.rs` cannot see it because it
+compares results after an explicit `collectgarbage()`.
+
+**What follows.** The default stays off, and per-workload enabling is not the answer: the gate is per program,
+so any program with a leaf-shaped closure or a HotIR loop regresses the moment one deletion fires anywhere in
+it (`array_mutation`, 8,399 HotIR iterations per call, is next in line). The counts point at:
+
+1. Gate HotIR and leaf-call plans per prototype: skip them only where that prototype's own slice of the
+   schedule is non-identity (for the hot callees here it is all ones, and the plans' fixed unit charges remain
+   exact under an identity slice). Counting acceptance before any host run: closure fast entries back to n,
+   `Len` refreshes back to a handful per call, HotIR iterations restored, charged `executed_instructions` and
+   checksums unchanged.
+2. Make the boundary test robust to unit-charged steps — advance the lattice once per crossed boundary, or cut
+   a multi-unit instruction at the boundary as the tape already does — with a counting test that
+   `deterministic_collection_count` equals `floor(executed / interval)` for every workload under every family
+   across an interval sweep and across consecutive calls on one VM, plus a bounded-heap assertion under
+   `ReproducibleStandard`.
+3. Record a census counter at `try_leaf_bytecode_handle`'s success, so iterator-path replays are visible to
+   `executor_ownership.rs` and to the table above.
+4. Then measure on the owned host, eight legs a side: main plus (1) and (2) with the default off against main
+   (expected within noise — the fixes are free); the same tree with `reachability_exact()` on against that
+   (predicted from the counts: `closures_upvalues` and `generic_iteration` within a few percent of baseline,
+   `sparse_tables` flat, the dense and stdlib wins shrinking to their rewrite share); and main plus (2) alone
+   against main, which prices the skipped collections. Only when the second of those shows no workload above
+   its threshold does this section flip the default.
 
 Default compilation remains byte-identical and schedule-identical; enabling any corpus-green family by
 default is now purely a measured performance decision behind the standard controlled A/B gates.
