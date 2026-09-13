@@ -446,6 +446,10 @@ function checkReleasePreflight(text) {
     '"bench/analyze-fixed-samples.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
+    // The weekly matrix's landing helper. Nothing short of a real cohort
+    // reaches its merge path, so its self-test is the only run it gets before
+    // a forty-minute measurement depends on it.
+    '"tools/land-matrix-publication.js", "self-test"',
     // The owned-host lane. Its self-tests carry the rules that keep a source
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
@@ -554,6 +558,11 @@ function checkWeeklyMatrix(text) {
   // push to main is the shape the branch rules reject.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
   requireIncludes(text, "node tools/land-matrix-publication.js", label);
+  // The helper merges only the commit this run pushed, and only while main is
+  // still the commit the publication was rendered on. It refuses to start
+  // without both, which would otherwise surface only after a full cohort.
+  requireIncludes(text, "--base \"$base_commit\"", label);
+  requireIncludes(text, "--head \"$publication_commit\"", label);
   requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);

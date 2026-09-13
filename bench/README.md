@@ -738,8 +738,13 @@ and live in the data repository. `main` accepts changes only through pull
 requests — an organisation rule with no bypass for the workflow token — so the
 publication commit goes to a `matrix-publish/<commit>` branch and
 `tools/land-matrix-publication.js` opens the pull request and merges it with a
-merge commit; if `main` moved meanwhile, the publication is rebuilt on top of
-it and landed again, three attempts at most.
+merge commit. The operations status, package and publishability inventories,
+and current-results report in that commit all describe the `main` it was built
+on, so the helper merges only the commit the run pushed, and only while `main`
+is still that commit — not merely while the branch merges cleanly. If `main`
+moved meanwhile, the publication is rebuilt on top of it and landed again,
+three attempts at most. A refusal that rebuilding cannot fix — a repository
+rule, a missing permission — fails the run at once with GitHub's reason.
 
 It replaced a nightly job that created a billed cloud instance whenever `main`
 had gained performance-relevant commits since the last cohort. Both properties
