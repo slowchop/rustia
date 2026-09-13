@@ -5,8 +5,9 @@
 > dashboard are implemented. The published cohort is `rustia-ci-070c387b173c`: 11 rustia rows from 99 raw
 > samples, measured on the owned host ci-bench on 2026-09-05 through a delegated cgroup-v2 subtree. The
 > cloud-measured cohorts — `pre-reclamation-18b58d8` (110 rows from 990 fresh processes) among them — were
-> removed on 2026-09-06, so the cross-engine memory comparison is pending a competitor cohort measured on
-> ci-bench. Tables, functions, upvalues, userdata, buffers,
+> removed on 2026-09-06. The owned-host lane can now measure that same 110-row protocol as its `cross-engine`
+> cohort, so the cross-engine memory comparison returns with the first such cohort dispatched on ci-bench;
+> none has run yet. Tables, functions, upvalues, userdata, buffers,
 > and vectors now reclaim backing allocations into generation-validated reusable slots; stale handles cannot
 > alias replacement objects, and generation exhaustion retires the slot instead of wrapping. Loaded programs
 > follow the same lifetime discipline. Maintained logical-live totals now back script counters, quota admission,
@@ -333,9 +334,10 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    512 KiB quota/recovery probe; relative to the frozen competitor cohort of that era, Rustia tied the
    256 KiB best shared-workload peak, ranked first for stress peak, second for stress retention, second for
    todo peak, and third for todo retention, with a shared retained mean of 14.4 KiB against mlua/Luau/JIT's
-   24.8 KiB. That evidence was removed with the other cloud-measured cohorts on 2026-09-06, so the
-   cross-engine memory comparison and the mlua/Luau/JIT reference are pending a competitor cohort measured on
-   ci-bench. Decision-reset ABI v1 adds focused 600-decision native
+   24.8 KiB. That evidence was removed with the other cloud-measured cohorts on 2026-09-06. The owned-host
+   lane can now measure the same 110-row protocol as its `cross-engine` cohort, so the cross-engine memory
+   comparison and the mlua/Luau/JIT reference return with the first such cohort dispatched on ci-bench; none
+   has run yet. Decision-reset ABI v1 adds focused 600-decision native
    table/coroutine/program/retained-handle plateau evidence. The shared mixed-heap test adds 96 native and
    Node/V8 wasm epochs with exact post-reset VM accounting and stable warmed wasm linear-memory pages.
    Broader allocator page-return and external dedicated-Linux history remain next.

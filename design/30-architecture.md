@@ -162,7 +162,8 @@ retained 99 native samples and passed the wasm32 512 KiB quota/recovery probe, b
 and was removed on 2026-09-06 with every other cloud-measured memory cohort, so its shared-workload peak
 ranking against the frozen mlua/Luau/JIT reference is retired evidence rather than a current comparison.
 The published memory evidence is the rustia-only ci-bench cohort `rustia-ci-070c387b173c`; the competitor
-reference is pending a cohort measured there. Decision-reset ABI v1 now discards every guest allocation
+reference returns with the first `cross-engine` cohort the memory lane measures there, and none has run
+yet. Decision-reset ABI v1 now discards every guest allocation
 and retained root, restores deterministic state, invalidates handles by epoch, and remains exactly flat after
 warm-up across 600 focused native decisions. A shared native/Node-V8 test adds 96 epochs and 3,072 mixed
 allocation waves across cyclic graphs, weak tables, public roots, suspended coroutines, rich values, hot reload,

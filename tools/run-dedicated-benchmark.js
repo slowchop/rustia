@@ -275,6 +275,7 @@ function parseArgs(argv) {
     command,
     replace: false,
     config: undefined,
+    cohort: undefined,
     out: undefined,
     previousBinary: undefined,
     local: false,
@@ -297,6 +298,13 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.config = value;
+    } else if (option === "--cohort") {
+      // Which engines the memory lane measures. Anything but the two named
+      // cohorts is refused: a misspelt cohort must not become a rustia-only
+      // run by default.
+      const value = rest[++index];
+      if (!MEMORY_COHORTS.includes(value)) return null;
+      parsed.cohort = value;
     } else if (option === "--local") {
       parsed.local = true;
     } else if (option === "--plan") {
@@ -359,6 +367,9 @@ function parseArgs(argv) {
   if (parsed.config !== undefined && !["plan", "history", "fetch", "matrix", "memory"].includes(command)) {
     return null;
   }
+  // --cohort selects which frozen memory protocol to generate; a --config
+  // names one outright, so the two together would be one of them ignored.
+  if (parsed.cohort !== undefined && (command !== "memory" || parsed.config !== undefined)) return null;
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
   // --plan measures and validates but promotes nothing, which only the lane that
@@ -809,9 +820,9 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
 
 // The matrix and memory lanes freeze one config per commit and name it after
 // HEAD. --config names a different frozen file instead -- one the operator
-// froze deliberately, such as a cross-engine memory protocol -- and that file
-// is never generated on the operator's behalf: a config asked for by name and
-// missing is a mistake, not a request to freeze one.
+// froze deliberately -- and that file is never generated on the operator's
+// behalf: a config asked for by name and missing is a mistake, not a request
+// to freeze one.
 function laneConfig(options, defaultRelative, generate) {
   if (options.config !== undefined) {
     const file = path.resolve(REPO, options.config);
@@ -901,16 +912,32 @@ function commandMatrix(options) {
 // finished publication: bench/publish-memory-analysis.js derives the results
 // file and the appended history from the analysis in that evidence, which is
 // the same tool the rented lane used and the reason this command is short.
+//
+// Two cohorts share the lane, the entrypoint and the frozen protocol, and
+// differ in the engine set alone. rustia-only is the routine per-commit
+// cohort, 11 rows; cross-engine measures the thirteen matrix engines, 110
+// rows, and is what puts the competitor rows and the mlua/Luau/JIT reference
+// on the same machine as the Rustia rows they are compared with.
+const MEMORY_COHORTS = Object.freeze(["rustia-only", "cross-engine"]);
+const MEMORY_COHORT_FREEZERS = Object.freeze({
+  "rustia-only": {
+    file: (short) => `bench/cloud/dedicated-rustia-ci-memory-${short}.json`,
+    generate: (relative) => ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", relative],
+  },
+  "cross-engine": {
+    file: (short) => `bench/cloud/dedicated-cross-engine-memory-${short}.json`,
+    generate: (relative) => ["tools/create-cross-engine-memory-config.js", "--output", relative],
+  },
+});
+
 async function commandMemory(options) {
   const commit = git(["rev-parse", "HEAD"]).trim();
   const short = commit.slice(0, 12);
+  const freezer = MEMORY_COHORT_FREEZERS[options.cohort ?? "rustia-only"];
   const { relative: configRelative, file: configFile } = laneConfig(
     options,
-    `bench/cloud/dedicated-rustia-ci-memory-${short}.json`,
-    (relative) =>
-      local("node", ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", relative], {
-        capture: false,
-      }),
+    freezer.file(short),
+    (relative) => local("node", freezer.generate(relative), { capture: false }),
   );
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (config.source.benchmark_commit !== commit) {
@@ -1921,9 +1948,9 @@ function selfTest() {
   assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
   const defaults = {
-    replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false,
-    plan: false, base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
-    baseline: undefined, candidate: undefined, passes: undefined,
+    replace: false, config: undefined, cohort: undefined, out: undefined, previousBinary: undefined,
+    local: false, plan: false, base: undefined, json: undefined, repetitions: undefined,
+    confidence: undefined, baseline: undefined, candidate: undefined, passes: undefined,
   };
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
@@ -1945,6 +1972,20 @@ function selfTest() {
   // derive everything from HEAD have nothing for it to name.
   assert.equal(parseArgs(["matrix", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
   assert.equal(parseArgs(["memory", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
+  // --cohort picks one of the two memory protocols and nothing else; a name
+  // outside the pair is refused rather than defaulted.
+  assert.equal(parseArgs(["memory", "--cohort", "cross-engine"]).cohort, "cross-engine");
+  assert.equal(parseArgs(["memory", "--cohort", "rustia-only"]).cohort, "rustia-only");
+  assert.equal(parseArgs(["memory"]).cohort, undefined);
+  assert.equal(parseArgs(["memory", "--cohort", "bogus"]), null);
+  assert.equal(parseArgs(["memory", "--cohort"]), null);
+  assert.equal(parseArgs(["matrix", "--cohort", "cross-engine"]), null);
+  assert.equal(parseArgs(["main", "--out", "r.jsonl", "--cohort", "cross-engine"]), null);
+  assert.equal(parseArgs(["memory", "--cohort", "cross-engine", "--config", "x.json"]), null);
+  for (const cohort of MEMORY_COHORTS) {
+    assert.match(MEMORY_COHORT_FREEZERS[cohort].file("abc"), /^bench\/cloud\/dedicated-.*-abc\.json$/);
+    assert.equal(MEMORY_COHORT_FREEZERS[cohort].generate("x.json").at(-1), "x.json");
+  }
   assert.equal(parseArgs(["main", "--out", "r.jsonl", "--config", "x.json"]), null);
   assert.equal(parseArgs(["pr", "--out", "s.md", "--config", "x.json"]), null);
   assert.deepEqual(parseArgs(["host-check"]), { command: "host-check", ...defaults });
@@ -2159,7 +2200,8 @@ function usage() {
       "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
       "  matrix    [--config FILE] [--plan]     measure 13 engines x 5 workloads and promote\n" +
-      "  memory    [--config FILE] [--plan]     measure per-VM memory and promote\n" +
+      "  memory    [--cohort rustia-only|cross-engine] [--config FILE] [--plan]\n" +
+      "                                         measure per-VM memory and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
       "                                         measure one revision against itself and write\n" +
       "                                         the per-workload screening thresholds\n" +

@@ -92,9 +92,12 @@ just bench-memory-self-test
 ```
 
 Fresh memory rows come from `.github/workflows/rustia-memory.yml`: dispatch-only, with a required `commit_sha`
-input, on the `bench-solo` runner group, pinning two isolated cores so the supervisor never shares a core with
-the benchmark. Its rows are pushed to the published data repository and rendered by the shared publisher. The
-cohort is rustia-only; competitor rows return when the memory matrix runs on the owned host.
+input and a `cohort` choice — `rustia-only`, the default 11-row per-commit cohort, or `cross-engine`, the
+110-row thirteen-engine cohort under the same protocol — on the `bench-solo` runner group, pinning two isolated
+cores so the supervisor never shares a core with the benchmark. Its rows are pushed to the published data
+repository and rendered by the shared publisher; there, each engine's rows come from the newest cohort that
+measured it. Competitor rows and the mlua/Luau/JIT reference return with the first cross-engine cohort measured
+on the owned host.
 
 ## Equal-work validation and publication
 

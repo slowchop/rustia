@@ -470,9 +470,13 @@ function checkReleasePreflight(text) {
     '"bench/run-memory-cohort.js"',
     '"bench/publish-memory-analysis.js"',
     '"tools/run-linux-memory-benchmark.js"',
+    // The cross-engine memory freezer and the two tools the memory workflow
+    // runs after measuring; preflight is where CI runs their self-tests.
+    '"tools/create-cross-engine-memory-config.js"',
     '"tools/run-wasm-gate.js"',
     '"tools/run-wasm-dispatch-gate.js"',
     '"tools/merge-rustia-ci-memory-data.js"',
+    '"tools/summarize-rustia-ci-memory.js"',
     '"tools/check-benchmark-results.js"',
     '"tools/check-wasm-gate-results.js"',
     '"tools/render-benchmark-operations-status.js", "--check"',
@@ -496,6 +500,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "commit_sha:\n", label);
   requireIncludes(text, "required: true\n", label);
   requireIncludes(text, "type: string\n", label);
+  // The cohort is a closed choice with the routine cohort first and as the
+  // default, so a dispatch that says nothing measures 11 rows, not 110.
+  requireIncludes(text, "cohort:\n", label);
+  requireIncludes(text, "default: rustia-only\n", label);
+  requireIncludes(text, "type: choice\n", label);
+  requireIncludes(text, "options:\n          - rustia-only\n          - cross-engine\n", label);
+  requireIncludes(text, "COHORT: ${{ inputs.cohort }}", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   // Shares the host's serialisation group: sampling must never overlap another
   // job on the machine it is measuring.
@@ -508,8 +519,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
-  // Measurement only through the driver that attests the machine first.
-  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local", label);
+  // Measurement only through the driver that attests the machine first. The
+  // routine cohort keeps the bare line, because the measured commit's own
+  // tools run and commits before the flag existed must stay measurable; an
+  // empty cohort input is the routine cohort.
+  requireIncludes(text, 'if [ "${COHORT:-rustia-only}" = rustia-only ]; then\n', label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local\n", label);
+  requireIncludes(text, 'node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"\n', label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);

@@ -629,9 +629,12 @@ unreachable suspended-coroutine frames.
    the tools find it by walking up from the process's own cgroup, check it before anything is cloned, and
    name which fault is present.
    The check is deliberately not relaxed: the cgroup is what the per-VM figure is measured in, so a run
-   without one would produce numbers that look like measurements and are not. The cohort is rustia-only, and
-   no lane measures competitor memory on the owned host today, so the memory comparison stays pending until a
-   competitor cohort is measured on `ci-bench`. Three cloud coordinators are deleted and the
+   without one would produce numbers that look like measurements and are not. The lane measures one of two
+   cohorts chosen at dispatch: `rustia-only`, the routine 11-row per-commit cohort, and `cross-engine`, the
+   110-row thirteen-engine cohort under the same protocol, which is what returns the memory comparison and the
+   mlua/Luau/JIT reference from the machine the Rustia rows come from. In the published data each engine's
+   rows come from the newest cohort that measured it. No cross-engine cohort has run on `ci-bench` yet, so
+   the comparison stays pending until the first is dispatched. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
    the matrix and memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle,
    and release preflight runs only its offline self-test. The rented-model A/B runner,

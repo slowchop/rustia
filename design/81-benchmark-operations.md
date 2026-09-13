@@ -69,10 +69,30 @@ Per-VM memory is measured inside a dedicated cgroup, so the memory lane needs
 something the timing lanes do not: a cgroup-v2 subtree the unprivileged CI user
 can create children in. The owned host has one, and the lane completed there on
 2026-09-05, producing its first cohort — `rustia-ci-070c387b173c` at commit
-`070c387`, 11 Rustia rows from 99 raw samples. That cohort is Rustia-only: no
-lane measures competitor memory on the owned host today, so the memory
-comparison, and with it the mlua/Luau/JIT memory reference, waits on a
-competitor cohort measured there.
+`070c387`, 11 Rustia rows from 99 raw samples.
+
+The lane measures one of two cohorts, chosen by the workflow's `cohort` input.
+The routine cohort keeps the bare `memory --local` line, because the measured
+commit's own tools run and commits from before the flag existed must stay
+measurable; only the cross-engine cohort is passed through as `--cohort`, and
+only commits that carry its freezer can measure it. Both go through the same attesting entrypoint
+and inherit one frozen protocol — samples, bootstrap, thresholds, host block,
+pinned cores — and differ in the engine set alone. `rustia-only`, the default,
+is the routine per-commit cohort: 11 rows from 99 samples, and the only one
+that runs the wasm32 quota probe. `cross-engine` measures the thirteen matrix
+engines under the protocol the rented lane measured as `pre-reclamation-18b58d8`:
+110 rows from 990 fresh processes. It is the cohort that puts the competitor
+rows and the mlua/Luau/JIT memory reference on the same machine as the Rustia
+rows they are compared with; one such cohort returns the comparison, and it is
+re-run when a competitor dependency moves rather than on a cadence. Its build
+carries twelve competitor crates the rustia-only build does not, so its first
+run on a cold cache is the long one; the workflow's 75-minute timeout is the
+lane's only runtime ceiling, since the host block's `max_runtime_minutes` is
+inherited from the shared config and not enforced by the memory runner. In the
+published data each engine's rows come from the newest cohort that measured it,
+so a rustia-only cohort after a cross-engine one swaps the Rustia rows and
+keeps the competitors. No cross-engine cohort has been measured on the owned
+host yet; the comparison stays pending until the first is dispatched.
 
 Root is one way to have such a subtree. The other, which keeps the runner
 unprivileged and is the arrangement in place, is a systemd-delegated subtree

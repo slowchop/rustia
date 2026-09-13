@@ -55,6 +55,9 @@ check-benchmark-results:
     node bench/run-memory-cohort.js self-test
     node bench/publish-memory-analysis.js self-test
     node tools/run-linux-memory-benchmark.js self-test
+    node tools/create-cross-engine-memory-config.js self-test
+    node tools/merge-rustia-ci-memory-data.js self-test
+    node tools/summarize-rustia-ci-memory.js self-test
     node tools/run-wasm-gate.js self-test
     node tools/run-wasm-dispatch-gate.js self-test
     node tools/check-benchmark-results.js
@@ -91,6 +94,7 @@ bench-memory-self-test:
     node bench/run-memory-cohort.js self-test
     node bench/publish-memory-analysis.js self-test
     node tools/run-linux-memory-benchmark.js self-test
+    node tools/create-cross-engine-memory-config.js self-test
 
 # Takes no arguments: the series starts at the first commit that contains an
 # engine and ends at HEAD. Pass replace=1 to supersede an existing artifact,

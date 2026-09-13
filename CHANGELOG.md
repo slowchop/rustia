@@ -245,6 +245,16 @@ Current unpublished workspace version: `0.0.1`.
   to `tools/check-dedicated-config.js`, which `just check-benchmark-results`
   and release preflight both run. The `bench-validate` recipe goes with the
   runner.
+- **The owned-host memory lane measures a second cohort.** `cohort:
+  cross-engine` on `.github/workflows/rustia-memory.yml` — `--cohort
+  cross-engine` on `tools/run-dedicated-benchmark.js memory` — freezes the same
+  protocol over the thirteen matrix engines, 110 rows from 990 fresh
+  processes, the protocol the rented lane measured as
+  `pre-reclamation-18b58d8`, through the same attesting entrypoint. It is what
+  puts the memory comparison and the mlua/Luau/JIT reference on the machine
+  the Rustia rows come from. The default stays `rustia-only`. In the published
+  data each engine's rows now come from the newest cohort that measured it,
+  and the job summary reports the Rustia rows whichever cohort ran.
 
 - **Removed the ten accepted fixed-work A/B evidence cohorts measured on rented
   cloud hosts** from `bench/history/evidence/`: seven DigitalOcean Droplets and
