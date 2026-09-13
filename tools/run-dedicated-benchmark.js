@@ -268,7 +268,7 @@ function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
     "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
-    "unlock", "self-test",
+    "unlock", "host-check", "self-test",
   ]);
   if (!known.has(command)) return null;
   const parsed = {
@@ -352,6 +352,13 @@ function parseArgs(argv) {
     return null;
   }
   if (parsed.previousBinary !== undefined && command !== "main") return null;
+  // --config names a frozen file for the lanes that freeze one. The other
+  // lanes derive everything from HEAD, so a --config there would be read by
+  // nothing, and an option that is accepted and ignored is worse than one
+  // that is refused.
+  if (parsed.config !== undefined && !["plan", "history", "fetch", "matrix", "memory"].includes(command)) {
+    return null;
+  }
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
   // --plan measures and validates but promotes nothing, which only the lane that
@@ -791,16 +798,33 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
   }
 }
 
+// The matrix and memory lanes freeze one config per commit and name it after
+// HEAD. --config names a different frozen file instead -- one the operator
+// froze deliberately, such as a cross-engine memory protocol -- and that file
+// is never generated on the operator's behalf: a config asked for by name and
+// missing is a mistake, not a request to freeze one.
+function laneConfig(options, defaultRelative, generate) {
+  if (options.config !== undefined) {
+    const file = path.resolve(REPO, options.config);
+    if (!fs.existsSync(file)) fail(`config ${options.config} does not exist`);
+    return { relative: path.relative(REPO, file), file };
+  }
+  const file = path.join(REPO, defaultRelative);
+  if (!fs.existsSync(file)) generate(defaultRelative);
+  return { relative: defaultRelative, file };
+}
+
 function commandMatrix(options) {
   const commit = git(["rev-parse", "HEAD"]).trim();
   const short = commit.slice(0, 12);
-  const configRelative = `bench/cloud/dedicated-cross-engine-matrix-${short}.json`;
-  const configFile = path.join(REPO, configRelative);
-  if (!fs.existsSync(configFile)) {
-    local("node", ["tools/create-linode-matrix-config.js", "--dedicated", "--output", configRelative], {
-      capture: false,
-    });
-  }
+  const { relative: configRelative, file: configFile } = laneConfig(
+    options,
+    `bench/cloud/dedicated-cross-engine-matrix-${short}.json`,
+    (relative) =>
+      local("node", ["tools/create-linode-matrix-config.js", "--dedicated", "--output", relative], {
+        capture: false,
+      }),
+  );
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (config.source.benchmark_commit !== commit) {
     fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
@@ -871,15 +895,14 @@ function commandMatrix(options) {
 async function commandMemory(options) {
   const commit = git(["rev-parse", "HEAD"]).trim();
   const short = commit.slice(0, 12);
-  const configRelative = `bench/cloud/dedicated-rustia-ci-memory-${short}.json`;
-  const configFile = path.join(REPO, configRelative);
-  if (!fs.existsSync(configFile)) {
-    local(
-      "node",
-      ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", configRelative],
-      { capture: false },
-    );
-  }
+  const { relative: configRelative, file: configFile } = laneConfig(
+    options,
+    `bench/cloud/dedicated-rustia-ci-memory-${short}.json`,
+    (relative) =>
+      local("node", ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", relative], {
+        capture: false,
+      }),
+  );
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (config.source.benchmark_commit !== commit) {
     fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
@@ -1756,12 +1779,41 @@ function commandFetch(options) {
   promote(extracted, config, options.replace);
 }
 
+// Each lane holds its own lock under its own root, so all three are cleared.
+// Clearing the history lane's alone, as this once did, left a stale matrix or
+// memory lock to be found by hand.
 function commandUnlock() {
-  const out = sshCapture(
-    `set -u\n` +
-      `lock="$HOME/${REMOTE_ROOT}/lock"\n` +
-      `if [ -f "$lock" ]; then cat "$lock"; rm -f "$lock"; echo "removed"; else echo "no lock held"; fi\n`,
-  );
+  const script = Object.entries(LANES)
+    .map(
+      ([name, lane]) =>
+        `lock="$HOME/${lane.root}/lock"\n` +
+        `if [ -f "$lock" ]; then printf '${name}: '; cat "$lock"; rm -f "$lock"; echo " removed"; ` +
+        `else echo "${name}: no lock held"; fi\n`,
+    )
+    .join("");
+  const out = sshCapture(`set -u\n${script}`);
+  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+}
+
+/// A read-only look at the host between runs, limited to what has actually
+/// stopped a run here: free space under $HOME (a filled disk stopped the weekly
+/// matrix before this script ran on 2026-09-06), the journal's share of it, the
+/// load average (a driver fault held it at 43 for a day), and whether that
+/// driver is loaded. Nothing printed names the machine.
+const HOST_CHECK_SCRIPT = `
+set -u
+printf 'free_under_home=%s GiB (floor ${MINIMUM_FREE_GIB})\\n' "$(df -Pk "$HOME" | awk 'NR==2{printf "%.1f", $4/1048576}')"
+journal="$(journalctl --disk-usage 2>/dev/null | sed 's/^Archived and active journals take up //')"
+printf 'journal=%s\\n' "\${journal:-unavailable}"
+diag="$(du -sh "$HOME"/actions-runner/_diag 2>/dev/null | cut -f1)"
+printf 'runner_diag=%s\\n' "\${diag:-none}"
+printf 'loadavg=%s\\n' "$(cut -d' ' -f1-3 /proc/loadavg)"
+printf 'nouveau_loaded=%s\\n' "$(lsmod | grep -c '^nouveau ')"
+printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
+`;
+
+function commandHostCheck() {
+  const out = sshCapture(HOST_CHECK_SCRIPT);
   process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
 }
 
@@ -1865,6 +1917,14 @@ function selfTest() {
   assert.equal(parseArgs(["plan", "--replace"]), null, "plan promotes nothing");
   assert.equal(parseArgs(["fetch", "--replace"]).replace, true, "fetch promotes, so it may supersede");
   assert.equal(parseArgs(["history", "--config"]), null);
+  // --config names a frozen file for the lanes that freeze one; the lanes that
+  // derive everything from HEAD have nothing for it to name.
+  assert.equal(parseArgs(["matrix", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
+  assert.equal(parseArgs(["memory", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
+  assert.equal(parseArgs(["main", "--out", "r.jsonl", "--config", "x.json"]), null);
+  assert.equal(parseArgs(["pr", "--out", "s.md", "--config", "x.json"]), null);
+  assert.deepEqual(parseArgs(["host-check"]), { command: "host-check", ...defaults });
+  assert.equal(parseArgs(["host-check", "--local"]).local, true);
 
   // The screening lanes. --base and --json describe a comparison, so only `pr`
   // takes them; --repetitions and --confidence buy a tighter interval, which
@@ -2074,13 +2134,14 @@ function usage() {
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
       "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
-      "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
-      "  memory    [--plan]                     measure per-VM memory and promote\n" +
+      "  matrix    [--config FILE] [--plan]     measure 13 engines x 5 workloads and promote\n" +
+      "  memory    [--config FILE] [--plan]     measure per-VM memory and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
       "                                         measure one revision against itself and write\n" +
       "                                         the per-workload screening thresholds\n" +
       "  fetch     [--config FILE] [--replace]  re-collect and promote the last remote run\n" +
-      "  unlock                                 clear a stale lock on the benchmark host\n" +
+      "  unlock                                 clear stale lane locks on the benchmark host\n" +
+      "  host-check                             print free space, journal size and load there\n" +
       "  self-test                              run the pure-function checks\n" +
       "\n" +
       `Set ${SSH_ENV} to the host's ssh destination or ssh_config alias.\n`,
@@ -2113,6 +2174,7 @@ try {
     }
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
+    else if (parsed.command === "host-check") commandHostCheck();
   }
 } catch (error) {
   process.stderr.write(`run-dedicated-benchmark: ${error.message}\n`);
