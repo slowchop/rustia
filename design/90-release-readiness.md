@@ -261,6 +261,12 @@ continuation remains part of the semantic-tail blocker.
 - Every third-party GitHub Action is pinned to a full commit SHA.
 - Cargo metadata, Clippy, examples, tests, and package checks use `--locked`;
   preflight rejects a dirty `Cargo.lock` before validation.
+- Preflight runs `cargo fetch --locked` against the manifest beside every
+  tracked `Cargo.lock`: the root, `fuzz/`, and the standalone wasm runners in
+  `bench/wasm/adapter-runner/` and `demos/live-wasm/wasm-runner/`. CI builds
+  neither wasm runner, but the owned-host benchmark lanes build the adapter
+  with `--locked`, so a lock left stale by a shared-crate dependency change
+  fails here instead of on the host.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps hosted CI validation-only: it pins the

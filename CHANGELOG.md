@@ -346,6 +346,18 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- **The wasm runners' lock files match their manifests again.** The typed
+  error work added `serde_path_to_error` to the `rustia` crate and refreshed
+  the root lock, but the benchmark adapter and the live-wasm demo carry their
+  own lock files, and both stayed stale. The weekly matrix and the rustia-only
+  memory cohort build the adapter with `--locked`, so the 2026-09-13 weekly
+  cross-engine matrix stopped before measuring anything, and a memory dispatch
+  at any commit from that change onward would have stopped the same way. Both
+  locks now add the two packages at the root lock's versions and checksums.
+  Release preflight, and so CI, now runs `cargo fetch --locked` for the
+  manifest beside every committed `Cargo.lock`, so a stale nested lock turns
+  the pull request's preflight check red before the change reaches the host.
+
 - Quiescent spare-capacity release now bumps a table's mutation version when
   it pops trailing array nils: the pop moves the observable length border,
   and version consumers (the `table.sort` mutation guard) previously saw no

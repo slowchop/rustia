@@ -434,6 +434,13 @@ function checkReleasePreflight(text) {
   for (const needle of [
     '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
     '"cargo", ["metadata", "--locked"',
+    // Every committed lock file, found by listing, fetched with --locked. The
+    // wasm adapter's own lock has gone stale more than once (smallvec, then
+    // serde_path_to_error); the second time it stopped the weekly matrix.
+    '"git", ["ls-files", "-z"]',
+    "/(^|\\/)Cargo\\.lock$/",
+    "for (const manifest of lockedManifests())",
+    '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
     '"tools/check-release-notes.js"',

@@ -25,9 +25,34 @@ function node(script, ...args) {
   run("node", [script, ...args]);
 }
 
+// The manifest beside every committed Cargo.lock. The wasm runners are
+// standalone packages with their own lock files, so a dependency added to a
+// shared crate updates the root lock and leaves theirs stale. CI never builds
+// them. The weekly matrix and the rustia-only memory lane build the benchmark
+// adapter with --locked on the host, where a stale lock stops the run, and the
+// demo's README documents a --locked build. Filtering the full tracked list
+// here, not with a pathspec glob, covers a new lock file without an edit, and
+// no git environment setting can shrink the list.
+function lockedManifests() {
+  const tracked = childProcess.execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const locks = tracked.split("\0").filter((file) => /(^|\/)Cargo\.lock$/.test(file));
+  if (!locks.includes("Cargo.lock")) {
+    console.error("release-preflight: git ls-files did not list the root Cargo.lock");
+    process.exit(1);
+  }
+  return locks.map((lock) => path.posix.join(path.posix.dirname(lock), "Cargo.toml"));
+}
+
 run("git", ["diff", "--quiet", "--", "Cargo.lock"]);
 run("git", ["diff", "--cached", "--quiet", "--", "Cargo.lock"]);
 run("cargo", ["metadata", "--locked", "--no-deps", "--format-version", "1"]);
+// The same command the matrix lane runs on the host before it builds.
+for (const manifest of lockedManifests()) {
+  run("cargo", ["fetch", "--locked", "--manifest-path", manifest]);
+}
 run("cargo", ["fmt", "--all", "--", "--check"]);
 run("cargo", ["clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
 
