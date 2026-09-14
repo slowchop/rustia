@@ -31,7 +31,11 @@ pub struct Program {
 /// scheduling by these units, which restores the unoptimized logical schedule
 /// over optimized code (the C2.3 receipt contract in `design/58-vm-core2.md`).
 /// Every folded instruction has fuel cost one, so an instruction's fuel is its
-/// own cost plus `unit - 1`.
+/// own cost plus `unit - 1`. Charging a unit greater than one advances the
+/// instruction clock by several steps at once and may cross several
+/// deterministic-collection boundaries; the VM fires one collection per
+/// crossed boundary at that instruction's edge, so the collection lattice is
+/// the unoptimized program's.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramLogicalUnits {
     main: Box<[u32]>,

@@ -282,9 +282,28 @@ is enabled), and the VM charges fuel, `executed_instructions`, and deterministic
 units on both the scalar dispatcher and the plain-mode tape. Every folded instruction has fuel cost one, so an
 instruction's restored cost is its own cost plus its extra units. HotIR and leaf-call plans assume one unit
 per PC and are skipped for unit-carrying programs; deterministic collection boundaries stay on the original
-count lattice but quantize to emitted-instruction edges inside a fused unit group. Schedule equivalence is
-pinned by tests: identical minimum fuel per family, identical outcomes at every fuel prefix, an identical
-logical `os.clock` on the plain-mode tape, and identical results across deterministic-GC interval sweeps.
+count lattice but quantize to emitted-instruction edges inside a fused unit group: a unit charge that steps
+over `k` boundaries fires the boundary collection `k` times at that instruction's pre-edge (iterations after
+the first see identical VM state and are idempotent) and advances the lattice `k` steps, so
+`deterministic_collection_count == floor(executed_instructions / deterministic_gc_interval)` and the next
+boundary is `(floor(executed / interval) + 1) * interval` at every instruction edge, for every program,
+across consecutive calls on one VM (`Vm::maybe_collect_with_roots` loops `while executed >= next`; fixed
+2026-09-15 after the finding below). Unit-one programs reach a boundary only by equality, so default
+compilation keeps its schedule bit for bit. The accepted quantization is observable from guest code running
+*inside* a folded survivor — a metamethod invoked by the commit-late `OP x, x, s` survivor, or a `Call`
+survivor — which sees the group's trailing boundaries already fired, at most one group earlier than the
+unoptimized program would; the fix does not widen it (the `k = 1` case quantized the same way before), and
+neither the conformance corpus nor `tests/o2_schedule.rs` (numeric operands only) exercises it, so a
+fixture with a metamethod-invoking survivor observing a weak table at a boundary belongs before any default
+flip. Schedule equivalence is pinned by tests: identical minimum fuel per family, identical outcomes at
+every fuel prefix, an identical logical `os.clock` on the plain-mode tape, identical results, collection
+counts, and next boundaries across deterministic-GC interval sweeps, the lattice invariant on the six
+tracked workloads under every family across two consecutive calls on both profiles plus a bounded
+`ReproducibleStandard` heap across four calls (`crates/rustia-compiler/tests/o2_schedule.rs`), and the
+straddling charge itself on a hand-built eight-unit schedule at every instruction edge, on both executors,
+with and without a stopped collector (`crates/rustia-vm/src/vm.rs`
+`unit_charged_steps_collect_once_per_crossed_boundary`,
+`stopped_collector_still_advances_the_lattice_over_unit_charged_steps`).
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
@@ -317,7 +336,7 @@ the finding below). At `n = 32`, with the reachability-exact track:
 
 | workload | default | with `reachability_exact()` |
 | --- | --- | --- |
-| `dense_tables` | 1.03% tape, 16,298 HotIR iterations, 38 receipts | 99.76% tape, 0 HotIR, 8,191 receipts |
+| `dense_tables` | 1.03% tape, 16,298 HotIR iterations, 38 receipts | 99.75% tape, 0 HotIR, 8,187 receipts (99.76% and 8,191 before the 2026-09-15 lattice fix: its 22 boundary instructions now cut the tape window and run scalar, root refreshes 68 -> 86, the default side's count) |
 | `sparse_tables` | 92.39% tape, 8,190 tape guard exits (**the only workload with any**) | unchanged coverage, 8,190 guard exits |
 | `closures_upvalues` | 68.67% tape, 32 closure fast entries | 77.67% tape, 0 closure fast entries |
 | `generic_iteration` | 38.02% tape, 2,208 receipts, 1,055 `call_value` leaf replays of the `__iter` closure (33 per unit less one per collection boundary that lands in the plan window) | 67.24% tape, 1,215 receipts, 0 leaf replays |
@@ -404,18 +423,33 @@ it failed.
   `sparse_tables`, where the rewrite removes 0.09%, is the one workload that did not move. Counting cannot
   apportion the wins; only the measurements listed below can.
 
-**A determinism bug in the schedule (open, blocks the track on its own).** The scalar dispatcher advances
-`executed_instructions` by `1 + extra_units` for a folded instruction, `maybe_collect` tests the
-deterministic-collection lattice for exact equality, and the lattice advances only on a hit. A multi-unit
-instruction that steps over the boundary therefore disables the boundary collection for the rest of the VM's
-life: `weak_collection_due_within` wraps, the tape's admitted window becomes unbounded, and only
-`reset_decision` re-arms it. Under the candidate the timed call performs almost no boundary collections
+**A determinism bug in the schedule (found 2026-09-13, fixed 2026-09-15).** The scalar dispatcher advances
+`executed_instructions` by `1 + extra_units` for a folded instruction; `maybe_collect` tested the
+deterministic-collection lattice for exact equality, and the lattice advanced only on a hit. A multi-unit
+instruction that stepped over the boundary therefore disabled the boundary collection for the rest of the
+VM's life: `weak_collection_due_within` wrapped, the tape's admitted window became unbounded, and only
+`reset_decision` re-armed it. Under the candidate the timed call performed almost no boundary collections
 (`dense_tables` 1,568 -> 3 per call at n=2,251; `stdlib_math_table` 616 -> 25 then 0; `closures_upvalues`
-2,079 -> 4), `ReproducibleStandard` heaps grow unreclaimed across calls (`generic_iteration` 3.2 -> 6.6 -> 10.0
+2,079 -> 4), `ReproducibleStandard` heaps grew unreclaimed across calls (`generic_iteration` 3.2 -> 6.6 -> 10.0
 MB after three calls on one VM), the measured wins include skipped collections, and the regressions understate
-the executor loss. Two programs with identical charged `executed_instructions` collect on different schedules,
-which is the invariant the logical receipts exist to hold; `tests/o2_schedule.rs` cannot see it because it
-compares results after an explicit `collectgarbage()`.
+the executor loss. Two programs with identical charged `executed_instructions` collected on different
+schedules, which is the invariant the logical receipts exist to hold; `tests/o2_schedule.rs` could not see it
+because it compared results after an explicit `collectgarbage()`. The fix is the loop described under C2.2
+above: `Vm::maybe_collect_with_roots` collects once per crossed boundary and advances the lattice once per
+crossed boundary (`while executed >= next`, saturating at `u64::MAX` instead of wrapping), on both profiles,
+so `deterministic_collection_count == floor(executed / interval)` and `next == (floor(executed / interval) +
+1) * interval` hold after every charge; every fast tier admits work only while `weak_collection_due_within`
+is false, so none of them needs the loop, and a `debug_assert!` pins `executed < next` at every admission
+check. `tests/o2_schedule.rs` now observes the lattice directly through `Vm::executed_instructions`,
+`Vm::deterministic_collection_count`, and the hidden `Vm::next_deterministic_collection_instruction`: the
+interval sweep compares count and next boundary on a `DeterministicSim` leg, the six tracked workloads are
+checked under all-off, each family alone, and `reachability_exact()` across two consecutive calls on one VM
+at intervals {1, 7, 13, 97, 997, 10,000} (`DeterministicSim` in full, `ReproducibleStandard` at 1, 97,
+10,000), with every variant charging the all-off clock and the corpus-green variants returning the all-off
+results, and a `ReproducibleStandard` heap bound (each variant within 16 KiB of its own first call and of
+all-off after each of four calls at n=128, intervals 97 and 10,000) pins the memory the skipped collections
+had left behind. The numbers above remain the record of the bugged candidate; pricing the collections it
+skipped is item 4's `main + (2)` host measurement.
 
 **What follows.** The default stays off, and per-workload enabling is not the answer: the gate is per program,
 so any program with a leaf-shaped closure or a HotIR loop regresses the moment one deletion fires anywhere in
@@ -426,11 +460,11 @@ it (`array_mutation`, 8,399 HotIR iterations per call, is next in line). The cou
    exact under an identity slice). Counting acceptance before any host run: closure fast entries back to n,
    `Len` refreshes back to a handful per call, HotIR iterations restored, charged `executed_instructions` and
    checksums unchanged.
-2. Make the boundary test robust to unit-charged steps — advance the lattice once per crossed boundary, or cut
-   a multi-unit instruction at the boundary as the tape already does — with a counting test that
-   `deterministic_collection_count` equals `floor(executed / interval)` for every workload under every family
-   across an interval sweep and across consecutive calls on one VM, plus a bounded-heap assertion under
-   `ReproducibleStandard`.
+2. **Done (2026-09-15).** The boundary test is robust to unit-charged steps: the lattice advances once per
+   crossed boundary, collecting at each, and the counting tests described in the bullet above pin
+   `deterministic_collection_count == floor(executed / interval)` for every tracked workload under every
+   family across an interval sweep and across consecutive calls on one VM, plus the bounded-heap assertion
+   under `ReproducibleStandard`. The tape's window cut is unchanged.
 3. **Done (2026-09-15).** A census counter at `try_leaf_bytecode_handle`'s success
    (`leaf_call_value_entries`), so iterator-path replays are visible to `executor_ownership.rs` and to the
    table above; the report and the VM unit tests pin it as described in the bullet above.

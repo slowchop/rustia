@@ -474,8 +474,12 @@ unreachable suspended-coroutine frames.
    validated `ProgramLogicalUnits` schedule and the VM charges fuel, `executed_instructions`, and
    deterministic-collection admission by those units on both the scalar dispatcher and the plain-mode tape
    (HotIR and leaf-call plans are skipped for unit-carrying programs), with equivalence pinned per family by
-   minimum-fuel equality, per-prefix fuel sweeps, logical-clock equality, and deterministic-GC interval
-   sweeps. The default-disabled O2 families are threaded through the full conformance corpus
+   minimum-fuel equality, per-prefix fuel sweeps, logical-clock equality, deterministic-GC interval sweeps
+   that compare the collection count and next boundary, and the lattice invariant
+   `deterministic_collection_count == floor(executed / interval)` on the tracked workloads across consecutive
+   calls on both profiles (a multi-unit charge fires one collection per crossed boundary; the equality test
+   that had silently disarmed the boundary for the rest of the VM's life was fixed 2026-09-15). The
+   default-disabled O2 families are threaded through the full conformance corpus
    (`run_repository_with_experimental_o2`); the reachability-exact track — constant-branch folding,
    commit-late compound/self-update assignment, provably-nil tail folds, slot tightening — passes all 712
    fixtures per family and together (0.1-11.0% executed-instruction reduction on the tracked workloads),

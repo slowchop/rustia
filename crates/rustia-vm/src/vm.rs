@@ -3606,6 +3606,25 @@ impl Vm {
         self.deterministic_collection_count
     }
 
+    /// Logical instructions charged since construction or the last
+    /// [`Vm::reset_decision`]: the clock the deterministic-collection lattice
+    /// and the logical `os.clock` derive from. A field read.
+    #[inline]
+    pub const fn executed_instructions(&self) -> u64 {
+        self.executed_instructions
+    }
+
+    /// The next lattice point at which a deterministic collection fires.
+    /// Between instructions this is always
+    /// `(executed_instructions / deterministic_gc_interval + 1) * interval`;
+    /// schedule tests assert it directly on profiles whose
+    /// [`Vm::deterministic_collection_count`] stays zero.
+    #[doc(hidden)]
+    #[inline]
+    pub const fn next_deterministic_collection_instruction(&self) -> u64 {
+        self.next_weak_collection_instruction
+    }
+
     pub fn run(&mut self, program: &Program) -> Result<Value> {
         let mut state = self.begin_execution();
         let mut hosts = RejectHostDispatcher;
@@ -20420,68 +20439,75 @@ impl Vm {
 
     #[inline(always)]
     fn maybe_collect(&mut self) -> Result<()> {
-        let weak_collection_due =
-            self.executed_instructions == self.next_weak_collection_instruction;
-        if self.profile.is_deterministic_sim() {
-            if weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(&[]);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
-                self.deterministic_collection_count =
-                    self.deterministic_collection_count.wrapping_add(1);
-            }
-        } else {
-            self.heap.collect_debt();
-            if !self.gc_stopped && weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(&[]);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
-            }
-        }
-        if weak_collection_due {
-            self.next_weak_collection_instruction = self
-                .next_weak_collection_instruction
-                .wrapping_add(self.settings.deterministic_gc_interval.get());
-        }
-        self.record_memory_peak();
-        self.enforce_memory_limit(&[])
+        self.maybe_collect_with_roots(&[])
     }
 
+    /// Fires the deterministic-collection boundary for every lattice point
+    /// the charge just applied to `executed_instructions` reached or stepped
+    /// over, then enforces the memory limit.
+    ///
+    /// A unit-carrying instruction (`ProgramLogicalUnits`) charges
+    /// `1 + extra_units` in one step, so one charge can cross several
+    /// boundaries. Each crossed boundary collects once — iterations after the
+    /// first run against identical VM state and are idempotent — and advances
+    /// the lattice once, which keeps the schedule invariant the logical
+    /// receipts exist to hold (`design/58-vm-core2.md` §C2.3): between
+    /// instructions `next == (executed / interval + 1) * interval` and, under
+    /// `DeterministicSim`, `deterministic_collection_count == executed /
+    /// interval`, for every program and across consecutive calls on one VM.
+    /// Unit-one programs reach a boundary only by equality, so their schedule
+    /// is unchanged by the loop. Under `ReproducibleStandard` a
+    /// `collectgarbage("stop")` skips the collection but the lattice still
+    /// advances, as before.
     #[inline(always)]
     fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) -> Result<()> {
-        let weak_collection_due =
-            self.executed_instructions == self.next_weak_collection_instruction;
-        if self.profile.is_deterministic_sim() {
-            if weak_collection_due {
+        let deterministic_sim = self.profile.is_deterministic_sim();
+        if !deterministic_sim {
+            self.heap.collect_debt();
+        }
+        let interval = self.settings.deterministic_gc_interval.get();
+        while self.executed_instructions >= self.next_weak_collection_instruction {
+            if deterministic_sim || !self.gc_stopped {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
                 self.prune_unreachable_coroutines_if_idle();
+            }
+            if deterministic_sim {
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
-        } else {
-            self.heap.collect_debt();
-            if !self.gc_stopped && weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(transient_roots);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
+            match self.next_weak_collection_instruction.checked_add(interval) {
+                Some(next) => self.next_weak_collection_instruction = next,
+                None => {
+                    // The lattice saturates rather than wrapping so this loop
+                    // can never spin; 2^64 charged instructions is unreachable.
+                    self.next_weak_collection_instruction = u64::MAX;
+                    break;
+                }
             }
         }
-        if weak_collection_due {
-            self.next_weak_collection_instruction = self
-                .next_weak_collection_instruction
-                .wrapping_add(self.settings.deterministic_gc_interval.get());
-        }
+        debug_assert!(
+            self.executed_instructions < self.next_weak_collection_instruction
+                || self.next_weak_collection_instruction == u64::MAX,
+            "deterministic-collection lattice fell behind the charged instructions"
+        );
         self.record_memory_peak();
         self.enforce_memory_limit(transient_roots)
     }
 
+    /// True when charging `steps` more logical instructions would reach or
+    /// cross the next deterministic-collection boundary. Every fast tier
+    /// (tape window, HotIR, leaf-call plans) admits work only while this is
+    /// false, so no tier ever needs the boundary loop above.
     #[inline(always)]
     fn weak_collection_due_within(&self, steps: u64) -> bool {
+        // `maybe_collect_with_roots` keeps `executed < next` between
+        // instructions, so the distance never wraps.
+        debug_assert!(
+            self.executed_instructions < self.next_weak_collection_instruction
+                || self.next_weak_collection_instruction == u64::MAX
+        );
         steps
             >= self
                 .next_weak_collection_instruction
@@ -28924,6 +28950,183 @@ mod inline_cache_tests {
             saw_tape |= taped.dynamic_programs[0].tape_entries > 0;
         }
         assert!(saw_tape);
+    }
+
+    /// Eight logical units over four emitted instructions: the second
+    /// `LoadConst` carries five units, so one scalar charge steps
+    /// `executed_instructions` from 1 to 6 and crosses several
+    /// deterministic-collection boundaries at small intervals.
+    fn unit_carrying_program() -> Program {
+        Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                    Instruction::new(Opcode::Add, 2, 0, 1),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
+                ],
+                3,
+            ),
+            vec![Constant::Number(2.0)],
+        )
+        .with_logical_units(Some(
+            crate::ProgramLogicalUnits::new(vec![1, 5, 1, 1], vec![]).unwrap(),
+        ))
+    }
+
+    /// The lattice invariant `maybe_collect_with_roots` restores after every
+    /// charge, plus agreement between the live `weak_collection_due_within`
+    /// and the test-only floor model.
+    fn assert_on_collection_lattice(vm: &Vm, interval: u64, context: &str) {
+        let executed = vm.executed_instructions;
+        assert_eq!(
+            vm.next_weak_collection_instruction,
+            (executed / interval + 1) * interval,
+            "{context}: next boundary is off the lattice"
+        );
+        let expected_count = if vm.profile.is_deterministic_sim() {
+            executed / interval
+        } else {
+            0
+        };
+        assert_eq!(
+            vm.deterministic_collection_count(),
+            expected_count,
+            "{context}: collection count is off the lattice"
+        );
+        assert_eq!(
+            vm.weak_collection_due_within(1),
+            weak_collection_due_within(executed, interval, 1),
+            "{context}: due-within disagrees with the floor model"
+        );
+        assert_eq!(vm.executed_instructions(), executed);
+        assert_eq!(
+            vm.next_deterministic_collection_instruction(),
+            vm.next_weak_collection_instruction
+        );
+    }
+
+    #[test]
+    fn unit_charged_steps_collect_once_per_crossed_boundary() {
+        let program = unit_carrying_program();
+        assert!(program.logical_units().is_some());
+        for interval in 1..=8u64 {
+            let settings = VmSettings {
+                deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+                ..VmSettings::default()
+            };
+
+            // Every instruction edge, observed through the exact fuel
+            // schedule: fuel is charged before the instruction clock, so a
+            // budget that runs out at instruction k stops at the edge after
+            // instruction k - 1. The five-unit charge makes the edge at 6
+            // reachable only by stepping over 2..=5 in one instruction.
+            let mut edges_seen = Vec::new();
+            for fuel in 0..=10u64 {
+                let mut vm = Vm::with_settings(
+                    Profile::DeterministicSim,
+                    VmSettings {
+                        initial_fuel: Some(fuel),
+                        ..settings.clone()
+                    },
+                );
+                match vm.run(&program) {
+                    Ok(value) => assert_eq!(value.as_number(), Some(4.0)),
+                    Err(error) => assert!(
+                        matches!(error.kind, ErrorKind::FuelExhausted { .. }),
+                        "interval {interval}, fuel {fuel}: {error}"
+                    ),
+                }
+                edges_seen.push(vm.executed_instructions);
+                assert_on_collection_lattice(
+                    &vm,
+                    interval,
+                    &format!("interval {interval}, fuel {fuel}"),
+                );
+                if vm.executed_instructions == 6 {
+                    // The straddling charge fired once per crossed boundary.
+                    assert_eq!(vm.deterministic_collection_count(), 6 / interval);
+                }
+            }
+            for edge in [1u64, 6, 7, 8] {
+                assert!(
+                    edges_seen.contains(&edge),
+                    "interval {interval}: edge {edge} never observed in {edges_seen:?}"
+                );
+            }
+
+            // Plain mode on both executors and both profiles, twice on one VM
+            // so the lattice is pinned across consecutive calls.
+            for tape_off in [false, true] {
+                for profile in [Profile::DeterministicSim, Profile::ReproducibleStandard] {
+                    let context = format!("interval {interval}, tape_off {tape_off}, {profile:?}");
+                    let mut vm = Vm::with_settings(profile, settings.clone());
+                    if tape_off {
+                        vm.tape_mode = TapeTestMode::Off;
+                    }
+                    assert_on_collection_lattice(&vm, interval, &format!("{context}, fresh"));
+                    for call in 1..=2u64 {
+                        assert_eq!(vm.run(&program).unwrap().as_number(), Some(4.0));
+                        assert_eq!(vm.executed_instructions, 8 * call);
+                        assert_on_collection_lattice(
+                            &vm,
+                            interval,
+                            &format!("{context}, call {call}"),
+                        );
+                    }
+                    if profile.is_deterministic_sim() {
+                        assert_eq!(vm.deterministic_collection_count(), 16 / interval);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stopped_collector_still_advances_the_lattice_over_unit_charged_steps() {
+        // `collectgarbage("stop")` under `ReproducibleStandard` skips the
+        // boundary collections but never the lattice: a five-unit charge
+        // over interval 2 advances `next` past every crossed boundary either
+        // way, and only the weak entry tells the two apart.
+        let program = unit_carrying_program();
+        for stopped in [true, false] {
+            let settings = VmSettings {
+                deterministic_gc_interval: NonZeroU64::new(2).unwrap(),
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let weak = vm.heap.alloc_array_table(&[]);
+            let metatable = vm.heap.alloc_array_table(&[]);
+            let mode_key = Value::string_atom(vm.heap.intern_string("__mode"));
+            let weak_values = Value::string_atom(vm.heap.intern_string("v"));
+            vm.heap
+                .table_set(metatable, mode_key, weak_values)
+                .expect("weak mode field");
+            vm.heap
+                .table_set_metatable(weak, Some(metatable))
+                .expect("weak metatable");
+            let key = Value::number(1.0);
+            let dead = Value::table(vm.heap.alloc_array_table(&[]));
+            vm.heap.table_set(weak, key, dead).expect("weak entry");
+            vm.set_global_value("weak", Value::table(weak))
+                .expect("root the weak table");
+            vm.gc_stopped = stopped;
+
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(4.0));
+            assert_eq!(vm.executed_instructions, 8);
+            assert_eq!(vm.next_weak_collection_instruction, 10);
+            assert_eq!(vm.deterministic_collection_count(), 0);
+            assert_on_collection_lattice(&vm, 2, &format!("stopped {stopped}"));
+            let survived = vm
+                .heap
+                .table_get(weak, key)
+                .is_some_and(|value| !value.is_nil());
+            assert_eq!(
+                survived, stopped,
+                "stopped {stopped}: the unreachable weak value should survive \
+                 exactly when the collector is stopped"
+            );
+        }
     }
 
     /// One scalar-versus-tape differential execution of `program`, comparing
