@@ -488,8 +488,11 @@ unreachable suspended-coroutine frames.
    program, so `dense_tables` swaps 16,298 HotIR iterations for 99.76% tape coverage while
    `closures_upvalues` loses its closure-call fast entries outright. The default-off
    `executor-diagnostics` feature and `crates/rustia-compiler/tests/executor_ownership.rs` report that
-   ownership per workload; the same report shows `sparse_tables` taking 8,190 tape guard exits per 32
-   units — one per scattered-integer index operation — independent of O2. The C2.5a slice is also merged: numeric writes to a
+   ownership per workload on both leaf-call paths — the `Call` opcode's inline cache and the `call_value`
+   replays that generic-for iterator steps take, so `generic_iteration` is seen serving 1,055 `__iter`
+   replays per 32 units by default and none under the reachability-exact schedule; the same report shows
+   `sparse_tables` taking 8,190 tape guard exits per 32 units — one per scattered-integer index
+   operation — independent of O2. The C2.5a slice is also merged: numeric writes to a
    proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
    the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,

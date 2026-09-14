@@ -309,24 +309,30 @@ non-identity logical-unit schedule deselects HotIR *and* the leaf-call plans for
 accounting assumes one logical unit per matched PC). `Program::with_logical_units` drops an identity
 schedule, so a program the pass did not actually rewrite keeps both. The default-off
 `executor-diagnostics` feature and `crates/rustia-compiler/tests/executor_ownership.rs` report which
-executor owns each workload; at `n = 32`, with the reachability-exact track:
+executor owns each workload. Leaf-call plans are counted on both of their paths — the `Call` opcode's
+inline cache (`closure_call_fast_entries`) and the dynamic `call_value` path that generic-for iterator
+steps, host `call_function`, `pcall`/`xpcall`, and coroutine starts take (`leaf_call_value_entries`,
+recorded on the callee's program at `try_leaf_bytecode_handle`'s success return; added 2026-09-15 after
+the finding below). At `n = 32`, with the reachability-exact track:
 
 | workload | default | with `reachability_exact()` |
 | --- | --- | --- |
 | `dense_tables` | 1.03% tape, 16,298 HotIR iterations, 38 receipts | 99.76% tape, 0 HotIR, 8,191 receipts |
 | `sparse_tables` | 92.39% tape, 8,190 tape guard exits (**the only workload with any**) | unchanged coverage, 8,190 guard exits |
 | `closures_upvalues` | 68.67% tape, 32 closure fast entries | 77.67% tape, 0 closure fast entries |
-| `generic_iteration` | 38.02% tape, 2,208 receipts | 67.24% tape, 1,215 receipts |
-| `stdlib_math_table` | 82.38% tape | unchanged (no rewrite fired) |
+| `generic_iteration` | 38.02% tape, 2,208 receipts, 1,055 `call_value` leaf replays of the `__iter` closure (33 per unit less one per collection boundary that lands in the plan window) | 67.24% tape, 1,215 receipts, 0 leaf replays |
+| `stdlib_math_table` | 82.38% tape | identical counts (1,771 executed, 82.38% tape, 133 root refreshes) although the rewrite fires — commit-late at two sites plus one dead-tail fold, static 110 -> 102, schedule attached — because the workload has no HotIR loop or leaf closure to lose |
 | `array_mutation` | 0.96% tape, 8,399 HotIR iterations | unchanged (no rewrite fired) |
 
-**The enablement gate runs on `generic_iteration`, not `dense_tables`.** A dense gate would measure the
+**No tracked workload isolates the rewrite from an executor swap.** A `dense_tables` gate would measure the
 tape replacing HotIR at least as much as it measures the O2 rewrites, because the executor changes under
-the candidate. `generic_iteration` loses only 31 HotIR iterations out of 36,955 executed instructions, so
-the executor is effectively constant across both sides while the rewrite effect is real (tape share
-38.02% to 67.24%, receipts 2,208 to 1,215). Dense may still be measured, but only as an explicitly
-labelled combined executor-swap-plus-rewrite result, never as the primary evidence for enabling a family
-by default.
+the candidate. `generic_iteration` was proposed as the gate instead because it loses only 31 HotIR
+iterations out of 36,955 executed instructions — but it also loses every `ArrayIterator` replay of its
+`__iter` closure (1,055 `call_value` leaf replays at `n = 32` go to 0), which the report could not see
+until the second leaf counter landed (2026-09-13 below), so its executor is not constant across the sides
+either: the tape share rising 38.02% to 67.24% (receipts 2,208 to 1,215) mixes the rewrite with a
+leaf-plan loss. Until the gate is per prototype, any enablement measurement is an explicitly labelled
+combined executor-swap-plus-rewrite result, never evidence for a family's rewrite alone.
 
 `sparse_tables` is the only tracked workload whose operations miss the tape's dense-array guard, and the
 test asserts that rather than only printing it. Its inner loop issues four index operations per iteration
@@ -378,12 +384,20 @@ it failed.
   then builds a full bytecode frame. At n=742,545, closure fast entries go 741,951 -> 0 and GC root refreshes
   2,681 -> 742,558 per timed call; at n=10,364, `Len`-triggered refreshes go 648 -> 342,012 (33 lost iterator
   replays per unit), tape entries rise by 131 per unit, and Rust allocations go 1.80M -> 4.82M per call.
-- **Two rows of the table above are wrong**, because `try_leaf_bytecode_handle` — the iterator-path leaf
-  replay — records no census counter, so `executor_ownership.rs` cannot see it. `generic_iteration`'s executor
-  is not "effectively constant" across the sides: it loses 33 `ArrayIterator` replays per unit. And
-  `stdlib_math_table` is not "unchanged (no rewrite fired)": commit-late fires at two sites plus one dead-tail
-  fold, static 110 -> 102, schedule attached. The enablement-gate argument built on the first of those rows
-  does not hold.
+- **Two rows of the table above were wrong** (corrected 2026-09-15), because `try_leaf_bytecode_handle` — the
+  iterator-path leaf replay — recorded no census counter, so `executor_ownership.rs` could not see it.
+  `generic_iteration`'s executor was not "effectively constant" across the sides: it loses 33 `ArrayIterator`
+  replays per unit. And `stdlib_math_table` was not "unchanged (no rewrite fired)": commit-late fires at two
+  sites plus one dead-tail fold, static 110 -> 102, schedule attached. The enablement-gate argument built on
+  the first of those rows does not hold. The counter now exists (`ExecutorCensus::leaf_call_value_entries`,
+  recorded on the callee's program at the replay's success return and nowhere on its fallbacks) and the
+  report pins it: 33 replays per unit less at most one per deterministic-collection boundary on the default
+  side (1,055 at `n = 32`; the boundary instruction runs scalar, and each refused call shows up as a
+  `Len`-triggered root refresh from the full frame it built), 0 under `reachability_exact()`, and 0 on the
+  `Call`-opcode path in both cases; `closures_upvalues` pins the mirror image (`n` fast entries, 0 replays).
+  `crates/rustia-vm/src/vm.rs` unit tests prove the counter on host `call_function` calls: three
+  `ArrayIterator` calls count 3 with identical results and charged instructions against the interpreter,
+  and 0 when a fuel budget makes the path fall back.
 - **The wins are not pure rewrite wins either.** `dense_tables` sums the rewrite (dispatched operations
   -11.0%), the HotIR -> tape swap (1,146,459 HotIR iterations -> 0, 576,255 fused receipts at n=2,251), and the
   schedule effect described next; `stdlib_math_table` sums the rewrite (-5.67% dispatched) and that effect;
@@ -417,8 +431,9 @@ it (`array_mutation`, 8,399 HotIR iterations per call, is next in line). The cou
    `deterministic_collection_count` equals `floor(executed / interval)` for every workload under every family
    across an interval sweep and across consecutive calls on one VM, plus a bounded-heap assertion under
    `ReproducibleStandard`.
-3. Record a census counter at `try_leaf_bytecode_handle`'s success, so iterator-path replays are visible to
-   `executor_ownership.rs` and to the table above.
+3. **Done (2026-09-15).** A census counter at `try_leaf_bytecode_handle`'s success
+   (`leaf_call_value_entries`), so iterator-path replays are visible to `executor_ownership.rs` and to the
+   table above; the report and the VM unit tests pin it as described in the bullet above.
 4. Then measure on the owned host, eight legs a side: main plus (1) and (2) with the default off against main
    (expected within noise — the fixes are free); the same tree with `reachability_exact()` on against that
    (predicted from the counts: `closures_upvalues` and `generic_iteration` within a few percent of baseline,

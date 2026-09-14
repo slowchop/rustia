@@ -697,6 +697,11 @@ struct LoadedProgram {
     closure_call_fast_entries: u64,
     #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_guard_exits: u64,
+    /// Leaf-plan replays served through `try_leaf_bytecode_handle` (the
+    /// `call_value` path). Attributed to the callee's program, since that path
+    /// has no caller site; `closure_call_fast_entries` is the caller's.
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    leaf_call_value_entries: u64,
 }
 
 #[derive(Default)]
@@ -1026,6 +1031,8 @@ impl LoadedProgram {
             closure_call_fast_entries: 0,
             #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_guard_exits: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            leaf_call_value_entries: 0,
         }
     }
 
@@ -2558,6 +2565,7 @@ impl Vm {
             census.closure_call_prototype_hits += program.closure_call_prototype_hits;
             census.closure_call_cache_fills += program.closure_call_cache_fills;
             census.closure_call_guard_exits += program.closure_call_guard_exits;
+            census.leaf_call_value_entries += program.leaf_call_value_entries;
             census.table_inline_cache_hits += program.table_inline_cache_hits;
             census.table_inline_cache_fills += program.table_inline_cache_fills;
             census.native_call_inline_cache_hits += program.native_call_inline_cache_hits;
@@ -11263,6 +11271,13 @@ impl Vm {
     }
 
     #[cfg(any(test, feature = "executor-diagnostics"))]
+    fn record_leaf_call_value_entry(&mut self, program_id: u32) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
+            program.leaf_call_value_entries = program.leaf_call_value_entries.saturating_add(1);
+        }
+    }
+
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     fn record_native_call_inline_cache_hit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.native_call_inline_cache_hits =
@@ -11511,6 +11526,10 @@ impl Vm {
         self.executed_instructions = self
             .executed_instructions
             .wrapping_add(u64::from(outcome.instruction_count));
+        // Recorded on the callee's program: this path has no caller site,
+        // unlike `try_closure_call_scalar`, which records on the caller's.
+        #[cfg(any(test, feature = "executor-diagnostics"))]
+        self.record_leaf_call_value_entry(program_id);
         Ok(Some(leaf_outcome_return_values(outcome)))
     }
 
@@ -30360,8 +30379,11 @@ mod inline_cache_tests {
         program
     }
 
-    fn closure_call_array_iterator_program() -> Program {
-        let leaf = Function::with_params_and_upvalues(
+    /// The `ArrayIterator` leaf shape: `i = i + 1; if i <= #items then return
+    /// i, items[i] end`, with `i` a parent cell (upvalue 0) and `items` a
+    /// parent value (upvalue 1).
+    fn array_iterator_leaf_function() -> Function {
+        Function::with_params_and_upvalues(
             vec![
                 Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
                 Instruction::new(Opcode::LoadConst, 1, 0, 0),
@@ -30393,7 +30415,10 @@ mod inline_cache_tests {
                 UpvalueDescriptor::ParentLocalValue(3),
             ],
             Vec::new(),
-        );
+        )
+    }
+
+    fn closure_call_array_iterator_program() -> Program {
         Program::with_functions(
             Function::new(
                 vec![
@@ -30417,8 +30442,59 @@ mod inline_cache_tests {
                 Constant::Number(10.0),
                 Constant::Number(20.0),
             ],
-            vec![leaf],
+            vec![array_iterator_leaf_function()],
         )
+    }
+
+    /// Same leaf as [`closure_call_array_iterator_program`], but `main`
+    /// returns the closure instead of calling it, so every call arrives from
+    /// the host through `call_function` -> `call_value` ->
+    /// `try_leaf_bytecode_handle` rather than the `Call` opcode's PIC.
+    fn closure_call_array_iterator_closure_program() -> Program {
+        Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                    Instruction::new(Opcode::NewArray, 3, 1, 2),
+                    Instruction::with_aux(Opcode::LoadFunction, 4, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 4, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                5,
+            ),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+                Constant::Number(10.0),
+                Constant::Number(20.0),
+            ],
+            vec![array_iterator_leaf_function()],
+        )
+    }
+
+    /// Calls `closure` three times from the host on both VMs and checks the
+    /// `ArrayIterator` results (1, 2, then nil) agree with `expected`.
+    fn call_array_iterator_closure_three_times(
+        program: &Program,
+        fast: &mut Vm,
+        fast_closure: Value,
+        interpreted: &mut Vm,
+        interpreted_closure: Value,
+    ) {
+        for expected in [Some(1.0), Some(2.0), None] {
+            let fast_result = fast.call_function(program, fast_closure, &[]).unwrap();
+            let interpreted_result = interpreted
+                .call_function(program, interpreted_closure, &[])
+                .unwrap();
+            assert_eq!(fast_result.as_number(), expected);
+            assert_eq!(interpreted_result.as_number(), expected);
+        }
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
     }
 
     #[test]
@@ -30484,7 +30560,75 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_prototype_hits, 0);
         assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 3);
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn leaf_call_value_path_records_census_and_matches_interpreter() {
+        let program = closure_call_array_iterator_closure_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_closure = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_closure = interpreted.run(&program).unwrap();
+
+        call_array_iterator_closure_three_times(
+            &program,
+            &mut fast,
+            fast_closure,
+            &mut interpreted,
+            interpreted_closure,
+        );
+
+        // Every host call replayed the leaf on the `call_value` path; the
+        // `Call` opcode's PIC never fired because no bytecode call happened.
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 3);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_cache_fills, 0);
+        assert_eq!(interpreted.dynamic_programs[0].leaf_call_value_entries, 0);
+        assert_eq!(fast.executor_census().leaf_call_value_entries, 3);
+        assert_eq!(interpreted.executor_census().leaf_call_value_entries, 0);
+    }
+
+    #[test]
+    fn leaf_call_value_path_counts_nothing_when_policy_falls_back() {
+        let program = closure_call_array_iterator_closure_program();
+        let mut accounting = Vm::new(Profile::ReproducibleStandard);
+        accounting.closure_call_mode = ClosureCallTestMode::Off;
+        let closure = accounting.run(&program).unwrap();
+        for _ in 0..3 {
+            accounting.call_function(&program, closure, &[]).unwrap();
+        }
+        let exact_fuel = accounting.executed_instructions;
+
+        // A fuel budget refuses the leaf path before it replays anything, so
+        // the counter must stay at zero: it sits strictly on the success
+        // return, never on a fallback to a full frame.
+        let settings = VmSettings {
+            initial_fuel: Some(exact_fuel),
+            ..VmSettings::default()
+        };
+        let mut fast = Vm::with_settings(Profile::ReproducibleStandard, settings.clone());
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_closure = fast.run(&program).unwrap();
+        let mut interpreted = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_closure = interpreted.run(&program).unwrap();
+
+        call_array_iterator_closure_three_times(
+            &program,
+            &mut fast,
+            fast_closure,
+            &mut interpreted,
+            interpreted_closure,
+        );
+
+        assert_eq!(fast.executed_instructions, exact_fuel);
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        assert_eq!(fast.executor_census().leaf_call_value_entries, 0);
     }
 
     #[test]

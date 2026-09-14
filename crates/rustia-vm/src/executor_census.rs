@@ -8,7 +8,15 @@
 //! This answers "which executor actually owns this workload" — the question
 //! that decides whether an optimization measured in executed instructions can
 //! translate into time, because attaching an optimized logical-unit schedule
-//! deselects the HotIR and leaf-call plans entirely.
+//! deselects the HotIR and leaf-call plans for the whole program
+//! (`Vm::load_program` and `recognize_leaf_call_plan` skip every function of a
+//! unit-carrying program; see `design/58-vm-core2.md` §C2.3).
+//!
+//! Leaf-call plans are served on two paths and counted separately: the `Call`
+//! opcode's inline cache (`closure_call_fast_entries`) and the dynamic
+//! `call_value` path (`leaf_call_value_entries`) that generic-for iterator
+//! steps, host `call_function`, `pcall`/`xpcall`, and coroutine starts take.
+//! Both charge the plan's fixed unit count.
 
 /// Aggregated executor counters across every loaded program.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -47,6 +55,13 @@ pub struct ExecutorCensus {
     pub closure_call_cache_fills: u64,
     /// Closure-call fast entries that side-exited.
     pub closure_call_guard_exits: u64,
+    /// Leaf-plan replays served through the dynamic `call_value` path
+    /// (generic-for iterator steps, host `call_function`, `pcall`/`xpcall`,
+    /// coroutine starts) rather than the `Call` opcode's inline cache. Both
+    /// paths charge the plan's fixed unit count. Attributed to the callee's
+    /// program (the path has no caller site), whereas
+    /// `closure_call_fast_entries` is attributed to the caller's.
+    pub leaf_call_value_entries: u64,
     /// Table inline-cache hits.
     pub table_inline_cache_hits: u64,
     /// Table inline-cache fills.

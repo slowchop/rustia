@@ -78,6 +78,11 @@ check-array-slot-coverage:
     cargo clippy --locked -p rustia-compiler --all-targets --features table-write-diagnostics -- -D warnings
     cargo test --locked -p rustia-compiler --features table-write-diagnostics --test array_slot_write_coverage -- --nocapture
 
+# Report which executor (tape, HotIR, leaf plans on both call paths) owns each benchmark workload.
+check-executor-ownership:
+    cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings
+    cargo test --locked -p rustia-compiler --features executor-diagnostics --test executor_ownership -- --nocapture
+
 check-examples:
     cargo test --locked -p rustia --examples --no-run
 
