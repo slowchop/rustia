@@ -61,11 +61,18 @@ impl ProgramLogicalUnits {
     /// True when every unit is one: the identity schedule carries no
     /// information and should be represented as `None` on the program.
     pub fn is_identity(&self) -> bool {
-        self.main.iter().all(|unit| *unit == 1)
-            && self
-                .functions
-                .iter()
-                .all(|units| units.iter().all(|unit| *unit == 1))
+        self.function_is_identity(None)
+            && (0..self.functions.len()).all(|index| self.function_is_identity(Some(index)))
+    }
+
+    /// True when one function's slice of the schedule is all ones (`None`
+    /// prototype = main). The VM gates its fixed-charge executors (HotIR and
+    /// the leaf-call plans, which assume one unit per instruction) on this
+    /// per prototype, so a rewrite in one function never deselects them in
+    /// another. A prototype the schedule does not cover has no units and is
+    /// identity, matching the VM's treatment of a missing unit as one.
+    pub fn function_is_identity(&self, prototype: Option<usize>) -> bool {
+        self.function_units(prototype).iter().all(|unit| *unit == 1)
     }
 
     fn function_units(&self, prototype: Option<usize>) -> &[u32] {
@@ -551,6 +558,17 @@ impl Program {
         self.logical_units
             .as_deref()
             .map(|units| units.function_units(prototype))
+    }
+
+    /// True when one function charges one unit per instruction: no schedule
+    /// is attached, or its slice for `prototype` is all ones. This is the
+    /// condition under which the fixed per-instruction charges of HotIR and
+    /// the leaf-call plans equal the scalar dispatcher's unit charge.
+    #[inline]
+    pub(crate) fn logical_units_are_identity_for(&self, prototype: Option<usize>) -> bool {
+        self.logical_units
+            .as_deref()
+            .is_none_or(|units| units.function_is_identity(prototype))
     }
 
     #[inline]

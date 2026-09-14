@@ -7,10 +7,12 @@
 //!
 //! This answers "which executor actually owns this workload" — the question
 //! that decides whether an optimization measured in executed instructions can
-//! translate into time, because attaching an optimized logical-unit schedule
-//! deselects the HotIR and leaf-call plans for the whole program
-//! (`Vm::load_program` and `recognize_leaf_call_plan` skip every function of a
-//! unit-carrying program; see `design/58-vm-core2.md` §C2.3).
+//! translate into time, because a prototype whose own slice of the attached
+//! logical-unit schedule is non-identity loses its HotIR loops (keyed on the
+//! prototype containing the loop) and its leaf-call plan (keyed on the callee
+//! the plan replays); a rewrite in a different prototype deselects nothing
+//! (`FunctionInlineCaches::new` and `recognize_leaf_call_plan`, per
+//! prototype since 2026-09-15; see `design/58-vm-core2.md` §C2.3).
 //!
 //! Leaf-call plans are served on two paths and counted separately: the `Call`
 //! opcode's inline cache (`closure_call_fast_entries`) and the dynamic
