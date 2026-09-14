@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-10.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-15.)
 
 ## One-paragraph state
 
@@ -495,7 +495,9 @@ unreachable suspended-coroutine frames.
    program-wide gate is what made the 2026-09-13 host measurement 2.9x/2.1x slower on `closures_upvalues`
    and `generic_iteration`), so `dense_tables` — whose rewrite sits inside its own HotIR loop — swaps 16,298
    HotIR iterations for 99.75% tape coverage while `closures_upvalues` and `generic_iteration` keep their
-   leaf plans with a census identical to all-off. The default-off `executor-diagnostics` feature and
+   leaf plans with a census identical to all-off. Those are counts, not timings: the fixed tree has not
+   been measured on the owned host yet (§C2.3 item 4), so the default stays off. The default-off
+   `executor-diagnostics` feature and
    `crates/rustia-compiler/tests/executor_ownership.rs` report that ownership per workload on both
    leaf-call paths — the `Call` opcode's inline cache and the `call_value` replays that generic-for
    iterator steps take, so `generic_iteration` is seen serving 1,055 `__iter` replays per 32 units on

@@ -302,9 +302,13 @@ neither the conformance corpus nor `tests/o2_schedule.rs` (numeric operands only
 fixture with a metamethod-invoking survivor observing a weak table at a boundary belongs before any default
 flip. Schedule equivalence is pinned by tests: identical minimum fuel per family, identical outcomes at
 every fuel prefix, an identical logical `os.clock` on the plain-mode tape, identical results, collection
-counts, and next boundaries across deterministic-GC interval sweeps, the lattice invariant on the six
-tracked workloads under every family across two consecutive calls on both profiles plus a bounded
-`ReproducibleStandard` heap across four calls (`crates/rustia-compiler/tests/o2_schedule.rs`), and the
+counts, and next boundaries across deterministic-GC interval sweeps
+(`deterministic_collection_cadence_survives_interval_sweeps`), the lattice invariant on the six tracked
+workloads under every family across two consecutive calls on both profiles
+(`deterministic_collection_count_tracks_the_unit_lattice_across_calls`) plus a bounded
+`ReproducibleStandard` heap across four calls
+(`reproducible_standard_heap_stays_bounded_across_calls_for_unit_carrying_programs`; all three in
+`crates/rustia-compiler/tests/o2_schedule.rs`), and the
 straddling charge itself on a hand-built eight-unit schedule at every instruction edge, on both executors,
 with and without a stopped collector (`crates/rustia-vm/src/vm.rs`
 `unit_charged_steps_collect_once_per_crossed_boundary`,
@@ -436,14 +440,17 @@ it failed.
   replays per unit. And `stdlib_math_table` was not "unchanged (no rewrite fired)": commit-late fires at two
   sites plus one dead-tail fold, static 110 -> 102, schedule attached. The enablement-gate argument built on
   the first of those rows does not hold. The counter now exists (`ExecutorCensus::leaf_call_value_entries`,
-  recorded on the callee's program at the replay's success return and nowhere on its fallbacks) and the
-  report pins it: 33 replays per unit less at most one per deterministic-collection boundary on the default
-  side (1,055 at `n = 32`; the boundary instruction runs scalar, and each refused call shows up as a
-  `Len`-triggered root refresh from the full frame it built), 0 under `reachability_exact()`, and 0 on the
-  `Call`-opcode path in both cases; `closures_upvalues` pins the mirror image (`n` fast entries, 0 replays).
+  recorded on the callee's program at the replay's success return and nowhere on its fallbacks) and
+  `report_executor_ownership` pins it on both sides: 33 replays per unit less at most one per
+  deterministic-collection boundary (1,055 at `n = 32`; the boundary instruction runs scalar, and each
+  refused call shows up as a `Len`-triggered root refresh from the full frame it built), and 0 on the
+  `Call`-opcode path; `closures_upvalues` pins the mirror image (`n` fast entries, 0 replays) on both sides.
+  When the counter landed it pinned 0 replays under `reachability_exact()` — the program-wide gate — and
+  the pin flipped to both-sides-serve with the per-prototype gate the same day.
   `crates/rustia-vm/src/vm.rs` unit tests prove the counter on host `call_function` calls: three
-  `ArrayIterator` calls count 3 with identical results and charged instructions against the interpreter,
-  and 0 when a fuel budget makes the path fall back.
+  `ArrayIterator` calls count 3 with identical results and charged instructions against the interpreter
+  (`leaf_call_value_path_records_census_and_matches_interpreter`), and 0 when a fuel budget makes the path
+  fall back (`leaf_call_value_path_counts_nothing_when_policy_falls_back`).
 - **The wins are not pure rewrite wins either.** `dense_tables` sums the rewrite (dispatched operations
   -11.0%), the HotIR -> tape swap (1,146,459 HotIR iterations -> 0, 576,255 fused receipts at n=2,251), and the
   schedule effect described next; `stdlib_math_table` sums the rewrite (-5.67% dispatched) and that effect;
@@ -469,14 +476,16 @@ so `deterministic_collection_count == floor(executed / interval)` and `next == (
 is false, so none of them needs the loop, and a `debug_assert!` pins `executed < next` at every admission
 check. `tests/o2_schedule.rs` now observes the lattice directly through `Vm::executed_instructions`,
 `Vm::deterministic_collection_count`, and the hidden `Vm::next_deterministic_collection_instruction`: the
-interval sweep compares count and next boundary on a `DeterministicSim` leg, the six tracked workloads are
-checked under all-off, each family alone, and `reachability_exact()` across two consecutive calls on one VM
-at intervals {1, 7, 13, 97, 997, 10,000} (`DeterministicSim` in full, `ReproducibleStandard` at 1, 97,
-10,000), with every variant charging the all-off clock and the corpus-green variants returning the all-off
-results, and a `ReproducibleStandard` heap bound (each variant within 16 KiB of its own first call and of
-all-off after each of four calls at n=128, intervals 97 and 10,000) pins the memory the skipped collections
-had left behind. The numbers above remain the record of the bugged candidate; pricing the collections it
-skipped is item 4's `main + (2)` host measurement.
+interval sweep compares count and next boundary on a `DeterministicSim` leg
+(`deterministic_collection_cadence_survives_interval_sweeps`), the six tracked workloads are checked under
+all-off, each family alone, and `reachability_exact()` across two consecutive calls on one VM at intervals
+{1, 7, 13, 97, 997, 10,000} (`DeterministicSim` in full, `ReproducibleStandard` at 1, 97, 10,000), with
+every variant charging the all-off clock and the corpus-green variants returning the all-off results
+(`deterministic_collection_count_tracks_the_unit_lattice_across_calls`), and a `ReproducibleStandard` heap
+bound (each variant within 16 KiB of its own first call and of all-off after each of four calls at n=128,
+intervals 97 and 10,000; `reproducible_standard_heap_stays_bounded_across_calls_for_unit_carrying_programs`)
+pins the memory the skipped collections had left behind. The numbers above remain the record of the bugged
+candidate; pricing the collections it skipped is item 4's `main + (2)` host measurement.
 
 **What follows.** The default stays off, and per-workload enabling was not the answer while the gate was per
 program: any program with a leaf-shaped closure or a HotIR loop regressed the moment one deletion fired
@@ -486,31 +495,48 @@ anywhere in it (`array_mutation`, 8,399 HotIR iterations per call, was next in l
    prototype's own slice of the schedule is non-identity (HotIR on the prototype containing the loop, a leaf
    plan on the callee it replays; the `Call` site charges its own units on top of the plan, which also fixed
    the fast path's `+1` call charge). Counting acceptance, met on the tracked workloads
-   (`executor_ownership.rs`, `n = 32`): closure fast entries back to `n` (32), `Len` refreshes at one per
-   call, `generic_iteration`'s 31 HotIR iterations and 1,055 iterator replays restored, charged
-   `executed_instructions` and checksums unchanged. The one caveat is `dense_tables`: its rewrite lands
-   inside `f`'s own HotIR loop, so `f`'s slice is non-identity and its HotIR stays off under
-   `reachability_exact()` (0 iterations, tape 99.75%) — restoring it needs unit-aware HotIR charging, not a
-   gate, and is deferred to the measurement in item 4. VM unit tests pin the mechanism on hand-built
-   schedules (`hot_ir_gate_is_per_prototype`, `leaf_plan_is_gated_on_the_callee_slice_only`,
-   `leaf_fast_path_charges_the_callers_call_units`: results, charged instructions, collection counts, and
-   next boundaries identical to the scalar path at every interval 1..=23).
+   (`executor_ownership.rs`, `n = 32`): closure fast entries back to `n` (32), `Len`-triggered root
+   refreshes back to the default side's count (one, pinned as at most one per collection boundary plus
+   one), `generic_iteration`'s 31 HotIR iterations and 1,055 iterator replays restored, charged
+   `executed_instructions`, root refreshes, and checksums identical on both sides of every tracked
+   workload. The one caveat is `dense_tables`: its rewrite lands inside `f`'s own HotIR loop, so `f`'s
+   slice is non-identity and its HotIR stays off under `reachability_exact()` (0 iterations, tape 99.75%)
+   — restoring it needs unit-aware HotIR charging, not a gate, and is deferred to the measurement in item
+   4. VM unit tests pin the mechanism on hand-built schedules (`hot_ir_gate_is_per_prototype`,
+   `leaf_plan_is_gated_on_the_callee_slice_only`, `leaf_fast_path_charges_the_callers_call_units`: results,
+   charged instructions, collection counts, and next boundaries identical to the scalar path at every
+   interval 1..=23), and `executor_ownership.rs` pins it on the tracked workloads
+   (`per_prototype_gate_keeps_every_untouched_fast_path`,
+   `artificial_schedule_outside_the_hot_prototype_changes_nothing`).
 2. **Done (2026-09-15).** The boundary test is robust to unit-charged steps: the lattice advances once per
-   crossed boundary, collecting at each, and the counting tests described in the bullet above pin
+   crossed boundary, collecting at each, and the counting tests pin
    `deterministic_collection_count == floor(executed / interval)` for every tracked workload under every
-   family across an interval sweep and across consecutive calls on one VM, plus the bounded-heap assertion
-   under `ReproducibleStandard`. The tape's window cut is unchanged.
+   family across an interval sweep and across consecutive calls on one VM
+   (`crates/rustia-compiler/tests/o2_schedule.rs`
+   `deterministic_collection_count_tracks_the_unit_lattice_across_calls`,
+   `deterministic_collection_cadence_survives_interval_sweeps`), plus the bounded-heap assertion under
+   `ReproducibleStandard` (`reproducible_standard_heap_stays_bounded_across_calls_for_unit_carrying_programs`)
+   and the straddling charge itself on a hand-built schedule (`crates/rustia-vm/src/vm.rs`
+   `unit_charged_steps_collect_once_per_crossed_boundary`,
+   `stopped_collector_still_advances_the_lattice_over_unit_charged_steps`). The tape's window cut is
+   unchanged.
 3. **Done (2026-09-15).** A census counter at `try_leaf_bytecode_handle`'s success
    (`leaf_call_value_entries`), so iterator-path replays are visible to `executor_ownership.rs` and to the
-   table above; the report and the VM unit tests pin it as described in the bullet above.
-4. Then measure on the owned host, eight legs a side: main plus (1) and (2) with the default off against main
-   (expected within noise — the fixes are free); the same tree with `reachability_exact()` on against that
-   (predicted from the counts: `closures_upvalues` and `generic_iteration` within a few percent of baseline,
-   `sparse_tables` flat, the stdlib win shrinking to its rewrite share, `dense_tables` still summing the
-   rewrite and the HotIR -> tape swap, which that leg prices); and main plus (2) alone against main, which
-   prices the skipped collections. Only when the second of those shows no workload above its threshold does
-   this section flip the default; whether `dense_tables` wants unit-aware HotIR is decided by the same
-   numbers.
+   table above; `report_executor_ownership` pins it on both sides of every tracked workload and the VM
+   unit tests (`leaf_call_value_path_records_census_and_matches_interpreter`,
+   `leaf_call_value_path_counts_nothing_when_policy_falls_back`) pin the counter itself, as described in
+   the bullet above.
+4. **Pending (owned host).** No timing of the fixed tree exists; the 2026-09-13 table above is the only
+   owned-host number for this track, and it prices the program-wide gate plus the lattice bug, not the
+   tree that (1)-(3) produced. Measure on `ci-bench`, eight legs a side: this tree (main plus (1)-(3)) with
+   the default off against main — default-compiled bytecode and its schedule are byte-identical, so the
+   prediction is within noise, and that leg tests the prediction rather than assumes it; the same tree with
+   `reachability_exact()` on against that (predicted from the counts, not measured: `closures_upvalues` and
+   `generic_iteration` within a few percent of baseline, `sparse_tables` flat, the stdlib win shrinking to
+   its rewrite share, `dense_tables` still summing the rewrite and the HotIR -> tape swap, which that leg
+   prices); and main plus (2) alone against main, which prices the skipped collections. Only when the
+   second of those shows no workload above its threshold does this section flip the default; whether
+   `dense_tables` wants unit-aware HotIR is decided by the same numbers.
 
 Default compilation remains byte-identical and schedule-identical; enabling any corpus-green family by
 default is now purely a measured performance decision behind the standard controlled A/B gates.
