@@ -15,8 +15,8 @@ but it is structured to become a standalone OSS benchmark project.
   generated report can be served from a plain repository or static host.
 - Keep adapter features independent. `mlua-lua54` must stay in a separate binary
   from `mlua-luau` because `mlua-sys` links both as `lua`.
-- Keep active timing records Linux/x86_64-only and sourced from the explicit
-  ephemeral Linode lifecycle. macOS and Windows remain supported build targets,
+- Keep active timing records Linux/x86_64-only and sourced from a single
+  qualified benchmark host. macOS and Windows remain supported build targets,
   but are outside the performance product until dedicated hosts exist.
 - Keep accepted fixed-work raw sidecars and provenance manifests under
   `history/evidence/<full-commit>/`; they complement rather than extend the
@@ -38,9 +38,9 @@ workspace coupling is intentional:
   `../crates/`.
 - The root `Justfile` owns convenience recipes while the project remains in this
   workspace.
-- The root `Justfile` and `tools/run-linode-benchmark.js` own the explicit,
-  operator-started Linux matrix lifecycle. Hosted CI checks committed artifacts
-  and never records fresh timings.
+- The root `Justfile` and `tools/run-dedicated-benchmark.js` own the explicit
+  Linux measurement lifecycle on the owned host. Hosted CI checks committed
+  artifacts and never records fresh timings.
 - Root license files cover the current in-repo copy.
 
 When the project splits, either publish `rustia-*` crates first, move the rustia

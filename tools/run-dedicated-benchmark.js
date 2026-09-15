@@ -57,6 +57,14 @@ const FULL_COMMIT = /^[0-9a-f]{40}$/;
 // acceptance interval; it is even so that A B B A stays balanced.
 const DEFAULT_ACCEPTANCE_PASSES = 8;
 
+// Free space the host must have under $HOME before a run may start. The lanes'
+// working roots and the runner's own work directory all live there, and on
+// 2026-09-06 a filled disk failed the weekly matrix before this script ran,
+// as a runner-level error that named no cause. This is a floor that catches
+// that failure, not a measurement of what a build needs; a run that
+// legitimately needs more should raise it with the figure it observed.
+const MINIMUM_FREE_GIB = 20;
+
 // A non-interactive ssh session does not read the login profile, so neither
 // rustup's nor a home-directory node install is on PATH by default. Both are
 // user-local by design (nothing on this host needs root), so the coordinator
@@ -194,6 +202,16 @@ function compareAttestation(declared, observed) {
   if (observed.smt !== "off" && observed.smt !== "notsupported") {
     problems.push(`SMT must be off, host reports ${JSON.stringify(observed.smt)}`);
   }
+  // Checked here rather than left to the build: a disk that fills mid-run
+  // wastes the whole measurement, and the error it produces names the
+  // symptom, not the cause.
+  const freeKib = Number(observed.free_kib);
+  if (!Number.isFinite(freeKib) || freeKib < MINIMUM_FREE_GIB * 1024 * 1024) {
+    const reported = Number.isFinite(freeKib) ? `${(freeKib / 1024 / 1024).toFixed(1)} GiB` : "unknown";
+    problems.push(
+      `free space: at least ${MINIMUM_FREE_GIB} GiB needed under $HOME, host reports ${reported}`,
+    );
+  }
   let declaredPinned;
   try {
     declaredPinned = parseCpuList(declared.pinned_cpus);
@@ -250,13 +268,14 @@ function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
     "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
-    "unlock", "self-test",
+    "unlock", "host-check", "self-test",
   ]);
   if (!known.has(command)) return null;
   const parsed = {
     command,
     replace: false,
     config: undefined,
+    cohort: undefined,
     out: undefined,
     previousBinary: undefined,
     local: false,
@@ -279,6 +298,13 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.config = value;
+    } else if (option === "--cohort") {
+      // Which engines the memory lane measures. Anything but the two named
+      // cohorts is refused: a misspelt cohort must not become a rustia-only
+      // run by default.
+      const value = rest[++index];
+      if (!MEMORY_COHORTS.includes(value)) return null;
+      parsed.cohort = value;
     } else if (option === "--local") {
       parsed.local = true;
     } else if (option === "--plan") {
@@ -334,6 +360,16 @@ function parseArgs(argv) {
     return null;
   }
   if (parsed.previousBinary !== undefined && command !== "main") return null;
+  // --config names a frozen file for the lanes that freeze one. The other
+  // lanes derive everything from HEAD, so a --config there would be read by
+  // nothing, and an option that is accepted and ignored is worse than one
+  // that is refused.
+  if (parsed.config !== undefined && !["plan", "history", "fetch", "matrix", "memory"].includes(command)) {
+    return null;
+  }
+  // --cohort selects which frozen memory protocol to generate; a --config
+  // names one outright, so the two together would be one of them ignored.
+  if (parsed.cohort !== undefined && (command !== "memory" || parsed.config !== undefined)) return null;
   // --base and --json describe a comparison; --repetitions and --confidence buy
   // a tighter interval, which only the lanes that publish nothing may do.
   // --plan measures and validates but promotes nothing, which only the lane that
@@ -370,6 +406,7 @@ printf 'logical_cpus=%s\\n' "$(nproc --all)"
 printf 'smt=%s\\n' "$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
 printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
 printf 'kernel=%s\\n' "$(uname -r)"
+printf 'free_kib=%s\\n' "$(df -Pk "$HOME" | awk 'NR==2{print $4}')"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
@@ -383,6 +420,7 @@ function attestHost(config) {
     if (at > 0) observed[line.slice(0, at)] = line.slice(at + 1).trim();
   }
   observed.logical_cpus = Number(observed.logical_cpus);
+  observed.free_kib = Number(observed.free_kib);
   const declared = config.provider.host;
   const problems = compareAttestation(declared, observed);
   if (observed.node === "missing") {
@@ -395,6 +433,15 @@ function attestHost(config) {
   if (problems.length > 0) {
     fail(`host attestation failed:\n  - ${problems.join("\n  - ")}`);
   }
+  return providerRecord(declared, observed);
+}
+
+// The provider block written beside every run. Matrix evidence commits it into
+// a public-bound repository, so its field names are held to the rule the
+// self-test checks: nothing that names an address, an account or an
+// identifier. The rented lanes let 16 provider IPs into the repository through
+// exactly such a block.
+function providerRecord(declared, observed) {
   return {
     schema: "rustia.bench.dedicated-provider.v1",
     host: declared.name,
@@ -405,6 +452,7 @@ function attestHost(config) {
     smt: observed.smt,
     isolated_cpus: observed.isolated_cpus,
     kernel: observed.kernel,
+    free_gib: Number((observed.free_kib / 1024 / 1024).toFixed(1)),
     cpu_isolation: observed.isolation,
     pinned_cpus: declared.pinned_cpus,
     node_version: observed.node,
@@ -514,6 +562,7 @@ function commandPlan(options) {
     `config     ${path.relative(REPO, configFile)}\n` +
       `host       ${provider.host} (${provider.cpu_model}, ${provider.logical_cpus} CPUs, SMT ${provider.smt})\n` +
       `isolation  ${provider.cpu_isolation || "none"}\n` +
+      `free       ${provider.free_gib} GiB under $HOME (floor ${MINIMUM_FREE_GIB})\n` +
       `pinned     CPU ${config.host_gate.benchmark_cpu} of ${provider.pinned_cpus}\n` +
       `revisions  ${config.source.target_commits.length}\n` +
       `repairs    ${config.source.source_modifications.length}\n` +
@@ -769,16 +818,33 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
   }
 }
 
+// The matrix and memory lanes freeze one config per commit and name it after
+// HEAD. --config names a different frozen file instead -- one the operator
+// froze deliberately -- and that file is never generated on the operator's
+// behalf: a config asked for by name and missing is a mistake, not a request
+// to freeze one.
+function laneConfig(options, defaultRelative, generate) {
+  if (options.config !== undefined) {
+    const file = path.resolve(REPO, options.config);
+    if (!fs.existsSync(file)) fail(`config ${options.config} does not exist`);
+    return { relative: path.relative(REPO, file), file };
+  }
+  const file = path.join(REPO, defaultRelative);
+  if (!fs.existsSync(file)) generate(defaultRelative);
+  return { relative: defaultRelative, file };
+}
+
 function commandMatrix(options) {
   const commit = git(["rev-parse", "HEAD"]).trim();
   const short = commit.slice(0, 12);
-  const configRelative = `bench/cloud/dedicated-cross-engine-matrix-${short}.json`;
-  const configFile = path.join(REPO, configRelative);
-  if (!fs.existsSync(configFile)) {
-    local("node", ["tools/create-linode-matrix-config.js", "--dedicated", "--output", configRelative], {
-      capture: false,
-    });
-  }
+  const { relative: configRelative, file: configFile } = laneConfig(
+    options,
+    `bench/cloud/dedicated-cross-engine-matrix-${short}.json`,
+    (relative) =>
+      local("node", ["tools/create-linode-matrix-config.js", "--dedicated", "--output", relative], {
+        capture: false,
+      }),
+  );
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (config.source.benchmark_commit !== commit) {
     fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
@@ -846,18 +912,33 @@ function commandMatrix(options) {
 // finished publication: bench/publish-memory-analysis.js derives the results
 // file and the appended history from the analysis in that evidence, which is
 // the same tool the rented lane used and the reason this command is short.
+//
+// Two cohorts share the lane, the entrypoint and the frozen protocol, and
+// differ in the engine set alone. rustia-only is the routine per-commit
+// cohort, 11 rows; cross-engine measures the thirteen matrix engines, 110
+// rows, and is what puts the competitor rows and the mlua/Luau/JIT reference
+// on the same machine as the Rustia rows they are compared with.
+const MEMORY_COHORTS = Object.freeze(["rustia-only", "cross-engine"]);
+const MEMORY_COHORT_FREEZERS = Object.freeze({
+  "rustia-only": {
+    file: (short) => `bench/cloud/dedicated-rustia-ci-memory-${short}.json`,
+    generate: (relative) => ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", relative],
+  },
+  "cross-engine": {
+    file: (short) => `bench/cloud/dedicated-cross-engine-memory-${short}.json`,
+    generate: (relative) => ["tools/create-cross-engine-memory-config.js", "--output", relative],
+  },
+});
+
 async function commandMemory(options) {
   const commit = git(["rev-parse", "HEAD"]).trim();
   const short = commit.slice(0, 12);
-  const configRelative = `bench/cloud/dedicated-rustia-ci-memory-${short}.json`;
-  const configFile = path.join(REPO, configRelative);
-  if (!fs.existsSync(configFile)) {
-    local(
-      "node",
-      ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", configRelative],
-      { capture: false },
-    );
-  }
+  const freezer = MEMORY_COHORT_FREEZERS[options.cohort ?? "rustia-only"];
+  const { relative: configRelative, file: configFile } = laneConfig(
+    options,
+    freezer.file(short),
+    (relative) => local("node", freezer.generate(relative), { capture: false }),
+  );
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
   if (config.source.benchmark_commit !== commit) {
     fail(`${configRelative} was frozen at a different commit; measure the commit it names or delete it`);
@@ -1734,12 +1815,41 @@ function commandFetch(options) {
   promote(extracted, config, options.replace);
 }
 
+// Each lane holds its own lock under its own root, so all three are cleared.
+// Clearing the history lane's alone, as this once did, left a stale matrix or
+// memory lock to be found by hand.
 function commandUnlock() {
-  const out = sshCapture(
-    `set -u\n` +
-      `lock="$HOME/${REMOTE_ROOT}/lock"\n` +
-      `if [ -f "$lock" ]; then cat "$lock"; rm -f "$lock"; echo "removed"; else echo "no lock held"; fi\n`,
-  );
+  const script = Object.entries(LANES)
+    .map(
+      ([name, lane]) =>
+        `lock="$HOME/${lane.root}/lock"\n` +
+        `if [ -f "$lock" ]; then printf '${name}: '; cat "$lock"; rm -f "$lock"; echo " removed"; ` +
+        `else echo "${name}: no lock held"; fi\n`,
+    )
+    .join("");
+  const out = sshCapture(`set -u\n${script}`);
+  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+}
+
+/// A read-only look at the host between runs, limited to what has actually
+/// stopped a run here: free space under $HOME (a filled disk stopped the weekly
+/// matrix before this script ran on 2026-09-06), the journal's share of it, the
+/// load average (a driver fault held it at 43 for a day), and whether that
+/// driver is loaded. Nothing printed names the machine.
+const HOST_CHECK_SCRIPT = `
+set -u
+printf 'free_under_home=%s GiB (floor ${MINIMUM_FREE_GIB})\\n' "$(df -Pk "$HOME" | awk 'NR==2{printf "%.1f", $4/1048576}')"
+journal="$(journalctl --disk-usage 2>/dev/null | sed 's/^Archived and active journals take up //')"
+printf 'journal=%s\\n' "\${journal:-unavailable}"
+diag="$(du -sh "$HOME"/actions-runner/_diag 2>/dev/null | cut -f1)"
+printf 'runner_diag=%s\\n' "\${diag:-none}"
+printf 'loadavg=%s\\n' "$(cut -d' ' -f1-3 /proc/loadavg)"
+printf 'nouveau_loaded=%s\\n' "$(lsmod | grep -c '^nouveau ')"
+printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
+`;
+
+function commandHostCheck() {
+  const out = sshCapture(HOST_CHECK_SCRIPT);
   process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
 }
 
@@ -1767,8 +1877,39 @@ function selfTest() {
     logical_cpus: 6,
     smt: "off",
     isolated_cpus: "4-5",
+    free_kib: 64 * 1024 * 1024,
   };
   assert.deepEqual(compareAttestation(declared, good), []);
+  // The record written beside every run must not carry a field that could
+  // hold an address, an account or an identifier. The host field is the
+  // provenance label the config declares, never a machine name.
+  const record = providerRecord(declared, {
+    ...good,
+    kernel: "6.8.0-generic",
+    isolation: "isolcpus=4,5 nohz_full=4,5",
+    node: "v22.0.0",
+    cargo: "cargo 1.95.0",
+  });
+  const forbidden = /ip|addr|account|token|key|user|label|region|instance|id$/i;
+  const leaked = Object.keys(record).filter((field) => forbidden.test(field));
+  assert.deepEqual(leaked, [], `provider record field(s) may carry infrastructure detail: ${leaked}`);
+  assert.equal(record.host, declared.name);
+  assert.equal(record.pinned_cpus, declared.pinned_cpus);
+  // The floor is inclusive, and a host that cannot report its free space is
+  // refused rather than assumed fine: the filled-disk failure this guards
+  // against never reached this script, so silence is not evidence.
+  assert.deepEqual(
+    compareAttestation(declared, { ...good, free_kib: MINIMUM_FREE_GIB * 1024 * 1024 }),
+    [],
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, free_kib: MINIMUM_FREE_GIB * 1024 * 1024 - 1 }).join("|"),
+    /free space: at least \d+ GiB needed under \$HOME, host reports \d+\.\d GiB/,
+  );
+  assert.match(
+    compareAttestation(declared, { ...good, free_kib: Number.NaN }).join("|"),
+    /free space: .* host reports unknown/,
+  );
   // /proc/cpuinfo's trailing marketing text must not read as a different chip.
   assert.deepEqual(
     compareAttestation(declared, { ...good, cpu_model: "AMD Ryzen 5 3600X 6-Core Processor" }),
@@ -1807,9 +1948,9 @@ function selfTest() {
   assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
   const defaults = {
-    replace: false, config: undefined, out: undefined, previousBinary: undefined, local: false,
-    plan: false, base: undefined, json: undefined, repetitions: undefined, confidence: undefined,
-    baseline: undefined, candidate: undefined, passes: undefined,
+    replace: false, config: undefined, cohort: undefined, out: undefined, previousBinary: undefined,
+    local: false, plan: false, base: undefined, json: undefined, repetitions: undefined,
+    confidence: undefined, baseline: undefined, candidate: undefined, passes: undefined,
   };
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
@@ -1827,6 +1968,28 @@ function selfTest() {
   assert.equal(parseArgs(["plan", "--replace"]), null, "plan promotes nothing");
   assert.equal(parseArgs(["fetch", "--replace"]).replace, true, "fetch promotes, so it may supersede");
   assert.equal(parseArgs(["history", "--config"]), null);
+  // --config names a frozen file for the lanes that freeze one; the lanes that
+  // derive everything from HEAD have nothing for it to name.
+  assert.equal(parseArgs(["matrix", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
+  assert.equal(parseArgs(["memory", "--config", "bench/cloud/x.json"]).config, "bench/cloud/x.json");
+  // --cohort picks one of the two memory protocols and nothing else; a name
+  // outside the pair is refused rather than defaulted.
+  assert.equal(parseArgs(["memory", "--cohort", "cross-engine"]).cohort, "cross-engine");
+  assert.equal(parseArgs(["memory", "--cohort", "rustia-only"]).cohort, "rustia-only");
+  assert.equal(parseArgs(["memory"]).cohort, undefined);
+  assert.equal(parseArgs(["memory", "--cohort", "bogus"]), null);
+  assert.equal(parseArgs(["memory", "--cohort"]), null);
+  assert.equal(parseArgs(["matrix", "--cohort", "cross-engine"]), null);
+  assert.equal(parseArgs(["main", "--out", "r.jsonl", "--cohort", "cross-engine"]), null);
+  assert.equal(parseArgs(["memory", "--cohort", "cross-engine", "--config", "x.json"]), null);
+  for (const cohort of MEMORY_COHORTS) {
+    assert.match(MEMORY_COHORT_FREEZERS[cohort].file("abc"), /^bench\/cloud\/dedicated-.*-abc\.json$/);
+    assert.equal(MEMORY_COHORT_FREEZERS[cohort].generate("x.json").at(-1), "x.json");
+  }
+  assert.equal(parseArgs(["main", "--out", "r.jsonl", "--config", "x.json"]), null);
+  assert.equal(parseArgs(["pr", "--out", "s.md", "--config", "x.json"]), null);
+  assert.deepEqual(parseArgs(["host-check"]), { command: "host-check", ...defaults });
+  assert.equal(parseArgs(["host-check", "--local"]).local, true);
 
   // The screening lanes. --base and --json describe a comparison, so only `pr`
   // takes them; --repetitions and --confidence buy a tighter interval, which
@@ -2036,13 +2199,15 @@ function usage() {
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
       "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
-      "  matrix    [--plan]                     measure 13 engines x 5 workloads and promote\n" +
-      "  memory    [--plan]                     measure per-VM memory and promote\n" +
+      "  matrix    [--config FILE] [--plan]     measure 13 engines x 5 workloads and promote\n" +
+      "  memory    [--cohort rustia-only|cross-engine] [--config FILE] [--plan]\n" +
+      "                                         measure per-VM memory and promote\n" +
       "  calibrate [--out FILE] [--repetitions N] [--confidence P]\n" +
       "                                         measure one revision against itself and write\n" +
       "                                         the per-workload screening thresholds\n" +
       "  fetch     [--config FILE] [--replace]  re-collect and promote the last remote run\n" +
-      "  unlock                                 clear a stale lock on the benchmark host\n" +
+      "  unlock                                 clear stale lane locks on the benchmark host\n" +
+      "  host-check                             print free space, journal size and load there\n" +
       "  self-test                              run the pure-function checks\n" +
       "\n" +
       `Set ${SSH_ENV} to the host's ssh destination or ssh_config alias.\n`,
@@ -2075,6 +2240,7 @@ try {
     }
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
+    else if (parsed.command === "host-check") commandHostCheck();
   }
 } catch (error) {
   process.stderr.write(`run-dedicated-benchmark: ${error.message}\n`);

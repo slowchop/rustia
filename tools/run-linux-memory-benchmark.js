@@ -623,6 +623,16 @@ function selfTest() {
   const pinnedCpus = parseCpuList(dedicated.provider.host.pinned_cpus);
   assert(pinnedCpus.includes(dedicated.host_gate.benchmark_cpu));
   assert(pinnedCpus.includes(dedicated.host_gate.supervisor_cpu));
+  // The second freezer, the cross-engine cohort, is held to the same link:
+  // it must validate here, and it must take the all-engines build path
+  // rather than the rustia-only shortcut.
+  const crossEngine = require("./create-cross-engine-memory-config.js").createConfig(head);
+  assert.equal(validateConfig(crossEngine).schema, DEDICATED_SCHEMA);
+  assert.equal(crossEngine.publication.mode, "memory");
+  assert.equal(crossEngine.publication.rows, 110);
+  assert.notEqual(crossEngine.publication.mode, "rustia_ci_memory");
+  assert.deepEqual(crossEngine.provider, dedicated.provider);
+  assert.deepEqual(crossEngine.host_gate, dedicated.host_gate);
   // A core outside the pinned set must be refused.
   assert.throws(
     () =>

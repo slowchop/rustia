@@ -103,9 +103,11 @@ function summarize(current, history) {
   if (current?.status !== "ready" || !Array.isArray(current.rows) || current.rows.length === 0) {
     fail("current Rustia CI memory results are not ready");
   }
-  if (current.rows.some((row) => row.engine !== "rustia")) {
-    fail("current CI memory result unexpectedly contains a competitor");
-  }
+  // The summary is the commit-over-commit Rustia comparison, whichever cohort
+  // the lane measured: a cross-engine cohort's competitor rows are the
+  // dashboard's business, not this table's.
+  const currentRows = current.rows.filter((row) => row.engine === "rustia");
+  if (currentRows.length === 0) fail("current CI memory result contains no Rustia rows");
   const cohortId = current.metadata?.cohort_id;
   const previousRows = new Map();
   let comparisonCohort = null;
@@ -114,7 +116,7 @@ function summarize(current, history) {
     for (const row of cohort.rows) {
       if (row.engine !== "rustia") continue;
       const key = identity(row);
-      if (current.rows.some((candidate) => identity(candidate) === key)) {
+      if (currentRows.some((candidate) => identity(candidate) === key)) {
         previousRows.set(key, row);
         comparisonCohort = cohort;
       }
@@ -125,15 +127,16 @@ function summarize(current, history) {
   }
 
   const lines = [
-    "# Rustia Linode memory benchmark",
+    "# Rustia memory on the owned host",
     "",
     `Commit \`${current.metadata.commit.slice(0, 12)}\` compared with ` +
-      `\`${comparisonCohort.commit.slice(0, 12)}\` (${comparisonCohort.cohort_id}).`,
+      `\`${comparisonCohort.commit.slice(0, 12)}\` (${comparisonCohort.cohort_id}). ` +
+      "Rustia rows only; the cohorts compared may differ in which other engines they measured.",
     "",
     "| Workload | Metric | Before | After | Change |",
     "|---|---:|---:|---:|---:|",
   ];
-  for (const row of [...current.rows].sort((left, right) => left.workload.localeCompare(right.workload))) {
+  for (const row of [...currentRows].sort((left, right) => left.workload.localeCompare(right.workload))) {
     const before = previousRows.get(identity(row));
     if (!before) continue;
     for (const [metric, label, unit, higherIsBetter] of METRICS) {
@@ -153,10 +156,10 @@ function main() {
   const config = parseArgs(process.argv.slice(2));
   if (config.selfTest) {
     const metric = (median) => ({ median });
-    const row = (commit, peak) => ({
+    const row = (commit, peak, engine = "rustia") => ({
       commit,
       target: "linux-x86_64",
-      engine: "rustia",
+      engine,
       execution_mode: "interpreter",
       workload: "memory_churn",
       n: 1,
@@ -182,6 +185,31 @@ function main() {
     if (!markdown.includes("| memory_churn | Peak Δ (KiB) | 100 | 50.0 | -50.0% ↓better |")) {
       fail("self-test summary did not report the expected improvement");
     }
+    // A cross-engine cohort carries competitor rows; they are left out of the
+    // table rather than aborting the job after the measurement succeeded.
+    const crossEngine = {
+      status: "ready",
+      metadata: { cohort_id: "cross-engine", commit: "c".repeat(40) },
+      rows: [row("c".repeat(40), 25), row("c".repeat(40), 999, "mlua-luau-jit")],
+    };
+    const crossMarkdown = summarize(crossEngine, [
+      ...history,
+      { cohort_id: "current", commit: "b".repeat(40), rows: current.rows },
+    ]);
+    if (
+      !crossMarkdown.includes("| memory_churn | Peak Δ (KiB) | 50.0 | 25.0 | -50.0% ↓better |") ||
+      crossMarkdown.includes("999") ||
+      crossMarkdown.includes("mlua-luau-jit")
+    ) {
+      fail("self-test summary did not leave the competitor row out");
+    }
+    let refused = false;
+    try {
+      summarize({ ...crossEngine, rows: [row("c".repeat(40), 999, "mlua-luau-jit")] }, history);
+    } catch (error) {
+      refused = /no Rustia rows/.test(error.message);
+    }
+    if (!refused) fail("self-test summarised a cohort without Rustia rows");
     process.stdout.write("Rustia CI memory summary self-test passed\n");
     return;
   }

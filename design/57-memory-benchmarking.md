@@ -2,8 +2,12 @@
 
 > **Status: [PROTOCOL, RECLAMATION, ACCOUNTING, AND QUOTAS IMPLEMENTED] (2026-07-29).** The isolated child/supervisor, cgroup-v2 sampler,
 > repeated-epoch analyzer, portable controls, deterministic todo-app workloads, publication schema, and
-> dashboard are implemented. Cohort `pre-reclamation-18b58d8` published 110 rows from 990 fresh processes after
-> confirmed Linode deletion and independent local re-analysis. Tables, functions, upvalues, userdata, buffers,
+> dashboard are implemented. The published cohort is `rustia-ci-070c387b173c`: 11 rustia rows from 99 raw
+> samples, measured on the owned host ci-bench on 2026-09-05 through a delegated cgroup-v2 subtree. The
+> cloud-measured cohorts — `pre-reclamation-18b58d8` (110 rows from 990 fresh processes) among them — were
+> removed on 2026-09-06. The owned-host lane can now measure that same 110-row protocol as its `cross-engine`
+> cohort, so the cross-engine memory comparison returns with the first such cohort dispatched on ci-bench;
+> none has run yet. Tables, functions, upvalues, userdata, buffers,
 > and vectors now reclaim backing allocations into generation-validated reusable slots; stale handles cannot
 > alias replacement objects, and generation exhaustion retires the slot instead of wrapping. Loaded programs
 > follow the same lifetime discipline. Maintained logical-live totals now back script counters, quota admission,
@@ -216,7 +220,9 @@ Linear-memory pages are displayed separately from process memory; they are not i
 
 ## Statistical and host protocol
 
-- Run only on the same dedicated Linode Linux product used for accepted timings.
+- Run only on the qualified owned benchmark host — runner group `bench-solo`, provenance label ci-bench —
+  that produces the accepted timings, pinning two isolated cores so the supervisor never shares a core with
+  the measured child.
 - Disable swap for the measurement cgroup with `memory.swap.max=0`; reject any nonzero swap or OOM event.
 - Record kernel, cgroup mode, base page size, THP configuration, libc/allocator, runtime versions, CPU, and VM
   identity.
@@ -252,8 +258,10 @@ Proposed schemas:
 - `rustia.bench.memory-current-results.v1` — latest coherent complete cohort selected for the dashboard.
 
 Every summary names its source hash, exact commit, mode, target, protocol version, sample count, problem size,
-work/epoch count, memory source, and confidence method. Promotion remains fail-closed and occurs only after the
-ephemeral VM is confirmed deleted.
+work/epoch count, memory source, and confidence method. Promotion remains fail-closed and runs entirely on the
+owned host: the run attests the host before the build, the cohort must reach `memory_complete` status, its
+evidence is validated against the frozen config, existing evidence is never overwritten, and the two
+publication files are staged atomically with rollback.
 
 ## Dashboard
 
@@ -274,9 +282,11 @@ Controls:
 - interpreter / JIT/native / all;
 - commit / date for history.
 
-The timing and memory panels may cross-link the same engine/workload, but they do not merge scores. Until a
-coherent cross-engine memory cohort exists, the generated dashboard shows a clear “memory baseline pending”
-state rather than fabricated zeroes or old Rustia-only evidence.
+The timing and memory panels may cross-link the same engine/workload, but they do not merge scores. While the
+accepted cohort carries no competitor rows, the generated dashboard shows it as absolute Rustia figures under
+a panel headed “rustia Memory on ci-bench” and says that no competitor engines are present yet; the “memory
+baseline pending” state appears only when there is no accepted cohort at all. Fabricated zeroes are never
+shown, and a comparison is never drawn against rows measured on another host.
 
 ## Diagnostic tools
 
@@ -318,11 +328,16 @@ instrumentation cost. Such traces explain *why* a cohort moved; they do not repl
    preflights large string/table/buffer requests, and commits growing table writes only after an exact candidate
    fits. Maintained heap/program/control live totals now back the script-visible counters and quota hot path
    without a whole-VM census at ordinary instruction boundaries; exact reserved telemetry remains on demand.
-   Exact-commit cohort `safe-memory-588b541` retained 99
-   native samples after confirmed Linode deletion and passed the wasm32 512 KiB quota/recovery probe. Relative
-   to the frozen competitor cohort, Rustia ties the 256 KiB best shared-workload peak, ranks first for stress
-   peak, second for stress retention, second for todo peak, and third for todo retention. The shared retained
-   mean is 14.4 KiB versus mlua/Luau/JIT's 24.8 KiB. Decision-reset ABI v1 adds focused 600-decision native
+   The published rustia-only cohort is
+   `rustia-ci-070c387b173c`: 11 rows from 99 native samples measured on ci-bench on 2026-09-05. Exact-commit
+   cohort `safe-memory-588b541` retained 99 native samples earlier on a rented host and passed the wasm32
+   512 KiB quota/recovery probe; relative to the frozen competitor cohort of that era, Rustia tied the
+   256 KiB best shared-workload peak, ranked first for stress peak, second for stress retention, second for
+   todo peak, and third for todo retention, with a shared retained mean of 14.4 KiB against mlua/Luau/JIT's
+   24.8 KiB. That evidence was removed with the other cloud-measured cohorts on 2026-09-06. The owned-host
+   lane can now measure the same 110-row protocol as its `cross-engine` cohort, so the cross-engine memory
+   comparison and the mlua/Luau/JIT reference return with the first such cohort dispatched on ci-bench; none
+   has run yet. Decision-reset ABI v1 adds focused 600-decision native
    table/coroutine/program/retained-handle plateau evidence. The shared mixed-heap test adds 96 native and
    Node/V8 wasm epochs with exact post-reset VM accounting and stable warmed wasm linear-memory pages.
    Broader allocator page-return and external dedicated-Linux history remain next.
