@@ -56,7 +56,7 @@
         "quota_boundary": "VM-owned logical live bytes",
         "failure": "catchable atomic OutOfMemory after one forced collection",
         "telemetry": "live, reserved, and optional instruction-boundary peak bytes",
-        "linode_cohort": "safe-memory-588b541",
+        "memory_cohort": "rustia-ci-070c387b173c",
         "native_samples": 99,
         "wasm_quota_probe_bytes": 524288,
         "mixed_heap_pressure": {
@@ -498,15 +498,15 @@
           "name": "History and static report",
           "complete": 92,
           "confidence": 92,
-          "state": "A coherent Linux-only speed snapshot covers 12 adapter families plus verified mlua/Luau JIT. The generated dashboard includes ranked speed bars, workload heatmaps, performance history, three memory workload cohorts, and Rustia peak/retained history versus a fixed mlua/JIT reference. The current memory view preserves frozen competitor rows while refreshing Rustia from safe-memory-588b541.",
+          "state": "A coherent Linux-only speed snapshot covers 12 adapter families plus verified mlua/Luau JIT. The generated dashboard includes ranked speed bars, workload heatmaps, performance history, and a Rustia-only memory panel measured on ci-bench. The current memory view holds the 11 Rustia rows of cohort rustia-ci-070c387b173c; competitor rows and the fixed mlua/JIT peak/retained reference return with the first cross-engine cohort the memory lane measures on ci-bench.",
           "future_plan": "Accumulate longer performance and memory history, then publish richer regression annotations after the standalone split."
         },
         {
           "name": "Benchmark operations",
           "complete": 85,
           "confidence": 92,
-          "state": "Hosted CI validates committed artifacts without provisioning billed infrastructure. An operator can manually start a Rustia-only Linode memory cohort for an exact commit already present on main. The explicit bounded Linode lifecycle promotes only complete evidence after confirmed instance deletion. The cgroup-v2 memory supervisor/analyzer, current/history merge, dashboard, frozen 990-process cross-engine baseline, 99-sample safe-memory Rustia refresh, and wasm32 quota probe are implemented.",
-          "future_plan": "Keep the Linode lifecycle reproducible, accumulate coherent external allocator/RSS history, and add regression alerts without mixing developer-machine timings."
+          "state": "Hosted CI validates committed artifacts, and every measurement runs on the owned host ci-bench; nothing in the repository can create or pay for a cloud instance. An operator dispatches the memory lane for an exact commit already present on main, choosing the rustia-only cohort or the 110-row cross-engine cohort under the same protocol, and it promotes only complete, validated evidence. The cgroup-v2 memory supervisor/analyzer, current/history merge, dashboard, wasm32 quota probe, and the first ci-bench cohort rustia-ci-070c387b173c (11 Rustia rows, 99 samples, 2026-09-05) are implemented; competitor memory rows await the first cross-engine cohort dispatched there.",
+          "future_plan": "Keep the owned-host memory lane reproducible, accumulate coherent external allocator/RSS history, and add regression alerts without mixing developer-machine timings."
         }
       ]
     },

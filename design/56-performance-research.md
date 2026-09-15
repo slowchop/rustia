@@ -296,9 +296,8 @@ The second accepted Linode v2 run compared baseline `ae3beae2025feb21d0e37c70168
 candidate `f208c12d0ce266117743569d736346fae9a35db2` on `oop_metamethods`, using fixed `n=24000`, 15 repetitions
 per leg, four ABBA/BAAB legs per build, and the predeclared zero-regression threshold. Its pooled baseline and
 candidate medians were 21,633.014 and 7,364.006 ns/unit, a -65.9594% candidate delta. The conservative nominal
-95% interval was -66.3876% to -65.5482%, excluding zero; three actual final-candidate rows and every raw/gate
-artifact are retained under
-[`../bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/`](../bench/history/evidence/f208c12d0ce266117743569d736346fae9a35db2/).
+95% interval was -66.3876% to -65.5482%, excluding zero. Three actual final-candidate rows and every raw/gate
+artifact were measured on a rented Linode and were removed on 2026-09-13; the samples remain in Git history.
 The comparison covers the complete candidate, including its constant-field/method paths and a correction that
 avoids repeated weak-table scanning when no `__mode` atom exists. It therefore demonstrates the exact candidate
 and workload, not that one opcode family alone caused the full delta.
@@ -590,8 +589,8 @@ That controlled A/B (baseline `6d22fa3` vs candidate `f412e2d`, `generic_iterati
 interleaved ABBA/BAAB, four legs per side, 20,000 bootstrap iterations, dedicated Linode with the standard
 idle/steal host gates) is **accepted**: candidate pooled median -8.4508% ns/unit with a conservative 95%
 interval of -9.064% to -7.348% (`material_regression_excluded`), checksums identical on every leg, and the
-instance destroyed 26 minutes after create. Evidence:
-`bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/analysis.json`. Per the dedicated-cohort
+instance destroyed 26 minutes after create. Its evidence was measured on that rented instance and was removed
+on 2026-09-13; the samples remain in Git history. Per the dedicated-cohort
 policy the single-workload rows stay out of public history; the win lands in `bench/RESULTS.md` with the
 next full-matrix cohort. This is the first profile-led bet in this file to survive the controlled host.
 
@@ -634,8 +633,8 @@ candidate ns/unit point estimate and a conservative 95% interval of -4.5763%
 to +3.9306%. This is `material_regression_excluded`: it rules out the declared
 5% regression, but the interval includes zero and therefore establishes no
 speedup. Checksums matched, all 808 comparison samples are retained, and the
-droplet was confirmed destroyed. Evidence:
-`bench/history/evidence/b861ee998ebb986b662cd6249e61169f86d685ac/analysis.json`.
+droplet was confirmed destroyed. Its evidence was measured on that rented
+Droplet and was removed on 2026-09-13; the samples remain in Git history.
 
 Region Engine v1 is therefore safe to retain as performance-neutral within the
 measured interval, not as the large jump sought. Further region expansion
@@ -709,8 +708,8 @@ three additional retained history sidecars. The complete cross-engine matrix
 cohort remains unchanged; the accepted A/B appears
 as an optimization check instead of mixing a one-workload candidate into that
 cohort. Run `20260824T022115Z-64b2afe9` confirmed temporary-key and Droplet
-cleanup. Evidence:
-`bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/analysis.json`.
+cleanup. Its evidence was measured on that rented Droplet and was removed on
+2026-09-13; the samples remain in Git history.
 
 This independently gated bridge precedes the mode-selected whole-function
 compact executable tape described in [`58-vm-core2.md`](58-vm-core2.md). That
@@ -753,8 +752,8 @@ predeclared +5% material-regression boundary. Four qualification pairs passed
 at 3.5815% maximum within-order ratio spread; all 808 formal samples matched
 the checksum; all 19 timed legs observed zero steal. Run
 `20260824T053606Z-bad0cf1d` (AMS3 Basic Intel 4-vCPU/8-GiB) confirmed
-temporary-key and Droplet deletion. Evidence:
-`bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/analysis.json`.
+temporary-key and Droplet deletion. Its evidence was measured on that rented
+Droplet and was removed on 2026-09-13; the samples remain in Git history.
 Replacing the per-PC executor-selection ladder with one loader-built tape is
 therefore an accepted win on top of the receipt slice for this workload and
 protocol. Same-day extension gates for the other four tracked workloads were
@@ -855,13 +854,9 @@ measurement — AMS3 on steal ticks, AMS3 at a 36.342% within-order paired ratio
 NYC3 on steal ticks, SFO3 at 5.098%, 6.689%, 11.403%, 27.537%, 17.578%, 12.997% and 8.591%, plus one accepted
 block invalidated by steal at leg 7. This account offers only shared Basic plans, so region choice and
 re-drawing were the available levers. Every Droplet and temporary SSH key was confirmed deleted; 225.2
-billable minutes cost about $0.31. Evidence:
-`bench/history/evidence/066ce1ffab721cd54ad960f2e7b65d11acf04d1a/analysis.json`,
-`bench/history/evidence/2082436260ceab46d97a060f2440457728976309/analysis.json`, and
-`bench/history/evidence/0a3125566919ca62d42905bfb99732f4170e1e04/analysis.json`, and — for the accepted
-speedup — `bench/history/evidence/accca92d0dd3efebbe58fd87cbf2f89d231c6bdc/analysis.json`. The first two
-directories name commits the tape rebase removed from the branch and are retained only for their raw
-samples.
+billable minutes cost about $0.31. The evidence for all four cohorts (`066ce1f`, `2082436`, `0a31255`, and the
+accepted speedup `accca92`) was measured on those rented Droplets and was removed on 2026-09-13; the samples
+remain in Git history. The first two cohorts name commits the tape rebase removed from the branch.
 
 One operational note from this cohort: a DigitalOcean API outage on 2026-08-24 outlasted the coordinator's
 four-minute delete-confirmation window, leaving one Droplet billing for about 1.4 hours with nothing running

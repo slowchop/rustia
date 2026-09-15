@@ -10,7 +10,6 @@ const sourcePath = path.join(__dirname, "current-results.json");
 const historyPath = path.join(__dirname, "history", "runs.jsonl");
 const historyBackfillDirectory = path.join(__dirname, "history", "backfills");
 const wasmResultsPath = path.join(__dirname, "wasm", "current-results.json");
-const wasmDispatchPath = path.join(__dirname, "wasm", "dispatch-current-results.json");
 const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
 const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
@@ -396,21 +395,6 @@ function readWasmResults() {
   return data;
 }
 
-function readWasmDispatchResults() {
-  const data = readJson(wasmDispatchPath);
-  if (data.schema_version !== 1) {
-    fail("wasm dispatch schema_version must be 1");
-  }
-  if (data.schema !== "rustia.bench.wasm-dispatch-current-results.v1") {
-    fail('wasm dispatch schema must be "rustia.bench.wasm-dispatch-current-results.v1"');
-  }
-  if (!Array.isArray(data.runs) || data.runs.length === 0) {
-    fail("wasm dispatch runs must be a non-empty array");
-  }
-  data.runs.forEach(validateWasmDispatchRun);
-  return data;
-}
-
 function readCohortEvidence() {
   let entries;
   try {
@@ -531,43 +515,6 @@ function validateWasmRun(run, index) {
   });
 }
 
-function validateWasmDispatchRun(run, index) {
-  const label = `wasm dispatch runs[${index}]`;
-  if (run.schema !== "rustia.bench.wasm-dispatch-results.v1") {
-    fail(`${label}.schema must be "rustia.bench.wasm-dispatch-results.v1"`);
-  }
-  if (run.runtime == null || typeof run.runtime !== "object" || Array.isArray(run.runtime)) {
-    fail(`${label}.runtime must be an object`);
-  }
-  if (run.comparison == null || typeof run.comparison !== "object" || Array.isArray(run.comparison)) {
-    fail(`${label}.comparison must be an object`);
-  }
-  if (run.comparison.status !== "measured") {
-    fail(`${label}.comparison.status must be measured`);
-  }
-  for (const key of ["name", "family"]) {
-    if (typeof run.runtime[key] !== "string" || run.runtime[key].trim() === "") {
-      fail(`${label}.runtime.${key} must be a non-empty string`);
-    }
-  }
-  if (!Array.isArray(run.rows) || run.rows.length !== 2) {
-    fail(`${label}.rows must contain br_table and call_ref`);
-  }
-  run.rows.forEach((row, rowIndex) => {
-    const rowLabel = `${label}.rows[${rowIndex}]`;
-    for (const key of ["style", "feature", "checksum"]) {
-      if (typeof row[key] !== "string" || row[key].trim() === "") {
-        fail(`${rowLabel}.${key} must be a non-empty string`);
-      }
-    }
-    for (const key of ["n", "ns_per_dispatch_min", "ns_per_dispatch_median", "dispatches_per_sec"]) {
-      if (!Number.isFinite(row[key]) || row[key] <= 0) {
-        fail(`${rowLabel}.${key} must be a positive finite number`);
-      }
-    }
-  });
-}
-
 function validateMetadataMatchesRows(data) {
   const expected = {
     targets: unique(data.rows.map((row) => row.target)),
@@ -645,13 +592,6 @@ function targetKind(target) {
   }
   const parts = value.split("-").filter(Boolean);
   return parts.length === 0 ? value : parts[parts.length - 1];
-}
-
-function slug(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
 }
 
 function groupBy(values, keyFn) {
@@ -1523,7 +1463,7 @@ function memoryHistorySection(records) {
             <p>${formatInteger(cohorts.length)} cohort(s) on <code>ci-bench</code>; no reference to plot against yet.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and the only mlua/JIT memory cohort was measured on a rented cloud host, so it has been removed. The line returns once the memory matrix runs on <code>ci-bench</code>. Rustia cohorts recorded so far: ${cohorts.map((cohort) => `<code>${escapeHtml(cohort)}</code>`).join(", ")}.</p>
+        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and the only mlua/JIT memory cohort was measured on a rented cloud host, so it has been removed. The line returns with the first cross-engine memory cohort measured on <code>ci-bench</code>. Rustia cohorts recorded so far: ${cohorts.map((cohort) => `<code>${escapeHtml(cohort)}</code>`).join(", ")}.</p>
       </section>
     `;
   }
@@ -1652,184 +1592,8 @@ function formatIsoDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
-function historyTargetSection(group) {
-  const workloads = [...groupBy(group.values, (row) => row.workload)]
-    .map(([workload, rows]) => ({ workload, rows }))
-    .sort((left, right) => left.workload.localeCompare(right.workload));
-  return `
-    <section class="history-target">
-      <div class="history-target-head">
-        <h3>${escapeHtml(group.target)}</h3>
-        <p>${formatInteger(group.values.length)} records across ${formatInteger(workloads.length)} workloads</p>
-      </div>
-      ${workloads.map((entry) => historyWorkloadSection(group.target, entry.workload, entry.rows)).join("")}
-    </section>
-  `;
-}
-
-function historyWorkloadSection(target, workload, rows) {
-  const latestRows = latestBy(rows, (row) => row.engine)
-    .sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
-  const unit = latestRows[0]?.unit ?? rows[0]?.unit ?? "";
-  return `
-    <section class="history-workload" id="${escapeHtml(slug(`history-${target}-${workload}`))}">
-      <div class="history-workload-head">
-        <div>
-          <h4>${escapeHtml(workload)}</h4>
-          <p>${escapeHtml(unit)} · ${formatInteger(rows.length)} records · ${formatInteger(latestRows.length)} engines</p>
-        </div>
-      </div>
-      ${historyChart(rows)}
-      <div class="table-wrap history-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Engine</th>
-              <th>Latest min ns/unit</th>
-              <th>Median</th>
-              <th>Trend vs previous</th>
-              <th>Commit</th>
-              <th>Measured</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${latestRows.map((row) => historyLatestRow(row, rows)).join("")}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
-
-function historyLatestRow(row, rows) {
-  const previous = previousHistoryRecord(row, rows);
-  const trend = previous ? (row.ns_per_unit_min / previous.ns_per_unit_min - 1) * 100 : null;
-  return `
-    <tr>
-      <td>${historyEngineLabel(row.engine)}</td>
-      <td>${formatNumber(row.ns_per_unit_min)}</td>
-      <td>${formatNumber(row.ns_per_unit_median)}</td>
-      <td>${historyTrend(trend)}</td>
-      <td>${escapeHtml(row.commit)}</td>
-      <td>${formatTime(row.timestamp_unix)}</td>
-    </tr>
-  `;
-}
-
-function previousHistoryRecord(row, rows) {
-  return rows
-    .filter((record) =>
-      record.engine === row.engine &&
-      record.target === row.target &&
-      record.workload === row.workload &&
-      record.timestamp_unix < row.timestamp_unix
-    )
-    .sort(compareRunTime)
-    .at(-1) ?? null;
-}
-
-function historyTrend(value) {
-  if (!Number.isFinite(value)) {
-    return '<span class="trend trend-flat">n/a</span>';
-  }
-  const className = value <= 0 ? "trend trend-good" : "trend trend-bad";
-  return `<span class="${className}">${value > 0 ? "+" : ""}${value.toFixed(1)}%</span>`;
-}
-
-function historyChart(rows) {
-  const width = 920;
-  const height = 260;
-  const pad = { left: 62, right: 20, top: 20, bottom: 42 };
-  const values = rows.map((row) => row.ns_per_unit_min).filter((value) => Number.isFinite(value) && value > 0);
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const minY = Math.log10(minValue * 0.85);
-  const maxY = Math.log10(maxValue * 1.15);
-  const minX = Math.min(...rows.map((row) => row.timestamp_unix));
-  const maxX = Math.max(...rows.map((row) => row.timestamp_unix));
-  const plotWidth = width - pad.left - pad.right;
-  const plotHeight = height - pad.top - pad.bottom;
-  const xScale = (timestamp) => maxX === minX
-    ? pad.left + plotWidth / 2
-    : pad.left + ((timestamp - minX) / (maxX - minX)) * plotWidth;
-  const yScale = (value) => {
-    const span = maxY - minY || 1;
-    return pad.top + (1 - (Math.log10(value) - minY) / span) * plotHeight;
-  };
-  const series = [...groupBy(rows, (row) => row.engine)]
-    .map(([engine, engineRows], index) => ({
-      engine,
-      color: engineColor(engine, index),
-      rows: engineRows.slice().sort(compareRunTime),
-    }))
-    .sort((left, right) => left.engine.localeCompare(right.engine));
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((tick) => {
-    const y = pad.top + tick * plotHeight;
-    const value = 10 ** (maxY - tick * (maxY - minY));
-    return `
-      <line x1="${pad.left}" y1="${y.toFixed(2)}" x2="${width - pad.right}" y2="${y.toFixed(2)}" class="history-grid-line" />
-      <text x="8" y="${(y + 4).toFixed(2)}" class="history-axis-label">${escapeHtml(formatNumber(value))}</text>
-    `;
-  }).join("");
-  return `
-    <div class="history-chart">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(rows[0].workload)} timing history">
-        <rect x="0" y="0" width="${width}" height="${height}" class="history-chart-bg" />
-        ${yTicks}
-        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="history-axis" />
-        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
-        <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(formatTime(minX))}</text>
-        <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(formatTime(maxX))}</text>
-        ${series.map((item) => historySeriesSvg(item, xScale, yScale)).join("")}
-      </svg>
-      <div class="history-legend">
-        ${series.map((item) => `<span>${colorDotMarkup(item.color)}${escapeHtml(item.engine)}</span>`).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function historySeriesSvg(series, xScale, yScale) {
-  const points = series.rows
-    .map((row) => `${xScale(row.timestamp_unix).toFixed(2)},${yScale(row.ns_per_unit_min).toFixed(2)}`)
-    .join(" ");
-  const circles = series.rows.map((row) => `
-    <circle cx="${xScale(row.timestamp_unix).toFixed(2)}" cy="${yScale(row.ns_per_unit_min).toFixed(2)}" r="3.2" fill="${series.color}">
-      <title>${escapeHtml(`${series.engine} ${row.commit}: ${formatNumber(row.ns_per_unit_min)} ns/unit`)}</title>
-    </circle>
-  `).join("");
-  const line = series.rows.length > 1
-    ? `<polyline points="${points}" fill="none" stroke="${series.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />`
-    : "";
-  return `<g>${line}${circles}</g>`;
-}
-
-function historyEngineLabel(engine) {
-  return `<span class="history-engine">${colorDotMarkup(engineColor(engine))}<strong>${escapeHtml(engine)}</strong></span>`;
-}
-
 function colorDotMarkup(color) {
   return `<span class="swatch" style="color: ${escapeHtml(color)}"></span>`;
-}
-
-function engineColor(engine, fallbackIndex = 0) {
-  const known = {
-    rustia: "#2563eb",
-    koto: "#0f766e",
-    luaur: "#0891b2",
-    "mlua-luau": "#b45309",
-    "mlua-luau-jit": "#ea580c",
-    "mlua-lua54": "#7c3aed",
-    rhai: "#b91c1c",
-    boa: "#047857",
-    rquickjs: "#be185d",
-    roto: "#475569",
-    ruau: "#9333ea",
-    wasmi: "#be185d",
-    wasmtime: "#111827",
-  };
-  const fallback = ["#2563eb", "#0f766e", "#b45309", "#b91c1c", "#7c3aed", "#047857", "#be185d", "#475569"];
-  return known[engine] ?? fallback[fallbackIndex % fallback.length];
 }
 
 function languagesByTargetSection(targetRows, {
@@ -1958,7 +1722,7 @@ function memoryResultsSection(data) {
             : "Fresh process+cgroup samples on the owned host. Peak catches short spikes; retained uses anonymous memory after quiescence."}</p>
         </div>
       </div>
-      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return when the memory matrix runs on <code>ci-bench</code>.</p>`}
+      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>ci-bench</code>.</p>`}
       ${comparative ? `<div class="memory-cohorts">
         ${memoryComparisonCharts(rows)}
       </div>` : ""}
@@ -2268,65 +2032,6 @@ function absoluteHeatClass(value) {
   return "heat-0";
 }
 
-function workloadSection(target, workload, rows) {
-  const sorted = rows.slice().sort((left, right) => left.ns_per_unit_min - right.ns_per_unit_min || left.engine.localeCompare(right.engine));
-  const fastest = sorted[0].ns_per_unit_min;
-  const slowest = sorted[sorted.length - 1].ns_per_unit_min;
-  const maxSpeed = Math.max(...sorted.map((row) => row.speed_vs_rustia ?? 0), 1);
-  return `
-    <section class="workload" id="${escapeHtml(slug(`${target}-${workload}`))}">
-      <div class="workload-head">
-        <div>
-          <h3>${escapeHtml(workload)}</h3>
-          <p>${escapeHtml(sorted[0].unit)} · fastest ${formatNumber(fastest)} ns/unit · slowest ${formatNumber(slowest)} ns/unit</p>
-        </div>
-      </div>
-      <div class="bars">
-        ${sorted.map((row) => resultBar(row, fastest, maxSpeed)).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function resultBar(row, fastest, maxSpeed) {
-  const speedWidth = row.speed_vs_rustia ? Math.max(2, (row.speed_vs_rustia / maxSpeed) * 100) : 0;
-  const timeRatio = fastest / row.ns_per_unit_min;
-  const timeWidth = Math.max(2, Math.min(100, timeRatio * 100));
-  return `
-    <article class="result-row">
-      <div class="result-label">
-        <strong>${escapeHtml(implementationLabel(row.engine))}</strong>
-        <span>${escapeHtml(languageLabel(row.dialect))} · ${escapeHtml(row.commit)} · ${formatTime(row.timestamp_unix)}</span>
-      </div>
-      <div class="result-values">
-        <span>${formatNumber(row.ns_per_unit_min)} ns min</span>
-        <span>${formatSpeed(row.speed_vs_rustia)} vs rustia</span>
-      </div>
-      <div class="bars-pair">
-        <div class="mini-bar time" title="Relative to fastest row in this workload"><span style="width: ${timeWidth.toFixed(3)}%"></span></div>
-        <div class="mini-bar speed" title="Speed relative to rustia"><span style="width: ${speedWidth.toFixed(3)}%"></span></div>
-      </div>
-    </article>
-  `;
-}
-
-function targetSection(group) {
-  const workloads = [...groupBy(group.values, (row) => row.workload)]
-    .map(([workload, rows]) => ({ workload, rows }))
-    .sort((left, right) => left.workload.localeCompare(right.workload));
-  return `
-    <section class="target" id="${escapeHtml(slug(group.target))}">
-      <div class="target-head">
-        <div>
-          <h2>${escapeHtml(group.target)}</h2>
-          <p>${formatInteger(group.values.length)} rows across ${formatInteger(workloads.length)} workloads</p>
-        </div>
-      </div>
-      ${workloads.map((entry) => workloadSection(group.target, entry.workload, entry.rows)).join("")}
-    </section>
-  `;
-}
-
 function wasmTargetRows(data) {
   const rows = [];
   for (const run of data.runs) {
@@ -2363,131 +2068,6 @@ function wasmTargetRows(data) {
       left.workload.localeCompare(right.workload) ||
       left.adapter.localeCompare(right.adapter)
     );
-}
-
-function wasmDispatchRows(data) {
-  const rows = [];
-  for (const run of data.runs) {
-    for (const row of run.rows) {
-      rows.push({
-        target: run.target,
-        runtime: runtimeLabel(run.runtime),
-        style: row.style,
-        feature: row.feature,
-        ns_per_dispatch_min: row.ns_per_dispatch_min,
-        ns_per_dispatch_median: row.ns_per_dispatch_median,
-        commit: run.commit,
-      });
-    }
-  }
-  const baselines = new Map(
-    rows
-      .filter((row) => row.style === "br_table")
-      .map((row) => [row.runtime, row.ns_per_dispatch_min]),
-  );
-  return rows
-    .map((row) => ({
-      ...row,
-      slower_vs_br_table: baselines.get(row.runtime) == null
-        ? null
-        : row.ns_per_dispatch_min / baselines.get(row.runtime),
-    }))
-    .sort((left, right) =>
-      left.target.localeCompare(right.target) ||
-      left.runtime.localeCompare(right.runtime) ||
-      left.style.localeCompare(right.style)
-    );
-}
-
-function wasmTargetSection(data) {
-  const rows = wasmTargetRows(data);
-  const targets = unique(rows.map((row) => row.target));
-  const runtimes = unique(rows.map((row) => row.runtime));
-  const adapters = unique(rows.map((row) => row.adapter));
-  return `
-    <section class="panel" id="wasm-target">
-      <div class="section-head">
-        <div>
-          <h2>Wasm Target Bench</h2>
-          <p>${formatInteger(rows.length)} rows · ${formatInteger(adapters.length)} adapters · ${formatInteger(targets.length)} targets · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmResultsPath))}</code></p>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Target / runtime</th>
-              <th>Adapter</th>
-              <th>Workload</th>
-              <th>Min ns/unit</th>
-              <th>Median</th>
-              <th>vs rustia</th>
-              <th>Commit</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                <td>${targetRuntimeLabel(row)}</td>
-                <td><strong>${escapeHtml(implementationLabel(row.adapter))}</strong> <span class="subtle">${escapeHtml(languageLabel(row.dialect))}</span></td>
-                <td>${escapeHtml(row.workload)}</td>
-                <td>${formatNumber(row.ns_per_unit_min)}</td>
-                <td>${formatNumber(row.ns_per_unit_median)}</td>
-                <td>${formatSpeed(row.speed_vs_rustia)}</td>
-                <td>${escapeHtml(row.commit)}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
-
-function wasmDispatchSection(data) {
-  const rows = wasmDispatchRows(data);
-  const targets = unique(rows.map((row) => row.target));
-  const runtimes = unique(rows.map((row) => row.runtime));
-  return `
-    <section class="panel" id="wasm-dispatch">
-      <div class="section-head">
-        <div>
-          <h2>Wasm Dispatch Bench</h2>
-          <p>${formatInteger(rows.length)} rows · ${formatInteger(targets.length)} targets · ${formatInteger(runtimes.length)} runtimes · source <code>${escapeHtml(relative(wasmDispatchPath))}</code></p>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Target / runtime</th>
-              <th>Style</th>
-              <th>Min ns/dispatch</th>
-              <th>Median</th>
-              <th>vs br_table</th>
-              <th>Commit</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                <td>${targetRuntimeLabel(row)}</td>
-                <td><strong>${escapeHtml(row.style)}</strong> <span class="subtle">${escapeHtml(row.feature)}</span></td>
-                <td>${formatNumber(row.ns_per_dispatch_min)}</td>
-                <td>${formatNumber(row.ns_per_dispatch_median)}</td>
-                <td>${formatSpeed(row.slower_vs_br_table)}</td>
-                <td>${escapeHtml(row.commit)}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
-
-function targetRuntimeLabel(row) {
-  return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.runtime)}</span></span>`;
 }
 
 function operationsStateLabel(state) {
@@ -2560,7 +2140,7 @@ function optimizationEvidenceSection(cohorts) {
         <div class="section-head">
           <div>
             <h2>Accepted Optimization Checks</h2>
-            <p>No accepted fixed-work A/B comparisons are available yet.</p>
+            <p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>
           </div>
         </div>
       </section>
@@ -2603,12 +2183,11 @@ function optimizationEvidenceSection(cohorts) {
   `;
 }
 
-function render(data, operationsStatus, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
+function render(data, operationsStatus, wasmResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
   const claimRows = summarizeClaimRows(summary.rows);
-  const dispatchRows = wasmDispatchRows(wasmDispatchResults);
 
   return `<!doctype html>
 <html lang="en">
@@ -3760,7 +3339,7 @@ function render(data, operationsStatus, wasmResults, wasmDispatchResults, memory
     ${claimGateSection(claimRows)}
       ${historySection(history, historyBackfills, data.rows)}
 
-    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm sources <code>${escapeHtml(relative(wasmResultsPath))}</code> and <code>${escapeHtml(relative(wasmDispatchPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
+    <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm source <code>${escapeHtml(relative(wasmResultsPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
   <script>
     (() => {
@@ -3841,11 +3420,10 @@ function main() {
   const historyRecords = readHistory();
   const historyBackfills = readHistoryBackfills();
   const wasmResults = readWasmResults();
-  const wasmDispatchResults = readWasmDispatchResults();
   const memoryResults = readMemoryResults();
   const memoryHistory = readMemoryHistory();
   const cohorts = readCohortEvidence();
-  const html = render(data, operationsStatus, wasmResults, wasmDispatchResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+  const html = render(data, operationsStatus, wasmResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills).replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
   const output = `${html}\n`;
   if (checkOnly) {
     let current;
@@ -3879,6 +3457,7 @@ module.exports = {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  memoryResultsSection,
   optimizationEvidenceSection,
   operationsStatusSection,
   summarizeLanguageTargets,

@@ -72,7 +72,7 @@ function writeAtomic(file, text) {
   fs.renameSync(temporary, file);
 }
 
-function validateCurrent(current, label, rustiaOnly) {
+function validateCurrent(current, label, generated) {
   if (
     current?.schema_version !== 1 ||
     current?.schema !== CURRENT_SCHEMA ||
@@ -83,11 +83,18 @@ function validateCurrent(current, label, rustiaOnly) {
   ) {
     fail(`${label} is not a ready memory-current-results snapshot`);
   }
-  if (rustiaOnly && current.rows.some((row) => row.engine !== "rustia")) {
-    fail(`${label} must contain only Rustia rows`);
+  // Both cohorts the lane measures carry Rustia; a cohort without it was
+  // produced by something other than the lane and must not be merged.
+  if (generated && !current.rows.some((row) => row.engine === "rustia")) {
+    fail(`${label} must contain Rustia rows`);
   }
 }
 
+// Each engine's rows come from the newest cohort that measured that engine.
+// A rustia-only cohort therefore swaps the Rustia rows and keeps every
+// competitor row; a cross-engine cohort swaps them all. Prior rows for an
+// engine the cohort measured are dropped whole rather than merged by
+// workload, so one engine never mixes two cohorts' measurements.
 function merge(config) {
   const generated = readJson(config.generatedCurrent, "generated current memory results");
   validateCurrent(generated, "generated current memory results", true);
@@ -114,31 +121,31 @@ function merge(config) {
     ? [...existingHistory, generatedCohorts[0]]
     : existingHistory;
 
-  const priorRows = existingCurrent?.rows ?? [];
-  const rows = [
-    ...priorRows.filter((row) => row.engine !== "rustia"),
-    ...generated.rows,
-  ].sort(
+  const measured = new Set(generated.rows.map((row) => row.engine));
+  const survivors = (existingCurrent?.rows ?? []).filter((row) => !measured.has(row.engine));
+  const rows = [...survivors, ...generated.rows].sort(
     (left, right) =>
       left.workload.localeCompare(right.workload) ||
       left.engine.localeCompare(right.engine),
   );
   const detectorCoverage = [
-    ...(existingCurrent?.detector_coverage ?? []).filter((entry) => entry.engine !== "rustia"),
+    ...(existingCurrent?.detector_coverage ?? []).filter((entry) => !measured.has(entry.engine)),
     ...generated.detector_coverage,
   ].sort((left, right) => left.engine.localeCompare(right.engine));
-  const sourceCohorts = [
-    ...new Set([
-      ...(existingCurrent?.metadata?.source_cohorts ?? []),
-      existingCurrent?.metadata?.cohort_id,
-      cohortId,
-    ].filter(Boolean)),
-  ];
+  // The cohorts whose rows are in the table, in history order. A cohort whose
+  // every row the new cohort replaced leaves the list with those rows; the
+  // new cohort is in the history by now and always contributes.
+  const rowKeys = new Set(rows.map((row) => `${row.engine}\0${row.commit}`));
+  const sourceCohorts = mergedHistory
+    .filter((record) => (record.rows ?? []).some((row) => rowKeys.has(`${row.engine}\0${row.commit}`)))
+    .map((record) => record.cohort_id);
   const mergedCurrent = {
     ...generated,
     metadata: {
       ...generated.metadata,
-      description: "Latest compatible dedicated-Linux memory rows by engine; Rustia is refreshed by successful main CI.",
+      description:
+        "Latest dedicated-Linux memory rows by engine; each engine's rows come from the newest " +
+        "cohort that measured it, and Rustia is refreshed by every memory cohort.",
       history: "history/runs.jsonl",
       targets: [...new Set(rows.map((row) => row.target))].sort(),
       engines: [...new Set(rows.map((row) => row.engine))].sort(),
@@ -180,50 +187,105 @@ function selfTest() {
       workload: "dense_tables",
       metrics: { peak_delta_kib: metric },
     });
-    const existingCohort = {
+    const cohort = (id, commit, engines) => ({
       schema_version: 1,
       schema: COHORT_SCHEMA,
-      cohort_id: "baseline",
-      commit: "a".repeat(40),
-      rows: [row("mlua-luau-jit", "a".repeat(40))],
-    };
-    const generatedCohort = {
-      schema_version: 1,
-      schema: COHORT_SCHEMA,
-      cohort_id: "rustia-ci-bbbbbbb",
-      commit: "b".repeat(40),
-      rows: [row("rustia", "b".repeat(40))],
-    };
-    writeAtomic(historyPath, `${JSON.stringify(existingCohort)}\n`);
-    writeAtomic(currentPath, `${JSON.stringify({
+      cohort_id: id,
+      commit,
+      rows: engines.map((engine) => row(engine, commit)),
+    });
+    const snapshot = (record) => ({
       schema_version: 1,
       schema: CURRENT_SCHEMA,
       status: "ready",
-      metadata: { cohort_id: "baseline" },
-      detector_coverage: [{ engine: "mlua-luau-jit" }],
-      rows: existingCohort.rows,
-    })}\n`);
-    writeAtomic(generatedCurrent, `${JSON.stringify({
-      schema_version: 1,
-      schema: CURRENT_SCHEMA,
-      status: "ready",
-      metadata: { cohort_id: generatedCohort.cohort_id, commit: generatedCohort.commit },
-      detector_coverage: [{ engine: "rustia" }],
-      rows: generatedCohort.rows,
-    })}\n`);
-    writeAtomic(generatedHistory, `${JSON.stringify(existingCohort)}\n${JSON.stringify(generatedCohort)}\n`);
+      metadata: { cohort_id: record.cohort_id, commit: record.commit },
+      detector_coverage: record.rows.map((entry) => ({ engine: entry.engine })),
+      rows: record.rows,
+    });
+    const engineCommits = () =>
+      Object.fromEntries(readJson(currentPath, "self-test current").rows.map((entry) => [entry.engine, entry.commit]));
+    const stage = (generated, history) => {
+      writeAtomic(generatedCurrent, `${JSON.stringify(snapshot(generated))}\n`);
+      writeAtomic(generatedHistory, `${history.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    };
+
+    // A rustia-only cohort against a stored competitor row: the competitor
+    // stays, Rustia is added, and a second merge changes nothing.
+    const baseline = cohort("baseline", "a".repeat(40), ["mlua-luau-jit"]);
+    const rustiaB = cohort("rustia-ci-bbbbbbb", "b".repeat(40), ["rustia"]);
+    writeAtomic(historyPath, `${JSON.stringify(baseline)}\n`);
+    writeAtomic(currentPath, `${JSON.stringify(snapshot(baseline))}\n`);
+    stage(rustiaB, [baseline, rustiaB]);
     const first = merge({ generatedCurrent, generatedHistory, dataRoot });
     const second = merge({ generatedCurrent, generatedHistory, dataRoot });
-    const current = readJson(currentPath, "self-test current");
-    if (
-      first.historyCount !== 2 ||
-      second.historyCount !== 2 ||
-      current.rows.length !== 2 ||
-      !current.rows.some((entry) => entry.engine === "mlua-luau-jit") ||
-      !current.rows.some((entry) => entry.engine === "rustia")
-    ) {
-      fail("self-test did not preserve competitors or idempotent history");
+    if (first.historyCount !== 2 || second.historyCount !== 2) fail("self-test history is not idempotent");
+    if (JSON.stringify(engineCommits()) !== JSON.stringify({ "mlua-luau-jit": "a".repeat(40), rustia: "b".repeat(40) })) {
+      fail("self-test did not preserve competitors under a rustia-only cohort");
     }
+    let current = readJson(currentPath, "self-test current");
+    if (JSON.stringify(current.metadata.source_cohorts) !== JSON.stringify(["baseline", "rustia-ci-bbbbbbb"])) {
+      fail(`self-test source cohorts after rustia-only: ${current.metadata.source_cohorts}`);
+    }
+
+    // A cross-engine cohort replaces every engine it measured: no engine
+    // appears twice, the stale competitor row is gone, and the cohorts whose
+    // rows were replaced leave the source list with them.
+    const crossC = cohort("cross-engine-ccccccc", "c".repeat(40), ["rustia", "mlua-luau-jit", "koto"]);
+    stage(crossC, [baseline, rustiaB, crossC]);
+    const third = merge({ generatedCurrent, generatedHistory, dataRoot });
+    merge({ generatedCurrent, generatedHistory, dataRoot });
+    current = readJson(currentPath, "self-test current");
+    if (third.historyCount !== 3 || third.rowCount !== 3 || current.rows.length !== 3) {
+      fail("self-test cross-engine merge did not replace the rows wholesale");
+    }
+    const commitsAfterCross = engineCommits();
+    if (Object.keys(commitsAfterCross).length !== 3 || Object.values(commitsAfterCross).some((c) => c !== "c".repeat(40))) {
+      fail("self-test cross-engine merge left a row from another cohort");
+    }
+    if (JSON.stringify(current.metadata.source_cohorts) !== JSON.stringify(["cross-engine-ccccccc"])) {
+      fail(`self-test source cohorts after cross-engine: ${current.metadata.source_cohorts}`);
+    }
+    if (current.detector_coverage.length !== 3) fail("self-test detector coverage was not replaced");
+
+    // The next rustia-only cohort swaps only the Rustia rows: the competitor
+    // rows from the cross-engine cohort stay and are counted once.
+    const rustiaD = cohort("rustia-ci-ddddddd", "d".repeat(40), ["rustia"]);
+    stage(rustiaD, [baseline, rustiaB, crossC, rustiaD]);
+    const fourth = merge({ generatedCurrent, generatedHistory, dataRoot });
+    current = readJson(currentPath, "self-test current");
+    const expected = { koto: "c".repeat(40), "mlua-luau-jit": "c".repeat(40), rustia: "d".repeat(40) };
+    if (fourth.rowCount !== 3 || JSON.stringify(engineCommits()) !== JSON.stringify(expected)) {
+      fail("self-test rustia-only merge after a cross-engine cohort did not swap only Rustia");
+    }
+    if (JSON.stringify(current.metadata.source_cohorts) !== JSON.stringify(["cross-engine-ccccccc", "rustia-ci-ddddddd"])) {
+      fail(`self-test source cohorts after the follow-on: ${current.metadata.source_cohorts}`);
+    }
+    if (current.metadata.engines.join() !== "koto,mlua-luau-jit,rustia" || current.metadata.row_count !== 3) {
+      fail("self-test metadata does not describe the merged rows");
+    }
+    // Two routine cohorts in a row: the earlier one's rows are all replaced,
+    // so its id leaves the source list rather than accumulating.
+    const rustiaE = cohort("rustia-ci-eeeeeee", "e".repeat(40), ["rustia"]);
+    stage(rustiaE, [baseline, rustiaB, crossC, rustiaD, rustiaE]);
+    const fifth = merge({ generatedCurrent, generatedHistory, dataRoot });
+    current = readJson(currentPath, "self-test current");
+    if (
+      fifth.rowCount !== 3 ||
+      engineCommits().rustia !== "e".repeat(40) ||
+      JSON.stringify(current.metadata.source_cohorts) !== JSON.stringify(["cross-engine-ccccccc", "rustia-ci-eeeeeee"])
+    ) {
+      fail(`self-test source cohorts after back-to-back routine cohorts: ${current.metadata.source_cohorts}`);
+    }
+
+    // A cohort without Rustia rows did not come from the lane.
+    stage(cohort("foreign", "f".repeat(40), ["koto"]), [cohort("foreign", "f".repeat(40), ["koto"])]);
+    let refused = false;
+    try {
+      merge({ generatedCurrent, generatedHistory, dataRoot });
+    } catch (error) {
+      refused = /must contain Rustia rows/.test(error.message);
+    }
+    if (!refused) fail("self-test accepted a cohort without Rustia rows");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

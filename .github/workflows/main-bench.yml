@@ -22,8 +22,15 @@ name: Per-Commit Rustia Series
 permissions:
   contents: read
 
-# Shares one group with every other lane that uses the bench host, so a
-# measurement can never overlap another job on the machine it is measuring.
+# Host exclusivity comes from the bench-solo group holding exactly one runner:
+# a second job sent there waits rather than sharing the machine. This shared
+# concurrency group adds ordering between the four lanes that hold the host for
+# a full measurement -- this one, the cross-engine matrix, the memory cohort and
+# acceptance -- so they queue instead of cancelling each other. PR screening
+# deliberately sits outside it, because it wants per-PR cancel-in-progress; it
+# relies on the single-runner group alone, so registering a second runner into
+# bench-solo would let a screening run and a measurement share the same pinned
+# cores.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false

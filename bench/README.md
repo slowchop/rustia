@@ -12,9 +12,10 @@ so history can be committed, served statically, or uploaded by CI without needin
 a hosted metrics service.
 
 The active performance product is deliberately narrower than Rustia's build
-support: native measurements are `linux-x86_64` on an ephemeral dedicated
-Linode, and wasm runtimes are measured on that same Linux host. macOS and
-Windows timings are excluded until dedicated machines exist for them.
+support: native measurements are `linux-x86_64` on the owned benchmark host
+labelled `ci-bench`, and the wasm runtimes are measured under Node/V8 on that
+same host, inside the cross-engine matrix lane. macOS and Windows timings are
+excluded until dedicated machines exist for them.
 
 The default build runs the in-repo `rustia` adapter over five workload families:
 
@@ -49,9 +50,10 @@ default remains calibrated measurement, so existing commands and public history
 behavior are unchanged.
 
 The JSONL summary stores only the stable min/median values. Direct harness runs
-may append rows, while the dedicated Linode matrix coordinator atomically
-publishes a fresh, complete Linux cohort. For local analysis, write the raw
-per-repetition `ns/unit` values to a separate JSON sidecar:
+may append rows, while the owned-host matrix coordinator
+(`weekly-matrix-bench.yml`, through `tools/run-dedicated-benchmark.js matrix`)
+atomically publishes a fresh, complete Linux cohort. For local analysis, write
+the raw per-repetition `ns/unit` values to a separate JSON sidecar:
 
 ```sh
 cargo run -p script-bench-harness --release -- \
@@ -80,19 +82,22 @@ The existing `vm-string-memory` sampler is a focused Rustia A/B evidence tool, n
 The first-class memory product is specified in
 [`design/57-memory-benchmarking.md`](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md). Its child/supervisor, cgroup-v2
 sampling, repeated-epoch analyzer, synthetic controls, deterministic todo workloads, separate history, and
-pending/ready dashboard integration are now implemented; the first dedicated-Linux pre-reclamation cohort is
-published as `pre-reclamation-18b58d8` (110 rows, 990 fresh processes). Throughput and instrumented memory
-measurements remain separate.
+pending/ready dashboard integration are now implemented; the published cohort is `rustia-ci-070c387b173c`
+(11 rustia rows from 99 raw samples), measured on the owned host `ci-bench` on 2026-09-05. The earlier
+cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes) among them, were removed on
+2026-09-06. Throughput and instrumented memory measurements remain separate.
 
 ```sh
 just bench-memory-self-test
-just bench-linode-memory-plan bench/cloud/linode-cross-engine-memory-COMMIT.json
-just bench-linode-memory bench/cloud/linode-cross-engine-memory-COMMIT.json
 ```
 
-The billed command uses the same fail-closed Linode lifecycle as timing: it downloads the complete raw cohort,
-confirms deletion, independently reruns the analysis locally, then atomically installs evidence, memory history,
-the current snapshot, and the generated dashboard.
+Fresh memory rows come from `.github/workflows/rustia-memory.yml`: dispatch-only, with a required `commit_sha`
+input and a `cohort` choice — `rustia-only`, the default 11-row per-commit cohort, or `cross-engine`, the
+110-row thirteen-engine cohort under the same protocol — on the `bench-solo` runner group, pinning two isolated
+cores so the supervisor never shares a core with the benchmark. Its rows are pushed to the published data
+repository and rendered by the shared publisher; there, each engine's rows come from the newest cohort that
+measured it. Competitor rows and the mlua/Luau/JIT reference return with the first cross-engine cohort measured
+on the owned host.
 
 ## Equal-work validation and publication
 
@@ -230,8 +235,8 @@ protocol and bounded idle/steal gates described below. Its exact AMS3 Basic
 Intel 4-vCPU/8-GiB shape is frozen in the config; the plan fails instead of
 substituting a different size or region. The accepted eight-leg comparison
 measured 8.1651% lower candidate ns/unit with a conservative nominal 95%
-interval of -10.2126% to -5.9577%. Evidence is retained under
-[`history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`](history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/).
+interval of -10.2126% to -5.9577%. Its evidence was measured on a rented
+Droplet and was removed on 2026-09-13; the samples remain in Git history.
 
 The earlier Region Engine v1 comparison remains frozen in
 [`cloud/digitalocean-region-b861ee9.json`](cloud/digitalocean-region-b861ee9.json).
@@ -253,15 +258,7 @@ The accepted OOP comparison is frozen separately in
 [`cloud/linode-oop-f208c12.json`](cloud/linode-oop-f208c12.json). The evidence-only 512-VM string sampler is
 frozen in
 [`cloud/linode-vm-string-memory-1370d6c.json`](cloud/linode-vm-string-memory-1370d6c.json); it uses paired
-fresh-process rounds and never appends throughput history. A no-argument Linode command continues to select the
-dense config. Select another frozen protocol explicitly and use the same path for planning and execution:
-
-```bash
-just bench-linode-plan bench/cloud/linode-oop-f208c12.json
-just bench-linode bench/cloud/linode-oop-f208c12.json
-just bench-linode-plan bench/cloud/linode-vm-string-memory-1370d6c.json
-just bench-linode bench/cloud/linode-vm-string-memory-1370d6c.json
-```
+fresh-process rounds and never appends throughput history.
 
 The DigitalOcean, Vultr and Scaleway coordinators that ran these comparisons
 have been deleted, the memory cohort has moved to the owned host, and the eleven
@@ -306,24 +303,6 @@ gate while still accruing hypervisor steal during timed legs, which is why the
 owned host requires steal to be exactly zero rather than merely bounded --
 on bare metal a non-zero reading is a fault, not a tolerance.
 
-Create a short-lived personal access token with only **Linodes: Read/Write** and
-**Account: Read Only**. Account read access lets the coordinator reject an
-account-wide automatic-backup default before creating a billable instance. The
-token is entered through a private TTY prompt and stored mode `0600` only under
-the ignored `.rustia-benchmark-state/linode/` directory:
-
-```bash
-just bench-linode-auth
-just bench-linode-plan
-just bench-linode
-```
-
-Run these from the operator's own checkout. Earlier revisions of this file
-spelled them as `ssh` invocations against a named developer machine; a host
-alias is infra-identifying and does not belong in a public repository, and the
-recipes never needed it -- `-t` for the two that prompt for a token is the only
-part that mattered.
-
 The Linode coordinator passes a unique local ED25519 public key directly in the
 create request, so no persistent account SSH-key resource or additional token
 scope is needed. Before billing it validates the exact public Ubuntu image,
@@ -341,22 +320,6 @@ diagnostic run is intentionally skipped because it would incur another full-hour
 begins with the same three candidate-only qualification legs. The evidence-only memory protocol instead uses one
 excluded warmup round followed by its paired measurement rounds.
 
-Crash recovery is provider-isolated:
-
-```bash
-just bench-linode-status
-just bench-linode-unlock
-just bench-linode-destroy
-just bench-linode-destroy RUN_ID
-just bench-linode-promote RUN_ID       # offline retry after a completed local promotion rolls back
-```
-
-The promotion retry never reads the API token or contacts Linode. It requires a confirmed-deleted, completed run
-and rechecks the journaled archive, original Git identities, raw samples, and every host gate. Fixed-throughput
-runs additionally require the qualification spread, recomputed bootstrap verdict, exact final-history rows, and
-generated result files. Evidence-only memory runs require `evidence_complete`, recompute the paired analysis, and
-prove that throughput history remains unchanged.
-
 The dedicated Linode shape is still a KVM guest. Two Sydney v1 placements
 eventually recorded one steal tick during a timed leg: 1/1,317 ticks (0.075930%)
 and 1/1,320 ticks (0.075758%). The frozen zero-steal rule correctly rejected
@@ -372,16 +335,18 @@ candidate pooled median at 302,665.974 ns/unit versus 310,170.536 for the
 baseline (-2.4195%). Its conservative nominal 95% interval was -3.3478% to
 -1.5699%, so the predeclared +5% material-regression threshold was excluded.
 The three actual final-candidate medians were 303,918.403, 303,335.093, and
-300,979.767 ns/unit; their raw sidecars and the complete comparison evidence are
-retained under `history/evidence/ed65077c2e779ec6a641b8ca2f8c8258b2508a2d/`.
+300,979.767 ns/unit. Their raw sidecars and the complete comparison evidence
+were measured on a rented Linode and were removed on 2026-09-13; the samples
+remain in Git history.
 This is acceptance evidence for that exact workload and host protocol, not a
 cross-engine or blanket speed claim.
 
 The accepted OOP run compared baseline `ae3beae2025feb21d0e37c70168204ae154ae125` with exact candidate
 `f208c12d0ce266117743569d736346fae9a35db2` at fixed `n=24000`. Its pooled medians were 21,633.014 and 7,364.006
 ns/unit, a -65.9594% candidate delta; the conservative nominal 95% interval was -66.3876% to -65.5482%, excluding
-the predeclared zero-regression threshold. Three actual final-candidate rows and all raw evidence are retained
-under `history/evidence/f208c12d0ce266117743569d736346fae9a35db2/`. The complete candidate includes both the
+the predeclared zero-regression threshold. Three actual final-candidate rows and all raw evidence were measured
+on a rented Linode and were removed on 2026-09-13; the samples remain in Git history. The complete candidate
+includes both the
 constant-field/method work and a weak-table GC-scan correction, so the result is not attributed to one opcode
 family alone.
 
@@ -448,20 +413,16 @@ The matrix switch is present now:
 cargo run -p script-bench-harness --features all-engines -- --list
 ```
 
-Do not publish the full matrix from a developer machine. Plan and run it through
-the explicit dedicated-Linode lifecycle with a committed frozen config:
+Do not publish the full matrix from a developer machine. It is measured and
+published by the owned-host lane described under
+[Cross-engine matrix](#cross-engine-matrix) below.
 
-```sh
-just bench-linode-matrix-plan bench/cloud/LINODE_MATRIX_CONFIG.json
-just bench-linode-matrix bench/cloud/LINODE_MATRIX_CONFIG.json
-```
-
-The coordinator verifies the frozen source and runtime artifacts, provisions the
-declared Linux/x86_64 shape, builds the `all-engines` binary plus the separate
-Lua 5.4 binary, and measures the five common workloads. It then runs the three
-wasm adapters on Node/V8, the most widely used JavaScript runtime, on that same
-host. Promotion requires the exact 65 native rows, 15 wasm rows, one dispatch run, Linux-only
-target identities, a single source revision, and confirmed instance deletion.
+The coordinator verifies the frozen source and runtime artifacts, builds the
+`all-engines` binary plus the separate Lua 5.4 binary, and measures the five
+common workloads. It then runs the three wasm adapters on that same host under
+Node/V8, the most widely used JavaScript runtime. Promotion requires the exact
+65 native rows, 15 wasm rows, one dispatch run, Linux-only target identities,
+and a single source revision.
 The accepted four-runtime matrix is retained under `bench/wasm/history/` as
 historical portability evidence; it is not repeated in the recurring public
 benchmark. The matrix v4 host gate keeps every prewindow at zero steal. It also retains
@@ -471,8 +432,9 @@ least a 1.5x native execution signal. A timed group
 passes at no more than 0.1% steal or one accounting tick; otherwise it restores
 only that group's outputs and retries up to three times after a fresh quiet
 prewindow, while retaining every rejected gate record. Each group shares one
-five-minute quiet-acquisition deadline across its retries, and the existing
-55-minute Linode lifecycle remains the outer bound.
+five-minute quiet-acquisition deadline across its retries, and
+`max_runtime_minutes`, checked at the phase boundaries as a hang detector,
+remains the outer bound.
 The generic `just benchmarks` local-publication path is retired so a macOS or
 Windows developer machine cannot repopulate active results.
 
@@ -525,21 +487,26 @@ destination or `ssh_config` alias the operator keeps outside this repository.
 No hostname, address or key path belongs here; `provider.host.name` is a
 provenance label published in row data, never an ssh target. Before shipping
 anything it attests the machine against the frozen config — CPU model, logical
-CPU count, SMT off, and that every pinned CPU really is in the kernel's isolated
-set. A pinned core the scheduler still uses is the failure this protocol exists
-to prevent, and it does not show up in the timings.
+CPU count, SMT off, free disk under the runner's home above the coordinator's
+`MINIMUM_FREE_GIB` floor, and that every pinned CPU really is in the kernel's
+isolated set. A pinned core the scheduler still uses is the failure this
+protocol exists to prevent, and it does not show up in the timings.
 
-Measurement stays out of GitHub Actions: `tools/check-workflows.js` forbids the
-harness there, and starting a run remains an explicit operator action.
+The reconstruction stays out of GitHub Actions: `tools/check-workflows.js`
+forbids the raw harness there, and starting a rebuild remains an explicit
+operator action.
 
 Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
 usable rows, so the runner takes an exclusive lock naming its pid and refuses to
 start while a live one is held. A lock left by a killed run is taken over
-automatically once its pid is gone; `just bench-history-unlock` clears one by
-hand. A run wipes its working state at startup but keeps the cargo target
-directory warm, which is what makes each revision cost about 26 seconds rather
-than minutes.
+automatically once its pid is gone; `just bench-history-unlock` clears the
+history, matrix and memory lanes' locks by hand. A run wipes its working state
+at startup but keeps the cargo target directory warm, which is what makes each
+revision cost about 26 seconds rather than minutes. `just bench-host-check`
+prints the host's free space, journal size, load average and driver state
+without touching anything; it is the first thing to run when a lane refuses a
+quiet window twice in a row.
 
 Revisions that predate the harness entry point need source changes to be
 drivable at all: the workspace must declare the overlaid `bench` crate, and a
@@ -705,9 +672,11 @@ twenty minutes. Historical source commit time is retained separately from
 honest measurement time; renderers order the reconstructed trend by the frozen
 target list rather than pretending the measurements happened in the past.
 
-Hosted CI only validates the committed artifacts. `tools/check-workflows.js`
-forbids fresh native or wasm measurement commands in GitHub Actions; starting a
-billed Linode remains an explicit operator action.
+The shared runner pool only validates the committed artifacts.
+`tools/check-workflows.js` forbids the raw harness and the on-host runners in
+GitHub Actions: measurement there is permitted only on `bench-solo`, and only
+through the attesting entrypoint `tools/run-dedicated-benchmark.js`, which that
+checker pins.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
 `mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
@@ -738,8 +707,13 @@ and live in the data repository. `main` accepts changes only through pull
 requests — an organisation rule with no bypass for the workflow token — so the
 publication commit goes to a `matrix-publish/<commit>` branch and
 `tools/land-matrix-publication.js` opens the pull request and merges it with a
-merge commit; if `main` moved meanwhile, the publication is rebuilt on top of
-it and landed again, three attempts at most.
+merge commit. The operations status, package and publishability inventories,
+and current-results report in that commit all describe the `main` it was built
+on, so the helper merges only the commit the run pushed, and only while `main`
+is still that commit — not merely while the branch merges cleanly. If `main`
+moved meanwhile, the publication is rebuilt on top of it and landed again,
+three attempts at most. A refusal that rebuilding cannot fix — a repository
+rule, a missing permission — fails the run at once with GitHub's reason.
 
 It replaced a nightly job that created a billed cloud instance whenever `main`
 had gained performance-relevant commits since the last cohort. Both properties

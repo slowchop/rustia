@@ -156,6 +156,8 @@ const MEASUREMENT_COMMANDS = Object.freeze([
   RAW_HARNESS,
   "node tools/run-wasm-gate.js",
   "node tools/run-wasm-dispatch-gate.js",
+  // Deleted runner. The entry stays so the name cannot return through a
+  // workflow; a forbid needs no file to exist.
   "node tools/run-linux-fixed-benchmark.js",
   "node tools/run-linux-matrix-benchmark.js",
   "node tools/run-linux-history-backfill.js",
@@ -432,6 +434,13 @@ function checkReleasePreflight(text) {
   for (const needle of [
     '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
     '"cargo", ["metadata", "--locked"',
+    // Every committed lock file, found by listing, fetched with --locked. The
+    // wasm adapter's own lock has gone stale more than once (smallvec, then
+    // serde_path_to_error); the second time it stopped the weekly matrix.
+    '"git", ["ls-files", "-z"]',
+    "/(^|\\/)Cargo\\.lock$/",
+    "for (const manifest of lockedManifests())",
+    '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
     '"tools/check-release-notes.js"',
@@ -446,6 +455,10 @@ function checkReleasePreflight(text) {
     '"bench/analyze-fixed-samples.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
+    // The weekly matrix's landing helper. Nothing short of a real cohort
+    // reaches its merge path, so its self-test is the only run it gets before
+    // a forty-minute measurement depends on it.
+    '"tools/land-matrix-publication.js", "self-test"',
     // The owned-host lane. Its self-tests carry the rules that keep a source
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
@@ -459,15 +472,22 @@ function checkReleasePreflight(text) {
     '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
+    // The frozen owned-host config: exact provider keys, SMT off, and the
+    // timed core inside the pinned set. Every lane copies that block.
+    '"tools/check-dedicated-config.js"',
     '"tools/push-benchmark-data-publication.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',
     '"bench/run-memory-cohort.js"',
     '"bench/publish-memory-analysis.js"',
     '"tools/run-linux-memory-benchmark.js"',
+    // The cross-engine memory freezer and the two tools the memory workflow
+    // runs after measuring; preflight is where CI runs their self-tests.
+    '"tools/create-cross-engine-memory-config.js"',
     '"tools/run-wasm-gate.js"',
     '"tools/run-wasm-dispatch-gate.js"',
     '"tools/merge-rustia-ci-memory-data.js"',
+    '"tools/summarize-rustia-ci-memory.js"',
     '"tools/check-benchmark-results.js"',
     '"tools/check-wasm-gate-results.js"',
     '"tools/render-benchmark-operations-status.js", "--check"',
@@ -491,6 +511,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "commit_sha:\n", label);
   requireIncludes(text, "required: true\n", label);
   requireIncludes(text, "type: string\n", label);
+  // The cohort is a closed choice with the routine cohort first and as the
+  // default, so a dispatch that says nothing measures 11 rows, not 110.
+  requireIncludes(text, "cohort:\n", label);
+  requireIncludes(text, "default: rustia-only\n", label);
+  requireIncludes(text, "type: choice\n", label);
+  requireIncludes(text, "options:\n          - rustia-only\n          - cross-engine\n", label);
+  requireIncludes(text, "COHORT: ${{ inputs.cohort }}", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   // Shares the host's serialisation group: sampling must never overlap another
   // job on the machine it is measuring.
@@ -503,8 +530,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
-  // Measurement only through the driver that attests the machine first.
-  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local", label);
+  // Measurement only through the driver that attests the machine first. The
+  // routine cohort keeps the bare line, because the measured commit's own
+  // tools run and commits before the flag existed must stay measurable; an
+  // empty cohort input is the routine cohort.
+  requireIncludes(text, 'if [ "${COHORT:-rustia-only}" = rustia-only ]; then\n', label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local\n", label);
+  requireIncludes(text, 'node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"\n', label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
@@ -554,6 +586,11 @@ function checkWeeklyMatrix(text) {
   // push to main is the shape the branch rules reject.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
   requireIncludes(text, "node tools/land-matrix-publication.js", label);
+  // The helper merges only the commit this run pushed, and only while main is
+  // still the commit the publication was rendered on. It refuses to start
+  // without both, which would otherwise surface only after a full cohort.
+  requireIncludes(text, "--base \"$base_commit\"", label);
+  requireIncludes(text, "--head \"$publication_commit\"", label);
   requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);

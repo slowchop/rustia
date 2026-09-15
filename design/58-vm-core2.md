@@ -164,8 +164,8 @@ and three additional final-binary measurements were retained as evidence
 sidecars without replacing the complete cross-engine matrix cohort.
 DigitalOcean run `20260824T022115Z-64b2afe9` used an AMS3 Basic Intel
 4-vCPU/8-GiB host and confirmed both temporary-key and Droplet deletion.
-Evidence is under
-`bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`.
+Its evidence was measured on that rented Droplet and was removed on
+2026-09-13; the samples remain in Git history.
 
 This result validates the architectural lesson from C2.1: keep verified work
 inside one already-admitted executor instead of adding a competing per-PC tier.
@@ -214,8 +214,8 @@ windows passed. Three additional final-binary measurements were retained as
 evidence sidecars without changing the complete cross-engine matrix cohort.
 DigitalOcean run `20260824T053606Z-bad0cf1d` used an AMS3 Basic Intel
 4-vCPU/8-GiB host for roughly 24 minutes and confirmed both temporary-key and
-Droplet deletion. Evidence is under
-`bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/`. Combined
+Droplet deletion. Its evidence was measured on that rented Droplet and was
+removed on 2026-09-13; the samples remain in Git history. Combined
 with the accepted receipt slice, plain-mode register/branch work now runs
 about 12% below the pre-C2.2 baseline on this workload and protocol.
 
@@ -808,8 +808,9 @@ measurement - AMS3 on steal, AMS3 at a 36.342% within-order paired ratio spread 
 on steal, SFO3 at 5.098%, 6.689%, 11.403%, 27.537%, 17.578%, 12.997% and 8.591%, plus one accepted block
 invalidated by steal at leg 7. This account offers only shared Basic plans, so region choice and re-drawing
 were the available levers. Every Droplet and temporary key was confirmed deleted, and 225.2 billable minutes
-cost about $0.31. Evidence for all three gates is under `bench/history/evidence/`; the first two directories
-name commits that the tape rebase removed from the branch, and are retained only for their raw samples.
+cost about $0.31. The evidence for all three gates was measured on those rented Droplets and was removed on
+2026-09-13; the samples remain in Git history. The first two cohorts name commits that the tape rebase removed
+from the branch.
 
 The measurable dense-table opportunity is array append and growth, where every one of `dense_tables`' numeric
 array writes lands - not existing-slot mutation. Capacity prediction and append fast-pathing are a separate

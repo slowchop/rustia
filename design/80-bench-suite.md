@@ -29,11 +29,11 @@ Split by what's measurable; never use one for the other's job:
 - **engine:** `rustia` · `boa` · `koto` · `luaur` · `mlua-luau` · `mlua-lua54` · `rhai` · `roto` · `ruau` ·
   `rquickjs` · `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate
   from Luau.
-- **active performance targets:** native `linux-x86_64` on a dedicated Linode; wasm32 under Node/V8 on that
-  same Linux host. The accepted Deno/V8, Bun/JavaScriptCore, and SpiderMonkey matrix is historical portability
-  evidence. The broader platform support matrix in
-  `00-constraints.md` remains a correctness/build concern, not a license to mix noisy macOS or Windows timings
-  into the active benchmark product.
+- **active performance targets:** native `linux-x86_64` on the owned benchmark host `ci-bench`, the single
+  timing authority; wasm32 under Node/V8 on that same host, measured inside the weekly cross-engine matrix
+  lane. The accepted Deno/V8, Bun/JavaScriptCore, and SpiderMonkey matrix is historical portability evidence.
+  The broader platform support matrix in `00-constraints.md` remains a correctness/build concern, not a
+  license to mix noisy macOS or Windows timings into the active benchmark product.
 - **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
   (LuauCompat/ReproducibleStandard/DeterministicSim). A pass/fail **correctness gate**, NOT a perf trend — a
   hash mismatch FAILS CI; never tracked as a number.
@@ -60,10 +60,12 @@ a conservative-envelope verdict that is retained with accepted evidence.
 ## Automation structure
 
 1. Hosted pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
-2. An explicit `just` command plans and starts the billed Linode lifecycle; CI never starts it automatically.
-3. The remote runner builds the feature-gated comparison matrix, including the separate Lua 5.4 binary, then
-   measures the recurring wasm adapters and dispatch check under Node/V8 on the same Linux placement.
-4. Promotion requires a complete single-revision Linux matrix and confirmed Linode deletion.
+2. Every fresh timing runs on the owned host `ci-bench`, reached only through the `bench-solo` runner group:
+   the per-commit series, pull-request screening, the weekly cross-engine matrix, and the dispatch-only
+   memory lane. Nothing in the repository creates or pays for a cloud instance.
+3. The owned host builds the feature-gated comparison matrix, including the separate Lua 5.4 binary, then
+   measures the recurring wasm adapters and dispatch check under Node/V8 on the same machine.
+4. Promotion requires a complete single-revision Linux matrix.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
 without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 12
