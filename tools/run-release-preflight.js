@@ -27,12 +27,12 @@ function node(script, ...args) {
 
 // The manifest beside every committed Cargo.lock. The wasm runners are
 // standalone packages with their own lock files, so a dependency added to a
-// shared crate updates the root lock and leaves theirs stale. CI never builds
-// them. The weekly matrix and the rustia-only memory lane build the benchmark
-// adapter with --locked on the host, where a stale lock stops the run, and the
-// demo's README documents a --locked build. Filtering the full tracked list
-// here, not with a pathspec glob, covers a new lock file without an edit, and
-// no git environment setting can shrink the list.
+// shared crate updates the root lock and leaves theirs stale. The workspace
+// build never reads them. The weekly matrix and the rustia-only memory lane
+// build the benchmark adapter with --locked on the host, where a stale lock
+// stops the run, and the demo's README documents a --locked build. Filtering
+// the full tracked list here, not with a pathspec glob, covers a new lock file
+// without an edit, and no git environment setting can shrink the list.
 function lockedManifests() {
   const tracked = childProcess.execFileSync("git", ["ls-files", "-z"], {
     cwd: root,
@@ -55,6 +55,58 @@ for (const manifest of lockedManifests()) {
 }
 run("cargo", ["fmt", "--all", "--", "--check"]);
 run("cargo", ["clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
+// The three builds that otherwise compile only on the owned benchmark host,
+// for the weekly matrix and the memory lanes: the competitor engines, the Lua
+// 5.4 binary (the one build with rustia-engine off), and the wasm adapter (a
+// standalone package that calls rustia's API). The workspace Clippy above sees
+// none of their cfg paths: bench's default features are rustia-engine alone,
+// and the adapter is a workspace of its own. A break in any of them showed up
+// only as a failed host run after merge. Both host workflows inherit the
+// toolchain action's default RUSTFLAGS=-D warnings, so a warning fails the
+// host build too, and a plain `cargo check` would miss it. Clippy with
+// -D warnings holds these builds to the bar the rest of the code meets. None
+// needs its own CARGO_TARGET_DIR. Cargo keys artifacts by feature set, so the
+// bench checks sit beside the workspace build without evicting it. The
+// adapter builds in its own target/, as it does on the host.
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/Cargo.toml",
+  "--bin",
+  "script-bench",
+  "--no-default-features",
+  "--features",
+  "all-engines",
+  "--",
+  "-D",
+  "warnings",
+]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/Cargo.toml",
+  "--bin",
+  "script-bench",
+  "--no-default-features",
+  "--features",
+  "mlua-lua54",
+  "--",
+  "-D",
+  "warnings",
+]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/wasm/adapter-runner/Cargo.toml",
+  "--target",
+  "wasm32-unknown-unknown",
+  "--",
+  "-D",
+  "warnings",
+]);
 
 node("tools/check-release-notes.js");
 node("tools/check-crate-metadata.js", "--check");
