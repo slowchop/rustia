@@ -248,8 +248,9 @@ function selfTest() {
     const analysis = JSON.parse(fs.readFileSync(analysisPath, "utf8"));
     // A row that cannot name its machine, a cohort assembled from two, and an
     // analysis whose own host label disagrees with its rows are all refused --
-    // the memory table is per-slot merged across cohorts, so an unlabelled or
-    // mislabelled row here is a row that can outlive the machine it came from.
+    // the memory table takes each engine's rows from the newest cohort that
+    // measured it, so an unlabelled or mislabelled row here is a row that can
+    // outlive the machine it came from.
     const strays = [
       ["unlabelled row", { rows: [{ ...analysis.rows[0], host: undefined }] }, /analysis row host is missing/],
       [

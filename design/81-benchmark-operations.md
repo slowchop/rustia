@@ -131,13 +131,18 @@ The lane measures one of two cohorts, chosen by the workflow's `cohort` input.
 The measured commit's own tools run the measurement, so the routine cohort
 keeps the bare `memory --local` line for commits that predate the `--cohort`
 flag; only the cross-engine cohort passes it, and only commits that carry its
-freezer can measure it. A commit from before host-labelled memory rows cannot
-be measured at all: one whose `bench/analyze-memory-samples.js` does not carry
-the host-label literal as a whole line is refused right after the checkout,
-before the build, because its rows could not name their machine by label and
-the data repository takes no row that cannot. `tools/check-workflows.js` pins
-that gate and requires the analyzer to keep the literal as a whole line, since
-an indented or annotated copy would refuse every commit. The merge and the
+freezer can measure it. A commit from before a row's host was confined to a
+label cannot be measured at all: one whose `bench/analyze-memory-samples.js`
+does not carry the host-label literal as a whole line is refused right after
+the checkout, before the build, because its rows might not name their machine
+by a label and the data repository takes no row that does not. That includes
+the two commits that first stamped a host, whose labels allowed dots.
+`tools/check-workflows.js` pins that gate and requires the analyzer to keep the
+literal as a whole line, since an indented or annotated copy would refuse every
+commit. It also refuses any other line that moves the working tree, a second
+checkout step, and any line that names the trusted tools directory other than
+the pinned copies and runs, since each could fill that directory with the
+measured commit's tools. The merge and the
 push into that repository do not run the measured commit's tools (see "Merge."
 under "Row provenance"). Both cohorts go through the same attesting entrypoint
 and inherit one frozen protocol — samples, bootstrap, thresholds, host block,
@@ -236,11 +241,12 @@ is its machine class (`linode-<region>-<size.id>`). The two are different
 strings, which is the property that matters.
 
 The rule the field enforces is that **a published table is one machine's
-readings**. Both `bench/current-results.json` and
-`bench/memory/current-results.json` are per-slot merges — newest row per
-(target, engine, workload) across every cohort in their history — so a partial
-re-measurement refreshes the slots it covered and silently leaves the rest as
-they were. On 2026-09-05 a rustia-only memory run did exactly that: 11 rows
+readings**. Both published tables merge cohorts:
+`bench/current-results.json` keeps the newest row per (target, engine,
+workload) across every cohort in its history, and
+`bench/memory/current-results.json` takes each engine's rows from the newest
+cohort that measured that engine. Either way a partial re-measurement refreshes
+what it covered and silently leaves the rest as it was. On 2026-09-05 a rustia-only memory run did exactly that: 11 rows
 moved to the owned host, 99 competitor rows stayed on a rented instance
 measured six weeks earlier, and the metadata named the owned host for all 110. Only `row.commit` revealed the split. Every figure
 on that page is a ratio between two rows, so this was not a labelling gap; it
@@ -341,12 +347,13 @@ the frozen-config checker, for `provider.host.name`
 `analysis.host` (`bench/publish-memory-analysis.js`); the memory merge
 (`tools/merge-rustia-ci-memory-data.js`); the operations-status renderer, for
 any runner class that names a machine, as the timing authority must
-(`tools/render-benchmark-operations-status.js`); and the publication gate and
-the page (`tools/check-benchmark-results.js`,
+(`tools/render-benchmark-operations-status.js`); the host-bridge recorder, for
+the host each side of a bridge names (`tools/record-host-bridge.js`); and the
+publication gate and the page (`tools/check-benchmark-results.js`,
 `bench/render-current-results.js`). The files cannot share a module (a runner
 is copied to the machine one file at a time, and the memory lane runs main's
 merge tool from a copy outside the tree), so the checker's self-test reads
-each of them — the twelve scripts for the literal
+each of them — the thirteen scripts for the literal
 `const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;`, the harness for the same
 character set and cap — and refuses to run if any has drifted. The merge does
 not re-check stored history lines: history is append-only, so refusing over one
@@ -358,12 +365,16 @@ neither names the machine by its node name: the memory supervisor records none,
 and the host evidence the owned host writes — the memory cohort's `host.json`
 (`bench/run-memory-cohort.js`) and the matrix runner's owned-lane `host.json` —
 records `uname -srvm` rather than `uname -a`. The owned lane's acceptance
-refuses matrix evidence that carries a node name.
+checks that form rather than looking for names, which would pass every name it
+did not list: `uname -srvm` puts the kernel release where `uname -a` puts the
+node name, so matrix evidence whose second field is not the release the
+attestation read is refused (`matrixUnameProblem()` in
+`tools/run-dedicated-benchmark.js`).
 
 The published data repository holds the memory table and history the
-publication lane installs before rendering, and it is subject to the same rule:
-its rows must name their host before that lane renders again. The copies
-committed here are identical to its files apart from the field.
+publication lane installs before rendering, and it is subject to the same rule.
+Its files were stamped the same way as the copies committed here
+(slowchop/rustia-bench-data PR #9).
 
 The wasm lane is outside this rule and does not need it.
 `bench/wasm/current-results.json` is rewritten whole by one invocation, and its

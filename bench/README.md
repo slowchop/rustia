@@ -98,8 +98,8 @@ cores so the supervisor never shares a core with the benchmark. Its rows are pus
 repository and rendered by the shared publisher; there, each engine's rows come from the newest cohort that
 measured it. Competitor rows and the mlua/Luau/JIT reference return with the first cross-engine cohort measured
 on the owned host. The measured commit's own tools measure, but the merge into the data repository and the push
-run main's copies, taken before the checkout moves, and a `commit_sha` from before host-labelled memory rows is
-refused before the build, for the reasons in
+run main's copies, taken before the checkout moves, and a `commit_sha` from before a row's host was confined to a
+label is refused before the build, for the reasons in
 [`design/81-benchmark-operations.md`](https://github.com/slowchop/rustia/blob/main/design/81-benchmark-operations.md).
 
 ## Equal-work validation and publication
@@ -501,8 +501,9 @@ target" a check. Before any ssh or scp, on every command that reaches the host �
 equals a label this repository publishes: a runner class's `host` in
 `operations-status.json`, or `provider.host.name` in any
 `cloud/dedicated-*.json`, read afresh on every call. The host part is what is
-left once an optional `ssh://`, a `user@`, and a `:port` or IPv6 brackets are
-stripped, and case is ignored, since ssh lowercases a host before it reads
+left once an optional `ssh://`, a `user@`, a `:port`, a trailing `/` (ssh
+accepts a URI with an empty path and still reaches the host) and IPv6 brackets
+are stripped, and case is ignored, since ssh lowercases a host before it reads
 `ssh_config`. The refusal names the label and nothing else of the destination.
 Only equality is refused, so choose an alias plainly unlike the label rather
 than a variation of it. With `--local` the variable is never read.
@@ -766,7 +767,9 @@ steal is structurally absent, so a non-zero reading is a fault rather than
 something to tolerate. Host evidence records `uname -srvm` rather than
 `uname -a`: on a throwaway instance the node name was a random string that died
 with the machine, and on an owned host it is the real name of a real machine in
-a file committed to a public repository.
+a file committed to a public repository. The coordinator checks the form rather
+than looking for a name: the second field must be the kernel release the
+attestation read, which is where `uname -a` puts the node name.
 
 **Before the rented rows are deleted**, `tools/record-host-bridge.js` writes the
 per-engine comparison between the last rented cohort and the first owned one.
@@ -813,10 +816,11 @@ row data and nothing more: no tool resolves it, connects to it, or derives an
 address from it. Runners pass it as `--host`, derived from the frozen config, so
 a row cannot claim a machine the run was not qualified for.
 
-The field exists because `current-results.json` and `memory/current-results.json`
-are per-slot merges — the newest row per target, engine, and workload across
-every cohort in history — so a partial re-measurement refreshes the slots it
-covered and leaves the others in place. Once those others came from a different
+The field exists because both tables merge cohorts — `current-results.json`
+keeps the newest row per target, engine, and workload across every cohort in
+history, and `memory/current-results.json` takes each engine's rows from the
+newest cohort that measured it — so a partial re-measurement refreshes what it
+covered and leaves the rest in place. Once those others came from a different
 machine, the table was a mix and nothing said so. A published table is therefore
 required to be one machine's readings: `current-results.json` carries
 `metadata.hosts`, `tools/check-benchmark-results.js` requires that list to hold
@@ -847,8 +851,9 @@ reads each and refuses to run if any has drifted:
 `bench/run-memory-cohort.js`, `bench/publish-memory-analysis.js`,
 `tools/merge-rustia-ci-memory-data.js`, `tools/check-dedicated-config.js`,
 `tools/run-linode-benchmark.js`, `tools/run-linux-matrix-benchmark.js`,
-`tools/run-linux-memory-benchmark.js` and
-`tools/run-linux-history-backfill.js`. The harness's `--host` check in
+`tools/run-linux-memory-benchmark.js`,
+`tools/run-linux-history-backfill.js` and `tools/record-host-bridge.js`. The
+harness's `--host` check in
 `bench/src/main.rs` is read alongside them for the same character set and
 128-character cap.
 

@@ -503,6 +503,17 @@ function selfTest() {
       [/history cohort rustia-ci-3333333 does not name "ci-bench"/],
       "appended a history line naming another machine",
     );
+    // The line's own host can agree while a row on it names another machine,
+    // or none. Two rows, so a check that only catches a line where every row
+    // strays is caught too.
+    const strayRows = cohort("cross-engine-7777777", "7".repeat(40), ["rustia", "koto"]);
+    for (const strayHost of ["other-box", undefined]) {
+      stage(strayRows, [{ ...strayRows, rows: [strayRows.rows[0], { ...strayRows.rows[1], host: strayHost }] }]);
+      refuses(
+        [/history cohort cross-engine-7777777 does not name "ci-bench"/],
+        `appended a history line with a row naming ${strayHost ?? "no machine"}`,
+      );
+    }
 
     // A generated row must name its machine too; an empty label names none.
     const blank = cohort("rustia-ci-4444444", "4".repeat(40), ["rustia"]);

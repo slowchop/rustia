@@ -626,9 +626,9 @@ unreachable suspended-coroutine frames.
    repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`). It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
-   (`f480758`) has landed, so `bench/history/runs.jsonl` now holds exactly one cohort, measured on
-   `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
-   reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
+   (`f480758`) has landed, and `bench/history/runs.jsonl` holds only cohorts measured on `ci-bench`, one per
+   accepted weekly publication (`f49646f` was the second): the 1,230 rows measured on retired cloud hosts
+   were removed once every generated report reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
    the ratio ranges 0.71x to 1.86x by engine, so absolute nanoseconds do not carry across the change while
    the published same-run ratios do. Every emitted row now names its machine in a `host` field
@@ -646,12 +646,13 @@ unreachable suspended-coroutine frames.
    authority itself, and the history charts read the field: the recorded timing chart draws only the
    reference machine's rows, a reconstruction from another machine is refused, and the memory history draws
    one machine against a reference from that same machine. A label may contain only `[A-Za-z0-9_-]{1,128}`, so
-   it can never be a dotted name or an address, and the checker's self-test holds the twelve scripts that
-   emit or validate one — the frozen-config checker, the memory publisher and merge, and the
-   operations-status renderer among them — and the harness's `--host` to that one literal; the owned-host
-   coordinator refuses an ssh destination whose host is a published label. The published data repository's
-   memory artifacts must carry the field before the publication lane renders again; the stamped copies
-   committed here differ from them only by it. Nothing in this repository can start a billed instance, on a
+   it can never be a dotted name or an address, and the checker's self-test holds the thirteen scripts that
+   emit or validate one — the frozen-config checker, the memory publisher and merge, the operations-status
+   renderer and the host-bridge recorder among them — and the harness's `--host` to that one literal; the
+   owned-host coordinator refuses an ssh destination whose host is a published label, and refuses matrix
+   evidence whose uname is not `uname -srvm` by its form rather than by a name. The published data
+   repository's memory table and history were stamped the same way (slowchop/rustia-bench-data PR #9).
+   Nothing in this repository can start a billed instance, on a
    timer or otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now
    runs on the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than
    one because the supervisor samples while the benchmark runs. That lane has completed there: on 2026-09-05 it
@@ -669,8 +670,8 @@ unreachable suspended-coroutine frames.
    mlua/Luau/JIT reference from the machine the Rustia rows come from. In the published data each engine's
    rows come from the newest cohort that measured it. The measured commit's own tools measure, but the merge
    into the data repository and the push run main's copies, taken before the checkout detaches, and a commit
-   from before host-labelled memory rows is refused before the build; on `main` that is every commit before
-   the merge that brought host labels. No cross-engine cohort has run on `ci-bench` yet, so the comparison
+   whose `bench/analyze-memory-samples.js` lacks the host-label line — one from before a row's host was confined
+   to a label — is refused before the build. No cross-engine cohort has run on `ci-bench` yet, so the comparison
    stays pending until the first is dispatched. Three cloud coordinators are deleted and the eleven Linode
    lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of the matrix and
    memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle, and release

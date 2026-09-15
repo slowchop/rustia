@@ -100,8 +100,9 @@ function readData() {
 
 // A published table is one machine.
 //
-// The source files are per-slot merges -- the newest row per slot across every
-// cohort -- so a run that re-measures only part of a matrix leaves the rest
+// The source files merge cohorts -- the timing table keeps the newest row per
+// slot, the memory table each engine's rows from the newest cohort that measured
+// it -- so a run that re-measures only part of a matrix leaves the rest
 // standing. That is how a table came to announce one machine in its metadata
 // while most of its rows had been measured on a rented cloud host six weeks
 // earlier. Every number this page draws is a comparison between rows, and a

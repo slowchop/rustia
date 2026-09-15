@@ -339,6 +339,24 @@ function scriptsDefiningHostLabel(base) {
   return found.sort();
 }
 
+// Refuses a listed script that does not carry `labelLiteral` as a line of its
+// own, or a script under `base` that defines HOST_LABEL without being listed.
+function requireHostLabelParity(base, labelFiles, labelLiteral) {
+  for (const file of labelFiles) {
+    if (!read(path.join(base, file)).split("\n").includes(labelLiteral)) {
+      fail(`${file} does not carry the label character set ${labelLiteral} as a line of its own; every emitter and validator must agree`);
+    }
+  }
+  // The list is only as good as its completeness: a script that defines the
+  // character set without being listed drifts unnoticed, which is how
+  // tools/check-dedicated-config.js went unchecked when it gained one.
+  for (const file of scriptsDefiningHostLabel(base)) {
+    if (!labelFiles.includes(file)) {
+      fail(`${file} defines HOST_LABEL but is not in the label parity list in tools/check-benchmark-results.js`);
+    }
+  }
+}
+
 function read(filePath) {
   try {
     return fs.readFileSync(filePath, "utf8");
@@ -695,21 +713,14 @@ function selfTest() {
     "tools/run-linux-matrix-benchmark.js",
     "tools/run-linux-memory-benchmark.js",
     "tools/run-linux-history-backfill.js",
+    "tools/record-host-bridge.js",
   ];
-  for (const file of labelFiles) {
-    if (!read(path.join(root, file)).split("\n").includes(labelLiteral)) {
-      fail(`${file} does not carry the label character set ${labelLiteral} as a line of its own; every emitter and validator must agree`);
-    }
-  }
-  // The list is only as good as its completeness: a script that defines the
-  // character set without being listed drifts unnoticed, which is how
-  // tools/check-dedicated-config.js went unchecked when it gained one.
-  for (const file of scriptsDefiningHostLabel(root)) {
-    if (!labelFiles.includes(file)) {
-      fail(`${file} defines HOST_LABEL but is not in the label parity list in tools/check-benchmark-results.js`);
-    }
-  }
+  requireHostLabelParity(root, labelFiles, labelLiteral);
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-host-label-"));
+  const writeFixture = (file, text) => {
+    fs.mkdirSync(path.dirname(path.join(fixtureRoot, file)), { recursive: true });
+    fs.writeFileSync(path.join(fixtureRoot, file), text);
+  };
   try {
     for (const [file, text] of [
       ["tools/emits.js", `${labelLiteral}\n`],
@@ -718,13 +729,26 @@ function selfTest() {
       ["tools/node_modules/vendored.js", `${labelLiteral}\n`],
       ["bench/notes.md", `${labelLiteral}\n`],
     ]) {
-      fs.mkdirSync(path.dirname(path.join(fixtureRoot, file)), { recursive: true });
-      fs.writeFileSync(path.join(fixtureRoot, file), text);
+      writeFixture(file, text);
     }
     const found = scriptsDefiningHostLabel(fixtureRoot);
     if (JSON.stringify(found) !== JSON.stringify(["bench/nested/validates.js", "tools/emits.js"])) {
       fail(`scriptsDefiningHostLabel found ${JSON.stringify(found)} in its fixture`);
     }
+    // Both refusals, each for its own reason. A copy of the literal that is
+    // indented, annotated or commented out is not the line, so it could sit
+    // beside a validator that says something else.
+    const bothListed = ["tools/emits.js", "bench/nested/validates.js"];
+    writeFixture("bench/nested/validates.js", `"use strict";\n${labelLiteral}\n`);
+    requireHostLabelParity(fixtureRoot, bothListed, labelLiteral);
+    for (const variant of [`  ${labelLiteral}`, `${labelLiteral} // same`, `// ${labelLiteral}`]) {
+      writeFixture("tools/emits.js", `${variant}\n`);
+      refuses(/^tools\/emits\.js does not carry the label character set .* as a line of its own/, () =>
+        requireHostLabelParity(fixtureRoot, bothListed, labelLiteral));
+    }
+    writeFixture("tools/emits.js", `${labelLiteral}\n`);
+    refuses(/^bench\/nested\/validates\.js defines HOST_LABEL but is not in the label parity list/, () =>
+      requireHostLabelParity(fixtureRoot, ["tools/emits.js"], labelLiteral));
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }

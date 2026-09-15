@@ -197,10 +197,10 @@ Current unpublished workspace version: `0.0.1`.
   and `bench/render-current-results.js` each require a published table to name
   exactly one machine. The renderer refuses such a table rather than labelling
   the mix: every figure on the page is a ratio between two rows, so an
-  annotated cross-host ratio is still a wrong number. Both published tables are
-  per-slot merges across cohorts, so before this a partial re-measurement left
-  every slot it did not cover on whatever machine last measured it, with only
-  `row.commit` to reveal it. Committed history is stamped; the harness reads
+  annotated cross-host ratio is still a wrong number. Both published tables
+  merge cohorts (the timing table per slot, the memory table per engine), so
+  before this a partial re-measurement left everything it did not cover on
+  whatever machine last measured it, with only `row.commit` to reveal it. Committed history is stamped; the harness reads
   the field as optional, because its absence means "measured before hosts were
   recorded" rather than "measured somewhere unnamed", and omits
   `metadata.hosts` when any row is unnamed rather than listing only the rows
@@ -226,8 +226,8 @@ Current unpublished workspace version: `0.0.1`.
   that replaces it. Raw memory samples no longer record the node name, and the
   memory cohort's host evidence records `uname -srvm` rather than `uname -a`,
   as the matrix runner's owned lane already did. The published data
-  repository's memory artifacts must carry the field before the publication
-  lane renders again; the copies committed here differ from them only by it.
+  repository's memory table and history were stamped the same way
+  (slowchop/rustia-bench-data PR #9).
 - The memory merge treats a generated cohort as one machine before merging it.
   `tools/merge-rustia-ci-memory-data.js` refuses a cohort whose rows,
   `metadata.host` or history line disagree, and names the side that is wrong.
@@ -236,8 +236,10 @@ Current unpublished workspace version: `0.0.1`.
   cross-engine cohort replaces every engine it measured whatever machine the
   stored rows name; that is how a table from another machine is re-measured
   rather than refused.
-- The label rule reaches four more files, and the checker's parity self-test
-  now reads twelve besides the harness. `tools/check-dedicated-config.js`,
+- The label rule reaches five more files, and the checker's parity self-test
+  now reads thirteen besides the harness. `tools/record-host-bridge.js`
+  refuses a row host that is not a label before it records or prints one.
+  `tools/check-dedicated-config.js`,
   which took over the deleted fixed runner's frozen-config validation, refuses
   a `provider.host.name` that is not a label. `bench/publish-memory-analysis.js`
   checks every row's host and `analysis.host`, and a missing `analysis.host`
@@ -254,15 +256,24 @@ Current unpublished workspace version: `0.0.1`.
   detaches at the measured commit and runs those copies, because a merge tool
   from before host labels checks nothing. A commit whose
   `bench/analyze-memory-samples.js` does not carry the label literal as a whole
-  line is refused before the build, so commits from before host-labelled
-  memory rows can no longer be measured through the lane.
+  line is refused before the build, so commits from before a row's host was
+  confined to a label can no longer be measured through the lane.
   `tools/check-workflows.js` pins the copies, their order and invocations, and
-  the gate, and requires both copied tools to load only `node:` builtins.
+  the gate, and requires both copied tools to load only `node:` builtins. It
+  also refuses any other line that moves the working tree, a second checkout
+  step, and any other line that names the trusted tools directory, each of
+  which could put the measured commit's tools there.
 - `tools/run-dedicated-benchmark.js` refuses an ssh destination that is a
   published label. Before any ssh or scp it compares the host part of
-  `RUSTIA_BENCH_SSH`, ignoring case, a `user@`, an `ssh://` scheme and a port,
-  with every runner class's `host` in `bench/operations-status.json` and the
-  `provider.host.name` of every `bench/cloud/dedicated-*.json`.
+  `RUSTIA_BENCH_SSH`, ignoring case, a `user@`, an `ssh://` scheme, a port and
+  a trailing `/`, with every runner class's `host` in
+  `bench/operations-status.json` and the `provider.host.name` of every
+  `bench/cloud/dedicated-*.json`. Its self-test runs `host-check` and `unlock`
+  against a stub `ssh` to show that neither reaches it.
+- The owned lane's matrix evidence check refuses a uname that is not
+  `uname -srvm` by its form: the second field must be the kernel release the
+  attestation read, which is where `uname -a` puts the node name. It used to
+  look for one name, so a node name it did not know would have passed.
 
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,

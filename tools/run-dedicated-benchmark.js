@@ -122,9 +122,11 @@ function publishedHostLabels(root) {
   return [...labels];
 }
 
-/// The host an ssh destination names, from `[ssh://][user@]host[:port]`. The
-/// user ends at the last `@`, which is where ssh splits it, and an IPv6 literal
-/// is bracketed so its colons are not read as a port.
+/// The host an ssh destination names, from `[ssh://][user@]host[:port][/]`. The
+/// user ends at the last `@`, which is where ssh splits it. The host ends at a
+/// `:` or a `/`, where ssh's URI parser ends it: that parser accepts an empty
+/// path, so `ssh://host/` reaches `host`. An IPv6 literal is bracketed so its
+/// colons are not read as a port.
 function sshHostPart(destination) {
   const authority = destination.replace(/^ssh:\/\//i, "");
   const host = authority.slice(authority.lastIndexOf("@") + 1);
@@ -132,8 +134,7 @@ function sshHostPart(destination) {
     const close = host.indexOf("]");
     return close === -1 ? host : host.slice(1, close);
   }
-  const colon = host.indexOf(":");
-  return colon === -1 ? host : host.slice(0, colon);
+  return host.split(/[:/]/)[0];
 }
 
 /// Why `destination` must not be used as an ssh target, or null. ssh lowercases
@@ -806,6 +807,24 @@ const MATRIX_PUBLICATIONS = Object.freeze({
   dispatch: "publication/bench/wasm/dispatch-current-results.json",
 });
 
+/// Why an owned-lane matrix `host.json` uname must not be committed, or null.
+/// The file is committed to a public repository, so the lane records
+/// `uname -srvm`, which leaves out the node name. `uname -a` puts the node name
+/// second, where `uname -srvm` puts the kernel release, so the second field
+/// must be the release the attestation read. That checks the form rather than
+/// a list of names, which would pass every name it did not list. The message
+/// does not quote the uname, since a wrong one may carry the name.
+function matrixUnameProblem(uname, kernel, arch) {
+  const fields = String(uname ?? "").trim().split(/\s+/);
+  if (fields[0] === "Linux" && typeof kernel === "string" && fields[1] === kernel && fields.at(-1) === arch) {
+    return null;
+  }
+  return (
+    "matrix host evidence is not uname -srvm (Linux, the attested kernel release, the version, the machine); " +
+    "the owned lane must record uname -srvm, since any other form can carry the node name"
+  );
+}
+
 // The rented lane's evidence check asserts the host is a KVM guest, which is
 // exactly the thing that is no longer true. The rest of it -- manifest schema,
 // source hashes, protocol and provider hashes, per-file hashes, result shape --
@@ -838,11 +857,9 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
   if (host.benchmark_cpu !== config.host_gate.benchmark_cpu) {
     fail("matrix host evidence pinned a different CPU than the config");
   }
-  // The node name is deliberately absent from the owned lane's uname, because
-  // this file is committed to a public repository.
-  if (/(\s|^)[A-Za-z0-9-]*\bci-bench\b/.test(host.uname ?? "")) {
-    fail("matrix host evidence carries a node name; the owned lane must record uname -srvm");
-  }
+  const attested = JSON.parse(fs.readFileSync(providerFile, "utf8"));
+  const unameProblem = matrixUnameProblem(host.uname, attested.kernel, host.arch);
+  if (unameProblem !== null) fail(unameProblem);
   if (manifest.protocol_sha256 !== matrixRules.sha256File(path.join(evidenceDirectory, "protocol.json"))) {
     fail("matrix manifest protocol hash is wrong");
   }
@@ -2070,10 +2087,38 @@ function selfTest() {
     `ssh://user@${authority}:22`,
     // ssh strips the brackets from a URI's host, whatever they enclose.
     `ssh://user@[${authority}]:22`,
+    // ssh accepts a URI with an empty path, and a trailing slash still reaches
+    // the host.
+    `ssh://${authority}/`,
+    `ssh://user@${authority}/`,
+    `ssh://user@${authority}:22/`,
     authority.toUpperCase(),
     `ssh://user@${authority.toUpperCase()}:22`,
   ]) {
     assert.equal(sshDestinationProblem(destination, published), refusal, `${destination} must be refused`);
+  }
+  // The refusal is wired into every ssh call, not just defined: host-check and
+  // unlock only ever run ssh, and each exits on the label before starting it.
+  // A stub ssh and scp ahead of the real ones record any call that gets through.
+  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-ssh-stub-"));
+  try {
+    const called = path.join(stubDir, "called");
+    for (const tool of ["ssh", "scp"]) {
+      fs.writeFileSync(path.join(stubDir, tool), `#!/bin/sh\necho "${tool}" >> "${called}"\n`, { mode: 0o755 });
+    }
+    for (const command of ["host-check", "unlock"]) {
+      for (const destination of [authority, `user@${authority}:22`, `ssh://${authority}/`]) {
+        const run = spawnSync(process.execPath, [__filename, command], {
+          encoding: "utf8",
+          env: { ...process.env, [SSH_ENV]: destination, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
+        });
+        assert.equal(run.status, 1, `${command} with ${destination} must be refused: ${run.stderr}`);
+        assert.equal(run.stderr, `run-dedicated-benchmark: ${refusal}\n`, `${command} with ${destination}`);
+        assert(!fs.existsSync(called), `${command} with ${destination} reached ssh`);
+      }
+    }
+  } finally {
+    fs.rmSync(stubDir, { recursive: true, force: true });
   }
   // Anything whose host is not a published label is the operator's business.
   for (const destination of ["box", "user@box", "ssh://user@box:22", "ssh://user@[fe80::1]:22", "10.0.0.5"]) {
@@ -2327,6 +2372,43 @@ function selfTest() {
   }
   for (const present of ["kvm", "vmware", "microsoft", "xen"]) {
     assert.notEqual(String(present).trim(), "none", `${present} must not read as bare metal`);
+  }
+
+  // The owned lane's uname is checked for its form, not for names. Every
+  // committed owned-host matrix evidence passes. `uname -a` fails whatever the
+  // node is called, and so does a uname from a kernel the attestation did not read.
+  const matrixEvidenceRoot = path.join(REPO, "bench/evidence/matrix");
+  let ownedEvidence = 0;
+  for (const commit of fs.readdirSync(matrixEvidenceRoot)) {
+    for (const run of fs.readdirSync(path.join(matrixEvidenceRoot, commit))) {
+      const dir = path.join(matrixEvidenceRoot, commit, run);
+      const providerPath = path.join(dir, "provider.json");
+      if (!fs.existsSync(providerPath)) continue;
+      const provider = JSON.parse(fs.readFileSync(providerPath, "utf8"));
+      if (provider.schema !== "rustia.bench.dedicated-provider.v1") continue;
+      const evidence = JSON.parse(fs.readFileSync(path.join(dir, "host.json"), "utf8"));
+      assert.equal(matrixUnameProblem(evidence.uname, provider.kernel, evidence.arch), null, `${commit}/${run}`);
+      ownedEvidence += 1;
+    }
+  }
+  assert(ownedEvidence > 0, "expected committed owned-host matrix evidence to check the uname form against");
+  const kernel = "6.8.0-138-generic";
+  const version = "#138-Ubuntu SMP PREEMPT_DYNAMIC Tue Jan 6 00:00:00 UTC 2026";
+  assert.equal(matrixUnameProblem(`Linux ${kernel} ${version} x86_64`, kernel, "x86_64"), null);
+  for (const node of ["localhost", "box", authority]) {
+    assert.match(
+      matrixUnameProblem(`Linux ${node} ${kernel} ${version} x86_64 x86_64 x86_64 GNU/Linux`, kernel, "x86_64") ?? "",
+      /must record uname -srvm/,
+      `uname -a with node ${node} must be refused`,
+    );
+  }
+  for (const [uname, attestedKernel] of [
+    [`Linux ${kernel} ${version} x86_64`, "6.8.0-139-generic"],
+    [`Linux ${kernel} ${version} x86_64`, undefined],
+    [`Linux ${kernel} ${version} aarch64`, kernel],
+    [undefined, kernel],
+  ]) {
+    assert.match(matrixUnameProblem(uname, attestedKernel, "x86_64") ?? "", /must record uname -srvm/, String(uname));
   }
 
   // A skipped screening still renders a summary a reader can act on.

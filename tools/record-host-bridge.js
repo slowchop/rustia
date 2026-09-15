@@ -20,6 +20,10 @@ const REPO = path.resolve(__dirname, "..");
 const HISTORY = path.join(REPO, "bench/history/runs.jsonl");
 const SCHEMA = "rustia.bench.host-bridge.v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+// The bridge writes each side's host into public evidence, so it takes one
+// only as a provenance label: never a dotted name or an address. Kept
+// byte-identical with every other host-label script; see check-benchmark-results.js.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -48,8 +52,13 @@ function cohort(rows, commit) {
 
 // The machine a cohort was measured on, read from its rows. Rows written
 // before hosts were recorded carry no label and yield null; a cohort whose rows
-// name two machines is not a cohort, and is refused rather than summarised.
+// name two machines is not a cohort, and is refused rather than summarised. A
+// row that carries a host must carry a label, checked before any host is
+// quoted, so an address is neither recorded nor printed.
 function cohortHost(rows, label) {
+  if (rows.some((row) => row.host !== undefined && !(typeof row.host === "string" && HOST_LABEL.test(row.host)))) {
+    fail(`${label} has a row whose host is not a label ([A-Za-z0-9_-]{1,128})`);
+  }
   const hosts = [...new Set(rows.map((row) => (typeof row.host === "string" ? row.host : null)))];
   if (hosts.length !== 1) {
     fail(
@@ -212,6 +221,13 @@ function selfTest() {
     () => cohortHost([row({ host: "ci-bench" }), row({ engine: "koto" })], "half"),
     /names 2 machines \(ci-bench, unnamed\)/,
   );
+  for (const host of ["10.0.0.5", "bench.example.com", "fe80::1", "", null]) {
+    assert.throws(
+      () => cohortHost([row({ host: "ci-bench" }), row({ engine: "koto", host })], "addressed"),
+      (error) => error.message === "addressed has a row whose host is not a label ([A-Za-z0-9_-]{1,128})",
+      `${JSON.stringify(host)} must be refused as a host`,
+    );
+  }
   requireDifferentHosts(null, "ci-bench");
   requireDifferentHosts("linode-ap-southeast-g6-dedicated-4", "ci-bench");
   assert.throws(() => requireDifferentHosts("ci-bench", "ci-bench"), /both cohorts were measured on "ci-bench"/);

@@ -26,10 +26,10 @@ name: Rustia Memory Cohort
 # it before anything is built. Merging into the data repository does not. The
 # merge is where a row's machine is checked, and a merge tool from before host
 # labels checks nothing about it, so the merge and the push run from copies of
-# main's tools, taken before the detach. A commit from before host-labelled
-# memory rows cannot be measured through this lane at all: its rows could not
-# name their machine by label, and it is refused before the measurement rather
-# than after.
+# main's tools, taken before the detach. A commit from before a row's host was
+# confined to a label cannot be measured through this lane at all: its rows
+# might not name their machine by one, and it is refused before the measurement
+# rather than after.
 "on":
   workflow_dispatch:
     inputs:
@@ -93,11 +93,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"
           # From here the tree is the measured commit. Every file that emits or
           # validates a host label carries this line verbatim, and
-          # bench/analyze-memory-samples.js has carried it since host labels
-          # arrived, so a commit without it predates labelled memory rows. It is
-          # refused now, not at the merge after an hour on the host.
+          # bench/analyze-memory-samples.js has carried it since labels were
+          # confined to this character set. A commit without it may stamp a
+          # host that is not a label, or none, so it is refused now rather than
+          # at the merge after an hour on the host.
           if ! grep -qxF 'const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;' bench/analyze-memory-samples.js; then
-            echo "::error::${BENCHMARK_COMMIT:0:12} predates host-labelled memory rows: a row it measured could not name its machine by label, and the data repository takes no row that cannot. Dispatch a commit at or after the host-label merge instead."
+            echo "::error::${BENCHMARK_COMMIT:0:12} predates the host-label rule: its bench/analyze-memory-samples.js does not confine a row's host to a label, and the data repository takes no row whose host is not one. Dispatch a commit at or after the host-label merge instead."
             exit 1
           fi
 
