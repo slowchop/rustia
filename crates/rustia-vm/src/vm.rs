@@ -29175,6 +29175,80 @@ mod inline_cache_tests {
         }
     }
 
+    #[test]
+    fn multi_boundary_charge_still_performs_a_real_collection() {
+        // At interval 4, the five-unit charge on the second instruction of
+        // `unit_carrying_program` takes `executed_instructions` straight from
+        // 1 to 6 in one charge, stepping over the boundary at 4 without ever
+        // landing on it exactly (6 % 4 != 0, and `next_weak_collection_instruction`
+        // only ever holds multiples of the interval). A lattice that fires the
+        // collection body only on exact `executed == next` equality -- while
+        // still advancing `next` and `deterministic_collection_count` once per
+        // crossed boundary, exactly as the correct
+        // `maybe_collect_with_roots` does -- would satisfy every bookkeeping
+        // assertion in `unit_charged_steps_collect_once_per_crossed_boundary`
+        // above and yet never actually collect for this charge. Only a
+        // weak-table entry that is already unreachable before the charge,
+        // checked right after it, tells the two apart.
+        let program = unit_carrying_program();
+        let interval = 4u64;
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+            ..VmSettings::default()
+        };
+
+        let mut saw_edge_six = false;
+        for fuel in 0..=10u64 {
+            let mut vm = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    initial_fuel: Some(fuel),
+                    ..settings.clone()
+                },
+            );
+            let weak = vm.heap.alloc_array_table(&[]);
+            let metatable = vm.heap.alloc_array_table(&[]);
+            let mode_key = Value::string_atom(vm.heap.intern_string("__mode"));
+            let weak_values = Value::string_atom(vm.heap.intern_string("v"));
+            vm.heap
+                .table_set(metatable, mode_key, weak_values)
+                .expect("weak mode field");
+            vm.heap
+                .table_set_metatable(weak, Some(metatable))
+                .expect("weak metatable");
+            let key = Value::number(1.0);
+            let dead = Value::table(vm.heap.alloc_array_table(&[]));
+            vm.heap.table_set(weak, key, dead).expect("weak entry");
+            vm.set_global_value("weak", Value::table(weak))
+                .expect("root the weak table");
+
+            let _ = vm.run(&program);
+            let survived = vm
+                .heap
+                .table_get(weak, key)
+                .is_some_and(|value| !value.is_nil());
+
+            match vm.executed_instructions {
+                1 => assert!(
+                    survived,
+                    "fuel {fuel}: executed=1 is below the first boundary (4); \
+                     nothing should have collected yet"
+                ),
+                6 => {
+                    saw_edge_six = true;
+                    assert!(
+                        !survived,
+                        "fuel {fuel}: executed=6 stepped over boundary 4 without \
+                         landing on it exactly; the weak entry must still be \
+                         collected, not just have the lattice bookkeeping advance"
+                    );
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_edge_six, "edge 6 never observed in fuel 0..=10");
+    }
+
     /// One scalar-versus-tape differential execution of `program`, comparing
     /// the result or error, the logical instruction count, and the
     /// deterministic collection state, across a sweep of collection intervals.
