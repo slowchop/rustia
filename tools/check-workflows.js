@@ -269,6 +269,50 @@ function checkRunnerLabels(files) {
   }
 }
 
+// The lanes that hold the bench host for a full measurement wait for it in one
+// concurrency group, in the order they began waiting. queue: max is the part
+// that makes it a queue: a group without it keeps a single pending run, and a
+// newly queued run cancels that one -- cancel-in-progress: false protects only
+// the run already going. That cancelled the per-commit run for f49646f on
+// 2026-09-15. Exclusivity is not this group's job; bench-solo holding one
+// runner is. Screening stays out because it cancels its own superseded runs,
+// which GitHub rejects alongside queue: max, and the publisher stays out
+// because the memory lane calls it while holding this group.
+const BENCH_HOST_QUEUE_GROUP = "rustia-bench-host-serial";
+const BENCH_HOST_QUEUE_BLOCK = [
+  "concurrency:",
+  `  group: ${BENCH_HOST_QUEUE_GROUP}`,
+  "  cancel-in-progress: false",
+  "  queue: max",
+  "",
+].join("\n");
+const BENCH_HOST_QUEUE_WORKFLOWS = Object.freeze([
+  "acceptance-bench.yml",
+  "main-bench.yml",
+  "rustia-memory.yml",
+  "weekly-matrix-bench.yml",
+]);
+
+function checkBenchHostQueue(files) {
+  for (const required of BENCH_HOST_QUEUE_WORKFLOWS) {
+    if (!files.includes(required)) fail(`missing .github/workflows/${required}`);
+  }
+  for (const file of files) {
+    const text = readWorkflow(path.join(workflowDir, file));
+    const label = `.github/workflows/${file}`;
+    if (!BENCH_HOST_QUEUE_WORKFLOWS.includes(file)) {
+      forbidIncludes(text, BENCH_HOST_QUEUE_GROUP, label);
+      continue;
+    }
+    requireIncludes(text, `\n${BENCH_HOST_QUEUE_BLOCK}`, label);
+    // One block, at workflow level. A job-level group beside it would put the
+    // measuring job back in a queue that holds one pending run.
+    if (text.split("concurrency:").length - 1 !== 1) {
+      fail(`${label} must declare exactly one concurrency block, the bench host queue`);
+    }
+  }
+}
+
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
@@ -295,6 +339,13 @@ function checkCi(text) {
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/run-release-preflight.js", label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
+  // Preflight lints the benchmark adapter for wasm32. The action's `rustup
+  // override` bypasses rust-toolchain.toml's target list, so the job names it.
+  requireIncludes(
+    releasePreflightJob,
+    "target: wasm32-unknown-unknown",
+    `${label} release-preflight job`,
+  );
   forbidIncludes(text, "cargo clippy --workspace", label);
   forbidIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "node tools/check-package-files.js", label);
@@ -360,10 +411,6 @@ function checkMainBench(text) {
   requireIncludes(text, "\"on\":\n  push:\n    branches:\n      - main\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
-  // One group across every lane that touches the bench host, so a measurement
-  // never overlaps another job on the machine being measured.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false", label);
   requireIncludes(text, "persist-credentials: false", label);
   requireIncludes(text, "timeout-minutes:", label);
   requireIncludes(text, "node tools/run-dedicated-benchmark.js main --local", label);
@@ -443,6 +490,16 @@ function checkReleasePreflight(text) {
     '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
+    // The builds only the owned benchmark host compiles. Without these, a
+    // break under their cfgs is found by the weekly matrix or a memory run,
+    // after merge. The host denies warnings through the toolchain action's
+    // RUSTFLAGS, so each check denies them too.
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "all-engines",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "mlua-lua54",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/wasm/adapter-runner/Cargo.toml",\n' +
+      '  "--target",\n  "wasm32-unknown-unknown",\n  "--",\n  "-D",\n  "warnings",\n',
     '"tools/check-release-notes.js"',
     '"tools/check-crate-metadata.js"',
     '"tools/check-workflows.js"',
@@ -781,10 +838,6 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "options:\n          - rustia-only\n          - cross-engine\n", label);
   requireIncludes(text, "COHORT: ${{ inputs.cohort }}", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
-  // Shares the host's serialisation group: sampling must never overlap another
-  // job on the machine it is measuring.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
   requireIncludes(text, "BENCHMARK_COMMIT: ${{ inputs.commit_sha }}", label);
@@ -856,10 +909,6 @@ function checkWeeklyMatrix(text) {
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);
   requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
-  // Shares the host's serialisation group: a cohort takes about forty minutes
-  // and must never overlap another job on the machine it is measuring.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
   requireIncludes(text, "toolchain: 1.95.0", label);
@@ -975,6 +1024,7 @@ if (files.includes("benchmarks.yml")) {
   fail(".github/workflows/benchmarks.yml must remain absent; fresh timing runs belong to the explicit Linode lifecycle");
 }
 checkRunnerLabels(files);
+checkBenchHostQueue(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
 checkWeeklyMatrix(readWorkflow(weeklyMatrixPath));

@@ -252,9 +252,10 @@ continuation remains part of the semantic-tail blocker.
 
 - `just release-preflight` and hosted CI invoke the same
   `tools/run-release-preflight.js` driver before any publishability flip. It checks
-  formatting, strict workspace Clippy, release notes, package file lists,
-  generated progress HTML, benchmark result freshness, crate metadata, workflow
-  policy, example compilation, and the workspace test suite.
+  formatting, strict workspace Clippy, strict Clippy for the builds only the
+  benchmark host compiles, release notes, package file lists, generated progress
+  HTML, benchmark result freshness, crate metadata, workflow policy, example
+  compilation, and the workspace test suite.
 - Hosted CI installs the exact channel from `rust-toolchain.toml` and runs
   `cargo fmt --all -- --check` plus
   locked strict workspace Clippy.
@@ -263,10 +264,24 @@ continuation remains part of the semantic-tail blocker.
   preflight rejects a dirty `Cargo.lock` before validation.
 - Preflight runs `cargo fetch --locked` against the manifest beside every
   tracked `Cargo.lock`: the root, `fuzz/`, and the standalone wasm runners in
-  `bench/wasm/adapter-runner/` and `demos/live-wasm/wasm-runner/`. CI builds
-  neither wasm runner, but the owned-host benchmark lanes build the adapter
-  with `--locked`, so a lock left stale by a shared-crate dependency change
-  fails here instead of on the host.
+  `bench/wasm/adapter-runner/` and `demos/live-wasm/wasm-runner/`. The
+  owned-host benchmark lanes build the adapter with `--locked`, so a lock left
+  stale by a shared-crate dependency change fails here instead of on the host.
+- Preflight runs Clippy with `-D warnings` on the three builds that otherwise
+  compile only on the owned benchmark host, for the weekly matrix and the
+  memory lanes: `bench` with `--no-default-features --features all-engines`
+  (every competitor engine), `bench` with `--no-default-features --features
+  mlua-lua54` (the one build with `rustia-engine` off), and the standalone
+  adapter in `bench/wasm/adapter-runner/` for `wasm32-unknown-unknown`. The
+  workspace Clippy reaches none of their cfg paths. Both host workflows
+  inherit the pinned toolchain action's default `RUSTFLAGS=-D warnings`, so a
+  plain `cargo check` would let through a warning that fails the host build.
+  The checks catch compile errors and warnings. Link and codegen failures
+  still surface only on the host. They add about 0.4 s to a warm preflight
+  with nothing changed, about 2.3 s after an engine-crate edit, and about
+  51 s from cold, measured on an M4 Max while other builds were running.
+  The CI preflight job installs the wasm target itself, because the action's
+  `rustup override` bypasses the target list in `rust-toolchain.toml`.
 - `just check-crate-metadata` passes and `design/crate-metadata.json` is
   current.
 - `just check-workflows` passes and keeps hosted CI validation-only: it pins the

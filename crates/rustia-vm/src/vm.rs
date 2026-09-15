@@ -697,6 +697,11 @@ struct LoadedProgram {
     closure_call_fast_entries: u64,
     #[cfg(any(test, feature = "executor-diagnostics"))]
     closure_call_guard_exits: u64,
+    /// Leaf-plan replays served through `try_leaf_bytecode_handle` (the
+    /// `call_value` path). Attributed to the callee's program, since that path
+    /// has no caller site; `closure_call_fast_entries` is the caller's.
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    leaf_call_value_entries: u64,
 }
 
 #[derive(Default)]
@@ -979,15 +984,20 @@ impl std::ops::Index<usize> for LoadedPrograms {
 impl LoadedProgram {
     fn new(program: Program) -> Self {
         let constant_atoms = vec![CONSTANT_ATOM_EMPTY; program.constants().len()];
-        let main_inline_caches = FunctionInlineCaches::new(&program, &program.main, None);
+        let main_inline_caches = FunctionInlineCaches::new(&program, None, &program.main, None);
+        // `index` is the prototype id: `program.functions[index]`, the
+        // schedule's `functions[index]` slice, and the `prototype` of
+        // `FunctionKind::Bytecode` all agree on it.
         let function_inline_caches = program
             .functions
             .iter()
-            .map(|function| {
+            .enumerate()
+            .map(|(index, function)| {
                 FunctionInlineCaches::new(
                     &program,
+                    Some(index),
                     function,
-                    recognize_leaf_call_plan(&program, function),
+                    recognize_leaf_call_plan(&program, index, function),
                 )
             })
             .collect();
@@ -1026,6 +1036,8 @@ impl LoadedProgram {
             closure_call_fast_entries: 0,
             #[cfg(any(test, feature = "executor-diagnostics"))]
             closure_call_guard_exits: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            leaf_call_value_entries: 0,
         }
     }
 
@@ -1254,7 +1266,14 @@ enum TapeOutcome {
 }
 
 impl FunctionInlineCaches {
-    fn new(program: &Program, function: &Function, leaf_call_plan: Option<LeafCallPlan>) -> Self {
+    /// `prototype` is this function's id (`None` = main): the function that
+    /// contains any `ForLoop` a HotIR plan replays.
+    fn new(
+        program: &Program,
+        prototype: Option<usize>,
+        function: &Function,
+        leaf_call_plan: Option<LeafCallPlan>,
+    ) -> Self {
         let entry_by_pc = function
             .code
             .iter()
@@ -1266,10 +1285,14 @@ impl FunctionInlineCaches {
                 _ => SITE_CACHE_INELIGIBLE,
             })
             .collect();
-        // HotIR iteration accounting assumes one logical unit per matched
-        // PC; programs carrying an optimized logical-unit schedule stay on
-        // the tape and scalar dispatcher, which charge exact units.
-        let hot_irs = if program.logical_units().is_none() {
+        // HotIR charges `1 + body_instruction_count` per continuing iteration
+        // and 1 on exit, which equals the scalar/tape unit charge over the
+        // loop's PCs only when every unit of this prototype is one. A
+        // prototype whose own slice of the logical-unit schedule is
+        // non-identity stays on the tape and scalar dispatcher, which charge
+        // exact units; a rewrite in a different prototype changes nothing
+        // here.
+        let hot_irs = if program.logical_units_are_identity_for(prototype) {
             recognize_hot_ir_loops(program, function)
         } else {
             Vec::new()
@@ -1588,14 +1611,32 @@ impl LeafCallPlan {
     }
 }
 
-fn recognize_leaf_call_plan(program: &Program, function: &Function) -> Option<LeafCallPlan> {
-    // Leaf-call plans replay a callee body at one logical unit per
-    // instruction; unit-carrying programs use ordinary frames instead.
-    if program.logical_units().is_some() {
+/// `prototype` is the callee whose body a plan replays (the counter closure
+/// itself for `UpvalueCounter`, the `__iter` closure for `ArrayIterator`).
+fn recognize_leaf_call_plan(
+    program: &Program,
+    prototype: usize,
+    function: &Function,
+) -> Option<LeafCallPlan> {
+    // Leaf-call plans replay the callee body at one logical unit per
+    // instruction (the fixed charges in `try_leaf_call_outcome`), so a callee
+    // whose own slice of the logical-unit schedule is non-identity keeps
+    // ordinary frames. The caller's schedule does not matter: the `Call`
+    // site charges its own units on top of the plan's. Plans are only ever
+    // looked up by callee prototype, so gating at recognition is sufficient.
+    if !program.logical_units_are_identity_for(Some(prototype)) {
         return None;
     }
     recognize_upvalue_counter_plan(function)
         .or_else(|| recognize_array_iterator_plan(program, function))
+}
+
+/// The logical units one instruction charges under a schedule (`None` is the
+/// identity schedule; a missing entry is one unit). Shared by the scalar
+/// dispatcher, the tape, and the `Call` fast path so the three cannot drift.
+#[inline]
+fn logical_unit_at(units: Option<&[u32]>, pc: usize) -> u64 {
+    units.map_or(1, |units| u64::from(units.get(pc).copied().unwrap_or(1)))
 }
 
 fn recognize_upvalue_counter_plan(function: &Function) -> Option<LeafCallPlan> {
@@ -2558,6 +2599,7 @@ impl Vm {
             census.closure_call_prototype_hits += program.closure_call_prototype_hits;
             census.closure_call_cache_fills += program.closure_call_cache_fills;
             census.closure_call_guard_exits += program.closure_call_guard_exits;
+            census.leaf_call_value_entries += program.leaf_call_value_entries;
             census.table_inline_cache_hits += program.table_inline_cache_hits;
             census.table_inline_cache_fills += program.table_inline_cache_fills;
             census.native_call_inline_cache_hits += program.native_call_inline_cache_hits;
@@ -3598,6 +3640,25 @@ impl Vm {
         self.deterministic_collection_count
     }
 
+    /// Logical instructions charged since construction or the last
+    /// [`Vm::reset_decision`]: the clock the deterministic-collection lattice
+    /// and the logical `os.clock` derive from. A field read.
+    #[inline]
+    pub const fn executed_instructions(&self) -> u64 {
+        self.executed_instructions
+    }
+
+    /// The next lattice point at which a deterministic collection fires.
+    /// Between instructions this is always
+    /// `(executed_instructions / deterministic_gc_interval + 1) * interval`;
+    /// schedule tests assert it directly on profiles whose
+    /// [`Vm::deterministic_collection_count`] stays zero.
+    #[doc(hidden)]
+    #[inline]
+    pub const fn next_deterministic_collection_instruction(&self) -> u64 {
+        self.next_weak_collection_instruction
+    }
+
     pub fn run(&mut self, program: &Program) -> Result<Value> {
         let mut state = self.begin_execution();
         let mut hosts = RejectHostDispatcher;
@@ -4254,6 +4315,12 @@ impl Vm {
                         // accounting.
                         if instruction.op == Opcode::Call {
                             if let Some(program_id) = program_id {
+                                // The `Call` instruction itself charges its own
+                                // units (one on an identity schedule) on top of
+                                // the plan's fixed callee charge, exactly as the
+                                // scalar charge below would before opening the
+                                // callee frame.
+                                let call_units = logical_unit_at(frame_logical_units, pc);
                                 if let Some(outcome) = self
                                     .try_closure_call_scalar(
                                         program_id,
@@ -4262,6 +4329,7 @@ impl Vm {
                                         &registers,
                                         instruction,
                                         context.depth,
+                                        call_units,
                                         fuel,
                                     )
                                     .map_err(|error| {
@@ -4270,7 +4338,8 @@ impl Vm {
                                 {
                                     self.executed_instructions =
                                         self.executed_instructions.wrapping_add(
-                                            u64::from(outcome.instruction_count).saturating_add(1),
+                                            u64::from(outcome.instruction_count)
+                                                .saturating_add(call_units),
                                         );
                                     sync_leaf_mutation_to_registers(
                                         &mut registers,
@@ -4343,15 +4412,18 @@ impl Vm {
                             // Folded logical instructions all have fuel cost
                             // one, so the restored schedule is the
                             // instruction's own cost plus its extra units.
-                            let extra_units = frame_logical_units.map_or(0, |units| {
-                                u64::from(units.get(pc).copied().unwrap_or(1)).saturating_sub(1)
-                            });
-                            let fuel_cost = self
+                            let extra_units =
+                                logical_unit_at(frame_logical_units, pc).saturating_sub(1);
+                            let own_cost = self
                                 .instruction_fuel_cost(instruction)
-                                .map_err(|e| e.at_pc(pc))?
-                                .saturating_add(extra_units);
-                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, fuel_cost)
-                                .map_err(|error| error.at_pc(pc))?;
+                                .map_err(|e| e.at_pc(pc))?;
+                            let fuel_cost = own_cost.saturating_add(extra_units);
+                            // Registers are unchanged until this instruction's
+                            // own semantics run below, so one check against the
+                            // group's whole prospective distance covers every
+                            // charge in the loop beneath it: nothing about the
+                            // root snapshot's accuracy depends on how many of
+                            // those charges the fuel budget actually affords.
                             let weak_collection_due = self.weak_collection_due_within(fuel_cost);
                             if weak_collection_due
                                 || self.settings.memory_limit_bytes.is_some()
@@ -4366,10 +4438,28 @@ impl Vm {
                                     &pending_return_prefixes,
                                 );
                             }
-                            self.executed_instructions = self
-                                .executed_instructions
-                                .wrapping_add(1)
-                                .wrapping_add(extra_units);
+                            // Charge one folded unit at a time -- each costs
+                            // exactly one fuel, by the invariant above -- with
+                            // its own `executed_instructions` advance and
+                            // `maybe_collect` call, so a budget that runs out
+                            // inside this group leaves the schedule exactly
+                            // where the unoptimized program would have left it
+                            // after charging that many folded instructions,
+                            // instead of discarding the whole group's
+                            // already-earned progress (design/58-vm-core2.md
+                            // §C2.3, "fuel exhaustion mid-group"). Real
+                            // dispatch below only ever runs once every unit in
+                            // the group -- folded and own -- has been charged.
+                            for _ in 0..extra_units {
+                                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, 1)
+                                    .map_err(|error| error.at_pc(pc))?;
+                                self.executed_instructions =
+                                    self.executed_instructions.wrapping_add(1);
+                                self.maybe_collect()?;
+                            }
+                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, own_cost)
+                                .map_err(|error| error.at_pc(pc))?;
+                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
                             self.maybe_collect()?;
                             self.record_coverage_hit(program_id, context.prototype, function, pc);
                             self.record_opcode_execution(instruction.op);
@@ -8975,9 +9065,7 @@ impl Vm {
         // Per-instruction logical units (identity when no schedule is
         // attached). Charging by units keeps fuel and deterministic-GC
         // scheduling on the unoptimized logical lattice.
-        let unit_at = |pc: usize| -> u64 {
-            logical_units.map_or(1, |units| u64::from(units.get(pc).copied().unwrap_or(1)))
-        };
+        let unit_at = |pc: usize| -> u64 { logical_unit_at(logical_units, pc) };
         let units_over = |start: usize, count: usize| -> u64 {
             match logical_units {
                 None => count as u64,
@@ -11135,7 +11223,7 @@ impl Vm {
                 .set_table_inline_cache(prototype, pc, entry)
                 .is_some()
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 {
                     program.table_inline_cache_fills =
                         program.table_inline_cache_fills.saturating_add(1);
@@ -11169,7 +11257,7 @@ impl Vm {
                 .set_import_inline_cache(prototype, pc, lane, entry)
                 .is_some()
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 {
                     program.table_inline_cache_fills =
                         program.table_inline_cache_fills.saturating_add(1);
@@ -11201,7 +11289,7 @@ impl Vm {
                 .set_native_call_inline_cache(prototype, pc, entry)
                 .is_some()
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "executor-diagnostics"))]
                 {
                     program.native_call_inline_cache_fills =
                         program.native_call_inline_cache_fills.saturating_add(1);
@@ -11232,7 +11320,7 @@ impl Vm {
     ) {
         if let Some(mut program) = self.dynamic_programs.get_mut(caller_program) {
             let _filled = program.set_closure_call_inline_cache(caller_prototype, pc, entry);
-            #[cfg(test)]
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             if matches!(_filled, Some(true)) {
                 program.closure_call_cache_fills =
                     program.closure_call_cache_fills.saturating_add(1);
@@ -11259,6 +11347,13 @@ impl Vm {
     fn record_closure_call_guard_exit(&mut self, program_id: u32) {
         if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
             program.closure_call_guard_exits = program.closure_call_guard_exits.saturating_add(1);
+        }
+    }
+
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    fn record_leaf_call_value_entry(&mut self, program_id: u32) {
+        if let Some(mut program) = self.dynamic_programs.get_mut(program_id) {
+            program.leaf_call_value_entries = program.leaf_call_value_entries.saturating_add(1);
         }
     }
 
@@ -11511,9 +11606,18 @@ impl Vm {
         self.executed_instructions = self
             .executed_instructions
             .wrapping_add(u64::from(outcome.instruction_count));
+        // Recorded on the callee's program: this path has no caller site,
+        // unlike `try_closure_call_scalar`, which records on the caller's.
+        #[cfg(any(test, feature = "executor-diagnostics"))]
+        self.record_leaf_call_value_entry(program_id);
         Ok(Some(leaf_outcome_return_values(outcome)))
     }
 
+    /// `call_units` is what the `Call` instruction at `pc` charges under the
+    /// caller's schedule; the admitted window and the caller's charge both
+    /// include it so the fast path stays exact for a caller whose own slice
+    /// is non-identity.
+    #[allow(clippy::too_many_arguments)]
     fn try_closure_call_scalar(
         &mut self,
         caller_program: u32,
@@ -11522,6 +11626,7 @@ impl Vm {
         registers: &[Value],
         instruction: Instruction,
         depth: usize,
+        call_units: u64,
         fuel: &mut Execution<'_>,
     ) -> Result<Option<LeafCallOutcome>> {
         if instruction.op != Opcode::Call
@@ -11579,7 +11684,8 @@ impl Vm {
             (plan, false)
         };
 
-        if self.weak_collection_due_within(plan.maximum_instruction_count().saturating_add(1))
+        if self
+            .weak_collection_due_within(plan.maximum_instruction_count().saturating_add(call_units))
             || depth.saturating_add(1) > self.settings.recursion_limit
         {
             return Ok(None);
@@ -20401,68 +20507,75 @@ impl Vm {
 
     #[inline(always)]
     fn maybe_collect(&mut self) -> Result<()> {
-        let weak_collection_due =
-            self.executed_instructions == self.next_weak_collection_instruction;
-        if self.profile.is_deterministic_sim() {
-            if weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(&[]);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
-                self.deterministic_collection_count =
-                    self.deterministic_collection_count.wrapping_add(1);
-            }
-        } else {
-            self.heap.collect_debt();
-            if !self.gc_stopped && weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(&[]);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
-            }
-        }
-        if weak_collection_due {
-            self.next_weak_collection_instruction = self
-                .next_weak_collection_instruction
-                .wrapping_add(self.settings.deterministic_gc_interval.get());
-        }
-        self.record_memory_peak();
-        self.enforce_memory_limit(&[])
+        self.maybe_collect_with_roots(&[])
     }
 
+    /// Fires the deterministic-collection boundary for every lattice point
+    /// the charge just applied to `executed_instructions` reached or stepped
+    /// over, then enforces the memory limit.
+    ///
+    /// A unit-carrying instruction (`ProgramLogicalUnits`) charges
+    /// `1 + extra_units` in one step, so one charge can cross several
+    /// boundaries. Each crossed boundary collects once — iterations after the
+    /// first run against identical VM state and are idempotent — and advances
+    /// the lattice once, which keeps the schedule invariant the logical
+    /// receipts exist to hold (`design/58-vm-core2.md` §C2.3): between
+    /// instructions `next == (executed / interval + 1) * interval` and, under
+    /// `DeterministicSim`, `deterministic_collection_count == executed /
+    /// interval`, for every program and across consecutive calls on one VM.
+    /// Unit-one programs reach a boundary only by equality, so their schedule
+    /// is unchanged by the loop. Under `ReproducibleStandard` a
+    /// `collectgarbage("stop")` skips the collection but the lattice still
+    /// advances, as before.
     #[inline(always)]
     fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) -> Result<()> {
-        let weak_collection_due =
-            self.executed_instructions == self.next_weak_collection_instruction;
-        if self.profile.is_deterministic_sim() {
-            if weak_collection_due {
+        let deterministic_sim = self.profile.is_deterministic_sim();
+        if !deterministic_sim {
+            self.heap.collect_debt();
+        }
+        let interval = self.settings.deterministic_gc_interval.get();
+        while self.executed_instructions >= self.next_weak_collection_instruction {
+            if deterministic_sim || !self.gc_stopped {
                 self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
                 self.prune_unreachable_coroutines_if_idle();
+            }
+            if deterministic_sim {
                 self.deterministic_collection_count =
                     self.deterministic_collection_count.wrapping_add(1);
             }
-        } else {
-            self.heap.collect_debt();
-            if !self.gc_stopped && weak_collection_due {
-                self.heap.finish_collection_cycle();
-                let roots = self.collectgarbage_roots(transient_roots);
-                self.heap.collect_weak_tables_with_roots(&roots);
-                self.prune_unreachable_coroutines_if_idle();
+            match self.next_weak_collection_instruction.checked_add(interval) {
+                Some(next) => self.next_weak_collection_instruction = next,
+                None => {
+                    // The lattice saturates rather than wrapping so this loop
+                    // can never spin; 2^64 charged instructions is unreachable.
+                    self.next_weak_collection_instruction = u64::MAX;
+                    break;
+                }
             }
         }
-        if weak_collection_due {
-            self.next_weak_collection_instruction = self
-                .next_weak_collection_instruction
-                .wrapping_add(self.settings.deterministic_gc_interval.get());
-        }
+        debug_assert!(
+            self.executed_instructions < self.next_weak_collection_instruction
+                || self.next_weak_collection_instruction == u64::MAX,
+            "deterministic-collection lattice fell behind the charged instructions"
+        );
         self.record_memory_peak();
         self.enforce_memory_limit(transient_roots)
     }
 
+    /// True when charging `steps` more logical instructions would reach or
+    /// cross the next deterministic-collection boundary. Every fast tier
+    /// (tape window, HotIR, leaf-call plans) admits work only while this is
+    /// false, so no tier ever needs the boundary loop above.
     #[inline(always)]
     fn weak_collection_due_within(&self, steps: u64) -> bool {
+        // `maybe_collect_with_roots` keeps `executed < next` between
+        // instructions, so the distance never wraps.
+        debug_assert!(
+            self.executed_instructions < self.next_weak_collection_instruction
+                || self.next_weak_collection_instruction == u64::MAX
+        );
         steps
             >= self
                 .next_weak_collection_instruction
@@ -28907,6 +29020,257 @@ mod inline_cache_tests {
         assert!(saw_tape);
     }
 
+    /// Eight logical units over four emitted instructions: the second
+    /// `LoadConst` carries five units, so one scalar charge steps
+    /// `executed_instructions` from 1 to 6 and crosses several
+    /// deterministic-collection boundaries at small intervals.
+    fn unit_carrying_program() -> Program {
+        Program::new(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                    Instruction::new(Opcode::Add, 2, 0, 1),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
+                ],
+                3,
+            ),
+            vec![Constant::Number(2.0)],
+        )
+        .with_logical_units(Some(
+            crate::ProgramLogicalUnits::new(vec![1, 5, 1, 1], vec![]).unwrap(),
+        ))
+    }
+
+    /// The lattice invariant `maybe_collect_with_roots` restores after every
+    /// charge, plus agreement between the live `weak_collection_due_within`
+    /// and the test-only floor model.
+    fn assert_on_collection_lattice(vm: &Vm, interval: u64, context: &str) {
+        let executed = vm.executed_instructions;
+        assert_eq!(
+            vm.next_weak_collection_instruction,
+            (executed / interval + 1) * interval,
+            "{context}: next boundary is off the lattice"
+        );
+        let expected_count = if vm.profile.is_deterministic_sim() {
+            executed / interval
+        } else {
+            0
+        };
+        assert_eq!(
+            vm.deterministic_collection_count(),
+            expected_count,
+            "{context}: collection count is off the lattice"
+        );
+        assert_eq!(
+            vm.weak_collection_due_within(1),
+            weak_collection_due_within(executed, interval, 1),
+            "{context}: due-within disagrees with the floor model"
+        );
+        assert_eq!(vm.executed_instructions(), executed);
+        assert_eq!(
+            vm.next_deterministic_collection_instruction(),
+            vm.next_weak_collection_instruction
+        );
+    }
+
+    #[test]
+    fn unit_charged_steps_collect_once_per_crossed_boundary() {
+        let program = unit_carrying_program();
+        assert!(program.logical_units().is_some());
+        for interval in 1..=8u64 {
+            let settings = VmSettings {
+                deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+                ..VmSettings::default()
+            };
+
+            // Every instruction edge, observed through the exact fuel
+            // schedule: fuel is charged before the instruction clock, so a
+            // budget that runs out at instruction k stops at the edge after
+            // instruction k - 1. The five-unit charge makes the edge at 6
+            // reachable only by stepping over 2..=5 in one instruction.
+            let mut edges_seen = Vec::new();
+            for fuel in 0..=10u64 {
+                let mut vm = Vm::with_settings(
+                    Profile::DeterministicSim,
+                    VmSettings {
+                        initial_fuel: Some(fuel),
+                        ..settings.clone()
+                    },
+                );
+                match vm.run(&program) {
+                    Ok(value) => assert_eq!(value.as_number(), Some(4.0)),
+                    Err(error) => assert!(
+                        matches!(error.kind, ErrorKind::FuelExhausted { .. }),
+                        "interval {interval}, fuel {fuel}: {error}"
+                    ),
+                }
+                edges_seen.push(vm.executed_instructions);
+                assert_on_collection_lattice(
+                    &vm,
+                    interval,
+                    &format!("interval {interval}, fuel {fuel}"),
+                );
+                if vm.executed_instructions == 6 {
+                    // The straddling charge fired once per crossed boundary.
+                    assert_eq!(vm.deterministic_collection_count(), 6 / interval);
+                }
+            }
+            for edge in [1u64, 6, 7, 8] {
+                assert!(
+                    edges_seen.contains(&edge),
+                    "interval {interval}: edge {edge} never observed in {edges_seen:?}"
+                );
+            }
+
+            // Plain mode on both executors and both profiles, twice on one VM
+            // so the lattice is pinned across consecutive calls.
+            for tape_off in [false, true] {
+                for profile in [Profile::DeterministicSim, Profile::ReproducibleStandard] {
+                    let context = format!("interval {interval}, tape_off {tape_off}, {profile:?}");
+                    let mut vm = Vm::with_settings(profile, settings.clone());
+                    if tape_off {
+                        vm.tape_mode = TapeTestMode::Off;
+                    }
+                    assert_on_collection_lattice(&vm, interval, &format!("{context}, fresh"));
+                    for call in 1..=2u64 {
+                        assert_eq!(vm.run(&program).unwrap().as_number(), Some(4.0));
+                        assert_eq!(vm.executed_instructions, 8 * call);
+                        assert_on_collection_lattice(
+                            &vm,
+                            interval,
+                            &format!("{context}, call {call}"),
+                        );
+                    }
+                    if profile.is_deterministic_sim() {
+                        assert_eq!(vm.deterministic_collection_count(), 16 / interval);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stopped_collector_still_advances_the_lattice_over_unit_charged_steps() {
+        // `collectgarbage("stop")` under `ReproducibleStandard` skips the
+        // boundary collections but never the lattice: a five-unit charge
+        // over interval 2 advances `next` past every crossed boundary either
+        // way, and only the weak entry tells the two apart.
+        let program = unit_carrying_program();
+        for stopped in [true, false] {
+            let settings = VmSettings {
+                deterministic_gc_interval: NonZeroU64::new(2).unwrap(),
+                ..VmSettings::default()
+            };
+            let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
+            let weak = vm.heap.alloc_array_table(&[]);
+            let metatable = vm.heap.alloc_array_table(&[]);
+            let mode_key = Value::string_atom(vm.heap.intern_string("__mode"));
+            let weak_values = Value::string_atom(vm.heap.intern_string("v"));
+            vm.heap
+                .table_set(metatable, mode_key, weak_values)
+                .expect("weak mode field");
+            vm.heap
+                .table_set_metatable(weak, Some(metatable))
+                .expect("weak metatable");
+            let key = Value::number(1.0);
+            let dead = Value::table(vm.heap.alloc_array_table(&[]));
+            vm.heap.table_set(weak, key, dead).expect("weak entry");
+            vm.set_global_value("weak", Value::table(weak))
+                .expect("root the weak table");
+            vm.gc_stopped = stopped;
+
+            assert_eq!(vm.run(&program).unwrap().as_number(), Some(4.0));
+            assert_eq!(vm.executed_instructions, 8);
+            assert_eq!(vm.next_weak_collection_instruction, 10);
+            assert_eq!(vm.deterministic_collection_count(), 0);
+            assert_on_collection_lattice(&vm, 2, &format!("stopped {stopped}"));
+            let survived = vm
+                .heap
+                .table_get(weak, key)
+                .is_some_and(|value| !value.is_nil());
+            assert_eq!(
+                survived, stopped,
+                "stopped {stopped}: the unreachable weak value should survive \
+                 exactly when the collector is stopped"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_boundary_charge_still_performs_a_real_collection() {
+        // At interval 4, the five-unit charge on the second instruction of
+        // `unit_carrying_program` takes `executed_instructions` straight from
+        // 1 to 6 in one charge, stepping over the boundary at 4 without ever
+        // landing on it exactly (6 % 4 != 0, and `next_weak_collection_instruction`
+        // only ever holds multiples of the interval). A lattice that fires the
+        // collection body only on exact `executed == next` equality -- while
+        // still advancing `next` and `deterministic_collection_count` once per
+        // crossed boundary, exactly as the correct
+        // `maybe_collect_with_roots` does -- would satisfy every bookkeeping
+        // assertion in `unit_charged_steps_collect_once_per_crossed_boundary`
+        // above and yet never actually collect for this charge. Only a
+        // weak-table entry that is already unreachable before the charge,
+        // checked right after it, tells the two apart.
+        let program = unit_carrying_program();
+        let interval = 4u64;
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+            ..VmSettings::default()
+        };
+
+        let mut saw_edge_six = false;
+        for fuel in 0..=10u64 {
+            let mut vm = Vm::with_settings(
+                Profile::DeterministicSim,
+                VmSettings {
+                    initial_fuel: Some(fuel),
+                    ..settings.clone()
+                },
+            );
+            let weak = vm.heap.alloc_array_table(&[]);
+            let metatable = vm.heap.alloc_array_table(&[]);
+            let mode_key = Value::string_atom(vm.heap.intern_string("__mode"));
+            let weak_values = Value::string_atom(vm.heap.intern_string("v"));
+            vm.heap
+                .table_set(metatable, mode_key, weak_values)
+                .expect("weak mode field");
+            vm.heap
+                .table_set_metatable(weak, Some(metatable))
+                .expect("weak metatable");
+            let key = Value::number(1.0);
+            let dead = Value::table(vm.heap.alloc_array_table(&[]));
+            vm.heap.table_set(weak, key, dead).expect("weak entry");
+            vm.set_global_value("weak", Value::table(weak))
+                .expect("root the weak table");
+
+            let _ = vm.run(&program);
+            let survived = vm
+                .heap
+                .table_get(weak, key)
+                .is_some_and(|value| !value.is_nil());
+
+            match vm.executed_instructions {
+                1 => assert!(
+                    survived,
+                    "fuel {fuel}: executed=1 is below the first boundary (4); \
+                     nothing should have collected yet"
+                ),
+                6 => {
+                    saw_edge_six = true;
+                    assert!(
+                        !survived,
+                        "fuel {fuel}: executed=6 stepped over boundary 4 without \
+                         landing on it exactly; the weak entry must still be \
+                         collected, not just have the lattice bookkeeping advance"
+                    );
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_edge_six, "edge 6 never observed in fuel 0..=10");
+    }
+
     /// One scalar-versus-tape differential execution of `program`, comparing
     /// the result or error, the logical instruction count, and the
     /// deterministic collection state, across a sweep of collection intervals.
@@ -29998,6 +30362,121 @@ mod inline_cache_tests {
         assert!(saw_hot_ir_iteration);
     }
 
+    /// [`hot_ir_array_program`]'s loop hoisted into function 0 (its 19
+    /// instructions, `ForLoop` at pc 15 over body pcs 8..=14) and called from
+    /// a four-instruction main, so a schedule can be non-identity in one
+    /// prototype while the other stays identity.
+    fn hot_ir_array_in_function_program(main_units: Vec<u32>, loop_units: Vec<u32>) -> Program {
+        let mut body = hot_ir_array_program().main;
+        assert_eq!(body.code.pop().map(|halt| halt.op), Some(Opcode::Halt));
+        let main = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, 0),
+                Instruction::with_aux(Opcode::Call, 1, 0, 0, 0),
+                Instruction::new(Opcode::Return, 1, 1, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            2,
+        );
+        assert_eq!(main_units.len(), main.code.len());
+        assert_eq!(loop_units.len(), body.code.len());
+        let identity = main_units.iter().chain(&loop_units).all(|unit| *unit == 1);
+        let program = Program::with_functions(
+            main,
+            vec![Constant::Number(1.0), Constant::Number(64.0)],
+            vec![body],
+        )
+        .with_logical_units(Some(
+            crate::ProgramLogicalUnits::new(main_units, vec![loop_units]).unwrap(),
+        ));
+        assert_eq!(program.logical_units().is_some(), !identity);
+        program
+    }
+
+    /// Runs the program once per deterministic-collection interval with
+    /// HotIR forced and off and requires the same result, charged
+    /// instructions, collection count, and next boundary; returns the forced
+    /// side's total HotIR iterations.
+    fn hot_ir_agrees_across_intervals(program: &Program) -> u64 {
+        let mut iterations = 0;
+        for interval in 1..=19 {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let settings = VmSettings {
+                deterministic_gc_interval: interval,
+                ..VmSettings::default()
+            };
+            let mut fast = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            fast.hot_ir_mode = HotIrTestMode::Force;
+            let fast_result = fast.run(program).unwrap();
+            let mut interpreted = Vm::with_settings(Profile::DeterministicSim, settings);
+            interpreted.hot_ir_mode = HotIrTestMode::Off;
+            let interpreted_result = interpreted.run(program).unwrap();
+            assert_eq!(fast_result.as_number(), Some(64.0));
+            assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+            assert_eq!(
+                fast.executed_instructions, interpreted.executed_instructions,
+                "interval {interval}: charged instructions diverged"
+            );
+            assert_eq!(
+                fast.deterministic_collection_count(),
+                interpreted.deterministic_collection_count(),
+                "interval {interval}: collection count diverged"
+            );
+            assert_eq!(
+                fast.next_weak_collection_instruction, interpreted.next_weak_collection_instruction,
+                "interval {interval}: next boundary diverged"
+            );
+            assert_on_collection_lattice(&fast, interval.get(), "fast");
+            assert_on_collection_lattice(&interpreted, interval.get(), "interpreted");
+            iterations += fast.dynamic_programs[0].hot_ir_iterations;
+            assert_eq!(interpreted.dynamic_programs[0].hot_ir_iterations, 0);
+        }
+        iterations
+    }
+
+    /// The HotIR gate is keyed on the prototype that contains the loop: a
+    /// unit folded onto main leaves function 0's loop on HotIR with the
+    /// unit charged once, while a unit folded inside the loop body drops the
+    /// plan and the loop then charges that unit on every iteration through
+    /// the tape and scalar dispatcher.
+    #[test]
+    fn hot_ir_gate_is_per_prototype() {
+        let identity = hot_ir_array_in_function_program(vec![1; 4], vec![1; 19]);
+        assert!(identity.logical_units().is_none());
+        let mut reference = Vm::new(Profile::ReproducibleStandard);
+        reference.hot_ir_mode = HotIrTestMode::Off;
+        assert_eq!(reference.run(&identity).unwrap().as_number(), Some(64.0));
+        let identity_executed = reference.executed_instructions;
+        assert!(hot_ir_agrees_across_intervals(&identity) > 0);
+
+        // Non-identity only in main: the loop keeps HotIR.
+        let outside = hot_ir_array_in_function_program(vec![2, 1, 1, 1], vec![1; 19]);
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.hot_ir_mode = HotIrTestMode::Force;
+        assert_eq!(fast.run(&outside).unwrap().as_number(), Some(64.0));
+        assert!(fast.dynamic_programs[0].hot_ir_entries > 0);
+        assert!(fast.dynamic_programs[0].hot_ir_iterations > 0);
+        assert_eq!(fast.executed_instructions, identity_executed + 1);
+        assert!(hot_ir_agrees_across_intervals(&outside) > 0);
+
+        // Non-identity inside the loop body (pc 8, executed 64 times): the
+        // gate fires, and the unit is charged on every iteration.
+        let mut loop_units = vec![1u32; 19];
+        loop_units[8] = 2;
+        let inside = hot_ir_array_in_function_program(vec![1; 4], loop_units);
+        let mut gated = Vm::new(Profile::ReproducibleStandard);
+        gated.hot_ir_mode = HotIrTestMode::Force;
+        assert_eq!(gated.run(&inside).unwrap().as_number(), Some(64.0));
+        assert!(gated.dynamic_programs[0]
+            .function_inline_caches
+            .iter()
+            .all(|caches| caches.hot_irs.is_empty()));
+        assert_eq!(gated.dynamic_programs[0].hot_ir_entries, 0);
+        assert_eq!(gated.dynamic_programs[0].hot_ir_iterations, 0);
+        assert_eq!(gated.executed_instructions, identity_executed + 64);
+        assert_eq!(hot_ir_agrees_across_intervals(&inside), 0);
+    }
+
     fn hot_ir_operation_guard_plan(kind: HotIrOpKind) -> HotIr {
         HotIr {
             body_start_pc: 8,
@@ -30360,8 +30839,11 @@ mod inline_cache_tests {
         program
     }
 
-    fn closure_call_array_iterator_program() -> Program {
-        let leaf = Function::with_params_and_upvalues(
+    /// The `ArrayIterator` leaf shape: `i = i + 1; if i <= #items then return
+    /// i, items[i] end`, with `i` a parent cell (upvalue 0) and `items` a
+    /// parent value (upvalue 1).
+    fn array_iterator_leaf_function() -> Function {
+        Function::with_params_and_upvalues(
             vec![
                 Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
                 Instruction::new(Opcode::LoadConst, 1, 0, 0),
@@ -30393,7 +30875,10 @@ mod inline_cache_tests {
                 UpvalueDescriptor::ParentLocalValue(3),
             ],
             Vec::new(),
-        );
+        )
+    }
+
+    fn closure_call_array_iterator_program() -> Program {
         Program::with_functions(
             Function::new(
                 vec![
@@ -30417,8 +30902,59 @@ mod inline_cache_tests {
                 Constant::Number(10.0),
                 Constant::Number(20.0),
             ],
-            vec![leaf],
+            vec![array_iterator_leaf_function()],
         )
+    }
+
+    /// Same leaf as [`closure_call_array_iterator_program`], but `main`
+    /// returns the closure instead of calling it, so every call arrives from
+    /// the host through `call_function` -> `call_value` ->
+    /// `try_leaf_bytecode_handle` rather than the `Call` opcode's PIC.
+    fn closure_call_array_iterator_closure_program() -> Program {
+        Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 2),
+                    Instruction::new(Opcode::LoadConst, 2, 0, 3),
+                    Instruction::new(Opcode::NewArray, 3, 1, 2),
+                    Instruction::with_aux(Opcode::LoadFunction, 4, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 4, 1, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                5,
+            ),
+            vec![
+                Constant::Number(1.0),
+                Constant::Number(0.0),
+                Constant::Number(10.0),
+                Constant::Number(20.0),
+            ],
+            vec![array_iterator_leaf_function()],
+        )
+    }
+
+    /// Calls `closure` three times from the host on both VMs and checks the
+    /// `ArrayIterator` results (1, 2, then nil) agree with `expected`.
+    fn call_array_iterator_closure_three_times(
+        program: &Program,
+        fast: &mut Vm,
+        fast_closure: Value,
+        interpreted: &mut Vm,
+        interpreted_closure: Value,
+    ) {
+        for expected in [Some(1.0), Some(2.0), None] {
+            let fast_result = fast.call_function(program, fast_closure, &[]).unwrap();
+            let interpreted_result = interpreted
+                .call_function(program, interpreted_closure, &[])
+                .unwrap();
+            assert_eq!(fast_result.as_number(), expected);
+            assert_eq!(interpreted_result.as_number(), expected);
+        }
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
     }
 
     #[test]
@@ -30448,6 +30984,154 @@ mod inline_cache_tests {
         assert_eq!(interpreted_loaded.closure_call_prototype_hits, 0);
         assert_eq!(interpreted_loaded.closure_call_fast_entries, 0);
         assert_eq!(interpreted_loaded.closure_call_guard_exits, 0);
+    }
+
+    /// [`closure_call_loop_program`] with a logical-unit schedule: `main`
+    /// (14 instructions, `Call` at pc 10) and the leaf (9 instructions).
+    fn closure_call_loop_program_with_units(main_units: Vec<u32>, leaf_units: Vec<u32>) -> Program {
+        let program = closure_call_loop_program();
+        assert_eq!(main_units.len(), program.main.code.len());
+        assert_eq!(leaf_units.len(), program.functions[0].code.len());
+        let program = program.with_logical_units(Some(
+            crate::ProgramLogicalUnits::new(main_units, vec![leaf_units]).unwrap(),
+        ));
+        assert!(program.logical_units().is_some());
+        program
+    }
+
+    /// Runs the program once per deterministic-collection interval on both
+    /// sides of `closure_call_mode` and requires the same result, charged
+    /// instructions, collection count, and next boundary; returns whether
+    /// any leg took the fast path.
+    fn closure_call_agrees_across_intervals(program: &Program) -> bool {
+        let mut saw_fast_entry = false;
+        for interval in 1..=23 {
+            let interval = NonZeroU64::new(interval).unwrap();
+            let settings = VmSettings {
+                deterministic_gc_interval: interval,
+                ..VmSettings::default()
+            };
+            let mut fast = Vm::with_settings(Profile::DeterministicSim, settings.clone());
+            fast.closure_call_mode = ClosureCallTestMode::Force;
+            let fast_result = fast.run(program).unwrap();
+            let mut interpreted = Vm::with_settings(Profile::DeterministicSim, settings);
+            interpreted.closure_call_mode = ClosureCallTestMode::Off;
+            let interpreted_result = interpreted.run(program).unwrap();
+
+            assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+            assert_eq!(
+                fast.executed_instructions, interpreted.executed_instructions,
+                "interval {interval}: charged instructions diverged"
+            );
+            assert_eq!(
+                fast.deterministic_collection_count(),
+                interpreted.deterministic_collection_count(),
+                "interval {interval}: collection count diverged"
+            );
+            assert_eq!(
+                fast.next_weak_collection_instruction, interpreted.next_weak_collection_instruction,
+                "interval {interval}: next boundary diverged"
+            );
+            assert_on_collection_lattice(&fast, interval.get(), "fast");
+            assert_on_collection_lattice(&interpreted, interval.get(), "interpreted");
+            saw_fast_entry |= fast.dynamic_programs[0].closure_call_fast_entries > 0;
+            assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+        }
+        saw_fast_entry
+    }
+
+    /// A caller whose own slice is non-identity keeps the callee's leaf plan,
+    /// and the fast path charges the `Call` instruction's units (three here)
+    /// on top of the plan's eight, exactly as the scalar dispatcher charges
+    /// three at the `Call` and then eight inside the callee frame. Before the
+    /// 2026-09-15 fix the fast path charged `8 + 1` and under-charged every
+    /// call by two.
+    #[test]
+    fn leaf_fast_path_charges_the_callers_call_units() {
+        let mut main_units = vec![1u32; 14];
+        main_units[10] = 3;
+        let program = closure_call_loop_program_with_units(main_units, vec![1; 9]);
+
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = interpreted.run(&program).unwrap();
+        assert_eq!(fast_result.as_number(), Some(16.0));
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 16);
+        assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
+        assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+
+        // The schedule adds exactly two units per call over the identity
+        // program: sixteen calls, thirty-two units.
+        let mut identity = Vm::new(Profile::ReproducibleStandard);
+        identity.closure_call_mode = ClosureCallTestMode::Off;
+        identity.run(&closure_call_loop_program()).unwrap();
+        assert_eq!(
+            fast.executed_instructions,
+            identity.executed_instructions + 32
+        );
+
+        // The admitted window includes the call units, so no boundary ever
+        // falls inside a fast-path span at any interval.
+        assert!(closure_call_agrees_across_intervals(&program));
+    }
+
+    /// The gate is keyed on the callee: a unit folded onto one of the leaf's
+    /// own instructions drops its plan, and the calls then charge exactly
+    /// what the scalar dispatcher charges for the unit-carrying frame.
+    #[test]
+    fn leaf_plan_is_gated_on_the_callee_slice_only() {
+        let mut leaf_units = vec![1u32; 9];
+        leaf_units[2] = 2;
+        let program = closure_call_loop_program_with_units(vec![1; 14], leaf_units);
+
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = interpreted.run(&program).unwrap();
+        assert_eq!(fast_result.as_number(), Some(16.0));
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(fast.dynamic_programs[0].leaf_call_plan(0), None);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_cache_fills, 0);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        // One extra unit per call over the identity program.
+        let mut identity = Vm::new(Profile::ReproducibleStandard);
+        identity.closure_call_mode = ClosureCallTestMode::Off;
+        identity.run(&closure_call_loop_program()).unwrap();
+        assert_eq!(
+            fast.executed_instructions,
+            identity.executed_instructions + 16
+        );
+        assert!(!closure_call_agrees_across_intervals(&program));
+
+        // The mirror image: a unit anywhere in main that is not the `Call`
+        // leaves the callee's plan and every fast entry in place.
+        let mut main_units = vec![1u32; 14];
+        main_units[0] = 2;
+        let program = closure_call_loop_program_with_units(main_units, vec![1; 9]);
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        assert_eq!(fast.run(&program).unwrap().as_number(), Some(16.0));
+        assert!(fast.dynamic_programs[0].leaf_call_plan(0).is_some());
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 16);
+        assert_eq!(
+            fast.executed_instructions,
+            identity.executed_instructions + 1
+        );
+        assert!(closure_call_agrees_across_intervals(&program));
     }
 
     #[test]
@@ -30484,7 +31168,75 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_prototype_hits, 0);
         assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 3);
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn leaf_call_value_path_records_census_and_matches_interpreter() {
+        let program = closure_call_array_iterator_closure_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_closure = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_closure = interpreted.run(&program).unwrap();
+
+        call_array_iterator_closure_three_times(
+            &program,
+            &mut fast,
+            fast_closure,
+            &mut interpreted,
+            interpreted_closure,
+        );
+
+        // Every host call replayed the leaf on the `call_value` path; the
+        // `Call` opcode's PIC never fired because no bytecode call happened.
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 3);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_cache_fills, 0);
+        assert_eq!(interpreted.dynamic_programs[0].leaf_call_value_entries, 0);
+        assert_eq!(fast.executor_census().leaf_call_value_entries, 3);
+        assert_eq!(interpreted.executor_census().leaf_call_value_entries, 0);
+    }
+
+    #[test]
+    fn leaf_call_value_path_counts_nothing_when_policy_falls_back() {
+        let program = closure_call_array_iterator_closure_program();
+        let mut accounting = Vm::new(Profile::ReproducibleStandard);
+        accounting.closure_call_mode = ClosureCallTestMode::Off;
+        let closure = accounting.run(&program).unwrap();
+        for _ in 0..3 {
+            accounting.call_function(&program, closure, &[]).unwrap();
+        }
+        let exact_fuel = accounting.executed_instructions;
+
+        // A fuel budget refuses the leaf path before it replays anything, so
+        // the counter must stay at zero: it sits strictly on the success
+        // return, never on a fallback to a full frame.
+        let settings = VmSettings {
+            initial_fuel: Some(exact_fuel),
+            ..VmSettings::default()
+        };
+        let mut fast = Vm::with_settings(Profile::ReproducibleStandard, settings.clone());
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_closure = fast.run(&program).unwrap();
+        let mut interpreted = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_closure = interpreted.run(&program).unwrap();
+
+        call_array_iterator_closure_three_times(
+            &program,
+            &mut fast,
+            fast_closure,
+            &mut interpreted,
+            interpreted_closure,
+        );
+
+        assert_eq!(fast.executed_instructions, exact_fuel);
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 0);
+        assert_eq!(fast.executor_census().leaf_call_value_entries, 0);
     }
 
     #[test]
@@ -30655,6 +31407,7 @@ mod inline_cache_tests {
                         &registers,
                         instruction,
                         0,
+                        1,
                         &mut fuel,
                     )
                     .unwrap()
@@ -30701,6 +31454,7 @@ mod inline_cache_tests {
                 &live_registers,
                 instruction,
                 0,
+                1,
                 &mut fuel,
             )
             .unwrap()
@@ -30718,6 +31472,7 @@ mod inline_cache_tests {
                 &live_registers,
                 instruction,
                 0,
+                1,
                 &mut fuel,
             )
             .unwrap()
@@ -30729,7 +31484,16 @@ mod inline_cache_tests {
 
         let registers = [Value::nil(), closures[0]];
         let outcome = vm
-            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel)
+            .try_closure_call_scalar(
+                program_id,
+                None,
+                0,
+                &registers,
+                instruction,
+                0,
+                1,
+                &mut fuel,
+            )
             .unwrap()
             .expect("warmed closure call");
         let mut alias_registers = [Value::number(-1.0), Value::number(-2.0)];
@@ -30746,7 +31510,16 @@ mod inline_cache_tests {
         vm.closure_call_mode = ClosureCallTestMode::Off;
         let registers = [Value::nil(), closures[0]];
         assert!(vm
-            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel,)
+            .try_closure_call_scalar(
+                program_id,
+                None,
+                0,
+                &registers,
+                instruction,
+                0,
+                1,
+                &mut fuel
+            )
             .unwrap()
             .is_none());
         let captures = [
@@ -30791,7 +31564,16 @@ mod inline_cache_tests {
         let instruction = Instruction::with_aux(Opcode::Call, 0, 1, 0, 0);
         test_execution!(fuel = None);
         assert!(vm
-            .try_closure_call_scalar(program_id, None, 0, &registers, instruction, 0, &mut fuel,)
+            .try_closure_call_scalar(
+                program_id,
+                None,
+                0,
+                &registers,
+                instruction,
+                0,
+                1,
+                &mut fuel
+            )
             .unwrap()
             .is_none());
         assert_eq!(
@@ -30836,6 +31618,7 @@ mod inline_cache_tests {
                 &[Value::nil(), Value::function(handle)],
                 instruction,
                 0,
+                1,
                 &mut remaining,
             )
             .unwrap()
@@ -30892,6 +31675,7 @@ mod inline_cache_tests {
                         &[Value::nil(), closure],
                         instruction,
                         0,
+                        1,
                         &mut fuel,
                     )
                     .unwrap()
@@ -32588,7 +33372,7 @@ mod inline_cache_tests {
     #[test]
     fn dynamic_string_cache_stays_monomorphic_on_atom_mismatch() {
         let program = cache_program();
-        let mut caches = FunctionInlineCaches::new(&program, &program.main, None);
+        let mut caches = FunctionInlineCaches::new(&program, None, &program.main, None);
         let x = TableStringInlineCache::new(1, TableStringHashSlot::from_parts(1, 2));
         let y = TableStringInlineCache::new(2, TableStringHashSlot::from_parts(1, 3));
         assert_eq!(caches.set_table_inline_cache(0, x), Some(()));

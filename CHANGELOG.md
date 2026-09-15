@@ -423,6 +423,20 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- **The owned-host benchmark lanes queue instead of cancelling a waiting run.**
+  The per-commit series, weekly matrix, memory cohort and A/B acceptance share
+  one concurrency group, whose comment said they queued. A group keeps one
+  pending run by default, and a newly queued run cancels it —
+  `cancel-in-progress: false` protects only the run in progress — so on
+  2026-09-15 a matrix dispatch cancelled the waiting per-commit run for
+  `f49646f`. No row was lost, because that commit changed no engine code. The
+  group now declares `queue: max`, which keeps up to 100 pending runs in
+  start order. It stays, rather than leaving the waiting to the single-runner
+  `bench-solo` group, because the per-commit series is appended and charted in
+  run order and the runner queue promises none. `tools/check-workflows.js`
+  pins the block in all four lanes, including acceptance, which it previously
+  did not check, and rejects the group in any other workflow.
+
 - **The wasm runners' lock files match their manifests again.** The typed
   error work added `serde_path_to_error` to the `rustia` crate and refreshed
   the root lock, but the benchmark adapter and the live-wasm demo carry their
@@ -434,6 +448,23 @@ Current unpublished workspace version: `0.0.1`.
   Release preflight, and so CI, now runs `cargo fetch --locked` for the
   manifest beside every committed `Cargo.lock`, so a stale nested lock turns
   the pull request's preflight check red before the change reaches the host.
+
+- **Release preflight now compiles the builds that only the benchmark host
+  used to compile.** The weekly matrix and the memory lanes build `bench`
+  with every competitor engine (`--features all-engines`), `bench` with
+  `rustia-engine` off (`--features mlua-lua54`), and the wasm adapter
+  against rustia's API. CI built none of them, so a compile error under
+  their cfgs was first seen on the host, after merge. Preflight, and so the
+  pull request's CI check, now runs Clippy with `-D warnings` on all three.
+  That is warnings as errors, as on the host, where both workflows inherit the
+  pinned toolchain action's default `RUSTFLAGS=-D warnings`. The CI
+  preflight job now installs the `wasm32-unknown-unknown` target for the
+  adapter check. On an M4 Max already running other builds, the three checks
+  add about 0.4 s to a warm preflight with nothing changed, about 2.3 s after
+  an engine-crate edit, and about 51 s from cold. Bringing the mlua
+  checksum helpers in `bench` under the gate fixed two `useless_format`
+  lints that had never been linted. The benchmark checksum strings are
+  unchanged.
 
 - Quiescent spare-capacity release now bumps a table's mutation version when
   it pops trailing array nils: the pop moves the observable length border,

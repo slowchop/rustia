@@ -556,6 +556,16 @@ target is instead a descendant of the fixed harness. Frozen configs record that
 direction explicitly, and the host verifies the declared ancestry before it
 builds anything.
 
+Runs wait for the host in the order they started. The four lanes that hold it
+for a full measurement share one concurrency group declared with `queue: max`,
+because a group without it keeps a single pending run and cancels that one when
+another arrives. This lane depends on the order: rows are appended as runs
+execute, the chart draws them in file order, and the unchanged-binary gate
+compares against the last row. A run that fails records nothing for its
+commit, and nothing measures that commit later. Re-run it before a later commit
+records a row, after which the ancestry check refuses the append. The reasoning
+is in [`design/81-benchmark-operations.md`](https://github.com/slowchop/rustia/blob/main/design/81-benchmark-operations.md#waiting-for-the-host).
+
 Each source workflow commits its publication onto a fresh clone of the data
 repository's `main` and hands it to `tools/push-benchmark-data-publication.js`,
 which pushes that commit to `main` as a plain fast-forward. The data
