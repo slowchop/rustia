@@ -323,6 +323,22 @@ function runNode(args) {
   }
 }
 
+// Every .js script under tools/ and bench/ that defines HOST_LABEL, as
+// repo-relative paths. Dependency and build directories are skipped.
+function scriptsDefiningHostLabel(base) {
+  const found = [];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(path.join(base, directory), { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "target") continue;
+      const child = path.posix.join(directory, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".js") && /^const HOST_LABEL\s*=/m.test(read(path.join(base, child)))) found.push(child);
+    }
+  };
+  ["tools", "bench"].forEach(walk);
+  return found.sort();
+}
+
 function read(filePath) {
   try {
     return fs.readFileSync(filePath, "utf8");
@@ -666,19 +682,51 @@ function selfTest() {
   // copied to the machine one file at a time), so their agreement is asserted
   // here by reading the files, and the harness's Rust arm alongside.
   const labelLiteral = "const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;";
-  for (const file of [
+  const labelFiles = [
     "tools/check-benchmark-results.js",
+    "tools/render-benchmark-operations-status.js",
     "bench/render-current-results.js",
     "bench/analyze-memory-samples.js",
     "bench/run-memory-cohort.js",
+    "bench/publish-memory-analysis.js",
+    "tools/merge-rustia-ci-memory-data.js",
+    "tools/check-dedicated-config.js",
     "tools/run-linode-benchmark.js",
     "tools/run-linux-matrix-benchmark.js",
     "tools/run-linux-memory-benchmark.js",
     "tools/run-linux-history-backfill.js",
-  ]) {
-    if (!read(path.join(root, file)).includes(labelLiteral)) {
-      fail(`${file} does not carry the label character set ${labelLiteral}; every emitter and validator must agree`);
+  ];
+  for (const file of labelFiles) {
+    if (!read(path.join(root, file)).split("\n").includes(labelLiteral)) {
+      fail(`${file} does not carry the label character set ${labelLiteral} as a line of its own; every emitter and validator must agree`);
     }
+  }
+  // The list is only as good as its completeness: a script that defines the
+  // character set without being listed drifts unnoticed, which is how
+  // tools/check-dedicated-config.js went unchecked when it gained one.
+  for (const file of scriptsDefiningHostLabel(root)) {
+    if (!labelFiles.includes(file)) {
+      fail(`${file} defines HOST_LABEL but is not in the label parity list in tools/check-benchmark-results.js`);
+    }
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-host-label-"));
+  try {
+    for (const [file, text] of [
+      ["tools/emits.js", `${labelLiteral}\n`],
+      ["bench/nested/validates.js", `"use strict";\nconst HOST_LABEL=/x/;\n`],
+      ["tools/mentions.js", `const HOST_LABEL_LINE = ${JSON.stringify(labelLiteral)};\n`],
+      ["tools/node_modules/vendored.js", `${labelLiteral}\n`],
+      ["bench/notes.md", `${labelLiteral}\n`],
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(fixtureRoot, file)), { recursive: true });
+      fs.writeFileSync(path.join(fixtureRoot, file), text);
+    }
+    const found = scriptsDefiningHostLabel(fixtureRoot);
+    if (JSON.stringify(found) !== JSON.stringify(["bench/nested/validates.js", "tools/emits.js"])) {
+      fail(`scriptsDefiningHostLabel found ${JSON.stringify(found)} in its fixture`);
+    }
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
   const harness = read(path.join(root, "bench", "src", "main.rs"));
   for (const fragment of ["c.is_ascii_alphanumeric() || c == '-' || c == '_'", "value.len() > 128"]) {

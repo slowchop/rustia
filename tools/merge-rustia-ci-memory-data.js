@@ -8,9 +8,28 @@ const path = require("node:path");
 
 const CURRENT_SCHEMA = "rustia.bench.memory-current-results.v1";
 const COHORT_SCHEMA = "rustia.bench.memory-cohort.v1";
+// The machine a merged row names is a provenance label published in row data,
+// and this merge writes the memory table and history that are pushed to the
+// public data repository, so it is the last place an address can be refused
+// before it is published. A label, never an address: no dots and no colons, so
+// it can be neither a fully qualified name nor an IPv4 or IPv6 address. Every
+// emitter and validator carries this same literal; the self-test in
+// tools/check-benchmark-results.js asserts it.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
+}
+
+// `subject` is who names the machine and how, so the refusal blames the side
+// that is wrong.
+function requireHostLabel(value, subject) {
+  if (typeof value !== "string" || !HOST_LABEL.test(value)) {
+    fail(
+      `${subject} ${JSON.stringify(value)}, which is not a label: ` +
+      "a label may contain only [A-Za-z0-9_-], never an address",
+    );
+  }
 }
 
 function parseArgs(argv) {
@@ -90,13 +109,13 @@ function validateCurrent(current, label, generated) {
   }
 }
 
-// Every row that will stand in the merged table must name its machine. The
-// generated rows are checked whole; the stored table is checked only on the
-// rows the merge keeps, because a stored row for an engine the new cohort
-// measured is about to be replaced, and refusing over it would make a stale,
-// unlabelled row permanent -- the one row this merge exists to replace. That
-// is also what lets a cross-engine cohort replace, whole, a table measured
-// before hosts were recorded.
+// Every row that will stand in the merged table must name its machine, and
+// name it with a label. The generated rows are checked whole; the stored table
+// is checked only on the rows the merge keeps, because a stored row for an
+// engine the new cohort measured is about to be replaced, and refusing over it
+// would make a stale, unlabelled row permanent -- the one row this merge exists
+// to replace. That is also what lets a cross-engine cohort replace, whole, a
+// table measured before hosts were recorded.
 function requireLabelledRows(rows, label) {
   const unlabelled = rows.filter((row) => typeof row.host !== "string" || row.host === "");
   if (unlabelled.length !== 0) {
@@ -106,13 +125,16 @@ function requireLabelledRows(rows, label) {
       "a row that cannot say where it came from cannot be merged with one that can",
     );
   }
+  for (const row of rows) requireHostLabel(row.host, `${label} row ${row.engine}/${row.workload} names its machine`);
 }
 
 // A cohort is one run on one machine, however many engines it measured. The
 // generated snapshot's rows must agree on that machine, and so must the two
 // places that restate it: the snapshot's metadata.host, which the merged table
 // inherits, and the history line appended beside it, which the memory history
-// chart is keyed on. Returns the machine.
+// chart is keyed on. Both restatements are published, so each is checked as a
+// label before it is compared with the rows: an address is refused as an
+// address, not as a disagreement. Returns the machine.
 function requireOneMachine(generated, record) {
   const label = "generated current memory results";
   const hosts = [...new Set(generated.rows.map((row) => row.host))].sort();
@@ -120,6 +142,13 @@ function requireOneMachine(generated, record) {
     fail(`${label} was measured on ${hosts.length} machines (${hosts.join(", ")}); a cohort is one run on one machine`);
   }
   const [host] = hosts;
+  if (generated.metadata?.host !== undefined) requireHostLabel(generated.metadata.host, `${label} names host`);
+  if (record.host !== undefined) requireHostLabel(record.host, `generated history cohort ${record.cohort_id} names host`);
+  for (const row of record.rows ?? []) {
+    if (row.host !== undefined) {
+      requireHostLabel(row.host, `generated history cohort ${record.cohort_id} row ${row.engine}/${row.workload} names its machine`);
+    }
+  }
   if (generated.metadata?.host !== undefined && generated.metadata.host !== host) {
     fail(`${label} names host ${JSON.stringify(generated.metadata.host)} but its rows name ${JSON.stringify(host)}`);
   }
@@ -483,6 +512,52 @@ function selfTest() {
       [/generated current memory results has 1 row/, /do not name the machine/],
       "merged a generated row with an empty host",
     );
+
+    // A label, never an address, wherever this merge would publish one: a
+    // generated row, a stored row it keeps, the snapshot's metadata.host, and
+    // the history line and its rows. Each case names the address in one place
+    // only and expects the refusal to name that place.
+    const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const notLabel = (subject, address) => literal(`${subject} ${JSON.stringify(address)}, which is not a label`);
+    for (const [index, address] of ["bench.example.com", "10.0.0.5", "fe80::1", "user@box"].entries()) {
+      const addressed = cohort(`rustia-ci-address-${index}`, "5".repeat(40), ["rustia"], address);
+      stage(addressed, [addressed]);
+      refuses(
+        [notLabel("generated current memory results row rustia/dense_tables names its machine", address)],
+        `merged a generated row naming ${address}`,
+      );
+
+      const labelled = cohort(`rustia-ci-labelled-${index}`, "6".repeat(40), ["rustia"]);
+      stage(labelled, [labelled]);
+      store([row("mlua-luau-jit", "c".repeat(40), address), row("rustia", "d".repeat(40))]);
+      refuses(
+        [notLabel("stored current memory results row mlua-luau-jit/dense_tables names its machine", address)],
+        `kept a stored row naming ${address}`,
+      );
+
+      store([row("mlua-luau-jit", "1".repeat(40)), row("rustia", "1".repeat(40))]);
+      writeAtomic(generatedCurrent, `${JSON.stringify({
+        ...snapshot(labelled),
+        metadata: { ...snapshot(labelled).metadata, host: address },
+      })}\n`);
+      writeAtomic(generatedHistory, `${JSON.stringify(labelled)}\n`);
+      refuses(
+        [notLabel("generated current memory results names host", address)],
+        `merged a snapshot whose metadata names ${address}`,
+      );
+
+      stage(labelled, [{ ...labelled, host: address }]);
+      refuses(
+        [notLabel(`generated history cohort ${labelled.cohort_id} names host`, address)],
+        `appended a history line naming ${address}`,
+      );
+
+      stage(labelled, [{ ...labelled, rows: labelled.rows.map((entry) => ({ ...entry, host: address })) }]);
+      refuses(
+        [notLabel(`generated history cohort ${labelled.cohort_id} row rustia/dense_tables names its machine`, address)],
+        `appended a history row naming ${address}`,
+      );
+    }
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

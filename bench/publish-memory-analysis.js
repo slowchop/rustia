@@ -10,6 +10,13 @@ const COHORT_SCHEMA = "rustia.bench.memory-cohort.v1";
 const CURRENT_SCHEMA = "rustia.bench.memory-current-results.v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SAFE_ID = /^[A-Za-z0-9._-]{1,128}$/;
+// The machine a cohort names is a provenance label, copied from here into the
+// history line and the memory table that are pushed to the public data
+// repository. A label, never an address: no dots and no colons, so it can be
+// neither a fully qualified name nor an IPv4 or IPv6 address. Every emitter and
+// validator carries this same literal; the self-test in
+// tools/check-benchmark-results.js asserts it.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -76,6 +83,12 @@ function validateAnalysis(analysis, config) {
     if (row.commit !== config.commit) fail("analysis contains a different commit");
     if (typeof row.target !== "string" || row.target === "") fail("analysis row target is missing");
     if (typeof row.host !== "string" || row.host === "") fail("analysis row host is missing");
+    if (!HOST_LABEL.test(row.host)) {
+      fail(
+        `analysis row ${row.engine}/${row.workload} names its machine ${JSON.stringify(row.host)}, ` +
+        "which is not a label: a label may contain only [A-Za-z0-9_-], never an address",
+      );
+    }
     if (row.classification === "detector_failed") {
       fail(`${row.engine}/${row.workload} failed the intentional-retention detector`);
     }
@@ -85,6 +98,15 @@ function validateAnalysis(analysis, config) {
   const hosts = [...new Set(analysis.rows.map((row) => row.host))].sort();
   if (hosts.length !== 1) {
     fail(`analysis rows name ${hosts.length} hosts (${hosts.join(", ")}); a cohort is one machine`);
+  }
+  // Checked as a label before it is compared with the rows, so an address is
+  // refused as an address rather than as a disagreement.
+  if (typeof analysis.host !== "string" || analysis.host === "") fail("analysis host is missing");
+  if (!HOST_LABEL.test(analysis.host)) {
+    fail(
+      `analysis names host ${JSON.stringify(analysis.host)}, ` +
+      "which is not a label: a label may contain only [A-Za-z0-9_-], never an address",
+    );
   }
   if (analysis.host !== hosts[0]) {
     fail(`analysis names host ${JSON.stringify(analysis.host)} but its rows name ${JSON.stringify(hosts[0])}`);
@@ -229,14 +251,34 @@ function selfTest() {
     // the memory table is per-slot merged across cohorts, so an unlabelled or
     // mislabelled row here is a row that can outlive the machine it came from.
     const strays = [
-      ["unlabelled row", { rows: [{ ...analysis.rows[0], host: undefined }] }, /host is missing/],
+      ["unlabelled row", { rows: [{ ...analysis.rows[0], host: undefined }] }, /analysis row host is missing/],
       [
         "two machines",
         { rows: [analysis.rows[0], { ...analysis.rows[0], workload: "memory_burst", host: "other-host" }] },
         /name 2 hosts/,
       ],
       ["analysis host disagrees with its rows", { host: "other-host" }, /names host "other-host" but its rows name "fixture-host"/],
+      ["unlabelled analysis", { host: undefined }, /^analysis host is missing$/],
     ];
+    // A label, never an address: the rows and the analysis's own host are what
+    // the history line and the memory table name, and both are pushed to the
+    // public data repository. Each is refused as an address, not as a
+    // disagreement with the other.
+    const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    for (const address of ["bench.example.com", "10.0.0.5", "fe80::1", "user@box"]) {
+      strays.push(
+        [
+          `rows naming ${address}`,
+          { host: address, rows: [{ ...analysis.rows[0], host: address }] },
+          literal(`analysis row rustia/memory_churn names its machine ${JSON.stringify(address)}, which is not a label`),
+        ],
+        [
+          `analysis naming ${address}`,
+          { host: address },
+          literal(`analysis names host ${JSON.stringify(address)}, which is not a label`),
+        ],
+      );
+    }
     for (const [name, override, expected] of strays) {
       const strayPath = path.join(temporary, `stray-${name.replace(/[^a-z]+/g, "-")}.json`);
       fs.writeFileSync(strayPath, `${JSON.stringify({ ...analysis, ...override })}\n`);

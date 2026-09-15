@@ -97,7 +97,10 @@ input and a `cohort` choice — `rustia-only`, the default 11-row per-commit coh
 cores so the supervisor never shares a core with the benchmark. Its rows are pushed to the published data
 repository and rendered by the shared publisher; there, each engine's rows come from the newest cohort that
 measured it. Competitor rows and the mlua/Luau/JIT reference return with the first cross-engine cohort measured
-on the owned host.
+on the owned host. The measured commit's own tools measure, but the merge into the data repository and the push
+run main's copies, taken before the checkout moves, and a `commit_sha` from before host-labelled memory rows is
+refused before the build, for the reasons in
+[`design/81-benchmark-operations.md`](https://github.com/slowchop/rustia/blob/main/design/81-benchmark-operations.md).
 
 ## Equal-work validation and publication
 
@@ -492,6 +495,18 @@ CPU count, SMT off, free disk under the runner's home above the coordinator's
 isolated set. A pinned core the scheduler still uses is the failure this
 protocol exists to prevent, and it does not show up in the timings.
 
+`sshDestination()` in `tools/run-dedicated-benchmark.js` makes "never an ssh
+target" a check. Before any ssh or scp, on every command that reaches the host —
+`host-check` and `unlock` included — it refuses a destination whose host part
+equals a label this repository publishes: a runner class's `host` in
+`operations-status.json`, or `provider.host.name` in any
+`cloud/dedicated-*.json`, read afresh on every call. The host part is what is
+left once an optional `ssh://`, a `user@`, and a `:port` or IPv6 brackets are
+stripped, and case is ignored, since ssh lowercases a host before it reads
+`ssh_config`. The refusal names the label and nothing else of the destination.
+Only equality is refused, so choose an alias plainly unlike the label rather
+than a variation of it. With `--local` the variable is never read.
+
 The reconstruction stays out of GitHub Actions: `tools/check-workflows.js`
 forbids the raw harness there, and starting a rebuild remains an explicit
 operator action.
@@ -812,9 +827,20 @@ refused, and the memory history draws one machine — the latest cohort's —
 against a mlua/JIT reference measured on that same machine, saying how many
 cohorts from another machine, or from before hosts were recorded, it leaves
 undrawn. The label itself may contain only `[A-Za-z0-9_-]{1,128}`: no dots, no
-colons, so it can never be a fully qualified name or an address, and the
-checker's self-test asserts that every emitter and validator carries that same
-literal.
+colons, so it can never be a fully qualified name or an address. Every file
+that emits or validates one carries that rule as the one literal
+`const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;`, and the checker's self-test
+reads each and refuses to run if any has drifted:
+`tools/check-benchmark-results.js`,
+`tools/render-benchmark-operations-status.js`,
+`bench/render-current-results.js`, `bench/analyze-memory-samples.js`,
+`bench/run-memory-cohort.js`, `bench/publish-memory-analysis.js`,
+`tools/merge-rustia-ci-memory-data.js`, `tools/check-dedicated-config.js`,
+`tools/run-linode-benchmark.js`, `tools/run-linux-matrix-benchmark.js`,
+`tools/run-linux-memory-benchmark.js` and
+`tools/run-linux-history-backfill.js`. The harness's `--host` check in
+`bench/src/main.rs` is read alongside them for the same character set and
+128-character cap.
 
 Rows written before the field existed do not carry it, and the harness reads it
 as optional for that reason: the absence means "measured before hosts were

@@ -265,11 +265,16 @@ publication files are staged atomically with rollback.
 
 A cohort is one run on one machine, and that is checked rather than assumed. The analyzer requires `--host` with
 no default and stamps it on every row; `publish-memory-analysis.js` refuses an analysis whose rows disagree about
-it; `tools/merge-rustia-ci-memory-data.js` refuses to merge a table spanning two machines; and the dashboard
-refuses to render one. `bench/memory/current-results.json` is a per-slot merge across cohorts, so without that
-rule a rustia-only refresh leaves every competitor row on whatever machine last measured it — which is what
-happened on 2026-09-05, when 11 new rows joined 99 six-week-old cloud rows under metadata naming a single host.
-See [`81-benchmark-operations.md`](81-benchmark-operations.md), "Row provenance".
+it; `tools/merge-rustia-ci-memory-data.js` refuses a generated cohort whose rows, `metadata.host` or history line
+disagree, and refuses to merge a table spanning two machines; and the dashboard refuses to render one. Each of
+those also refuses a host that is not a label. `bench/memory/current-results.json` is a per-slot merge across
+cohorts, so without that rule a rustia-only refresh leaves every competitor row on whatever machine last
+measured it — which is what happened on 2026-09-05, when 11 new rows joined 99 six-week-old cloud rows under
+metadata naming a single host. The merge is per engine, so a cross-engine cohort replaces every engine it
+measured, whatever machine the stored rows name: that is how a table from another machine is re-measured. The
+merge is also where a row's machine is last checked before publication, so the lane runs main's copy of it
+rather than the measured commit's, and a commit from before host-labelled rows is refused before it is
+measured. See [`81-benchmark-operations.md`](81-benchmark-operations.md), "Row provenance".
 
 ## Dashboard
 

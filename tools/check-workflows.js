@@ -504,6 +504,268 @@ function checkReleasePreflight(text) {
   }
 }
 
+// The memory lane measures a commit that may be older than main, with that
+// commit's own tools. What it writes into the data repository must not pass
+// through them: the merge is where a row's machine is checked, and a merge tool
+// from before host labels checks nothing about it. So the merge and the push
+// run from copies of main's tools, taken while the tree is still main, and a
+// commit whose memory rows predate the host label is refused right after the
+// detach, before the measurement takes the host.
+//
+// These rules report rather than exit, so the tripwire in
+// checkTrustedMemoryPublication can break each one and watch it fire.
+const TRUSTED_TOOLS_DIR = '          trusted_tools="$RUNNER_TEMP/rustia-trusted-tools"';
+const TRUSTED_MEMORY_TOOLS = Object.freeze([
+  {
+    name: "merge-rustia-ci-memory-data.js",
+    invocation: [
+      '          node "$trusted_tools/merge-rustia-ci-memory-data.js" \\',
+      "            --generated-current bench/memory/current-results.json \\",
+      "            --generated-history bench/memory/history/runs.jsonl \\",
+      '            --data-root "$data_dir"',
+    ],
+  },
+  {
+    name: "push-benchmark-data-publication.js",
+    invocation: ['            node "$trusted_tools/push-benchmark-data-publication.js" --repo-dir "$data_dir" --kind memory'],
+  },
+]);
+const MEMORY_DETACH = '          git checkout --detach "$BENCHMARK_COMMIT"';
+const MEMORY_MEASURE = "            node tools/run-dedicated-benchmark.js memory --local";
+// Carried verbatim by every file that emits or validates a host label, and
+// asserted in bench/analyze-memory-samples.js by tools/check-benchmark-results.js
+// from the commit that introduced the label on. A commit whose copy of that
+// file lacks the line predates labelled memory rows.
+const HOST_LABEL_LINE = "const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;";
+const HOST_LABEL_GATE = `          if ! grep -qxF '${HOST_LABEL_LINE}' bench/analyze-memory-samples.js; then`;
+
+function trustedCopy(tool) {
+  return `          install -m 644 tools/${tool.name} "$trusted_tools/${tool.name}"`;
+}
+
+function memoryPublicationProblems(text) {
+  const lines = text.split("\n");
+  const indexes = (line) => lines.flatMap((candidate, index) => (candidate === line ? [index] : []));
+  const only = (line) => (indexes(line).length === 1 ? indexes(line)[0] : -1);
+  const detach = only(MEMORY_DETACH);
+  const measure = lines.indexOf(MEMORY_MEASURE);
+  const publishStep = only("      - name: Publish measured memory data only");
+  if (
+    detach === -1 ||
+    lines[detach + 1] !== '          test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"' ||
+    !(detach < measure && measure < publishStep)
+  ) {
+    return ["must detach at the measured commit once, check HEAD on the next line, then measure, then publish"];
+  }
+  const problems = [];
+  // Each step is its own shell, so the directory is named twice: once where
+  // the copies are taken and once where they run. A third assignment could
+  // point the second at something else.
+  const assignments = lines.flatMap((line, index) => (/\btrusted_tools=/.test(line) ? [index] : []));
+  if (
+    assignments.length !== 2 ||
+    assignments.some((index) => lines[index] !== TRUSTED_TOOLS_DIR) ||
+    !(assignments[0] < detach && publishStep < assignments[1])
+  ) {
+    problems.push(
+      `must set ${JSON.stringify(TRUSTED_TOOLS_DIR.trim())} once before the detach and once in the publish step, ` +
+        "and nowhere else",
+    );
+  }
+  const mkdir = only('          install -d -m 700 "$trusted_tools"');
+  // Per tool, the rule naming the likeliest mistake comes first, since the
+  // first problem is the one a failing run prints.
+  for (const tool of TRUSTED_MEMORY_TOOLS) {
+    const historical = `node tools/${tool.name}`;
+    if (text.includes(historical)) {
+      problems.push(
+        `must not include ${JSON.stringify(historical)}: after the detach that runs the measured commit's copy, ` +
+          "not main's",
+      );
+    }
+    // Any other spelling of the same thing -- ./tools/, the workspace path, a
+    // cd first -- runs the measured commit's copy too.
+    lines.forEach((line, index) => {
+      if (!line.includes(tool.name) || line.trim().startsWith("#")) return;
+      if (line === trustedCopy(tool) || line === tool.invocation[0]) return;
+      if (line.includes(historical)) return;
+      problems.push(`line ${index + 1} names ${tool.name} outside main's copy and its trusted invocation: ${line.trim()}`);
+    });
+    // Exactly once: a second copy after the detach would replace main's tool
+    // with the measured commit's, and the invocation would never know.
+    const copy = only(trustedCopy(tool));
+    if (!(assignments[0] < mkdir && mkdir < copy && copy < detach)) {
+      problems.push(
+        `must copy main's ${tool.name} exactly once, before the detach, while the tree is still main: ` +
+          JSON.stringify(trustedCopy(tool).trim()),
+      );
+    }
+    const run = lines.findIndex((line, index) => index > publishStep && line === tool.invocation[0]);
+    const block = lines.slice(run, run + tool.invocation.length).join("\n");
+    if (!(assignments[1] < run) || block !== tool.invocation.join("\n")) {
+      problems.push(
+        `must run main's copy of ${tool.name} in the publish step, with the same flags: ` +
+          JSON.stringify(tool.invocation.map((line) => line.trim()).join(" ")),
+      );
+    }
+  }
+  // After the detach, because before it the tree is main and the gate passes
+  // every commit; before the measurement, because that is what it spares.
+  const gate = only(HOST_LABEL_GATE);
+  if (
+    !(detach < gate && gate < measure) ||
+    !lines[gate + 1]?.startsWith('            echo "::error::') ||
+    lines[gate + 2] !== "            exit 1" ||
+    lines[gate + 3] !== "          fi"
+  ) {
+    problems.push(
+      "must refuse, between the detach and the measurement, a commit whose memory rows predate the host label: " +
+        `${JSON.stringify(HOST_LABEL_GATE.trim())}, then an ::error:: and exit 1`,
+    );
+  }
+  return problems;
+}
+
+// A copy runs from $RUNNER_TEMP with nothing beside it, so a relative require,
+// or a path built from the file's own location, would resolve there and fail at
+// the merge -- after the measurement has taken the host. Each tool the memory
+// lane copies may therefore load only node: builtins and locate nothing
+// relative to itself.
+function selfContainedProblems(source, file) {
+  const problems = [];
+  const loads = source.match(/\b(?:require|import)\s*\(/g) ?? [];
+  const builtins = source.match(/\brequire\("node:[a-z_\/]+"\)/g) ?? [];
+  if (loads.length !== builtins.length) {
+    problems.push(
+      `${file} must load only node: builtins; the memory lane runs a copy of it from $RUNNER_TEMP, ` +
+        "where nothing else resolves",
+    );
+  }
+  for (const name of ["__dirname", "__filename"]) {
+    if (source.includes(name)) {
+      problems.push(
+        `${file} must not use ${name}; the memory lane runs a copy of it from $RUNNER_TEMP, ` +
+          "away from the repository",
+      );
+    }
+  }
+  return problems;
+}
+
+// The gate greps main's descendants for a whole line, so main must keep it
+// whole: indented, or with a trailing comment, it would refuse every commit.
+function hostLabelLineProblems(source) {
+  if (source.split(/\r?\n/).includes(HOST_LABEL_LINE)) return [];
+  return [
+    `bench/analyze-memory-samples.js must carry ${JSON.stringify(HOST_LABEL_LINE)} as a whole line; ` +
+      "the memory lane's gate greps for exactly that line and would refuse every commit without it",
+  ];
+}
+
+function checkTrustedMemoryPublication(text, label) {
+  const tools = TRUSTED_MEMORY_TOOLS.map((tool) => [tool.name, readWorkflow(path.join(root, "tools", tool.name))]);
+  const analyzer = readWorkflow(path.join(root, "bench", "analyze-memory-samples.js"));
+  const problemsOf = ({ workflow = text, sources = tools, analyzerSource = analyzer }) => [
+    ...memoryPublicationProblems(workflow).map((problem) => `${label} ${problem}`),
+    ...sources.flatMap(([name, source]) => selfContainedProblems(source, `tools/${name}`)),
+    ...hostLabelLineProblems(analyzerSource),
+  ];
+  const problems = problemsOf({});
+  if (problems.length !== 0) fail(problems[0]);
+
+  // Tripwire: break the reviewed files one way at a time and require each
+  // break to be refused by the rule written for it, so a rule that has quietly
+  // stopped matching fails here rather than on the dispatch it existed for.
+  const lines = text.split("\n");
+  // A missing line must stop the tripwire, not become splice(-1), which would
+  // quietly break the last line of the file instead.
+  const at = (copy, line) => {
+    const index = copy.indexOf(line);
+    if (index === -1) fail(`tripwire could not find ${JSON.stringify(line.trim())} to break`);
+    return index;
+  };
+  const edit = (change) => {
+    const copy = [...lines];
+    change(copy);
+    return copy.join("\n");
+  };
+  const takeGate = (copy) => copy.splice(at(copy, HOST_LABEL_GATE), 4);
+  const [merge, push] = TRUSTED_MEMORY_TOOLS;
+  const replaceLine = (from, to) => edit((copy) => copy.splice(at(copy, from), 1, to));
+  const withSource = (name, change) => tools.map(([file, source]) => [file, file === name ? change(source) : source]);
+  const cases = [
+    ["a workflow that never detaches", { workflow: edit((copy) => copy.splice(at(copy, MEMORY_DETACH), 1)) },
+      "must detach at the measured commit once"],
+    ["no host-label gate", { workflow: edit(takeGate) }, "predate the host label"],
+    ["the gate before the detach, where it reads main's file", {
+      workflow: edit((copy) => {
+        const gate = takeGate(copy);
+        copy.splice(at(copy, MEMORY_DETACH), 0, ...gate);
+      }),
+    }, "predate the host label"],
+    ["the gate after the measurement it exists to spare", {
+      workflow: edit((copy) => {
+        const gate = takeGate(copy);
+        copy.splice(at(copy, MEMORY_MEASURE) + 1, 0, ...gate);
+      }),
+    }, "predate the host label"],
+    ["a gate that reports but does not stop", {
+      workflow: edit((copy) => copy.splice(at(copy, HOST_LABEL_GATE) + 2, 1)),
+    }, "predate the host label"],
+    ["the merge tool copied after the detach", {
+      workflow: edit((copy) => {
+        copy.splice(at(copy, trustedCopy(merge)), 1);
+        copy.splice(at(copy, MEMORY_DETACH) + 2, 0, trustedCopy(merge));
+      }),
+    }, `must copy main's ${merge.name} exactly once`],
+    ["a second copy of the merge tool after the detach", {
+      workflow: edit((copy) => copy.splice(at(copy, MEMORY_DETACH) + 2, 0, trustedCopy(merge))),
+    }, `must copy main's ${merge.name} exactly once`],
+    ["the push helper never copied", { workflow: edit((copy) => copy.splice(at(copy, trustedCopy(push)), 1)) },
+      `must copy main's ${push.name} exactly once`],
+    ["the trusted directory pointed elsewhere", {
+      workflow: edit((copy) => copy.splice(copy.lastIndexOf(TRUSTED_TOOLS_DIR) + 1, 0, "          trusted_tools=tools")),
+    }, "must set"],
+    ["the measured commit's merge tool", {
+      workflow: replaceLine(merge.invocation[0], `          node tools/${merge.name} \\`),
+    }, `must not include "node tools/${merge.name}"`],
+    ["the measured commit's push helper", {
+      workflow: replaceLine(push.invocation[0], `            node tools/${push.name} --repo-dir "$data_dir" --kind memory`),
+    }, `must not include "node tools/${push.name}"`],
+    ["the measured commit's merge tool under another spelling", {
+      workflow: replaceLine(merge.invocation[0], `          node ./tools/${merge.name} \\`),
+    }, `names ${merge.name} outside main's copy`],
+    ["the merge run without its data root", {
+      workflow: replaceLine(merge.invocation[3], "            --data-root ."),
+    }, `must run main's copy of ${merge.name} in the publish step, with the same flags`],
+    ["a copied tool with a relative require", {
+      sources: withSource(merge.name, (source) => `${source}\nrequire("./lib");\n`),
+    }, `tools/${merge.name} must load only node: builtins`],
+    ["a copied tool that locates files beside itself", {
+      sources: withSource(push.name, (source) => `${source}\nconst here = __dirname;\n`),
+    }, `tools/${push.name} must not use __dirname`],
+    ["the label line indented in the analyzer the gate reads", {
+      analyzerSource: analyzer.replace(HOST_LABEL_LINE, () => `  ${HOST_LABEL_LINE}`),
+    }, "as a whole line"],
+  ];
+  for (const [description, change, reason] of cases) {
+    if (
+      (change.workflow ?? text) === text &&
+      (change.sources ?? tools) === tools &&
+      (change.analyzerSource ?? analyzer) === analyzer
+    ) {
+      fail(`tripwire could not build ${description}: the reviewed shape it breaks is gone`);
+    }
+    const refusals = problemsOf(change);
+    if (!refusals.some((problem) => problem.includes(reason))) {
+      fail(
+        `tripwire: ${description} was not refused for that reason` +
+          (refusals.length === 0 ? "; it was accepted" : `; refused instead with: ${refusals[0]}`),
+      );
+    }
+  }
+}
+
 function checkRustiaMemory(text) {
   const label = ".github/workflows/rustia-memory.yml";
   requireIncludes(text, "name: Rustia Memory Cohort\n", label);
@@ -531,21 +793,20 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
   // Measurement only through the driver that attests the machine first. The
-  // routine cohort keeps the bare line, because the measured commit's own
-  // tools run and commits before the flag existed must stay measurable; an
-  // empty cohort input is the routine cohort.
+  // measured commit's own tools run it, so the routine cohort keeps the bare
+  // line for the labelled commits that predate the --cohort flag; commits from
+  // before host-labelled rows are refused before it. An empty cohort input is
+  // the routine cohort.
   requireIncludes(text, 'if [ "${COHORT:-rustia-only}" = rustia-only ]; then\n', label);
   requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local\n", label);
   requireIncludes(text, 'node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"\n', label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
-  requireIncludes(text, "node tools/merge-rustia-ci-memory-data.js", label);
-  requireIncludes(
-    text,
-    "node tools/push-benchmark-data-publication.js --repo-dir \"$data_dir\" --kind memory",
-    label,
-  );
+  // Merging into the data repository and pushing there run main's copies of
+  // those tools, never the measured commit's, and a commit from before
+  // host-labelled rows is refused before it takes the host.
+  checkTrustedMemoryPublication(text, label);
   // The data repository's main is written only by the helper, which owns the
   // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
   // grow a push of its own.

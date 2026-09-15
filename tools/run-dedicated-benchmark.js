@@ -12,7 +12,8 @@
 // known-hosts entry belongs in this repository (CLAUDE.md: nothing
 // infra-identifying lands here). `provider.host.name` is a provenance label
 // that is published in row data; it is NOT an ssh target and must never be
-// used as one.
+// used as one, and sshDestination() refuses a destination whose host is any
+// label this repository publishes.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -86,7 +87,68 @@ function sshDestination() {
         `(kept outside this repository; see rustia-ops)`,
     );
   }
+  const problem = sshDestinationProblem(destination.trim(), publishedHostLabels(REPO));
+  if (problem !== null) fail(problem);
   return destination.trim();
+}
+
+// A provenance label is public and an ssh destination is private, so the two
+// must never be one name. Saying so in prose did not make it so: an ssh_config
+// alias spelt like the published label would quietly make the label an ssh
+// target, and host-check and unlock reach the host without loading a config to
+// compare against. So every ssh and scp call takes its destination from
+// sshDestination(), which checks it against every label the repository
+// publishes, read afresh each time rather than restated here.
+//
+// Every owned-host lane freezes its config into bench/cloud under this prefix
+// -- history, matrix and both memory cohorts -- so a config frozen by a lane
+// added later is read without a second list.
+const DEDICATED_CONFIG = /^dedicated-.*\.json$/;
+
+/// Every provenance label this repository publishes: the host each runner
+/// class names in bench/operations-status.json, and provider.host.name of every
+/// frozen owned-host config in bench/cloud.
+function publishedHostLabels(root) {
+  const labels = new Set();
+  const status = JSON.parse(fs.readFileSync(path.join(root, "bench/operations-status.json"), "utf8"));
+  for (const runner of Object.values(status?.runner_classes ?? {})) {
+    if (typeof runner?.host === "string") labels.add(runner.host);
+  }
+  const configDir = path.join(root, "bench/cloud");
+  for (const name of fs.readdirSync(configDir).filter((file) => DEDICATED_CONFIG.test(file))) {
+    const label = JSON.parse(fs.readFileSync(path.join(configDir, name), "utf8"))?.provider?.host?.name;
+    if (typeof label === "string") labels.add(label);
+  }
+  return [...labels];
+}
+
+/// The host an ssh destination names, from `[ssh://][user@]host[:port]`. The
+/// user ends at the last `@`, which is where ssh splits it, and an IPv6 literal
+/// is bracketed so its colons are not read as a port.
+function sshHostPart(destination) {
+  const authority = destination.replace(/^ssh:\/\//i, "");
+  const host = authority.slice(authority.lastIndexOf("@") + 1);
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    return close === -1 ? host : host.slice(1, close);
+  }
+  const colon = host.indexOf(":");
+  return colon === -1 ? host : host.slice(0, colon);
+}
+
+/// Why `destination` must not be used as an ssh target, or null. ssh lowercases
+/// a host before matching it against ssh_config, so case is ignored. The message
+/// names the published label and nothing else of the destination: the user,
+/// port and spelling the operator chose stay out of the log.
+function sshDestinationProblem(destination, labels) {
+  const host = sshHostPart(destination).toLowerCase();
+  const label = labels.find((candidate) => candidate.toLowerCase() === host);
+  if (label === undefined) return null;
+  return (
+    `${SSH_ENV} names ${JSON.stringify(label)}, which is a provenance label published in row data, ` +
+    `never an ssh target: use a private ssh_config alias that is not a published label ` +
+    `(kept outside this repository; see rustia-ops)`
+  );
 }
 
 function git(args) {
@@ -1984,6 +2046,72 @@ function selfTest() {
     }),
     /not a label/,
   );
+
+  // The label every lane stamps is one sshDestination() refuses, however the
+  // destination wraps it: the host part is compared, so a user, an ssh://
+  // scheme or a port does not hide the label, and neither does case, which ssh
+  // folds before it reads ssh_config. Every spelling yields the one message,
+  // so nothing of the destination but the label reaches the log.
+  const published = publishedHostLabels(REPO);
+  for (const [lane, , label] of lanes) {
+    assert(published.includes(label), `${lane} rows' label must be one sshDestination() refuses`);
+  }
+  const refusal = sshDestinationProblem(authority, published);
+  assert.match(
+    refusal ?? "",
+    new RegExp(
+      `^${SSH_ENV} names "${authority}", which is a provenance label published in row data, never an ssh ` +
+        "target: use a private ssh_config alias that is not a published label",
+    ),
+  );
+  for (const destination of [
+    `user@${authority}`,
+    `ssh://${authority}:22`,
+    `ssh://user@${authority}:22`,
+    // ssh strips the brackets from a URI's host, whatever they enclose.
+    `ssh://user@[${authority}]:22`,
+    authority.toUpperCase(),
+    `ssh://user@${authority.toUpperCase()}:22`,
+  ]) {
+    assert.equal(sshDestinationProblem(destination, published), refusal, `${destination} must be refused`);
+  }
+  // Anything whose host is not a published label is the operator's business.
+  for (const destination of ["box", "user@box", "ssh://user@box:22", "ssh://user@[fe80::1]:22", "10.0.0.5"]) {
+    assert.equal(sshDestinationProblem(destination, published), null, `${destination} is not a published label`);
+  }
+  // Each source adds its own labels. A runner class that names no host adds
+  // nothing, and a frozen config is read by the dedicated- prefix every lane's
+  // file carries, so a rented lane's config is not.
+  const labelRoot = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-labels-"));
+  try {
+    writeJson(path.join(labelRoot, "bench/operations-status.json"), {
+      runner_classes: {
+        shared: { timing_authority: false },
+        owned: { timing_authority: true, host: "owned-class" },
+      },
+    });
+    const frozen = {
+      "dedicated-history-abc1234.json": "owned-history",
+      "dedicated-cross-engine-matrix-abc.json": "owned-matrix",
+      "linode-cross-engine-matrix-abc.json": "rented",
+    };
+    for (const cohort of MEMORY_COHORTS) {
+      frozen[path.basename(MEMORY_COHORT_FREEZERS[cohort].file("abc"))] = `owned-${cohort}`;
+    }
+    for (const [name, label] of Object.entries(frozen)) {
+      writeJson(path.join(labelRoot, "bench/cloud", name), { provider: { host: { name: label } } });
+    }
+    const fixtureLabels = publishedHostLabels(labelRoot);
+    assert.deepEqual(
+      [...fixtureLabels].sort(),
+      ["owned-class", ...MEMORY_COHORTS.map((cohort) => `owned-${cohort}`), "owned-history", "owned-matrix"].sort(),
+    );
+    for (const label of fixtureLabels) {
+      assert.match(sshDestinationProblem(`user@${label}`, fixtureLabels) ?? "", new RegExp(`names "${label}"`));
+    }
+  } finally {
+    fs.rmSync(labelRoot, { recursive: true, force: true });
+  }
 
   const harness = "a".repeat(40);
   const paths = promotionPaths(harness);
