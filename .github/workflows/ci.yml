@@ -1,10 +1,17 @@
 name: CI
 
+# workflow_dispatch is how main's tip gets CI after the weekly matrix lands a
+# cohort: that merge is made with the workflow token, which starts no push
+# workflows, so the matrix workflow dispatches this one on main instead. A
+# dispatched run on main shares the push runs' concurrency group below, so the
+# newest run wins, as it does between two quick merges. A manual trigger is
+# harmless only because this workflow holds a read-only token and no secret.
 "on":
   pull_request:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read

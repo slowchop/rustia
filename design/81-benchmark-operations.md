@@ -341,6 +341,16 @@ derived from reviewed commit identities, so rewriting those identities while
 landing a change makes the generated operations view stale immediately after
 an otherwise green merge.
 
+The weekly matrix publication depends on that rule. GitHub holds pull-request
+runs on a pull request the workflow token opens until a person approves them,
+and the landing helper merges within seconds, so the publication commit carries
+GitHub's CI-skip marker and its pull request starts no checks. A squash or
+rebase would copy the marker onto `main`; GitHub still offers both there, so
+the rule is a convention rather than a setting. The same landing means `main`
+cannot require status checks: a skipped check stays expected and the merge is
+refused. The merge starts no push workflows, so the workflow dispatches CI on
+`main` after landing.
+
 ## Automation
 
 1. Shared self-hosted CI performs correctness and artifact validation only.

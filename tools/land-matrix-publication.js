@@ -12,6 +12,12 @@
 // artifacts accept. Nothing here is reviewed by hand: the cohort was accepted
 // by tools/check-benchmark-results.js before the branch was pushed.
 //
+// Nothing runs on the pull request either. GitHub holds pull-request runs on a
+// pull request the workflow token opens until someone with write access
+// approves them, and this merges within seconds, so the publication commit
+// asks GitHub to skip pull-request workflows and none are created. The merge
+// starts no push workflows, so the workflow dispatches CI on main afterwards.
+//
 // The publication is one commit rendered on one main commit (--base): the
 // operations status, the package and publishability inventories and the
 // current-results report all describe that commit. GitHub would merge a clean
@@ -78,7 +84,11 @@ function pullRequestBody(runUrl) {
     "`main` accepts changes only through pull requests, so the workflow lands its cohort this way " +
     "and merges with a merge commit as soon as GitHub reports the branch mergeable, provided `main` " +
     "is still the commit the publication was rendered on. Nothing here is reviewed by hand: the " +
-    "cohort was accepted by `tools/check-benchmark-results.js` before the branch was pushed."
+    "cohort was accepted by `tools/check-benchmark-results.js` before the branch was pushed.\n\n" +
+    "No checks run here: the commit asks GitHub to skip pull-request workflows, and the workflow " +
+    "dispatches CI on `main` after the merge. If this pull request is still open, the landing failed. " +
+    "Close it rather than merging it by hand: a hand merge does not check that `main` is still the " +
+    "commit it was rendered on, and a squash or rebase merge would carry the skip onto `main`."
   );
 }
 
@@ -185,8 +195,8 @@ async function readTargetBranch(io, config) {
 
 async function deleteBranch(io, config, branch) {
   const removed = await io.api("DELETE", `/repos/${config.repository}/git/refs/heads/${branch}`);
-  // 422 is "reference does not exist": the repository deletes merged head
-  // branches itself, or a previous attempt already did.
+  // 422 is "reference does not exist": a repository set to delete merged head
+  // branches has done it itself, or a previous attempt already did.
   if (removed.status !== 204 && removed.status !== 422 && removed.status !== 404) {
     io.log(`warning: could not delete ${branch}: ${describe(removed.status, removed.json)}`);
   }
@@ -405,6 +415,15 @@ async function selfTest() {
   assert.match(pullRequestBody(config.runUrl), /actions\/runs\/42/);
   assert.match(pullRequestBody(config.runUrl), /merge commit/);
   assert.match(pullRequestBody(null), /Cross-Engine Matrix \(weekly\) workflow\. /);
+  // The body is the only explanation a person sees on a pull request with no
+  // checks. It must not carry a skip marker itself: a repository set to copy
+  // the description into the merge commit would put it on main.
+  assert.match(pullRequestBody(null), /No checks run here/);
+  assert.match(pullRequestBody(null), /Close it rather than merging it by hand/);
+  assert.doesNotMatch(
+    pullRequestBody(config.runUrl),
+    /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks:\s*true/i,
+  );
 
   // A refused merge because main moved is retried by rebuilding; a refused
   // merge for any other reason is a failure.
