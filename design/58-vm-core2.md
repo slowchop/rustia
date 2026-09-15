@@ -491,6 +491,36 @@ intervals 97 and 10,000; `reproducible_standard_heap_stays_bounded_across_calls_
 pins the memory the skipped collections had left behind. The numbers above remain the record of the bugged
 candidate; pricing the collections it skipped is item 4's `main + (2)` host measurement.
 
+**A second determinism bug: fuel exhaustion mid-group (found and fixed 2026-09-15).** The scalar dispatcher
+charged a folded instruction's whole restored cost -- its own fuel plus every unit it absorbed -- in one
+`charge_fuel` call, before advancing `executed_instructions` or calling `maybe_collect`. When that charge
+failed with `FuelExhausted`, the `?` discarded the group's progress entirely: `executed_instructions` never
+advanced for it, whereas the unoptimized program, charging its atomic instructions one at a time, would have
+advanced by however many of them fit in the remaining fuel before failing on the one that didn't. Two programs
+with an identical schedule for a completed run could therefore leave the VM's `executed_instructions` and
+deterministic-collection lattice at different points after a fuel-limited call exhausts inside a fused group --
+the same invariant the lattice bug above violates, on a different trigger. `tests/o2_schedule.rs`'s
+`every_fuel_prefix_matches_exactly` could not see it: it only compares the guest-visible (result-or-
+`FuelExhausted`) outcome, which the restored total-fuel-need invariant
+(`minimum_fuel_is_identical_for_every_family`) already guarantees agrees regardless of this bug.
+Reachability: not exposed through any public embedder surface today -- `RustiaBuilder`/`Rustia` carry no
+`ExperimentalO2Options` knob at all, so O2 is reachable only by code that drives `compile_with_options` and
+`rustia_vm::Vm` directly -- and every fast tier (tape, HotIR, leaf-call plans) already refuses admission
+whenever fuel is bounded (`self.settings.initial_fuel.is_some() || fuel.state.fuel.is_some()`), so fuel-limited
+execution always falls back to this exact scalar-dispatch charge site regardless of which family is enabled;
+no separate fix was needed there. The one place in the workspace that already combines O2 with a bounded fuel
+budget (`crates/rustia/tests/error_recovery.rs`) uses a budget generous enough that it never actually exhausts.
+Fixed by charging one folded unit at a time -- each costs exactly one fuel, the invariant the restored schedule
+already relies on -- with its own `executed_instructions` advance and `maybe_collect` call, stopping at the
+exact unit a `FuelExhausted` budget cannot afford; real dispatch still only runs once every unit in the group
+is charged, so the group's own semantics (which can invoke a metamethod for `commit_late_compound_locals`'s
+folded `Add`/`Sub`/`Concat`/... op) stay all-or-nothing, matching what the unoptimized program's own failing
+instruction would do.
+`crates/rustia-compiler/tests/o2_schedule.rs::fuel_exhaustion_mid_group_leaves_the_same_schedule_as_the_unoptimized_program`
+reproduces the divergence directly (confirmed failing before the fix -- `executed_instructions` 10 vs 9 at fuel
+10 on `local total = 0; for i = 1, 5 do total += i end`) and sweeps every fuel level from 0 to `minimum_fuel +
+2`, comparing `executed_instructions` and the deterministic-collection lattice, not just the outcome.
+
 **What follows.** The default stays off, and per-workload enabling was not the answer while the gate was per
 program: any program with a leaf-shaped closure or a HotIR loop regressed the moment one deletion fired
 anywhere in it (`array_mutation`, 8,399 HotIR iterations per call, was next in line). The counts pointed at:

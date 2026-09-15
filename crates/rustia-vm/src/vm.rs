@@ -4414,12 +4414,16 @@ impl Vm {
                             // instruction's own cost plus its extra units.
                             let extra_units =
                                 logical_unit_at(frame_logical_units, pc).saturating_sub(1);
-                            let fuel_cost = self
+                            let own_cost = self
                                 .instruction_fuel_cost(instruction)
-                                .map_err(|e| e.at_pc(pc))?
-                                .saturating_add(extra_units);
-                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, fuel_cost)
-                                .map_err(|error| error.at_pc(pc))?;
+                                .map_err(|e| e.at_pc(pc))?;
+                            let fuel_cost = own_cost.saturating_add(extra_units);
+                            // Registers are unchanged until this instruction's
+                            // own semantics run below, so one check against the
+                            // group's whole prospective distance covers every
+                            // charge in the loop beneath it: nothing about the
+                            // root snapshot's accuracy depends on how many of
+                            // those charges the fuel budget actually affords.
                             let weak_collection_due = self.weak_collection_due_within(fuel_cost);
                             if weak_collection_due
                                 || self.settings.memory_limit_bytes.is_some()
@@ -4434,10 +4438,28 @@ impl Vm {
                                     &pending_return_prefixes,
                                 );
                             }
-                            self.executed_instructions = self
-                                .executed_instructions
-                                .wrapping_add(1)
-                                .wrapping_add(extra_units);
+                            // Charge one folded unit at a time -- each costs
+                            // exactly one fuel, by the invariant above -- with
+                            // its own `executed_instructions` advance and
+                            // `maybe_collect` call, so a budget that runs out
+                            // inside this group leaves the schedule exactly
+                            // where the unoptimized program would have left it
+                            // after charging that many folded instructions,
+                            // instead of discarding the whole group's
+                            // already-earned progress (design/58-vm-core2.md
+                            // §C2.3, "fuel exhaustion mid-group"). Real
+                            // dispatch below only ever runs once every unit in
+                            // the group -- folded and own -- has been charged.
+                            for _ in 0..extra_units {
+                                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, 1)
+                                    .map_err(|error| error.at_pc(pc))?;
+                                self.executed_instructions =
+                                    self.executed_instructions.wrapping_add(1);
+                                self.maybe_collect()?;
+                            }
+                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, own_cost)
+                                .map_err(|error| error.at_pc(pc))?;
+                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
                             self.maybe_collect()?;
                             self.record_coverage_hit(program_id, context.prototype, function, pc);
                             self.record_opcode_execution(instruction.op);

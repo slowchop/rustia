@@ -218,6 +218,84 @@ fn every_fuel_prefix_matches_exactly() {
     }
 }
 
+/// Every observable schedule field after attempting `program` under an exact
+/// fuel budget, on a fresh `DeterministicSim` VM with a tight deterministic
+/// collection interval: the (value-or-exhausted) outcome `run_with_fuel`
+/// already checks, plus `executed_instructions` and the collection lattice,
+/// which it does not.
+fn run_with_fuel_and_schedule(program: &Program, fuel: u64) -> (Result<u64, bool>, u64, u64, u64) {
+    let settings = VmSettings {
+        initial_fuel: Some(fuel),
+        deterministic_gc_interval: NonZeroU64::new(3).unwrap(),
+        ..VmSettings::default()
+    };
+    let mut vm = Vm::with_settings(Profile::DeterministicSim, settings);
+    let outcome = match vm.run(program) {
+        Ok(value) => Ok(value.as_number().map(f64::to_bits).unwrap_or(0)),
+        Err(error) => Err(matches!(error.kind, ErrorKind::FuelExhausted { .. })),
+    };
+    (
+        outcome,
+        vm.executed_instructions(),
+        vm.next_deterministic_collection_instruction(),
+        vm.deterministic_collection_count(),
+    )
+}
+
+#[test]
+fn fuel_exhaustion_mid_group_leaves_the_same_schedule_as_the_unoptimized_program() {
+    // `every_fuel_prefix_matches_exactly` above only compares the
+    // guest-visible outcome (result or `FuelExhausted`) across every fuel
+    // level, which the restored total-fuel-need invariant already
+    // guarantees agrees between baseline and optimized (`minimum_fuel` is
+    // identical for both, per `minimum_fuel_is_identical_for_every_family`).
+    // But `commit_late_compound_locals` charges a fused group's whole
+    // restored cost -- its own fuel plus every folded instruction it
+    // absorbed -- in one `charge_fuel` call. If that call fails partway
+    // through the group, discarding the whole charge discards the group's
+    // already-earned progress too, instead of leaving `executed_instructions`
+    // wherever the unoptimized program would have gotten to before its own
+    // charge failed on the corresponding atomic instruction. That divergence
+    // is invisible to `run_with_fuel`'s (value-or-exhausted) tuple -- only
+    // `executed_instructions` and the deterministic-collection lattice see
+    // it, and only a host that inspects them (or keeps running the same VM
+    // into a later tick) would ever observe it.
+    let source = r#"
+        local total = 0
+        for i = 1, 5 do
+            total += i
+        end
+        return total
+    "#;
+    let baseline = compile_o2(source, ExperimentalO2Options::default());
+    let optimized = compile_o2(
+        source,
+        ExperimentalO2Options {
+            commit_late_compound_locals: true,
+            ..ExperimentalO2Options::default()
+        },
+    );
+    let limit = minimum_fuel(&baseline) + 2;
+    for fuel in 0..=limit {
+        let base = run_with_fuel_and_schedule(&baseline, fuel);
+        let opt = run_with_fuel_and_schedule(&optimized, fuel);
+        assert_eq!(base.0, opt.0, "outcome diverged at fuel {fuel}");
+        assert_eq!(
+            base.1, opt.1,
+            "executed_instructions diverged at fuel {fuel}: baseline {} vs optimized {}",
+            base.1, opt.1
+        );
+        assert_eq!(
+            (base.2, base.3),
+            (opt.2, opt.3),
+            "deterministic-collection lattice diverged at fuel {fuel}: \
+             baseline {:?} vs optimized {:?}",
+            (base.2, base.3),
+            (opt.2, opt.3)
+        );
+    }
+}
+
 #[test]
 fn logical_clock_is_identical_on_the_plain_mode_tape() {
     // os.clock in ReproducibleStandard without providers is the deterministic
