@@ -139,10 +139,14 @@ by a label and the data repository takes no row that does not. That includes
 the two commits that first stamped a host, whose labels allowed dots.
 `tools/check-workflows.js` pins that gate and requires the analyzer to keep the
 literal as a whole line, since an indented or annotated copy would refuse every
-commit. It also refuses any other line that moves the working tree, a second
-checkout step, and any line that names the trusted tools directory other than
-the pinned copies and runs, since each could fill that directory with the
-measured commit's tools. The merge and the
+commit. It also refuses any other line that runs a tree-moving git command
+(checkout, switch, reset, restore, read-tree, worktree, stash, rebase, pull,
+cherry-pick or bisect), a second checkout step, and any line other than the
+pinned copies and runs that names the trusted tools directory by its
+`rustia-trusted` path or its variable, since each could fill that directory
+with the measured commit's tools. That is a line-by-line lint against the
+plausible ways an edit would do so, not a proof: a line built to slip past the
+patterns is left to review of the workflow. The merge and the
 push into that repository do not run the measured commit's tools (see "Merge."
 under "Row provenance"). Both cohorts go through the same attesting entrypoint
 and inherit one frozen protocol — samples, bootstrap, thresholds, host block,

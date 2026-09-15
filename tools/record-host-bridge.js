@@ -36,10 +36,12 @@ function loadRows() {
     .trim()
     .split("\n")
     .map((line, index) => {
+      // The parser's message quotes the text around the fault, which may be an
+      // address in a malformed host, so only the row number is reported.
       try {
         return JSON.parse(line);
-      } catch (error) {
-        fail(`bench/history/runs.jsonl row ${index + 1} is not JSON: ${error.message}`);
+      } catch {
+        fail(`bench/history/runs.jsonl row ${index + 1} is not JSON`);
       }
     });
 }

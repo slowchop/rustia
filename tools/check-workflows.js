@@ -670,11 +670,14 @@ function memoryPublicationProblems(text) {
     }
   }
   // The copies are main's only while the pinned detach is the one thing that
-  // moves the tree. A switch or reset before them, or a second checkout step,
-  // would put the measured commit in place first, and they would copy its tools.
+  // moves the tree. A switch, reset or rebase before them, or a second checkout
+  // step, would put the measured commit in place first, and they would copy its
+  // tools. This is a lint over single lines against the ways a workflow edit
+  // would plausibly move the tree, not a proof that nothing can: the workflow
+  // is reviewed code, and a line built to slip past a pattern is caught there.
   lines.forEach((line, index) => {
     if (line === MEMORY_DETACH || line.trim().startsWith("#")) return;
-    if (/\bgit\b.*\b(?:checkout|switch|reset|restore|read-tree|worktree|stash)\b/.test(line)) {
+    if (/\bgit\b.*\b(?:checkout|switch|reset|restore|read-tree|worktree|stash|rebase|pull|cherry-pick|bisect)\b/.test(line)) {
       problems.push(`line ${index + 1} moves the working tree outside the pinned detach: ${line.trim()}`);
     }
   });
@@ -691,7 +694,7 @@ function memoryPublicationProblems(text) {
   ]);
   lines.forEach((line, index) => {
     if (trustedLines.has(line) || line.trim().startsWith("#")) return;
-    if (/rustia-trusted-tools|\$\{?trusted_tools\b/.test(line)) {
+    if (/rustia-trusted|\$\{?trusted_tools\b/.test(line)) {
       problems.push(`line ${index + 1} names the trusted tools directory outside the pinned copies and runs: ${line.trim()}`);
     }
   });
@@ -829,6 +832,8 @@ function checkTrustedMemoryPublication(text, label) {
     ...[
       '          git switch --detach "$BENCHMARK_COMMIT"',
       '          git checkout -q "$BENCHMARK_COMMIT"',
+      '          git rebase --onto "$BENCHMARK_COMMIT" HEAD',
+      '          git pull --ff-only origin "$BENCHMARK_COMMIT"',
     ].map((line) => [`${line.trim()} before the copies`, {
       workflow: edit((copy) => copy.splice(at(copy, TRUSTED_TOOLS_DIR), 0, line)),
     }, "moves the working tree outside the pinned detach"]),
@@ -845,6 +850,8 @@ function checkTrustedMemoryPublication(text, label) {
       ["an rsync in the measure step", MEMORY_MEASURE, 0, '            rsync -a tools/ "$RUNNER_TEMP/rustia-trusted-tools/"'],
       ["a symlink to the checkout after the detach", MEMORY_DETACH, 2,
         '          ln -sfn "$PWD/tools" "$RUNNER_TEMP/rustia-trusted-tools"'],
+      ["a copy into the directory by a glob after the detach", MEMORY_DETACH, 2,
+        '          cp tools/*.js "$RUNNER_TEMP"/rustia-trusted-*/'],
     ].map(([description, anchor, offset, line]) => [description, {
       workflow: edit((copy) => copy.splice(at(copy, anchor) + offset, 0, line)),
     }, "names the trusted tools directory outside the pinned copies and runs"]),

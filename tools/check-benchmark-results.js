@@ -515,17 +515,18 @@ function authoritativeHost() {
 
 // Provenance, per row and for the table as a whole.
 //
-// bench/current-results.json and bench/memory/current-results.json are per-slot
-// merges -- the latest row per (target, engine, workload) across every cohort
-// in their histories. A run that re-measures only some slots therefore leaves
-// the rest standing, and before rows named their machine that is exactly what
-// happened: a table announced one machine in its metadata while most of its
-// rows had been measured on a rented cloud host six weeks earlier, and only
-// the per-row commit revealed it. A comparison between two machines is not a
-// comparison between two engines, so each table must come from one machine,
-// and that machine must be the one the operations policy qualifies to produce
-// timings. The checks below are pure so the self-test can hand them tables
-// that must be refused.
+// bench/current-results.json and bench/memory/current-results.json are merges
+// across every cohort in their histories: the timing table keeps the latest row
+// per (target, engine, workload), and the memory table takes each engine's rows
+// from the newest cohort that measured it. A run that re-measures only some
+// slots or engines therefore leaves the rest standing, and before rows named
+// their machine that is exactly what happened: a table announced one machine
+// in its metadata while most of its rows had been measured on a rented cloud
+// host six weeks earlier, and only the per-row commit revealed it. A
+// comparison between two machines is not a comparison between two engines, so
+// each table must come from one machine, and that machine must be the one the
+// operations policy qualifies to produce timings. The checks below are pure so
+// the self-test can hand them tables that must be refused.
 // A label, never an address: no dots and no colons, so it can be neither a
 // fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
 // Every emitter and validator carries this same literal; selfTest() asserts it.

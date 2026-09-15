@@ -260,13 +260,17 @@ Current unpublished workspace version: `0.0.1`.
   confined to a label can no longer be measured through the lane.
   `tools/check-workflows.js` pins the copies, their order and invocations, and
   the gate, and requires both copied tools to load only `node:` builtins. It
-  also refuses any other line that moves the working tree, a second checkout
-  step, and any other line that names the trusted tools directory, each of
-  which could put the measured commit's tools there.
+  also refuses any other line running a tree-moving git command (checkout,
+  switch, reset, restore, read-tree, worktree, stash, rebase, pull,
+  cherry-pick, bisect), a second checkout step, and any other line naming the
+  trusted tools directory by path or variable, each of which could put the
+  measured commit's tools there. It is a line lint, not a proof; a line built
+  to evade it is left to review.
 - `tools/run-dedicated-benchmark.js` refuses an ssh destination that is a
   published label. Before any ssh or scp it compares the host part of
-  `RUSTIA_BENCH_SSH`, ignoring case, a `user@`, an `ssh://` scheme, a port and
-  a trailing `/`, with every runner class's `host` in
+  `RUSTIA_BENCH_SSH`, ignoring case, a `user@`, an `ssh://` or `scp://`
+  scheme, a port, a trailing `/` and trailing dots, with every runner class's
+  `host` in
   `bench/operations-status.json` and the `provider.host.name` of every
   `bench/cloud/dedicated-*.json`. Its self-test runs `host-check` and `unlock`
   against a stub `ssh` to show that neither reaches it.

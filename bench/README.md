@@ -501,10 +501,11 @@ target" a check. Before any ssh or scp, on every command that reaches the host â
 equals a label this repository publishes: a runner class's `host` in
 `operations-status.json`, or `provider.host.name` in any
 `cloud/dedicated-*.json`, read afresh on every call. The host part is what is
-left once an optional `ssh://`, a `user@`, a `:port`, a trailing `/` (ssh
-accepts a URI with an empty path and still reaches the host) and IPv6 brackets
-are stripped, and case is ignored, since ssh lowercases a host before it reads
-`ssh_config`. The refusal names the label and nothing else of the destination.
+left once an optional `ssh://` or `scp://` (the scp calls take the same
+destination), a `user@`, a `:port`, a trailing `/` (ssh accepts a URI with an
+empty path and still reaches the host), trailing dots (ssh drops one from a
+URI's host) and IPv6 brackets are stripped, and case is ignored, since ssh
+lowercases a host before it reads `ssh_config`. The refusal names the label and nothing else of the destination.
 Only equality is refused, so choose an alias plainly unlike the label rather
 than a variation of it. With `--local` the variable is never read.
 

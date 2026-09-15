@@ -125,16 +125,19 @@ function publishedHostLabels(root) {
 /// The host an ssh destination names, from `[ssh://][user@]host[:port][/]`. The
 /// user ends at the last `@`, which is where ssh splits it. The host ends at a
 /// `:` or a `/`, where ssh's URI parser ends it: that parser accepts an empty
-/// path, so `ssh://host/` reaches `host`. An IPv6 literal is bracketed so its
-/// colons are not read as a port.
+/// path, so `ssh://host/` reaches `host`. It also drops a trailing `.`, so
+/// `ssh://host.` reaches `host` too, and trailing dots are dropped here. The
+/// destination is interpolated into scp arguments as well, and scp reads an
+/// `scp://` URI the same way, so that scheme (and sftp's) is stripped alike.
+/// An IPv6 literal is bracketed so its colons are not read as a port.
 function sshHostPart(destination) {
-  const authority = destination.replace(/^ssh:\/\//i, "");
+  const authority = destination.replace(/^(?:ssh|scp|sftp):\/\//i, "");
   const host = authority.slice(authority.lastIndexOf("@") + 1);
   if (host.startsWith("[")) {
     const close = host.indexOf("]");
-    return close === -1 ? host : host.slice(1, close);
+    return (close === -1 ? host : host.slice(1, close)).replace(/\.+$/, "");
   }
-  return host.split(/[:/]/)[0];
+  return host.split(/[:/]/)[0].replace(/\.+$/, "");
 }
 
 /// Why `destination` must not be used as an ssh target, or null. ssh lowercases
@@ -2092,6 +2095,13 @@ function selfTest() {
     `ssh://${authority}/`,
     `ssh://user@${authority}/`,
     `ssh://user@${authority}:22/`,
+    // ssh drops a trailing dot from a URI's host.
+    `ssh://${authority}.`,
+    `ssh://user@${authority}.:22/`,
+    `ssh://[${authority}.]`,
+    // The scp calls take the same destination, and scp reads its own URI form.
+    `scp://${authority}/`,
+    `scp://user@${authority}:22/`,
     authority.toUpperCase(),
     `ssh://user@${authority.toUpperCase()}:22`,
   ]) {
@@ -2107,7 +2117,7 @@ function selfTest() {
       fs.writeFileSync(path.join(stubDir, tool), `#!/bin/sh\necho "${tool}" >> "${called}"\n`, { mode: 0o755 });
     }
     for (const command of ["host-check", "unlock"]) {
-      for (const destination of [authority, `user@${authority}:22`, `ssh://${authority}/`]) {
+      for (const destination of [authority, `user@${authority}:22`, `ssh://${authority}/`, `ssh://${authority}.`]) {
         const run = spawnSync(process.execPath, [__filename, command], {
           encoding: "utf8",
           env: { ...process.env, [SSH_ENV]: destination, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
