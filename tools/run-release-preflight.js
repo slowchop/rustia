@@ -78,6 +78,7 @@ node("tools/check-dedicated-config.js");
 node("tools/check-dedicated-config.js", "--self-test");
 node("tools/push-benchmark-data-publication.js", "self-test");
 node("tools/run-linux-matrix-benchmark.js", "self-test");
+node("tools/land-matrix-publication.js", "self-test");
 node("bench/run-memory-supervisor.js", "self-test");
 node("bench/analyze-memory-samples.js", "self-test");
 node("bench/run-memory-cohort.js", "self-test");

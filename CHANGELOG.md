@@ -399,6 +399,23 @@ Current unpublished workspace version: `0.0.1`.
   coverage, so a partial tail cohort can no longer poison the rendered
   current-results report; output is byte-identical on existing history.
 
+- **The weekly matrix lands a publication only on the `main` it describes.**
+  `tools/land-matrix-publication.js` merged whenever GitHub reported the
+  branch mergeable, so a commit that reached `main` after the workflow fetched
+  it would have been merged under an operations status, package and
+  publishability inventories, and current-results report rendered for the
+  previous `main`. The workflow now passes the commit it rendered on and the
+  commit it pushed; the helper reads `main` just before merging, rebuilds
+  unless `main` is still the publication's parent, names the pushed commit in
+  the merge so GitHub refuses a branch that moved, and trusts an adopted pull
+  request's mergeability only once its head is that commit. It also no longer
+  treats every HTTP 405 as a race: only "base branch was modified" and
+  conflict refusals rebuild, while a ruleset or other refusal fails at once
+  with GitHub's reason instead of after two pointless rebuilds and a silent
+  `test -n`. This path has not yet landed a cohort, so its self-test now runs
+  in release preflight, and therefore in CI; `tools/check-workflows.js` pins
+  both the preflight step and the helper's two new arguments.
+
 - One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
   collides with compiler constructor pre-sizing hints: constructor
   `TableCreate` instructions now mark with `aux == 0` (the builtin's arity is

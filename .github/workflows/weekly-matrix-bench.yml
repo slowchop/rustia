@@ -98,6 +98,9 @@ jobs:
           for attempt in 1 2 3; do
             git fetch origin main
             git checkout -B "$branch" origin/main
+            # Every file rendered below describes this commit, so the landing
+            # helper merges only while main is still exactly this commit.
+            base_commit="$(git rev-parse HEAD)"
             git checkout "$snapshot" -- \
               "$config" \
               bench/history \
@@ -117,21 +120,28 @@ jobs:
             node tools/check-benchmark-results.js
             git add bench design tools/check-benchmark-results.js
             git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
+            publication_commit="$(git rev-parse HEAD)"
             git push --force origin "HEAD:refs/heads/$branch"
-            # Exit 3 means main moved and the branch no longer merges cleanly;
-            # anything else that is not success is a failure.
+            # Exit 3 means main moved, so the publication no longer describes
+            # it and is rebuilt; anything else that is not success is a
+            # failure, and the helper has already printed GitHub's reason.
             landing=0
             node tools/land-matrix-publication.js \
               --branch "$branch" \
+              --base "$base_commit" \
+              --head "$publication_commit" \
               --title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?
             if [ "$landing" -eq 0 ]; then
               published=yes
               break
             fi
             [ "$landing" -eq 3 ] || exit "$landing"
-            echo "landing raced with new commits on main; rebuilding publication (attempt $attempt)"
+            echo "main moved before the publication could land (attempt $attempt of 3)"
           done
-          test -n "$published"
+          if [ -z "$published" ]; then
+            echo "main moved under the publication on all three attempts; nothing was landed" >&2
+            exit 1
+          fi
           # A merge performed with GITHUB_TOKEN does not trigger downstream
           # workflows, so the dashboard publication is dispatched explicitly.
           curl -sSf -X POST \
