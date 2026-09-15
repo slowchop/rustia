@@ -65,13 +65,13 @@
     "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
   },
   "progress": {
-    "state": "current",
+    "state": "pending",
     "measured_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
     "measured_at_unix": 1789440743,
-    "latest_relevant_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
-    "latest_relevant_committed_at_unix": 1789439942,
-    "pending_relevant_commit_count": 0,
-    "next_action": "No progress measurement is currently required."
+    "latest_relevant_commit": "9bc64a16ce2e491a8ce1f922ffc2644b2dbb9916",
+    "latest_relevant_committed_at_unix": 1789445597,
+    "pending_relevant_commit_count": 5,
+    "next_action": "Measure the newest pending performance-relevant commit on the owned benchmark host."
   },
   "landscape": {
     "state": "paused",
