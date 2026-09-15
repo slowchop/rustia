@@ -57,7 +57,7 @@ impl Function {
         let raw_results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         let results = raw_results
             .into_iter()
             .map(|value| snapshot_value(rustia.vm_mut(), value))
@@ -80,7 +80,7 @@ impl Function {
         let results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
-            .map_err(Error::Vm)?;
+            .map_err(Error::from)?;
         LiveValue::retain_many(rustia.vm_mut(), &results)
     }
 
@@ -244,9 +244,9 @@ impl Exports {
     pub fn function(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
         let value = self.raw_get(rustia, name)?;
         if value.kind() != ValueKind::Function {
-            return Err(Error::Embed(format!("export `{name}` is not a function")));
+            return Err(Error::embed(format!("export `{name}` is not a function")));
         }
-        let value = rustia.vm_mut().retain_value(value).map_err(Error::Vm)?;
+        let value = rustia.vm_mut().retain_value(value).map_err(Error::from)?;
         Ok(Function::new(value, self.decision_epoch))
     }
 
@@ -257,9 +257,9 @@ impl Exports {
         invocation.scoped(|invocation| {
             let value = self.raw_get_in(invocation, name)?;
             if value.kind() != ValueKind::Function {
-                return Err(Error::Embed(format!("export `{name}` is not a function")));
+                return Err(Error::embed(format!("export `{name}` is not a function")));
             }
-            let value = invocation.vm.retain_value(value).map_err(Error::Vm)?;
+            let value = invocation.vm.retain_value(value).map_err(Error::from)?;
             Ok(Function::new(value, self.decision_epoch))
         })
     }
@@ -275,7 +275,7 @@ impl Exports {
         rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 
     fn raw_get_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<RawValue>
@@ -292,7 +292,7 @@ impl Exports {
         invocation
             .vm
             .raw_table_get_value(table, key)
-            .map_err(Error::Vm)
+            .map_err(Error::from)
     }
 }
 
@@ -358,7 +358,7 @@ impl FromHostArgument for LiveValue {
 impl FromHostArgument for crate::Table {
     fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
         if value.kind() != ValueKind::Table {
-            return Err(Error::Embed("expected table".to_owned()));
+            return Err(Error::embed("expected table".to_owned()));
         }
         Ok(Self::new(LiveValue::retain(vm, value)?))
     }
@@ -367,7 +367,7 @@ impl FromHostArgument for crate::Table {
 impl FromHostArgument for Function {
     fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
         if value.kind() != ValueKind::Function {
-            return Err(Error::Embed("expected function".to_owned()));
+            return Err(Error::embed("expected function".to_owned()));
         }
         Ok(Self::from_value(LiveValue::retain(vm, value)?))
     }
@@ -626,10 +626,12 @@ where
 
 fn host_embed_error(function_name: &str, slot: impl AsRef<str>, error: Error) -> rustia_vm::Error {
     match error {
-        Error::Vm(error) => error,
-        error => embed_to_vm_error(Error::Embed(format!(
-            "host function `{function_name}` {}: {error}",
-            slot.as_ref()
-        ))),
+        Error {
+            kind: crate::ErrorKind::Vm(error),
+            ..
+        } => *error,
+        error => embed_to_vm_error(
+            error.with_context(format!("host function `{function_name}` {}", slot.as_ref())),
+        ),
     }
 }

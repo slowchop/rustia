@@ -425,6 +425,7 @@ function render(data, historyCount, wasmData) {
   lines.push("- [`bench/current-results.json`](bench/current-results.json): latest rows by target, engine, and workload");
   lines.push("- [`bench/RESULTS.md`](bench/RESULTS.md): generated detailed result table");
   lines.push("- [`bench/current-results.html`](bench/current-results.html): standalone rendered report");
+  lines.push("- [`bench/grabby-builds/results.json`](bench/grabby-builds/results.json): selected Grabby application build results and paired samples, separate from Rustia workloads");
   lines.push("- [`bench/CLAIMS.md`](bench/CLAIMS.md): generated public-claim gate");
   lines.push("- [`bench/operations-status.json`](bench/operations-status.json): publication, progress, and landscape freshness");
   if (wasm) {

@@ -1,17 +1,12 @@
-use rustia::{
-    ModuleSource, OwnedValue, Profile, Rustia, ServiceModuleResolver, SourceSpan, VmSettings,
-};
+use rustia::{ModuleSource, OwnedValue, Profile, Rustia, ServiceModuleResolver, VmSettings};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::env;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
-
-type SourceMap = Rc<RefCell<BTreeMap<String, Vec<u8>>>>;
 
 const USAGE: &str = "\
 usage: rustia [options] <script.luau>
@@ -43,16 +38,8 @@ fn main() -> ExitCode {
             eprintln!("{label}: {error}");
             ExitCode::from(1)
         }
-        Err(CliError::Rustia {
-            error,
-            source_name,
-            source,
-            sources,
-        }) => {
-            eprintln!(
-                "{}",
-                format_diagnostic_with_sources(&error, &source_name, &source, &sources)
-            );
+        Err(CliError::Rustia { error }) => {
+            eprintln!("{}", error.report());
             ExitCode::from(1)
         }
     }
@@ -124,10 +111,7 @@ fn read_source(config: &Config) -> Result<(String, Vec<u8>), CliError> {
 }
 
 fn run_source(config: &Config, source_name: &str, source: &[u8]) -> Result<(), CliError> {
-    let (mut rustia, sources) = configured_rustia(config)?;
-    sources
-        .borrow_mut()
-        .insert(source_name.to_owned(), source.to_vec());
+    let mut rustia = configured_rustia(config)?;
     let executable_source = source_without_shebang(source);
     rustia
         .load(executable_source.as_ref())
@@ -135,14 +119,10 @@ fn run_source(config: &Config, source_name: &str, source: &[u8]) -> Result<(), C
         .exec()
         .map_err(|error| CliError::Rustia {
             error: Box::new(error),
-            source_name: source_name.to_owned(),
-            source: source.to_vec(),
-            sources: sources.borrow().clone(),
         })
 }
 
-fn configured_rustia(config: &Config) -> Result<(Rustia, SourceMap), CliError> {
-    let sources = Rc::new(RefCell::new(BTreeMap::new()));
+fn configured_rustia(config: &Config) -> Result<Rustia, CliError> {
     let mut builder = Rustia::builder()
         .profile(config.profile)
         .settings(config.settings.clone())
@@ -150,11 +130,11 @@ fn configured_rustia(config: &Config) -> Result<(Rustia, SourceMap), CliError> {
 
     if config.profile != Profile::DeterministicSim {
         let base_directory = module_base_directory(config)?;
-        builder = builder.module_resolver(cli_module_resolver(base_directory, sources.clone()));
+        builder = builder.module_resolver(cli_module_resolver(base_directory));
     }
 
     let rustia = builder.build()?;
-    Ok((rustia, sources))
+    Ok(rustia)
 }
 
 fn module_base_directory(config: &Config) -> Result<PathBuf, CliError> {
@@ -174,7 +154,7 @@ fn module_base_directory(config: &Config) -> Result<PathBuf, CliError> {
     })
 }
 
-fn cli_module_resolver(base_directory: PathBuf, sources: SourceMap) -> ServiceModuleResolver {
+fn cli_module_resolver(base_directory: PathBuf) -> ServiceModuleResolver {
     let known_modules = Rc::new(RefCell::new(BTreeSet::new()));
     ServiceModuleResolver::from_nondeterministic_fn(move |requested, referrer| {
         let resolution_base = referrer
@@ -190,7 +170,9 @@ fn cli_module_resolver(base_directory: PathBuf, sources: SourceMap) -> ServiceMo
                 Ok(path) => path,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => {
-                    return Err(format!("could not resolve module {requested:?}: {error}"));
+                    return Err(rustia::Error::embed(format!(
+                        "could not resolve module {requested:?}: {error}"
+                    )));
                 }
             };
             if !canonical.is_file() {
@@ -203,17 +185,14 @@ fn cli_module_resolver(base_directory: PathBuf, sources: SourceMap) -> ServiceMo
                 .into_string()
                 .map_err(|path| format!("module path is not valid UTF-8: {}", path.display()))?;
 
-            sources
-                .borrow_mut()
-                .insert(identity.clone(), source.clone());
             known_modules.borrow_mut().insert(identity.clone());
             return Ok(ModuleSource::new(identity, source));
         }
 
-        Err(format!(
+        Err(rustia::Error::embed(format!(
             "module {requested:?} was not found (tried {})",
             attempted.join(", ")
-        ))
+        )))
     })
 }
 
@@ -265,7 +244,7 @@ where
     O: Write,
     E: Write,
 {
-    let (mut rustia, sources) = configured_rustia(config)?;
+    let mut rustia = configured_rustia(config)?;
     let source_prefix = config.source_name.as_deref().unwrap_or("<repl>");
     let mut line = String::new();
     let mut line_number = 1usize;
@@ -316,13 +295,14 @@ where
 
         let (source, display_result) = repl_source(trimmed);
         let source_name = format!("{source_prefix}[{line_number}]");
-        sources
-            .borrow_mut()
-            .insert(source_name.clone(), source.as_bytes().to_vec());
         let result = if display_result {
             rustia
                 .load(&source)
                 .source_name(&source_name)
+                .source_map(rustia::SourceMap::generated_wrapper(
+                    "return tostring((".len(),
+                    2,
+                ))
                 .eval()
                 .map(Some)
         } else {
@@ -343,15 +323,7 @@ where
             }
             Ok(None) => {}
             Err(error) => {
-                let diagnostic = {
-                    let sources = sources.borrow();
-                    format_diagnostic_with_sources(
-                        &error,
-                        &source_name,
-                        source.as_bytes(),
-                        &sources,
-                    )
-                };
+                let diagnostic = error.report();
                 writeln!(error_output, "{diagnostic}").map_err(|error| CliError::Io {
                     label: "<stderr>".to_owned(),
                     error,
@@ -381,145 +353,6 @@ fn display_repl_value(value: OwnedValue) -> String {
         OwnedValue::Number(value) => value.to_string(),
         OwnedValue::Table(_) => "<table>".to_owned(),
     }
-}
-
-#[cfg(test)]
-fn format_diagnostic(error: &rustia::Error, source_name: &str, source: &[u8]) -> String {
-    format_diagnostic_with_sources(error, source_name, source, &BTreeMap::new())
-}
-
-fn format_diagnostic_with_sources(
-    error: &rustia::Error,
-    source_name: &str,
-    source: &[u8],
-    sources: &BTreeMap<String, Vec<u8>>,
-) -> String {
-    let mut output = error.to_string();
-    if let Some(span) = error.source_span() {
-        append_span_snippet(&mut output, source_name, source, span);
-    } else if let Some(location) = error.source_location() {
-        let located_source = sources.get(location.source).map_or(source, Vec::as_slice);
-        append_line_snippet(&mut output, location.source, located_source, location.line);
-    }
-    output
-}
-
-fn append_span_snippet(output: &mut String, source_name: &str, source: &[u8], span: SourceSpan) {
-    let position = line_position(source, span.start);
-    let line = String::from_utf8_lossy(&source[position.line_start..position.line_end]);
-    let width = position.line.to_string().len();
-    let caret_count = span_caret_count(source, position.line_start, position.line_end, span);
-
-    let _ = write!(
-        output,
-        "\n --> {source_name}:{}:{}\n{:>width$} |\n{:>width$} | {line}\n{:>width$} | {}{}",
-        position.line,
-        position.column,
-        "",
-        position.line,
-        "",
-        " ".repeat(position.column.saturating_sub(1)),
-        "^".repeat(caret_count),
-        width = width
-    );
-}
-
-fn append_line_snippet(output: &mut String, source_name: &str, source: &[u8], line_number: u32) {
-    let Some((line_index, line)) = source_line(source, line_number) else {
-        return;
-    };
-    let line = String::from_utf8_lossy(line);
-    let width = line_index.to_string().len();
-
-    let _ = write!(
-        output,
-        "\n --> {source_name}:{line_index}\n{:>width$} |\n{:>width$} | {line}\n{:>width$} | ^",
-        "",
-        line_index,
-        "",
-        width = width
-    );
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct LinePosition {
-    line: usize,
-    column: usize,
-    line_start: usize,
-    line_end: usize,
-}
-
-fn line_position(source: &[u8], byte_index: usize) -> LinePosition {
-    let target = byte_index.min(source.len());
-    let mut line = 1;
-    let mut line_start = 0;
-
-    for (index, byte) in source.iter().copied().enumerate() {
-        if index >= target {
-            break;
-        }
-        if byte == b'\n' {
-            line += 1;
-            line_start = index + 1;
-        }
-    }
-
-    let mut line_end = source[line_start..]
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .map_or(source.len(), |offset| line_start + offset);
-    if line_end > line_start && source[line_end - 1] == b'\r' {
-        line_end -= 1;
-    }
-    let column = String::from_utf8_lossy(&source[line_start..target])
-        .chars()
-        .count()
-        + 1;
-
-    LinePosition {
-        line,
-        column,
-        line_start,
-        line_end,
-    }
-}
-
-fn span_caret_count(source: &[u8], line_start: usize, line_end: usize, span: SourceSpan) -> usize {
-    let start = span.start.clamp(line_start, line_end);
-    let end = span.end.clamp(start, line_end);
-    String::from_utf8_lossy(&source[start..end])
-        .chars()
-        .count()
-        .max(1)
-}
-
-fn source_line(source: &[u8], line_number: u32) -> Option<(usize, &[u8])> {
-    let line_index = usize::try_from(line_number).ok()?;
-    if line_index == 0 {
-        return None;
-    }
-    let mut current = 1;
-    let mut line_start = 0;
-
-    for (index, byte) in source.iter().copied().enumerate() {
-        if current == line_index && byte == b'\n' {
-            let line = trim_line_ending(&source[line_start..index]);
-            return Some((line_index, line));
-        }
-        if byte == b'\n' {
-            current += 1;
-            line_start = index + 1;
-        }
-    }
-
-    if current == line_index {
-        return Some((line_index, trim_line_ending(&source[line_start..])));
-    }
-    None
-}
-
-fn trim_line_ending(line: &[u8]) -> &[u8] {
-    line.strip_suffix(b"\r").unwrap_or(line)
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError> {
@@ -672,16 +505,8 @@ enum Input {
 enum CliError {
     Help,
     Usage(String),
-    Io {
-        label: String,
-        error: io::Error,
-    },
-    Rustia {
-        error: Box<rustia::Error>,
-        source_name: String,
-        source: Vec<u8>,
-        sources: BTreeMap<String, Vec<u8>>,
-    },
+    Io { label: String, error: io::Error },
+    Rustia { error: Box<rustia::Error> },
 }
 
 impl CliError {
@@ -694,18 +519,13 @@ impl From<rustia::Error> for CliError {
     fn from(error: rustia::Error) -> Self {
         Self::Rustia {
             error: Box::new(error),
-            source_name: "<unknown>".to_owned(),
-            source: Vec::new(),
-            sources: BTreeMap::new(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        format_diagnostic, parse_args, parse_profile, run_repl, run_source, CliError, Input,
-    };
+    use super::{parse_args, parse_profile, run_repl, run_source, CliError, Input};
     use rustia::Profile;
     use std::io::Cursor;
     use std::path::PathBuf;
@@ -840,7 +660,7 @@ break
             run_source(&config, "broken.luau", source.as_bytes())
                 .expect_err("break outside loop should fail compilation"),
         );
-        let diagnostic = format_diagnostic(&error, "broken.luau", source.as_bytes());
+        let diagnostic = error.report().to_string();
 
         assert!(diagnostic.contains("break outside loop"), "{diagnostic}");
         assert!(diagnostic.contains(" --> broken.luau:2:1"), "{diagnostic}");
@@ -859,7 +679,7 @@ t[0 / 0] = 1
             run_source(&config, "runtime.luau", source.as_bytes())
                 .expect_err("NaN table key should fail"),
         );
-        let diagnostic = format_diagnostic(&error, "runtime.luau", source.as_bytes());
+        let diagnostic = error.report().to_string();
 
         assert!(diagnostic.contains("runtime.luau:2:"), "{diagnostic}");
         assert!(diagnostic.contains(" --> runtime.luau:2"), "{diagnostic}");

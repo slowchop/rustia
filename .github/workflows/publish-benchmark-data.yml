@@ -10,6 +10,7 @@ name: Publish Benchmark Data
       - bench/RESULTS.md
       - bench/current-results.html
       - bench/current-results.json
+      - bench/grabby-builds/**
       - bench/history/runs.jsonl
       - bench/history/backfills/**
       - bench/operations-policy.json
@@ -20,10 +21,15 @@ name: Publish Benchmark Data
       - bench/wasm/current-results.json
       - bench/wasm/dispatch-current-results.json
       - tools/check-benchmark-results.js
+      - tools/check-grabby-build-results.js
       - tools/check-wasm-gate-results.js
       - tools/render-benchmark-data-readme.js
       - tools/render-benchmark-operations-status.js
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      BENCH_DATA_DEPLOY_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -66,6 +72,7 @@ jobs:
           node tools/check-wasm-gate-results.js
           node tools/render-benchmark-operations-status.js --check
           node tools/check-current-report-summary.js
+          node tools/check-grabby-build-results.js
           node bench/render-current-results.js --check
           node bench/render-claims.js --check
 
@@ -90,11 +97,12 @@ jobs:
           export GIT_SSH_COMMAND="ssh -i $ssh_dir/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$ssh_dir/known_hosts"
 
           git clone --branch main git@github.com:slowchop/rustia-bench-data.git "$data_dir"
-          install -d "$data_dir/bench/history" "$data_dir/bench/wasm"
+          install -d "$data_dir/bench/history" "$data_dir/bench/wasm" "$data_dir/bench/grabby-builds"
           for artifact in \
             bench/CLAIMS.md \
             bench/RESULTS.md \
             bench/current-results.json \
+            bench/grabby-builds/results.json \
             bench/history/runs.jsonl \
             bench/operations-status.json \
             bench/wasm-gate.json \
@@ -153,9 +161,10 @@ jobs:
           git -C "$data_dir" fetch origin gh-pages
           git -C "$data_dir" worktree add --detach "$pages_dir" origin/gh-pages
           install -m 644 bench/current-results.html "$pages_dir/index.html"
+          install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"
           git -C "$pages_dir" config user.name "rustia-benchmark"
           git -C "$pages_dir" config user.email "benchmark@rustia.invalid"
-          git -C "$pages_dir" add index.html
+          git -C "$pages_dir" add index.html grabby-builds.json
           if ! git -C "$pages_dir" diff --cached --quiet; then
             git -C "$pages_dir" commit -m "Publish benchmark data ${source_commit:0:12}"
             git -C "$pages_dir" push origin HEAD:gh-pages

@@ -96,7 +96,7 @@ fn build_vm(hardened: bool) -> Result<Rustia<LeafSchema>> {
                     .get()
                     .get(usize::from(slot))
                     .copied()
-                    .ok_or_else(|| rustia::Error::Embed("slot index out of range".to_owned()))
+                    .ok_or_else(|| rustia::Error::embed("slot index out of range".to_owned()))
             })
             .effect(
                 "move",

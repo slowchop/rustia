@@ -691,6 +691,21 @@ function selfTest() {
     () => validateConfig({ ...rented, provider: { ...rented.provider, size: { ...rented.provider.size, id: undefined } } }),
     /provider\.size\.id/,
   );
+  // The second freezer, the cross-engine cohort, is held to the same link:
+  // it must validate here, and it must take the all-engines build path
+  // rather than the rustia-only shortcut.
+  const crossEngine = require("./create-cross-engine-memory-config.js").createConfig(head);
+  assert.equal(validateConfig(crossEngine).schema, DEDICATED_SCHEMA);
+  assert.equal(crossEngine.publication.mode, "memory");
+  assert.equal(crossEngine.publication.rows, 110);
+  assert.notEqual(crossEngine.publication.mode, "rustia_ci_memory");
+  assert.deepEqual(crossEngine.provider, dedicated.provider);
+  assert.deepEqual(crossEngine.host_gate, dedicated.host_gate);
+  // Its competitor rows share a table with the rustia-only cohort's rows, and
+  // that table must name one machine, so the cross-engine cohort labels its
+  // rows with the same owned-host name through the same protocol field.
+  assert.equal(hostLabel(crossEngine), "ci-bench");
+  assert.equal(memoryProtocol(crossEngine).host.name, hostLabel(dedicated));
   // A core outside the pinned set must be refused.
   assert.throws(
     () =>

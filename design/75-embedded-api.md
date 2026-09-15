@@ -59,6 +59,16 @@ The ordered expansion is recorded in
 
 ## Non-Negotiable Requirements
 
+Human-facing diagnostics use the shared [`Error::report()` contract](79-script-diagnostics.md):
+bounded immutable executed source and logical callers, honest spans, typed host
+causes and serde paths. The error is now an object; migrate old `Error::Vm(e)`
+matches to `error.as_vm_error()` or `error.kind()`, constructors to `Error::from`
+and `Error::embed`, and module resolvers to `rustia::Result<ModuleSource>`.
+Clients render at existing reporting boundaries, not inside VM execution.
+Console-generated prefixes are mapped with `SourceMap`, not guessed from the
+latest input buffer. Guest strings and hardened-leaf failure classification
+remain separate from host presentation.
+
 - Koto-shaped migration path: construct VM, configure limits/fuel, register host functions, inject globals,
   compile/run chunks, read exports, call script functions from Rust.
 - Two additive public layers: preserve the concise typed command/data facade, then add an advanced live-object

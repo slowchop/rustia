@@ -334,12 +334,22 @@ fn apply_rewrite(
         if let Some(last) = new_source_map.last_mut() {
             if last.pc == mapped {
                 last.line = entry.line;
+                last.span = if plan.deleted[entry.pc] {
+                    None
+                } else {
+                    entry.span
+                };
                 continue;
             }
         }
         new_source_map.push(InstructionSource {
             pc: mapped,
             line: entry.line,
+            span: if plan.deleted[entry.pc] {
+                None
+            } else {
+                entry.span
+            },
         });
     }
 

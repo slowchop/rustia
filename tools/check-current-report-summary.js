@@ -433,21 +433,46 @@ function main() {
   // qualified timing authority it was handed.
   assert.match(memoryHistorySection([], "some-authority"), /starts again on <code>some-authority<\/code>/);
 
+  // Without a same-host competitor cohort there is no reference to divide by, so the panel has to
+  // say so instead of plotting a line against a host it no longer trusts.
+  const rustiaOnlyHistory = [hostedCohort({
+    schema_version: 1,
+    schema: "rustia.bench.memory-cohort.v1",
+    cohort_id: "ci-bench-only",
+    commit: "ci-bench-commit",
+    created_at: "2026-07-03T00:00:00.000Z",
+    rows: memoryHistoryWorkloads.map((workload) =>
+      memoryHistoryRow("rustia", workload, 50, 25)
+    ),
+  }, "ci-bench")];
+  assert.equal(memoryHistoryModel(rustiaOnlyHistory), null);
+  const rustiaOnlyHistoryHtml = memoryHistorySection(rustiaOnlyHistory, "ci-bench");
+  assert.match(rustiaOnlyHistoryHtml, /1 cohort\(s\) on <code>ci-bench<\/code>; no reference to plot against yet\./);
+  assert.match(rustiaOnlyHistoryHtml, /The chart needs a competitor reference from the same machine\./);
+  assert.match(rustiaOnlyHistoryHtml, /The line returns with the first cross-engine memory cohort measured there\./);
+  assert.match(rustiaOnlyHistoryHtml, /Rustia cohorts recorded so far on this machine: <code>ci-bench-only<\/code>\./);
+  assert.equal(count(rustiaOnlyHistoryHtml, "<svg"), 0);
+
+  const emptyHistoryHtml = memoryHistorySection([], "ci-bench");
+  assert.match(emptyHistoryHtml, /No cohorts\./);
+  assert.match(emptyHistoryHtml, /The series starts again on <code>ci-bench<\/code>\./);
+  assert.equal(count(emptyHistoryHtml, "<svg"), 0);
+
   // The memory panel names the machine its rows name, never a literal.
-  const memoryResultRow = (engine, host) => ({
+  const memoryResultRow = (engine, host, workload = "memory_churn") => ({
     commit: "c".repeat(40),
     target: "linux-x86_64",
     host,
     engine,
     dialect: engine === "rustia" ? "luau" : "koto",
     execution_mode: "interpreter",
-    workload: "memory_churn",
+    workload,
     classification: "stable_in_tested_window",
     metrics: {
-      spawned_anon_kib: { median: 1024 },
-      prepared_delta_anon_kib: { median: 64 },
-      peak_delta_kib: { median: 256 },
-      quiescent_retained_delta_anon_kib: { median: 32 },
+      spawned_anon_kib: { median: 2_048 },
+      prepared_delta_anon_kib: { median: 128 },
+      peak_delta_kib: { median: engine === "rustia" ? 1_024 : 256 },
+      quiescent_retained_delta_anon_kib: { median: engine === "rustia" ? 512 : 16 },
       tail_growth_kib_per_epoch: { median: 0 },
     },
   });
@@ -456,7 +481,7 @@ function main() {
     "some-authority",
   );
   assert.match(soloMemoryHtml, /<h2>rustia Memory on box-a<\/h2>/);
-  assert.match(soloMemoryHtml, /Competitors return when the memory matrix runs on <code>box-a<\/code>/);
+  assert.match(soloMemoryHtml, /Competitors return with the first cross-engine memory cohort measured on <code>box-a<\/code>/);
   assert.doesNotMatch(soloMemoryHtml, /some-authority|ci-bench/);
   const pendingMemoryHtml = memoryResultsSection({ status: "pending", rows: [], detector_coverage: [] }, "some-authority");
   assert.match(pendingMemoryHtml, /measured on <code>some-authority<\/code>/);
@@ -467,6 +492,28 @@ function main() {
     ),
     /2 machines/,
   );
+
+  const memoryResults = (engines, host) => ({
+    schema_version: 1,
+    schema: "rustia.bench.memory-current-results.v1",
+    status: "ready",
+    detector_coverage: engines.map((engine) => ({ engine, detector_validated: true })),
+    rows: engines.flatMap((engine) =>
+      memoryWorkloads.map((workload) => memoryResultRow(engine, host, workload))
+    ),
+  });
+
+  // One engine cannot be a comparison: the panel reads rustia's own figures and drops the charts.
+  const singleEngineMemoryHtml = memoryResultsSection(memoryResults(["rustia"], "ci-bench"), "ci-bench");
+  assert.match(singleEngineMemoryHtml, /<h2>rustia Memory on ci-bench<\/h2>/);
+  assert.match(singleEngineMemoryHtml, /No competitor engines yet\./);
+  assert.doesNotMatch(singleEngineMemoryHtml, /Linux Memory Comparison/);
+  assert.equal(count(singleEngineMemoryHtml, 'class="memory-cohort-summary"'), 0);
+
+  const comparativeMemoryHtml = memoryResultsSection(memoryResults(["rustia", "koto"], "ci-bench"), "ci-bench");
+  assert.match(comparativeMemoryHtml, /<h2>Linux Memory Comparison on ci-bench<\/h2>/);
+  assert.doesNotMatch(comparativeMemoryHtml, /No competitor engines yet/);
+  assert.equal(count(comparativeMemoryHtml, 'class="memory-cohort-summary"'), 3);
 
   // The single-host rule, as the readers apply it.
   const hostRow = (engine, host) => ({ engine, host });

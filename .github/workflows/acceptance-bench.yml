@@ -10,10 +10,10 @@ name: Benchmark Acceptance
 # its passes, so it is never on a timer and never on a push: someone decides a
 # specific comparison is worth the machine's time.
 #
-# It records nothing. The reading lands in the job summary and in an artifact,
-# not in the published history -- promoting a number is the series lane's job,
-# and a comparison of two arbitrary historical commits is evidence for a
-# decision rather than a row in a series.
+# It records nothing. The reading lands in the job summary, not in the
+# published history -- promoting a number is the series lane's job, and a
+# comparison of two arbitrary historical commits is evidence for a decision
+# rather than a row in a series.
 "on":
   workflow_dispatch:
     inputs:

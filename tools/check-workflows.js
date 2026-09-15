@@ -69,7 +69,14 @@ function checkActionPins(text, label) {
     const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
     const official = /^actions\/[a-z0-9-]+@[0-9a-f]{40}$/.test(action);
     const rustToolchain = action === "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659";
-    if (!official && !rustToolchain) {
+    // Only this success-dependent job-level local call is permitted. Do not
+    // turn the exception into acceptance of arbitrary local actions/workflows.
+    const publicationCall = "uses: ./.github/workflows/publish-benchmark-data.yml";
+    const reusablePublication = label === ".github/workflows/rustia-memory.yml"
+      && line === publicationCall
+      && text.includes(`\n  publish:\n    needs: benchmark\n    ${publicationCall}\n`)
+      && usesLines(text).filter(use => use === publicationCall).length === 1;
+    if (!official && !rustToolchain && !reusablePublication) {
       fail(`${label} action must be an approved action pinned to a full commit SHA: ${line}`);
     }
   }
@@ -129,6 +136,7 @@ const RUNNER_CLASSES = new Map([
 // a file that quietly inherits whatever the loop happens to allow. `null` means
 // the workflow may only use GitHub-hosted runners.
 const WORKFLOW_RUNNER_CLASS = new Map([
+  ["error-fuzz.yml", "general-linux"],
   ["ci.yml", "general-linux"],
   ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],
@@ -148,6 +156,8 @@ const MEASUREMENT_COMMANDS = Object.freeze([
   RAW_HARNESS,
   "node tools/run-wasm-gate.js",
   "node tools/run-wasm-dispatch-gate.js",
+  // Deleted runner. The entry stays so the name cannot return through a
+  // workflow; a forbid needs no file to exist.
   "node tools/run-linux-fixed-benchmark.js",
   "node tools/run-linux-matrix-benchmark.js",
   "node tools/run-linux-history-backfill.js",
@@ -424,6 +434,13 @@ function checkReleasePreflight(text) {
   for (const needle of [
     '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
     '"cargo", ["metadata", "--locked"',
+    // Every committed lock file, found by listing, fetched with --locked. The
+    // wasm adapter's own lock has gone stale more than once (smallvec, then
+    // serde_path_to_error); the second time it stopped the weekly matrix.
+    '"git", ["ls-files", "-z"]',
+    "/(^|\\/)Cargo\\.lock$/",
+    "for (const manifest of lockedManifests())",
+    '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
     '"tools/check-release-notes.js"',
@@ -438,6 +455,10 @@ function checkReleasePreflight(text) {
     '"bench/analyze-fixed-samples.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
+    // The weekly matrix's landing helper. Nothing short of a real cohort
+    // reaches its merge path, so its self-test is the only run it gets before
+    // a forty-minute measurement depends on it.
+    '"tools/land-matrix-publication.js", "self-test"',
     // The owned-host lane. Its self-tests carry the rules that keep a source
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
@@ -451,20 +472,28 @@ function checkReleasePreflight(text) {
     '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
+    // The frozen owned-host config: exact provider keys, SMT off, and the
+    // timed core inside the pinned set. Every lane copies that block.
+    '"tools/check-dedicated-config.js"',
     '"tools/push-benchmark-data-publication.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',
     '"bench/run-memory-cohort.js"',
     '"bench/publish-memory-analysis.js"',
     '"tools/run-linux-memory-benchmark.js"',
+    // The cross-engine memory freezer and the two tools the memory workflow
+    // runs after measuring; preflight is where CI runs their self-tests.
+    '"tools/create-cross-engine-memory-config.js"',
     '"tools/run-wasm-gate.js"',
     '"tools/run-wasm-dispatch-gate.js"',
     '"tools/merge-rustia-ci-memory-data.js"',
+    '"tools/summarize-rustia-ci-memory.js"',
     '"tools/check-benchmark-results.js"',
     '"tools/check-wasm-gate-results.js"',
     '"tools/render-benchmark-operations-status.js", "--check"',
     '"tools/check-current-report-summary.js"',
     '"bench/render-current-results.js"',
+    '"tools/check-grabby-build-results.js"',
     '"bench/render-claims.js"',
     '"cargo", ["fmt", "--all", "--manifest-path", "fuzz/Cargo.toml"',
     '"clippy",\n  "--locked",\n  "--manifest-path",\n  "fuzz/Cargo.toml"',
@@ -482,6 +511,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "commit_sha:\n", label);
   requireIncludes(text, "required: true\n", label);
   requireIncludes(text, "type: string\n", label);
+  // The cohort is a closed choice with the routine cohort first and as the
+  // default, so a dispatch that says nothing measures 11 rows, not 110.
+  requireIncludes(text, "cohort:\n", label);
+  requireIncludes(text, "default: rustia-only\n", label);
+  requireIncludes(text, "type: choice\n", label);
+  requireIncludes(text, "options:\n          - rustia-only\n          - cross-engine\n", label);
+  requireIncludes(text, "COHORT: ${{ inputs.cohort }}", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   // Shares the host's serialisation group: sampling must never overlap another
   // job on the machine it is measuring.
@@ -494,8 +530,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
-  // Measurement only through the driver that attests the machine first.
-  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local", label);
+  // Measurement only through the driver that attests the machine first. The
+  // routine cohort keeps the bare line, because the measured commit's own
+  // tools run and commits before the flag existed must stay measurable; an
+  // empty cohort input is the routine cohort.
+  requireIncludes(text, 'if [ "${COHORT:-rustia-only}" = rustia-only ]; then\n', label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local\n", label);
+  requireIncludes(text, 'node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"\n', label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
@@ -509,7 +550,12 @@ function checkRustiaMemory(text) {
   // fast-forward push and the bounded fetch-rebase-retry; a workflow must not
   // grow a push of its own.
   forbidIncludes(text, "git -C \"$data_dir\" push origin HEAD:main", label);
-  requireIncludes(text, "git -C \"$pages_dir\" push origin HEAD:gh-pages", label);
+  requireIncludes(text, 'git -C "$data_dir" add bench/memory\n', label);
+  requireIncludes(text, "  publish:\n    needs: benchmark\n    uses: ./.github/workflows/publish-benchmark-data.yml\n    permissions:\n      contents: read\n    secrets:\n      BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
+  forbidIncludes(text, "gh-pages", label);
+  forbidIncludes(text, "render-current-results", label);
+  forbidIncludes(text, "bench/current-results.html", label);
+  forbidIncludes(text, "actions: write", label);
   // This was the last lane that could create a billed instance. These are the
   // strings that would bring that back.
   forbidIncludes(text, "LINODE_TOKEN", label);
@@ -540,6 +586,11 @@ function checkWeeklyMatrix(text) {
   // push to main is the shape the branch rules reject.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
   requireIncludes(text, "node tools/land-matrix-publication.js", label);
+  // The helper merges only the commit this run pushed, and only while main is
+  // still the commit the publication was rendered on. It refuses to start
+  // without both, which would otherwise surface only after a full cohort.
+  requireIncludes(text, "--base \"$base_commit\"", label);
+  requireIncludes(text, "--head \"$publication_commit\"", label);
   requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);
@@ -580,6 +631,16 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, "name: Publish Benchmark Data\n", label);
   requireIncludes(text, "push:\n    branches:\n      - main\n    paths:\n", label);
   requireIncludes(text, "workflow_dispatch:\n", label);
+  requireIncludes(text, "workflow_call:\n    secrets:\n      BENCH_DATA_DEPLOY_KEY:\n        required: true", label);
+  requireIncludes(text, "group: rustia-benchmark-data-publication", label);
+  requireIncludes(text, "bench/grabby-builds/**", label);
+  requireIncludes(text, "node tools/check-grabby-build-results.js", label);
+  requireIncludes(text, "bench/grabby-builds/results.json \\", label);
+  requireIncludes(text, 'install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"', label);
+  requireIncludes(text, 'git -C "$pages_dir" add index.html grabby-builds.json', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/history/series/ci-bench-main.jsonl"', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl', label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);

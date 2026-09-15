@@ -14,7 +14,6 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const REPO = path.resolve(__dirname, "..");
 const DEFAULT_CONFIG = path.join(REPO, "bench/cloud/linode-dense-ed65077.json");
-const REMOTE_RUNNER = path.join(REPO, "tools/run-linux-fixed-benchmark.js");
 const MATRIX_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-matrix-benchmark.js");
 const MEMORY_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-memory-benchmark.js");
 const HISTORY_BACKFILL_REMOTE_RUNNER = path.join(REPO, "tools/run-linux-history-backfill.js");
@@ -306,7 +305,12 @@ function remoteRunnerForConfig(config) {
   if (isCrossEngineMatrix(config)) return MATRIX_REMOTE_RUNNER;
   if (isCrossEngineMemory(config)) return MEMORY_REMOTE_RUNNER;
   if (isHistoryBackfill(config)) return HISTORY_BACKFILL_REMOTE_RUNNER;
-  return REMOTE_RUNNER;
+  // The fixed-throughput A/B runner this lane once shipped is deleted. A
+  // config for it fails here rather than naming a file that does not exist.
+  fail(
+    "the fixed-throughput A/B lane is retired; acceptance runs on the owned host through " +
+      "tools/run-dedicated-benchmark.js accept",
+  );
 }
 
 function requireFrozenArray(value, frozen, location) {
@@ -2546,6 +2550,9 @@ async function verifyRecoveryCheckout(config, state) {
   ) {
     fail("recorded Linode config path is outside or inconsistent with the repository");
   }
+  // Resolved out of the recorded orchestration commit by gitBlob below, never
+  // the worktree: the default names the runner the earliest recorded runs
+  // shipped, which no longer exists at HEAD.
   const recordedRemoteRunner = planned.remote_runner_path || "tools/run-linux-fixed-benchmark.js";
   const originalFiles = [
     [planned.config_path, planned.config_sha256, "config"],
@@ -6638,8 +6645,6 @@ async function selfTest(config) {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 
-  const runner = await run("node", [REMOTE_RUNNER, "self-test"]);
-  assert.match(outputText(runner), /self-test passed/);
   const matrixRunner = await run("node", [MATRIX_REMOTE_RUNNER, "self-test"]);
   assert.match(outputText(matrixRunner), /self-test passed/);
   const historyBackfillRunner = await run("node", [HISTORY_BACKFILL_REMOTE_RUNNER, "self-test"]);
@@ -6721,11 +6726,12 @@ async function main() {
   }
 }
 
-// RETIRED LIFECYCLE. Nothing invokes this coordinator any more: no workflow
-// reaches it, and its justfile recipes are gone, so no path in this repository
-// creates or pays for a cloud instance. The file survives for one reason -- the
-// owned-host coordinator borrows the matrix and memory acceptance rules exported
-// at the bottom, and reimplementing them would mean two sets of rules that agree
+// RETIRED LIFECYCLE. Nothing runs this coordinator's lifecycle any more: no
+// workflow reaches it, and its justfile recipes are gone, so no path in this
+// repository creates or pays for a cloud instance. Two things still load the
+// file. Release preflight runs its offline self-test, and the owned-host
+// coordinator borrows the matrix and memory acceptance rules exported at the
+// bottom, because reimplementing them would mean two sets of rules that agree
 // only until one is edited. They move to a shared module and this file goes when
 // that extraction is worth doing on its own; running it in the meantime would
 // provision an instance and is not something anything here asks for.

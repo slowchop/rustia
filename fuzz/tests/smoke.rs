@@ -99,6 +99,28 @@ fn every_target_rejects_oversized_inputs() {
 
 struct DeterministicBytes(u64);
 
+#[test]
+#[ignore = "requires the separately built pinned oracle worker; run in differential CI"]
+fn generated_differential_smoke() {
+    let mut random = DeterministicBytes::new(0x6572_726f_7273);
+    for _ in 0..256 {
+        let data: Vec<_> = (0..16).map(|_| random.byte()).collect();
+        assert!(rustia_fuzz::differential::fuzz_differential(&data));
+    }
+}
+
+#[test]
+fn deterministic_stateful_failure_and_recovery_sequences() {
+    let mut random = DeterministicBytes::new(0x6572_726f_7273);
+    for _ in 0..256 {
+        let data: Vec<_> = (0..32).map(|_| random.byte()).collect();
+        assert!(rustia_fuzz::fuzz_stateful(&data));
+    }
+    assert!(!rustia_fuzz::fuzz_stateful(
+        &[0; rustia_fuzz::MAX_STATEFUL_INPUT_BYTES + 1]
+    ));
+}
+
 impl DeterministicBytes {
     const fn new(seed: u64) -> Self {
         Self(seed)

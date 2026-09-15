@@ -23,6 +23,7 @@ rustia-lexer.workspace = true
 rustia-parser.workspace = true
 rustia-vm.workspace = true
 serde.workspace = true
+serde_path_to_error.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 js-sys = { version = "0.3", optional = true }

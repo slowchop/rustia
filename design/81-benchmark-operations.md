@@ -63,19 +63,43 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
-### Blocked: the memory cohort needs a delegated cgroup
+### The memory cohort and its delegated cgroup
 
-The memory lane is ported and its workflow runs on the owned host, but it cannot
-complete there yet, and the reason is a property of the machine rather than of
-the code. Per-VM memory is measured inside a dedicated cgroup; the benchmark
-host runs its CI as an unprivileged user (`uid 1001`), and that user has no
-cgroup-v2 subtree it can create children in.
+Per-VM memory is measured inside a dedicated cgroup, so the memory lane needs
+something the timing lanes do not: a cgroup-v2 subtree the unprivileged CI user
+can create children in. The owned host has one, and the lane completed there on
+2026-09-05, producing its first cohort — `rustia-ci-070c387b173c` at commit
+`070c387`, 11 Rustia rows from 99 raw samples.
 
-Root is one way to have one. The other, which keeps the runner unprivileged, is
-a systemd-delegated subtree that *contains the job's own process*: on the unit
-that runs the runner, `Delegate=memory` plus `DelegateSubgroup=` (so the
-unit's own cgroup holds no processes and may enable the controller for its
-children) and no `ProtectControlGroups=`. A subtree delegated beside that
+The lane measures one of two cohorts, chosen by the workflow's `cohort` input.
+The routine cohort keeps the bare `memory --local` line, because the measured
+commit's own tools run and commits from before the flag existed must stay
+measurable; only the cross-engine cohort is passed through as `--cohort`, and
+only commits that carry its freezer can measure it. Both go through the same attesting entrypoint
+and inherit one frozen protocol — samples, bootstrap, thresholds, host block,
+pinned cores — and differ in the engine set alone. `rustia-only`, the default,
+is the routine per-commit cohort: 11 rows from 99 samples, and the only one
+that runs the wasm32 quota probe. `cross-engine` measures the thirteen matrix
+engines under the protocol the rented lane measured as `pre-reclamation-18b58d8`:
+110 rows from 990 fresh processes. It is the cohort that puts the competitor
+rows and the mlua/Luau/JIT memory reference on the same machine as the Rustia
+rows they are compared with; one such cohort returns the comparison, and it is
+re-run when a competitor dependency moves rather than on a cadence. Its build
+carries twelve competitor crates the rustia-only build does not, so its first
+run on a cold cache is the long one; the workflow's 75-minute timeout is the
+lane's only runtime ceiling, since the host block's `max_runtime_minutes` is
+inherited from the shared config and not enforced by the memory runner. In the
+published data each engine's rows come from the newest cohort that measured it,
+so a rustia-only cohort after a cross-engine one swaps the Rustia rows and
+keeps the competitors. No cross-engine cohort has been measured on the owned
+host yet; the comparison stays pending until the first is dispatched.
+
+Root is one way to have such a subtree. The other, which keeps the runner
+unprivileged and is the arrangement in place, is a systemd-delegated subtree
+that *contains the job's own process*: on the unit that runs the runner,
+`Delegate=memory` plus `DelegateSubgroup=` (so the unit's own cgroup holds no
+processes and may enable the controller for its children) and no
+`ProtectControlGroups=`. A subtree delegated beside that
 unit — a lingering `user@<uid>.service` — is no use, because cgroup v2 refuses
 to move a process across a common ancestor the mover cannot write. The tools
 find the delegated root by walking up from the process's own cgroup
@@ -87,35 +111,49 @@ controller — is the one present.
 **The check must not be relaxed to make the lane pass.** Without the cgroup there
 is no per-VM figure — the accounting is the cgroup's — so a run that skipped it
 would produce numbers that look like measurements and are not. The lane is
-dispatch-only, so until the host is configured it fails immediately and costs
-nothing; the alternative, restoring the cloud lane, would reintroduce the ability
-to spend money to work around a one-line host setting.
+dispatch-only and the check is a preflight that fails closed before anything is
+cloned, so a host that loses the delegation costs a dispatch and nothing else;
+the alternative, restoring the cloud lane, would reintroduce the ability to
+spend money to work around a one-line host setting.
 
-### Known gap: the A/B acceptance runner
+### A/B acceptance on the owned host
 
-`tools/run-linux-fixed-benchmark.js` still assumes the rented model — root,
-`/root/.cargo`, and permanent masking of the host's package timers. Nothing
-executes it any more: no workflow reaches it, and the only remaining caller is
-`validate`, which reads a frozen config and takes no timing. It therefore has not
-been ported, and porting it is the prerequisite for running a full A/B acceptance
-campaign on the owned host rather than a screening comparison. The three runners
-that do execute there — history, matrix, memory — have had those assumptions
-removed and are checked for their absence.
+`.github/workflows/acceptance-bench.yml` answers what screening cannot: not "did
+this pull request move anything" against a merge base, but "did this change move
+this workload, and by how much" for a pair of commits named explicitly. It takes
+a baseline, a candidate, and an even number of legs per side between 2 and 16,
+and measures on `bench-solo` through the same attesting entrypoint as every
+other lane. It is dispatch-only — a run holds the host for the length of its
+passes, so it is never on a timer and never on a push — and it records nothing:
+the reading lands in the job summary, not in the published history, because a
+comparison of two arbitrary historical commits is evidence for a decision
+rather than a row in a series.
+
+The frozen owned-host config, `bench/cloud/dedicated-core2-tape-sparse.json`,
+is the one place the repository records what the host guarantees. The matrix
+and memory config generators copy its provider block, and the history freezer
+cross-checks host identity against it, so `tools/check-dedicated-config.js`
+validates it — exact provider keys, SMT off, the timed core inside the pinned
+set — on every `just check-benchmark-results` and release-preflight run. The
+rented-model A/B runner that once carried that check is deleted; the three
+runners that execute on the host — history, matrix, memory — are checked for
+the absence of its assumptions.
 
 ### Cost
 
 **Nothing in this repository creates or pays for a cloud instance.** Not on a
 timer, not on a push, not by dispatch, and not by a justfile recipe. Every lane
-— the reconstruction, the per-commit series, pull-request screening, the
-cross-engine matrix and the memory cohort — runs on the owned host, so the cloud
-lifecycle's cost ceilings, ownership journal and deletion gate have nothing left
-to govern and are retired with it.
+— the reconstruction, the per-commit series, pull-request screening, A/B
+acceptance, the cross-engine matrix and the memory cohort — runs on the owned
+host, so the cloud lifecycle's cost ceilings, ownership journal and deletion
+gate have nothing left to govern and are retired with it.
 
 One file remains from that model. `tools/run-linode-benchmark.js` is the only
 home of the matrix and memory acceptance rules, and the owned-host coordinator
 borrows them rather than carrying a second copy that agrees until one is edited.
-It is documented as retired at the top of the file, nothing invokes it, and it
-goes when those rules move to a shared module.
+It is documented as retired at the bottom of the file; nothing runs its
+lifecycle, release preflight runs only its offline self-test, and it goes when
+those rules move to a shared module.
 
 ## Row provenance
 
@@ -368,8 +406,9 @@ an otherwise green merge.
    changes; merging an update marks the landscape pending but spends no money.
 4. An operator explicitly plans and starts a qualified progress, bridge,
    landscape, or candidate campaign.
-5. Promotion requires a complete cohort, semantic checks, provenance, accepted
-   host gates, and confirmed resource deletion.
+5. Promotion requires a complete cohort, semantic checks, provenance, and the
+   accepted host gates — the attestation against the frozen config plus the
+   committed checkers.
 6. Artifact-only publication validates committed evidence, renders the report,
    and pushes Pages directly. Data-repository updates are one commit on a
    fresh clone of that repository's `main`, pushed there as a fast-forward by
@@ -379,6 +418,38 @@ an otherwise green merge.
    GitHub-hosted runner.
 
 ## Statistics and presentation
+
+### Grabby build results and one dashboard publisher (2026-09-09)
+
+Gak confirmed `https://slowchop.github.io/rustia-bench-data/` as the destination for
+Grabby's reviewed build-time results. The separate `#grabby-builds` section uses
+`bench/grabby-builds/results.json`, never Rustia workload rows, rankings, histories,
+memory cohorts or claim gates. It presents the two sequential ci-bench A/B runs
+and their exact source-report identities, preserving both contemporary LTO-off
+controls, cold n=1, four paired edits and runtime/debugging costs.
+
+Only selected public benchmark fields are copied into this repository and the
+public `grabby-builds.json`. Full internal reports, machine load/swap diagnostics,
+chat quotes and raw logs stay in their original repository. SHA-256 values identify
+the immutable original reports, not the selected JSON's bytes. The selection was
+compared read-only against those reports; its validator checks field allowlists,
+experiment identity and paired arithmetic. It does not repeat the earlier raw
+compiler, snapshot or screenshot audits or independently approve new adoption.
+
+`publish-benchmark-data.yml` is the sole Pages writer. It is also reusable by the
+memory workflow after a successful data-only promotion. Historical memory code
+can measure and merge memory rows but cannot render or write Pages. The publisher
+checks out current main, hydrates current data-owned memory and live series, keeps
+the selected Grabby source, and serializes its writes under
+`rustia-benchmark-data-publication`. It never measures or needs an actions-write
+token. The benchmark-host group is distinct, preventing a self-deadlock.
+
+This preserves accepted memory/series data and keeps later memory updates from
+replacing the dashboard with a historical renderer. Publication uses the data
+snapshot it reads, not a transaction spanning concurrent measurement appends.
+Failure can be recovered by dispatching only the publisher; no measurement rerun
+is needed. The local page and selected-data validation are implemented; final PR
+CI, merge, publication and live verification remain delivery gates.
 
 - Keep cold preparation, first call, warmed execution, throughput, and memory
   as separate dimensions.
@@ -404,9 +475,7 @@ an otherwise green merge.
 
 ## Cost policy
 
-- No scheduled job may create a billed host.
+- No job can create a billed host, because no path in this repository can.
 - Progress runs are batched around relevant changes and decisions.
 - Landscape runs occur at most monthly by default.
 - Candidate runs require a concrete, credible optimization hypothesis.
-- Every campaign freezes a maximum runtime, rounded billing ceiling, cleanup
-  reserve, and exact resource scope before the first billable request.

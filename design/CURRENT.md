@@ -2,9 +2,29 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-07.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-10.)
 
 ## One-paragraph state
+
+[Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is complete in
+[PR #34](https://github.com/slowchop/rustia/pull/34): cross-profile failure/recovery
+regressions, bounded stateful embedding and isolated pinned-Luau differential
+fuzzing, and the quota-limited PUC short-string placement fix are merged.
+Both six-target remote campaigns pass, including expanded stateful coverage at
+`347b0af`. Canonical release preflight, final platform/Node-V8 CI and remote PR
+benchmark screening pass. WOTS #6, civfun #44 and Grabby #1027 are merged after
+their full rollout gates and required reviews, using exact upstream revision
+`aee98e7815460c2df014c9b20f92de8de5382814`.
+This is not a release-completion or performance claim.
+
+[Human-friendly script diagnostics](79-script-diagnostics.md) merged in
+[PR #32](https://github.com/slowchop/rustia/pull/32), with host-only source
+snapshots, expression spans, typed errors, bounded reports, and console source
+mapping. Canonical release preflight, full correctness/conformance tests,
+platform/Node-V8 CI and remote PR screening pass. Controlled-client changes are
+recorded in WOTS #5, civfun #43 / CIV-75, and Grabby #1025. This completes neither
+the wider public-release gate nor the remaining language error-phase parity work.
+
 The **design phase is complete and reviewed**, and P1 implementation is now substantial in production crates.
 The current workspace contains the VM/lexer/parser/compiler/public API/CLI/conformance runner, plus an
 executable Luau 0.709 conformance corpus with **0 pending-oracle** and **0 pending-impl** rows. The public
@@ -138,13 +158,20 @@ state-preserving line evaluation, expression shorthand, and source-aware diagnos
 failures.
 CI wiring now includes pinned-toolchain formatting and strict Clippy gates, hosted release-preflight checks,
 and explicit public-example compilation. Hosted workflows validate committed benchmark artifacts but never take
-fresh timings; those come only from the explicit ephemeral Linode Linux lifecycle.
+fresh timings; those come only from the attested owned ci-bench host.
 The operational rollout is specified in
 [`81-benchmark-operations.md`](81-benchmark-operations.md): shared, normally
 CPU-busy self-hosted runners remain valid for correctness and artifact work but
 are not timing authorities; the generated benchmark report now exposes
 machine-readable progress freshness plus explicit landscape pause and active
 artifact-only publication state instead of appearing silently current.
+The dashboard also has a separately typed Grabby application-build section with
+reviewed sequential ci-bench comparisons, debugger/runtime tradeoffs and selected
+public evidence. It does not enter Rustia engine rankings or histories. Memory
+promotion now delegates dashboard publication to the same current-main publisher,
+so historical measurements cannot replace the page with an old renderer. See
+the September 9 section of `81-benchmark-operations.md`; live publication remains
+subject to final PR checks and deployment verification.
 The benchmark harness prepares fresh engine/workload state for calibration and every recorded repetition, warms
 that state once outside the timer, and can write execution-ordered raw samples to a separate
 `rustia.bench.raw-samples.v1` JSON sidecar. `--fixed-n` bypasses calibration and uses exactly the selected work for
@@ -252,8 +279,8 @@ dispatch-dominated synthetic, and a per-call-site generalized-iterator leaf-step
 A follow-up profile-driven slice promotes the pure register-bookkeeping opcodes `Move` and
 `ClearLocalCell` (42-61% of executed instructions on four tracked workloads) into the common-instruction
 fast path; its accepted controlled-host A/B measured -8.4508% candidate median ns/unit on
-`generic_iteration` (conservative interval -9.064% to -7.348%, evidence at
-`bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/`), with public-history publication
+`generic_iteration` (conservative interval -9.064% to -7.348%; its rented-host evidence was removed on
+2026-09-13 and remains in Git history), with public-history publication
 deferred to the next full-matrix cohort under the dedicated-cohort policy.
 `tools/check-workflows.js` keeps those workflow policies inside `just release-preflight`.
 
@@ -573,9 +600,12 @@ unreachable suspended-coroutine frames.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
    asserted: cores held off the scheduler, SMT disabled, timed work pinned to one isolated core, one job on
-   the box at a time, and every run attested against the frozen config before it builds. Four lanes reach it,
-   all through `tools/run-dedicated-benchmark.js`: the reconstruction (`history`), the per-commit series
-   (`main`), pull-request screening (`pr`), and the cross-engine matrix (`matrix`).
+   the box at a time, and every run attested against the frozen config before it builds. Every workflow that
+   measures reaches it through `tools/run-dedicated-benchmark.js`: the cross-engine matrix (`matrix`), the
+   per-commit series (`main`), pull-request screening (`pr`, plus its `live-serde` and `calibrate` jobs),
+   dispatch-only A/B acceptance (`accept`, `.github/workflows/acceptance-bench.yml`: two to sixteen legs, a
+   summary only, recording nothing), and the memory cohort (`memory`). The reconstruction (`history`) uses the
+   same entrypoint but is operator-run rather than workflow-triggered.
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
@@ -605,18 +635,26 @@ unreachable suspended-coroutine frames.
    them only by it. Nothing in this repository can start a billed instance, on a timer or
    otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
    the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
-   because the supervisor samples while the benchmark runs. That lane is ported but not yet completing:
-   per-VM memory is measured inside a dedicated cgroup and the host's unprivileged CI user has no cgroup-v2
-   subtree it can write to, so it needs either root or a systemd-delegated subtree containing the job's own
-   process (`Delegate=memory` plus `DelegateSubgroup=` on the unit that runs the runner, without
-   `ProtectControlGroups=`); the tools find it by walking up from the process's own cgroup, check it before
-   anything is cloned, and name which fault is present.
+   because the supervisor samples while the benchmark runs. That lane has completed there: on 2026-09-05 it
+   produced the rustia-only cohort `rustia-ci-070c387b173c` at `070c387`, 11 rustia rows from 99 raw samples,
+   which is now the whole of `bench/memory`. Per-VM memory is measured inside a dedicated cgroup, and the
+   host's unprivileged CI user cannot write a cgroup-v2 subtree of its own, so the lane needs either root or a
+   systemd-delegated subtree containing the job's own process (`Delegate=memory` plus `DelegateSubgroup=` on
+   the unit that runs the runner, without `ProtectControlGroups=`) — the delegation the host now provides;
+   the tools find it by walking up from the process's own cgroup, check it before anything is cloned, and
+   name which fault is present.
    The check is deliberately not relaxed: the cgroup is what the per-VM figure is measured in, so a run
-   without one would produce numbers that look like measurements and are not. Three cloud coordinators are deleted and the
+   without one would produce numbers that look like measurements and are not. The lane measures one of two
+   cohorts chosen at dispatch: `rustia-only`, the routine 11-row per-commit cohort, and `cross-engine`, the
+   110-row thirteen-engine cohort under the same protocol, which is what returns the memory comparison and the
+   mlua/Luau/JIT reference from the machine the Rustia rows come from. In the published data each engine's
+   rows come from the newest cohort that measured it. No cross-engine cohort has run on `ci-bench` yet, so
+   the comparison stays pending until the first is dispatched. Three cloud coordinators are deleted and the
    eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
-   the matrix and memory acceptance rules the owned-host coordinator borrows, is documented as retired, and
-   is invoked by nothing. Not ported: `tools/run-linux-fixed-benchmark.js`, the A/B acceptance runner, which
-   nothing executes — its only caller validates a frozen config without measuring.
+   the matrix and memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle,
+   and release preflight runs only its offline self-test. The rented-model A/B runner,
+   `tools/run-linux-fixed-benchmark.js`, is deleted; the frozen-config validation it carried lives in
+   `tools/check-dedicated-config.js`.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

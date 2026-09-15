@@ -51,8 +51,8 @@
     "mode": "attested-owned-host",
     "authoritative_runner_classes": ["bench-solo"],
     "scheduled_billing_allowed": false,
-    "billed_host_creation": "operator-dispatch-only",
-    "reason": "No timer may start a billed instance. The retired cloud matrix remains reachable by explicit dispatch only, because it is still the sole producer of the cross-engine reference every published Rustia number is normalised against."
+    "billed_host_creation": "none-possible",
+    "reason": "All timing runs on the attested owned host. Nothing in this repository creates or pays for a billed instance: not on a timer, not on a push, not by dispatch, and not by a recipe. The cross-engine matrix is one of that host's own lanes, and it remains the sole producer of the reference every published Rustia number is normalised against."
   },
   "publication": {
     "state": "active",
