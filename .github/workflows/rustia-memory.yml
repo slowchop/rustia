@@ -40,9 +40,12 @@ name: Rustia Memory Cohort
 permissions:
   contents: read
 
+# Waits in start order behind the other full-measurement lanes rather than
+# cancelling one already waiting; main-bench.yml carries the reasoning.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false
+  queue: max
 
 jobs:
   benchmark:
