@@ -94,14 +94,18 @@ impl WorkloadCensus {
     }
 }
 
-/// Runs setup plus one `f(n)` call on a fresh VM (`Vm::new` runs on
-/// `VmSettings::default()`, so that is the interval the boundary count below
-/// must use) and reads the census.
+/// Runs setup plus one `f(n)` call on a fresh VM and reads the census.
 fn census_of(program: &Program) -> WorkloadCensus {
     census_with(program, VmSettings::default())
 }
 
+/// `gc_boundaries` bounds how many leaf-plan replays a deterministic
+/// collection could have refused during the call, so it must use the
+/// interval the VM below actually ran with, not a fresh default -- a caller
+/// that passed a non-default interval would otherwise have every
+/// `assert_leaf_path_serves` bound computed against the wrong lattice.
 fn census_with(program: &Program, settings: VmSettings) -> WorkloadCensus {
+    let interval = settings.deterministic_gc_interval.get();
     let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
     let function = vm
         .run(program)
@@ -114,8 +118,7 @@ fn census_with(program: &Program, settings: VmSettings) -> WorkloadCensus {
     WorkloadCensus {
         census,
         checksum,
-        gc_boundaries: census.executed_instructions
-            / VmSettings::default().deterministic_gc_interval.get(),
+        gc_boundaries: census.executed_instructions / interval,
         root_refresh_triggers: vm.gc_root_refresh_histogram(),
     }
 }

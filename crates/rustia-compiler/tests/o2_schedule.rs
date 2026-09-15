@@ -479,7 +479,10 @@ fn compares_results(variant: &str) -> bool {
 /// fields the lattice invariant relates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ScheduleObservation {
-    result_bits: u64,
+    // `None` for a nil result, distinct from `Some(0.0f64.to_bits())` -- a
+    // variant that returns nil where another returns 0.0 must not compare
+    // equal.
+    result_bits: Option<u64>,
     executed: u64,
     count: u64,
     next: u64,
@@ -548,7 +551,7 @@ fn observe_schedule(
             );
             live_bytes.push(vm.memory_stats().live_bytes);
             ScheduleObservation {
-                result_bits: result.as_number().map(f64::to_bits).unwrap_or(0),
+                result_bits: result.as_number().map(f64::to_bits),
                 executed: vm.executed_instructions(),
                 count: vm.deterministic_collection_count(),
                 next: vm.next_deterministic_collection_instruction(),

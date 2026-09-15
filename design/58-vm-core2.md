@@ -294,10 +294,14 @@ the first see identical VM state and are idempotent) and advances the lattice `k
 boundary is `(floor(executed / interval) + 1) * interval` at every instruction edge, for every program,
 across consecutive calls on one VM (`Vm::maybe_collect_with_roots` loops `while executed >= next`; fixed
 2026-09-15 after the finding below). Unit-one programs reach a boundary only by equality, so default
-compilation keeps its schedule bit for bit. The accepted quantization is observable from guest code running
-*inside* a folded survivor — a metamethod invoked by the commit-late `OP x, x, s` survivor, or a `Call`
-survivor — which sees the group's trailing boundaries already fired, at most one group earlier than the
-unoptimized program would; the fix does not widen it (the `k = 1` case quantized the same way before), and
+compilation keeps its schedule bit for bit. Scalar dispatch charges and collects before an instruction runs,
+so the accepted quantization is observable both *inside* a folded survivor — a metamethod invoked by the
+commit-late `OP x, x, s` survivor, or a `Call` survivor, seeing the group's trailing boundaries already fired
+— and from any guest code running *after* the group whose reachability the survivor's own execution would
+have changed (a metamethod that nils the last strong reference to a weak-table value fires before the
+optimized program's mid-group boundary would, while the unoptimized program's earlier, exact boundary sees
+the old value); either way it is at most one group earlier than the unoptimized program would collect. The
+fix does not widen this (the `k = 1` case quantized the same way before), and
 neither the conformance corpus nor `tests/o2_schedule.rs` (numeric operands only) exercises it, so a
 fixture with a metamethod-invoking survivor observing a weak table at a boundary belongs before any default
 flip. Schedule equivalence is pinned by tests: identical minimum fuel per family, identical outcomes at
