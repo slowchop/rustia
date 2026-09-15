@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-10.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-15.)
 
 ## One-paragraph state
 
@@ -473,9 +473,15 @@ unreachable suspended-coroutine frames.
    differentials. The C2.3 logical receipts are now connected to the tape executor: optimized programs carry a
    validated `ProgramLogicalUnits` schedule and the VM charges fuel, `executed_instructions`, and
    deterministic-collection admission by those units on both the scalar dispatcher and the plain-mode tape
-   (HotIR and leaf-call plans are skipped for unit-carrying programs), with equivalence pinned per family by
-   minimum-fuel equality, per-prefix fuel sweeps, logical-clock equality, and deterministic-GC interval
-   sweeps. The default-disabled O2 families are threaded through the full conformance corpus
+   (HotIR and leaf-call plans are skipped only in a prototype whose own slice of the schedule is
+   non-identity, and the `Call` fast path charges the `Call`'s own units on top of a plan's fixed charge —
+   per prototype since 2026-09-15), with equivalence pinned per family by
+   minimum-fuel equality, per-prefix fuel sweeps, logical-clock equality, deterministic-GC interval sweeps
+   that compare the collection count and next boundary, and the lattice invariant
+   `deterministic_collection_count == floor(executed / interval)` on the tracked workloads across consecutive
+   calls on both profiles (a multi-unit charge fires one collection per crossed boundary; the equality test
+   that had silently disarmed the boundary for the rest of the VM's life was fixed 2026-09-15). The
+   default-disabled O2 families are threaded through the full conformance corpus
    (`run_repository_with_experimental_o2`); the reachability-exact track — constant-branch folding,
    commit-late compound/self-update assignment, provably-nil tail folds, slot tightening — passes all 712
    fixtures per family and together (0.1-11.0% executed-instruction reduction on the tracked workloads),
@@ -483,13 +489,21 @@ unreachable suspended-coroutine frames.
    upstream weak-root-liveness fixture and is hard-blocked until C2.4 frame root scans mask liveness-dead
    registers; a self-documenting ignored conformance test pins the divergence. Default compilation remains
    byte- and schedule-identical; enabling a corpus-green family is now purely a measured performance decision
-   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3), and that decision is a **per-workload executor trade**:
-   attaching a non-identity logical-unit schedule deselects HotIR and the leaf-call plans for that
-   program, so `dense_tables` swaps 16,298 HotIR iterations for 99.76% tape coverage while
-   `closures_upvalues` loses its closure-call fast entries outright. The default-off
-   `executor-diagnostics` feature and `crates/rustia-compiler/tests/executor_ownership.rs` report that
-   ownership per workload; the same report shows `sparse_tables` taking 8,190 tape guard exits per 32
-   units — one per scattered-integer index operation — independent of O2. The C2.5a slice is also merged: numeric writes to a
+   (see [`58-vm-core2.md`](58-vm-core2.md) §C2.3), and that decision is a **per-workload executor trade**
+   only where the rewrite lands in a hot prototype: a prototype whose own slice of the logical-unit
+   schedule is non-identity loses HotIR and its leaf-call plan (per prototype since 2026-09-15; the earlier
+   program-wide gate is what made the 2026-09-13 host measurement 2.9x/2.1x slower on `closures_upvalues`
+   and `generic_iteration`), so `dense_tables` — whose rewrite sits inside its own HotIR loop — swaps 16,298
+   HotIR iterations for 99.75% tape coverage while `closures_upvalues` and `generic_iteration` keep their
+   leaf plans with a census identical to all-off. Those are counts, not timings: the fixed tree has not
+   been measured on the owned host yet (§C2.3 item 4), so the default stays off. The default-off
+   `executor-diagnostics` feature and
+   `crates/rustia-compiler/tests/executor_ownership.rs` report that ownership per workload on both
+   leaf-call paths — the `Call` opcode's inline cache and the `call_value` replays that generic-for
+   iterator steps take, so `generic_iteration` is seen serving 1,055 `__iter` replays per 32 units on
+   both sides of the reachability-exact schedule; the same report shows
+   `sparse_tables` taking 8,190 tape guard exits per 32 units — one per scattered-integer index
+   operation — independent of O2. The C2.5a slice is also merged: numeric writes to a
    proven existing, non-nil array slot mutate in place, skipping `mutate_table_data`'s before/after memory
    census and its no-op `side_usage` adjustment while keeping readonly, `__newindex`, insertion-order, and
    the single `mutation_version` bump exact; a `debug_assert!` pins the shadowing invariant across the unit,
