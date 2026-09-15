@@ -63,6 +63,62 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
+### Waiting for the host
+
+Exclusivity and order are separate mechanisms. `bench-solo` holds exactly one
+runner, so a second job sent to it waits in GitHub's runner queue rather than
+sharing the machine. That alone keeps a pull-request screening run off the
+pinned cores while a measurement holds them, and it stops being true the moment
+a second runner joins the group.
+
+The four lanes that hold the host for a full measurement — the per-commit
+series, the cross-engine matrix, the memory cohort and A/B acceptance — also
+share the concurrency group `rustia-bench-host-serial`, declared with
+`queue: max` so that every waiting run is kept. The key is load-bearing. A
+concurrency group otherwise keeps one pending run, and a newly queued run
+cancels it; `cancel-in-progress: false` protects only the run already in
+progress. On 2026-09-15 that cancelled the per-commit run for `f49646f` (Actions
+run 34921991922) two seconds after a matrix dispatch joined the group, while the
+run for `08cf383` was measuring. #39 changed no engine code, so no row was lost;
+an engine-changing commit would have lost its row with nothing reporting it.
+With `queue: max` GitHub keeps up to 100 pending runs and starts them first in,
+first out by when each began waiting, and cancels any beyond the hundredth. Its
+documentation adds that the order is not guaranteed, because start times vary.
+
+The group stays, rather than leaving all waiting to the runner queue, because
+the per-commit series depends on order and the runner queue documents none.
+Rows are appended in the order runs execute, the published chart draws them in
+file order, and the unchanged-binary gate compares a new build with the last
+row. If a per-commit run does execute after a later commit's run has recorded
+a row, `check-benchmark-series.js` refuses the append before anything is
+pushed — the recorded commit is not an ancestor of the one being measured — so
+an inversion costs that row visibly rather than bending the line. The exception
+is a build identical to the last row's binary: it records nothing, and the
+change is attributed to the later commit. The matrix, memory and acceptance
+lanes measure main's tip or commits named at dispatch, and do not depend on
+order.
+
+Screening stays outside the group: it cancels its own superseded runs per pull
+request, and GitHub rejects `cancel-in-progress: true` combined with
+`queue: max`. The publisher stays outside too, because the memory lane calls it
+while holding this group. `tools/check-workflows.js` pins the exact block in
+the four lanes, allows no second concurrency block beside it, and rejects the
+group name in every other workflow.
+
+**No catch-up.** A per-commit run that fails, is cancelled by hand, or waits
+more than GitHub's 24-hour limit for a self-hosted runner records no row for
+its commit, and nothing measures that commit later. Re-running it recovers the
+row only while no later commit has recorded one; after that the ancestry rule
+refuses the append. The series already has three such gaps: `0fce032` (#14),
+`50a5bfb` (#15) and `7b8d334` (#17) changed engine code, and their runs failed
+on 2026-09-01 and 2026-09-02. Catch-up — each run measuring every unrecorded
+first-parent commit since the last row, oldest first — would close those gaps
+and make the lane independent of run order. It is not built: it needs the
+`main` command to measure a commit other than HEAD, a per-run budget inside the
+30-minute timeout, and a decision on whether a point measured long after its
+commit landed is drawn like one measured on landing. Queueing removes the loss
+that prompted it; the failure gaps remain open.
+
 ### The memory cohort and its delegated cgroup
 
 Per-VM memory is measured inside a dedicated cgroup, so the memory lane needs
@@ -329,7 +385,10 @@ can measure and merge memory rows but cannot render or write Pages. The publishe
 checks out current main, hydrates current data-owned memory and live series, keeps
 the selected Grabby source, and serializes its writes under
 `rustia-benchmark-data-publication`. It never measures or needs an actions-write
-token. The benchmark-host group is distinct, preventing a self-deadlock.
+token. The benchmark-host group is distinct, preventing a self-deadlock. Unlike
+that group it keeps GitHub's default single pending slot on purpose: each run
+renders current main and the data repository's current rows, so a newer
+publication supersedes a waiting one rather than losing anything.
 
 This preserves accepted memory/series data and keeps later memory updates from
 replacing the dashboard with a historical renderer. Publication uses the data
