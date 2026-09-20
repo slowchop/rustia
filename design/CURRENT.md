@@ -635,15 +635,37 @@ unreachable suspended-coroutine frames.
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land
-   through the pull request, so `bench/history/runs.jsonl` now holds only those two cohorts, both measured
+   through the pull request, joined by `7826508f` (2026-09-20), so `bench/history/runs.jsonl` now holds
+   only those three cohorts of 65 rows, every one measured
    on `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
    reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
    the ratio ranges 0.71x to 1.86x by engine, so absolute nanoseconds do not carry across the change while
-   the published same-run ratios do. Nothing in this repository can start a billed instance, on a timer or
-   otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now runs on
-   the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than one
-   because the supervisor samples while the benchmark runs. That lane has completed there: on 2026-09-05 it
+   the published same-run ratios do. Every emitted row now names its machine in a `host` field
+   — provenance published in row data, never an address — and the single-host rule is mechanical: the
+   acceptance rules recompute the expected label from the frozen config, and `tools/check-benchmark-results.js`,
+   `tools/merge-rustia-ci-memory-data.js`, `bench/publish-memory-analysis.js` and the renderer each refuse a
+   table whose rows disagree rather than labelling the mix, because every figure on that page is a ratio
+   between two rows. That closes the way the memory table silently mixed hosts on 2026-09-05, when a
+   rustia-only refresh left 99 six-week-old cloud rows beside 11 new ones under metadata naming one host
+   (`81-benchmark-operations.md`, "Row provenance"). The memory merge also refuses a generated cohort whose
+   rows, `metadata.host` or history line disagree, and, because it is per engine, a cross-engine cohort
+   replaces every engine it measured whatever machine the stored rows name, which is how a table is
+   re-measured rather than refused. The rule reaches the memory table and each memory cohort in the checker,
+   the renderer pins the timing table, the memory table, and the memory history's latest cohort to the timing
+   authority itself, and the history charts read the field: the recorded timing chart draws only the
+   reference machine's rows, a reconstruction from another machine is refused, and the memory history draws
+   one machine against a reference from that same machine. A label may contain only `[A-Za-z0-9_-]{1,128}`, so
+   it can never be a dotted name or an address, and the checker's self-test holds the thirteen scripts that
+   emit or validate one — the frozen-config checker, the memory publisher and merge, the operations-status
+   renderer and the host-bridge recorder among them — and the harness's `--host` to that one literal; the
+   owned-host coordinator refuses an ssh destination whose host is a published label, and refuses matrix
+   evidence whose uname is not `uname -srvm` by its form rather than by a name. The published data
+   repository's memory table and history were stamped the same way (slowchop/rustia-bench-data PR #9).
+   Nothing in this repository can start a billed instance, on a
+   timer or otherwise. The memory cohort was the last lane that could, and only by explicit dispatch; it now
+   runs on the owned host too (`.github/workflows/rustia-memory.yml`), pinning two isolated cores rather than
+   one because the supervisor samples while the benchmark runs. That lane has completed there: on 2026-09-05 it
    produced the rustia-only cohort `rustia-ci-070c387b173c` at `070c387`, 11 rustia rows from 99 raw samples,
    which is now the whole of `bench/memory`. Per-VM memory is measured inside a dedicated cgroup, and the
    host's unprivileged CI user cannot write a cgroup-v2 subtree of its own, so the lane needs either root or a
@@ -656,13 +678,16 @@ unreachable suspended-coroutine frames.
    cohorts chosen at dispatch: `rustia-only`, the routine 11-row per-commit cohort, and `cross-engine`, the
    110-row thirteen-engine cohort under the same protocol, which is what returns the memory comparison and the
    mlua/Luau/JIT reference from the machine the Rustia rows come from. In the published data each engine's
-   rows come from the newest cohort that measured it. No cross-engine cohort has run on `ci-bench` yet, so
-   the comparison stays pending until the first is dispatched. Three cloud coordinators are deleted and the
-   eleven Linode lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of
-   the matrix and memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle,
-   and release preflight runs only its offline self-test. The rented-model A/B runner,
-   `tools/run-linux-fixed-benchmark.js`, is deleted; the frozen-config validation it carried lives in
-   `tools/check-dedicated-config.js`.
+   rows come from the newest cohort that measured it. The measured commit's own tools measure, but the merge
+   into the data repository and the push run main's copies, taken before the checkout detaches, and a commit
+   whose `bench/analyze-memory-samples.js` lacks the host-label line — one from before a row's host was confined
+   to a label — is refused before the build. No cross-engine cohort has run on `ci-bench` yet, so the comparison
+   stays pending until the first is dispatched. Three cloud coordinators are deleted and the eleven Linode
+   lifecycle recipes with them; `tools/run-linode-benchmark.js` survives only as the home of the matrix and
+   memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle, and release
+   preflight runs only its offline self-test. The rented-model A/B runner, `tools/run-linux-fixed-benchmark.js`,
+   is deleted; the frozen-config validation it carried lives in `tools/check-dedicated-config.js`, which also
+   refuses a `provider.host.name` that is not a label.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are

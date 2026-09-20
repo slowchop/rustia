@@ -122,6 +122,11 @@ function validateConfig(value) {
     const size = requireObject(provider.size, "provider.size");
     requireInteger(size.vcpus, "provider.size.vcpus", 2);
     requireInteger(size.memory_mib, "provider.size.memory_mib", 1);
+    // Both feed hostLabel below. Unvalidated they would silently produce
+    // "linode-undefined-undefined", which is a provenance label that looks like
+    // one and identifies nothing.
+    requireString(provider.region, "provider.region");
+    requireString(size.id, "provider.size.id");
   }
   const source = requireObject(config.source, "source");
   requireExactKeys(source, ["benchmark_commit", "expected_sha256"], "source");
@@ -626,6 +631,31 @@ async function timedGroup(config, label, command, args, gateFile, options = {}, 
   );
 }
 
+// The machine a row was measured on, as a label the row carries into published
+// data. The owned host has a name; a rented instance does not -- it is created
+// and destroyed per run -- so the honest label there is the class of machine the
+// frozen config bought, which is what "same environment" actually means for a
+// rental. Either way the two lifecycles produce different strings, which is the
+// whole point: a table can no longer hold rows from both without saying so.
+//
+// Deliberately duplicated in each on-host runner rather than shared. Only the
+// single runner file is copied to the benchmark host (see shipAndRun in
+// run-dedicated-benchmark.js), so a require() of a sibling module would resolve
+// on a developer machine and fail on the host.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
+function hostLabel(config) {
+  const label = config.schema === DEDICATED_SCHEMA
+    ? config.provider.host.name
+    : `linode-${config.provider.region}-${config.provider.size.id}`;
+  if (!HOST_LABEL.test(label)) {
+    fail(`host label ${JSON.stringify(label)} is not a label: it may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return label;
+}
+
 function nativeArgs(config, engines, samplesFile) {
   return [
     "--engines", engines.join(","),
@@ -635,6 +665,7 @@ function nativeArgs(config, engines, samplesFile) {
     "--history", HISTORY,
     "--samples-json", samplesFile,
     "--commit", config.source.benchmark_commit,
+    "--host", hostLabel(config),
     "--no-results",
     "--no-latest-json",
   ];
@@ -981,6 +1012,39 @@ async function selfTest() {
   assert.equal(validateConfig(frozenDedicated).schema, DEDICATED_SCHEMA);
   assert.equal(frozenDedicated.provider.host.name, "ci-bench");
   validateBenchmarkCpu(frozenDedicated, {});
+
+  // Every measured row carries the machine it was measured on, and the two
+  // lifecycles label differently -- a rented instance has no name, only a class.
+  // Rows from the two can therefore never merge into one table unnoticed, which
+  // is the failure this label exists to make impossible.
+  assert.equal(hostLabel(frozenDedicated), "ci-bench");
+  assert.equal(hostLabel(linodeConfig), "linode-ap-southeast-g6-dedicated-4");
+  assert.notEqual(hostLabel(linodeConfig), hostLabel(frozenDedicated));
+  // A label is never an address: a name with a dot or a colon is refused
+  // before it can be stamped on a row.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(
+      () => hostLabel({ ...frozenDedicated, provider: { ...frozenDedicated.provider, host: { ...frozenDedicated.provider.host, name } } }),
+      /not a label/,
+    );
+  }
+  for (const config of [frozenDedicated, linodeConfig]) {
+    const args = nativeArgs(config, ALL_ENGINES, "samples.json");
+    assert.equal(args[args.indexOf("--host") + 1], hostLabel(config));
+  }
+  // A rented config that cannot name its class is refused before it can label
+  // a row "linode-undefined-undefined".
+  assert.throws(
+    () => validateConfig({ ...linodeConfig, provider: { ...linodeConfig.provider, region: undefined } }),
+    /provider\.region/,
+  );
+  assert.throws(
+    () => validateConfig({
+      ...linodeConfig,
+      provider: { ...linodeConfig.provider, size: { ...linodeConfig.provider.size, id: undefined } },
+    }),
+    /provider\.size\.id/,
+  );
 
   // Steal is structurally zero on bare metal, so the owned lifecycle requires
   // exactly zero and must refuse the rented one's tolerances.

@@ -188,6 +188,101 @@ Current unpublished workspace version: `0.0.1`.
   disables checkout credentials, and removes its temporary deploy key and
   worktrees on every exit before the persistent runner can be reused.
 
+- Machine provenance on every benchmark row. Emitted timing and memory rows
+  carry a `host` field — a provenance label published in row data, never an
+  address — and `bench/current-results.json` carries a matching
+  `metadata.hosts`. The on-host runners derive the label from the frozen
+  config, the shared acceptance rules recompute it independently and reject
+  rows naming anything else, and `tools/check-benchmark-results.js`,
+  `tools/merge-rustia-ci-memory-data.js`, `bench/publish-memory-analysis.js`,
+  and `bench/render-current-results.js` each require a published table to name
+  exactly one machine. The renderer refuses such a table rather than labelling
+  the mix: every figure on the page is a ratio between two rows, so an
+  annotated cross-host ratio is still a wrong number. Both published tables
+  merge cohorts (the timing table per slot, the memory table per engine), so
+  before this a partial re-measurement left everything it did not cover on
+  whatever machine last measured it, with only `row.commit` to reveal it. Committed history is stamped; the harness reads
+  the field as optional, because its absence means "measured before hosts were
+  recorded" rather than "measured somewhere unnamed", and omits
+  `metadata.hosts` when any row is unnamed rather than listing only the rows
+  that know. The checker covers the memory table and each memory cohort too,
+  and self-tests its refusals before reading committed data; the renderer pins
+  the timing table, the memory table, and the memory history's latest cohort
+  to the timing authority itself, since the publication lane installs the data
+  repository's memory files after the checker has run, and the checker pins
+  that latest cohort too. The history charts read the field as well: the
+  recorded timing chart draws only the reference machine's rows and counts
+  the rest as runs not drawn, a reconstruction or live series from another
+  machine is refused, and the memory history plots one machine against a
+  reference from that same machine, saying how many cohorts from another
+  machine or from before hosts were recorded it leaves undrawn. The memory
+  panel names the machine from its rows, not from prose. Every label emitter
+  and validator, the publication gate included, now accepts only
+  `[A-Za-z0-9_-]{1,128}`, so a dotted name or an IP address is refused as a
+  label, and the checker's self-test asserts that every one of those files
+  carries the same literal.
+  `tools/record-host-bridge.js` records `from_host`/`to_host` and refuses a
+  same-machine bridge; the memory merge requires a host, and a label, only on
+  the rows it keeps, so a stale unlabelled Rustia row cannot block the run
+  that replaces it. Raw memory samples no longer record the node name, and the
+  memory cohort's host evidence records `uname -srvm` rather than `uname -a`,
+  as the matrix runner's owned lane already did. The published data
+  repository's memory table and history were stamped the same way
+  (slowchop/rustia-bench-data PR #9). The weekly cohort `7826508f` landed
+  while this was open, measured on the owned host by a commit that predates
+  the field: its 65 rows are stamped here like the two before them, from its
+  own evidence, and the published tables are regenerated from that history.
+- The memory merge treats a generated cohort as one machine before merging it.
+  `tools/merge-rustia-ci-memory-data.js` refuses a cohort whose rows,
+  `metadata.host` or history line disagree, and names the side that is wrong.
+  It checks each of those as a label first, so an address is refused as an
+  address rather than as a disagreement. The merge is per engine, so a
+  cross-engine cohort replaces every engine it measured whatever machine the
+  stored rows name; that is how a table from another machine is re-measured
+  rather than refused.
+- The label rule reaches five more files, and the checker's parity self-test
+  now reads thirteen besides the harness. `tools/record-host-bridge.js`
+  refuses a row host that is not a label before it records or prints one.
+  `tools/check-dedicated-config.js`,
+  which took over the deleted fixed runner's frozen-config validation, refuses
+  a `provider.host.name` that is not a label. `bench/publish-memory-analysis.js`
+  checks every row's host and `analysis.host`, and a missing `analysis.host`
+  is now refused as missing. `tools/merge-rustia-ci-memory-data.js` checks the
+  generated rows, the stored rows it keeps, `metadata.host`, and the generated
+  history line and its rows. `tools/render-benchmark-operations-status.js`
+  checks every runner class that names a machine and requires the timing
+  authority to name one; it now self-tests those refusals against one-edit
+  variants of the committed policy before every render and every `--check`.
+- The memory lane merges with main's tools, not the measured commit's.
+  `.github/workflows/rustia-memory.yml` copies
+  `tools/merge-rustia-ci-memory-data.js` and
+  `tools/push-benchmark-data-publication.js` out of main before the checkout
+  detaches at the measured commit and runs those copies, because a merge tool
+  from before host labels checks nothing. A commit whose
+  `bench/analyze-memory-samples.js` does not carry the label literal as a whole
+  line is refused before the build, so commits from before a row's host was
+  confined to a label can no longer be measured through the lane.
+  `tools/check-workflows.js` pins the copies, their order and invocations, and
+  the gate, and requires both copied tools to load only `node:` builtins. It
+  also refuses any other line running a tree-moving git command (checkout,
+  switch, reset, restore, read-tree, worktree, stash, rebase, pull,
+  cherry-pick, bisect), a second checkout step, and any other line naming the
+  trusted tools directory by path or variable, each of which could put the
+  measured commit's tools there. It is a line lint, not a proof; a line built
+  to evade it is left to review.
+- `tools/run-dedicated-benchmark.js` refuses an ssh destination that is a
+  published label. Before any ssh or scp it compares the host part of
+  `RUSTIA_BENCH_SSH`, ignoring case, a `user@`, an `ssh://` or `scp://`
+  scheme, a port, a trailing `/` and trailing dots, with every runner class's
+  `host` in
+  `bench/operations-status.json` and the `provider.host.name` of every
+  `bench/cloud/dedicated-*.json`. Its self-test runs `host-check` and `unlock`
+  against a stub `ssh` to show that neither reaches it.
+- The owned lane's matrix evidence check refuses a uname that is not
+  `uname -srvm` by its form: the second field must be the kernel release the
+  attestation read, which is where `uname -a` puts the node name. It used to
+  look for one name, so a node name it did not know would have passed.
+
 - A new `Profile::Puc51Compat` PUC Lua 5.1.5 compatibility profile: a faithful
   `ltable.c` table backend (array part + node part with main-position chaining,
   Brent-style relocation, `computesizes` rehash, tombstone deletion, `luaH_next`

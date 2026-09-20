@@ -20,6 +20,10 @@ const REPO = path.resolve(__dirname, "..");
 const HISTORY = path.join(REPO, "bench/history/runs.jsonl");
 const SCHEMA = "rustia.bench.host-bridge.v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+// The bridge writes each side's host into public evidence, so it takes one
+// only as a provenance label: never a dotted name or an address. Kept
+// byte-identical with every other host-label script; see check-benchmark-results.js.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -32,10 +36,12 @@ function loadRows() {
     .trim()
     .split("\n")
     .map((line, index) => {
+      // The parser's message quotes the text around the fault, which may be an
+      // address in a malformed host, so only the row number is reported.
       try {
         return JSON.parse(line);
-      } catch (error) {
-        fail(`bench/history/runs.jsonl row ${index + 1} is not JSON: ${error.message}`);
+      } catch {
+        fail(`bench/history/runs.jsonl row ${index + 1} is not JSON`);
       }
     });
 }
@@ -44,6 +50,40 @@ function cohort(rows, commit) {
   const selected = rows.filter((row) => row.commit === commit);
   if (selected.length === 0) fail(`no rows for commit ${commit}`);
   return selected;
+}
+
+// The machine a cohort was measured on, read from its rows. Rows written
+// before hosts were recorded carry no label and yield null; a cohort whose rows
+// name two machines is not a cohort, and is refused rather than summarised. A
+// row that carries a host must carry a label, checked before any host is
+// quoted, so an address is neither recorded nor printed.
+function cohortHost(rows, label) {
+  if (rows.some((row) => row.host !== undefined && !(typeof row.host === "string" && HOST_LABEL.test(row.host)))) {
+    fail(`${label} has a row whose host is not a label ([A-Za-z0-9_-]{1,128})`);
+  }
+  const hosts = [...new Set(rows.map((row) => (typeof row.host === "string" ? row.host : null)))];
+  if (hosts.length !== 1) {
+    fail(
+      `${label} names ${hosts.length} machines (${hosts.map((host) => host ?? "unnamed").join(", ")}); ` +
+        "a bridge is between two machines, so each side must be one",
+    );
+  }
+  return hosts[0];
+}
+
+// A bridge exists to separate a host change from an engine change, so both
+// sides must be known to be different machines. Two named, equal hosts are
+// one machine and the ratio would be an engine change wearing a host label;
+// two unnamed sides cannot be told apart at all. One named side and one
+// unnamed side is allowed: that is exactly the bridge from the cloud era.
+function requireDifferentHosts(fromHost, toHost) {
+  if (fromHost === toHost) {
+    fail(
+      fromHost == null
+        ? "neither cohort names its machine, so this cannot be a comparison between two machines"
+        : `both cohorts were measured on ${JSON.stringify(fromHost)}; a bridge is between two machines`,
+    );
+  }
 }
 
 function slotKey(row) {
@@ -169,6 +209,31 @@ function selfTest() {
   assert.equal(median([3, 1, 2]), 2);
   assert.equal(median([4, 1, 2, 3]), 2.5);
   assert.equal(median([]), null);
+
+  // Each side of the bridge is one machine, read from the rows. Unlabelled
+  // rows are the cloud era and read as null; a same-machine bridge is refused
+  // because it would record an engine change as a host change.
+  assert.equal(cohortHost(before, "before"), null);
+  assert.equal(cohortHost(after.map((entry) => ({ ...entry, host: "ci-bench" })), "after"), "ci-bench");
+  assert.throws(
+    () => cohortHost([row({ host: "ci-bench" }), row({ engine: "koto", host: "elsewhere" })], "mixed"),
+    /names 2 machines \(ci-bench, elsewhere\)/,
+  );
+  assert.throws(
+    () => cohortHost([row({ host: "ci-bench" }), row({ engine: "koto" })], "half"),
+    /names 2 machines \(ci-bench, unnamed\)/,
+  );
+  for (const host of ["10.0.0.5", "bench.example.com", "fe80::1", "", null]) {
+    assert.throws(
+      () => cohortHost([row({ host: "ci-bench" }), row({ engine: "koto", host })], "addressed"),
+      (error) => error.message === "addressed has a row whose host is not a label ([A-Za-z0-9_-]{1,128})",
+      `${JSON.stringify(host)} must be refused as a host`,
+    );
+  }
+  requireDifferentHosts(null, "ci-bench");
+  requireDifferentHosts("linode-ap-southeast-g6-dedicated-4", "ci-bench");
+  assert.throws(() => requireDifferentHosts("ci-bench", "ci-bench"), /both cohorts were measured on "ci-bench"/);
+  assert.throws(() => requireDifferentHosts(null, null), /neither cohort names its machine/);
   assert.equal(parseArgs(["--from", "a", "--to", "b"]).to, "b");
   assert.equal(parseArgs(["--from", "a"]), null);
   assert.equal(parseArgs(["--self-test", "--from", "a"]), null);
@@ -198,18 +263,25 @@ function main(argv) {
   const rows = loadRows();
   const fromRows = cohort(rows, parsed.from);
   const toRows = cohort(rows, parsed.to);
+  const fromHost = cohortHost(fromRows, `cohort ${parsed.from.slice(0, 12)}`);
+  const toHost = cohortHost(toRows, `cohort ${parsed.to.slice(0, 12)}`);
+  requireDifferentHosts(fromHost, toHost);
   const { slots, missing } = compare(fromRows, toRows);
   const ratios = slots.map((slot) => slot.ratio);
+  const name = (host) => (host == null ? "a machine that predates host labels" : host);
   const bridge = {
     schema: SCHEMA,
     recorded_at: new Date().toISOString(),
     why:
-      "The cross-engine matrix moved from a rented instance to the owned host. Published figures " +
+      `The cross-engine matrix moved from ${name(fromHost)} to ${name(toHost)}. Published figures ` +
       "are ratios against the reference measured in the same run, so a host change cancels there; " +
-      "absolute nanoseconds do not. This is that comparison, written down before the rented rows " +
-      "are deleted and it becomes unrecoverable.",
+      "absolute nanoseconds do not. This is that comparison, written down before the earlier " +
+      "machine's rows are retired and it becomes unrecoverable.",
     from_commit: parsed.from,
     to_commit: parsed.to,
+    // Labels as the rows carry them; null is a cohort measured before hosts were recorded.
+    from_host: fromHost,
+    to_host: toHost,
     slot_count: slots.length,
     ratio_summary: {
       note: "after / before on ns_per_unit_min; above 1 means the new host is slower on that slot",

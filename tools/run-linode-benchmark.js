@@ -4140,6 +4140,27 @@ function requireFreshMatrixTimestamp(value, status, location) {
   }
 }
 
+// The provenance label the on-host runner stamps onto every row it measures.
+// Mirrors hostLabel() in run-linux-matrix-benchmark.js, which cannot be shared
+// because only that one file is copied to the benchmark host. Restating it here
+// is what makes the check adversarial: acceptance derives the expected label
+// from the frozen config rather than trusting whatever the runner wrote.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
+function requireHostLabel(label) {
+  if (!HOST_LABEL.test(label)) {
+    fail(`host label ${JSON.stringify(label)} is not a label: it may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return label;
+}
+
+function matrixHostLabel(config) {
+  if (config.schema === "rustia.dedicated-cross-engine-matrix.v1") return requireHostLabel(config.provider.host.name);
+  return requireHostLabel(`linode-${config.provider.region}-${config.provider.size.id}`);
+}
+
 function validateMatrixNativeRows(config, file, historyPrefixFile, status) {
   const publication = fs.readFileSync(file);
   const historyPrefix = fs.readFileSync(historyPrefixFile);
@@ -4175,18 +4196,25 @@ function validateMatrixNativeRows(config, file, historyPrefixFile, status) {
     "mlua-lua54": "lua54",
   };
   const expectedKeys = [
-    "timestamp_unix", "commit", "target", "engine", "dialect", "workload", "unit", "n", "reps",
+    "timestamp_unix", "commit", "target", "host", "engine", "dialect", "workload", "unit", "n", "reps",
     "ns_per_unit_min", "ns_per_unit_median", "units_per_sec", "checksum",
     "prepare_ns_min", "prepare_ns_median", "first_call_ns_min", "first_call_ns_median",
     "cold_start_ns_min", "cold_start_ns_median", "mode_family", "execution_mode",
     "native_verified", "native_verification", "native_verification_ratio",
   ];
+  const expectedHost = matrixHostLabel(config);
   const slots = new Set();
   for (const [index, row] of rows.entries()) {
     requireObject(row, `matrix native row ${index + 1}`);
     requireExactKeys(row, expectedKeys, `matrix native row ${index + 1}`);
     if (row.commit !== config.source.benchmark_commit) fail(`matrix native row ${index + 1} has the wrong commit`);
     if (row.target !== MATRIX_NATIVE_TARGET) fail(`matrix native row ${index + 1} is not ${MATRIX_NATIVE_TARGET}`);
+    if (row.host !== expectedHost) {
+      fail(
+        `matrix native row ${index + 1} names host ${JSON.stringify(row.host)}, ` +
+        `but this config was frozen for ${JSON.stringify(expectedHost)}`,
+      );
+    }
     if (!MATRIX_NATIVE_ENGINES.includes(row.engine) || row.dialect !== dialects[row.engine]) {
       fail(`matrix native row ${index + 1} has an invalid engine/dialect identity`);
     }
@@ -4955,6 +4983,15 @@ function validateCrossEngineMemoryStatus(status) {
   if (finished < started) fail("cross-engine memory status finished before it started");
 }
 
+// Mirrors hostLabel() in run-linux-memory-benchmark.js, which cannot be shared
+// because only that one file is copied to the benchmark host. Restating it is
+// what makes the check adversarial: acceptance derives the expected label from
+// the frozen config rather than trusting what the runner wrote.
+function memoryHostLabel(config) {
+  if (config.schema === "rustia.dedicated-memory-benchmark.v1") return requireHostLabel(config.provider.host.name);
+  return requireHostLabel(`linode-${config.provider.region}-${config.provider.size.id}`);
+}
+
 function expectedMemoryProtocol(config) {
   return {
     schema: "rustia.bench.memory-protocol.v1",
@@ -4965,6 +5002,7 @@ function expectedMemoryProtocol(config) {
     bootstrap_seed: config.measurement.bootstrap_seed,
     growth_thresholds: config.measurement.growth_thresholds,
     host: {
+      name: memoryHostLabel(config),
       benchmark_cpu: config.host_gate.benchmark_cpu,
       supervisor_cpu: config.host_gate.supervisor_cpu,
       sample_interval_ms: config.measurement.sample_interval_ms,
@@ -5053,6 +5091,10 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   if (analysis.rows.some((row) => row.commit !== config.source.benchmark_commit)) {
     fail("cross-engine memory analysis contains a different commit");
   }
+  const expectedHost = memoryHostLabel(config);
+  if (analysis.host !== expectedHost || analysis.rows.some((row) => row.host !== expectedHost)) {
+    fail(`cross-engine memory analysis does not name host ${JSON.stringify(expectedHost)}`);
+  }
   if (analysis.rows.some((row) => row.classification === "detector_failed")) {
     fail("cross-engine memory positive retention control failed");
   }
@@ -5078,6 +5120,8 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
         String(config.measurement.growth_thresholds.absolute_kib_per_epoch),
         "--proportional-growth-percent-per-epoch",
         String(config.measurement.growth_thresholds.proportional_percent_per_epoch),
+        "--host",
+        expectedHost,
       ],
       { announce: true },
     );
@@ -5808,6 +5852,17 @@ async function selfTest(config) {
   assert.equal(config.provider.image, "linode/ubuntu24.04");
   assert.equal(config.provider.size.id, "g6-dedicated-2");
   assert.equal(config.provider.size.class, "dedicated");
+  // The label acceptance recomputes is a label, never an address.
+  assert.equal(matrixHostLabel(config), "linode-ap-southeast-g6-dedicated-2");
+  assert.throws(() => matrixHostLabel({ ...config, provider: { ...config.provider, region: "ap.southeast" } }), /not a label/);
+  assert.throws(
+    () => matrixHostLabel({ schema: "rustia.dedicated-cross-engine-matrix.v1", provider: { host: { name: "10.0.0.5" } } }),
+    /not a label/,
+  );
+  assert.throws(
+    () => memoryHostLabel({ schema: "rustia.dedicated-memory-benchmark.v1", provider: { host: { name: "bench.example.com" } } }),
+    /not a label/,
+  );
   assert.deepEqual(
     config.measurement.run_order.map((entry) => entry.variant),
     ["baseline", "candidate", "candidate", "baseline", "candidate", "baseline", "baseline", "candidate"],
@@ -6470,6 +6525,7 @@ async function selfTest(config) {
         timestamp_unix: 1784505630,
         commit: matrixConfig.source.benchmark_commit,
         target: MATRIX_NATIVE_TARGET,
+        host: matrixHostLabel(matrixConfig),
         engine,
         dialect: matrixDialects[engine],
         workload,
@@ -6525,6 +6581,29 @@ async function selfTest(config) {
         matrixStatus,
       ),
     );
+    // A row measured somewhere other than the machine this config froze must
+    // not be accepted, and neither may a row that declines to say. This is the
+    // defect the label exists for: rows from two machines merging into one
+    // published table with nothing in the data to show it happened.
+    for (const wrongHost of ["some-other-box", undefined]) {
+      const strayRows = freshMatrixRows.map((row, index) =>
+        index === 0 ? { ...row, host: wrongHost } : row,
+      );
+      fs.writeFileSync(
+        matrixHistoryPublication,
+        `${frozenPrefix}${strayRows.map((row) => JSON.stringify(row)).join("\n")}\n`,
+      );
+      assert.throws(
+        () =>
+          validateMatrixNativeRows(
+            matrixConfig,
+            matrixHistoryPublication,
+            matrixHistoryPrefix,
+            matrixStatus,
+          ),
+        /host|keys/,
+      );
+    }
     const writeMatrixGate = (records) => {
       fs.writeFileSync(matrixGate, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
     };
@@ -6670,6 +6749,8 @@ if (require.main === module) {
 // the rules move with their remaining consumer, which is the point at which the
 // shared module is earned rather than guessed at.
 module.exports = {
+  matrixHostLabel,
+  memoryHostLabel,
   validateCrossEngineMemoryEvidence,
   validateMatrixStatus,
   validateMatrixNativeRows,

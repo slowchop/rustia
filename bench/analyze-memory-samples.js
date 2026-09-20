@@ -12,6 +12,11 @@ const DEFAULT_BOOTSTRAP_SEED = 1_381_323_604;
 const DEFAULT_ABSOLUTE_GROWTH_KIB_PER_EPOCH = 4;
 const DEFAULT_PROPORTIONAL_GROWTH_PERCENT_PER_EPOCH = 0.05;
 const RETAINED_CONTROLS = new Set(["memory_retained_control", "todo_retained_control"]);
+// Provenance labels only ever name a machine in published row data; they are
+// never resolved or connected to, so the character set is deliberately narrow:
+// no dots and no colons, so a label can be neither a fully qualified name nor
+// an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -26,6 +31,7 @@ function parseArgs(argv) {
   let bootstrapSeed = DEFAULT_BOOTSTRAP_SEED;
   let absoluteThreshold = DEFAULT_ABSOLUTE_GROWTH_KIB_PER_EPOCH;
   let proportionalThreshold = DEFAULT_PROPORTIONAL_GROWTH_PERCENT_PER_EPOCH;
+  let host = null;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -54,12 +60,21 @@ function parseArgs(argv) {
       case "--proportional-growth-percent-per-epoch":
         proportionalThreshold = positiveNumber(value, flag);
         break;
+      case "--host":
+        if (host != null) fail("--host was supplied more than once");
+        host = value;
+        break;
       default:
         fail(`unknown argument ${JSON.stringify(flag)}`);
     }
     index += 1;
   }
   if (inputs.length === 0) fail("at least one --input is required");
+  // Required, not defaulted. The samples themselves cannot say which machine
+  // produced them, so this is the only place the answer can enter the row -- and
+  // a default would be a guess published as provenance.
+  if (host == null) fail("--host is required: name the machine these samples were measured on");
+  if (!HOST_LABEL.test(host)) fail("--host must be a label of [A-Za-z0-9_-] characters, never an address");
   return {
     command: "analyze",
     inputs,
@@ -69,6 +84,7 @@ function parseArgs(argv) {
     bootstrapSeed,
     absoluteThreshold,
     proportionalThreshold,
+    host,
   };
 }
 
@@ -381,6 +397,7 @@ function summarizeGroup(samples, config) {
   return {
     commit: samples[0].commit,
     target: samples[0].target,
+    host: config.host,
     engine: samples[0].engine,
     dialect: samples[0].dialect,
     execution_mode: samples[0].execution_mode,
@@ -478,6 +495,7 @@ function analyze(config) {
       proportional_growth_percent_per_epoch: config.proportionalThreshold,
       rss_hwm_role: "diagnostic only",
     },
+    host: config.host,
     raw_sample_count: samples.length,
     row_count: rows.length,
     detector_coverage: detectorCoverage(rows),
@@ -499,6 +517,18 @@ function selfTest() {
   });
   const interval = bootstrapMedianInterval([10, 10, 10], 100, 7);
   assert.deepEqual(interval, { lower: 10, upper: 10 });
+
+  // The host label is the only provenance a row gets, so it is required, must
+  // be a label rather than anything resolvable, and may be given once.
+  const input = ["--input", "samples.json"];
+  assert.equal(parseArgs([...input, "--host", "ci-bench"]).host, "ci-bench");
+  assert.throws(() => parseArgs(input), /--host is required/);
+  assert.equal(parseArgs([...input, "--host", "linode-ap-southeast-g6-dedicated-4"]).host, "linode-ap-southeast-g6-dedicated-4");
+  assert.throws(() => parseArgs([...input, "--host", ""]), /requires a value|never an address/);
+  for (const address of ["bench.example.com:22", "bench.example.com", "10.0.0.5", "fe80::1", "a b", "user@box"]) {
+    assert.throws(() => parseArgs([...input, "--host", address]), /never an address/);
+  }
+  assert.throws(() => parseArgs([...input, "--host", "ci-bench", "--host", "ci-bench"]), /more than once/);
   process.stdout.write("memory analyzer self-test passed\n");
 }
 

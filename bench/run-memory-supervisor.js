@@ -553,7 +553,9 @@ async function collectSample(config) {
       os: process.platform,
       arch: process.arch,
       release: os.release(),
-      hostname: os.hostname(),
+      // No node name: raw samples are copied into a public data repository
+      // whole, and the machine is named by the provenance label on the row
+      // the analyzer derives from them, never by its hostname.
       benchmark_cpu: config.benchmarkCpu,
       supervisor_cpu: config.supervisorCpu,
       page_size_bytes: Number(process.env.PAGESIZE || 4096),

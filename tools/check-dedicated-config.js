@@ -29,6 +29,14 @@ const SCHEMA = "rustia.dedicated-fixed-benchmark.v1";
 const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+// provider.host.name is the provenance label every owned-host timing and memory
+// row carries into published data, copied from this file by the config
+// generators. A label, never an address: no dots and no colons, so it can be
+// neither a fully qualified name nor an IPv4 or IPv6 address. The same literal
+// is carried by every emitter and validator of that label; the on-host runners
+// refuse a bad one too, but only after the block has been copied into a lane
+// and shipped to the machine.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
 function fail(message) {
   throw new Error(message);
@@ -98,6 +106,12 @@ function validateDedicatedProvider(config) {
     "config.provider.host",
   );
   requireString(host.name, "config.provider.host.name");
+  if (!HOST_LABEL.test(host.name)) {
+    fail(
+      `config.provider.host.name ${JSON.stringify(host.name)} is not a label: ` +
+        `it may contain only [A-Za-z0-9_-], never an address`,
+    );
+  }
   requireString(host.cpu_model, "config.provider.host.cpu_model");
   requireString(host.pinned_cpus, "config.provider.host.pinned_cpus");
   requireInteger(host.logical_cpus, "config.provider.host.logical_cpus", 1);
@@ -232,6 +246,16 @@ function selfTest() {
   assert.throws(() => validateDedicatedProvider({ provider: { host: { ...dedicatedHost, extra: 1 } } }));
   assert.throws(() => validateDedicatedProvider({ provider: { host: {} } }));
   assert.throws(() => validateDedicatedProvider({ provider: { host: dedicatedHost, region: "x" } }));
+  // The name becomes the `host` label on published rows, so it must be a label
+  // and never an address -- refused here, before a generator copies it.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1", "ci bench", "x".repeat(129)]) {
+    assert.throws(
+      () => validateDedicatedProvider({ provider: { host: { ...dedicatedHost, name } } }),
+      /is not a label/,
+      `host name ${JSON.stringify(name)} must be refused`,
+    );
+  }
+  assert.doesNotThrow(() => validateDedicatedProvider({ provider: { host: { ...dedicatedHost, name: "x".repeat(128) } } }));
 
   // The committed config is the one that matters, so the rules are exercised
   // on it and on one-edit variants of it rather than on a lookalike fixture.
@@ -249,6 +273,9 @@ function selfTest() {
   rejects((config) => {
     config.provider.host.logical_cpus = 12;
   }, /SMT off/);
+  rejects((config) => {
+    config.provider.host.name = "bench.example.com";
+  }, /provider\.host\.name .* is not a label/);
   rejects((config) => {
     config.source.candidate_commit = config.source.baseline_commit;
   }, /must differ/);

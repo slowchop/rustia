@@ -32,9 +32,11 @@ const MEMORY_HISTORY_WORKLOADS = Object.freeze([
   "todo_steady",
 ]);
 
+// Thrown, not exited: tools/check-current-report-summary.js hands the
+// section builders tables they must refuse and asserts on the refusal. The
+// catch at the bottom of the file turns any refusal into the exit status.
 function fail(message) {
-  console.error(`render-current-results: ${message}`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function readData() {
@@ -57,7 +59,7 @@ function readData() {
   if (data.metadata == null || typeof data.metadata !== "object" || Array.isArray(data.metadata)) {
     fail("metadata must be an object");
   }
-  for (const key of ["targets", "engines", "workloads", "commits"]) {
+  for (const key of ["targets", "engines", "workloads", "commits", "hosts"]) {
     if (!Array.isArray(data.metadata[key])) {
       fail(`metadata.${key} must be an array`);
     }
@@ -87,7 +89,51 @@ function readData() {
 
   data.rows.forEach(validateRow);
   validateMetadataMatchesRows(data);
+  data.rows.forEach((row, index) => requireHostLabel(row.host, `${relative(sourcePath)} row ${index + 1}`));
+  requireSingleHost(
+    data.rows,
+    relative(sourcePath),
+    "every ratio on this page divides one row by another",
+  );
   return data;
+}
+
+// A published table is one machine.
+//
+// The source files merge cohorts -- the timing table keeps the newest row per
+// slot, the memory table each engine's rows from the newest cohort that measured
+// it -- so a run that re-measures only part of a matrix leaves the rest
+// standing. That is how a table came to announce one machine in its metadata
+// while most of its rows had been measured on a rented cloud host six weeks
+// earlier. Every number this page draws is a comparison between rows, and a
+// comparison between two machines is not a comparison between two engines, so
+// the page refuses to render rather than labelling the mix: a labelled ratio
+// between two boxes is still a wrong number, just an annotated one. The way
+// forward is to re-measure the stale slots on the same machine or to retire
+// their rows: tools/retire-cloud-history.js removes them, after
+// tools/record-host-bridge.js has written down how the two machines compared,
+// because once the rows are gone that comparison cannot be recovered.
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
+
+function requireHostLabel(value, label) {
+  if (!HOST_LABEL.test(value)) {
+    fail(`${label} names its machine ${JSON.stringify(value)}, which is not a label: a label may contain only [A-Za-z0-9_-], never an address`);
+  }
+  return value;
+}
+
+function requireSingleHost(rows, label, why) {
+  const hosts = unique(rows.map((row) => row.host));
+  if (hosts.length === 1) return hosts[0];
+  const byHost = hosts.map(
+    (host) => `${host}: ${unique(rows.filter((row) => row.host === host).map((row) => row.engine)).join(", ")}`,
+  );
+  fail(
+    `${label} holds rows measured on ${hosts.length} machines (${byHost.join("; ")}); ` +
+    `${why}, so re-measure the stale rows on one machine or retire them`,
+  );
 }
 
 function readOperationsStatus(data) {
@@ -145,6 +191,13 @@ function readOperationsStatus(data) {
     fail("progress state and pending relevant commit count disagree");
   }
   return status;
+}
+
+// The one machine the operations policy qualifies to produce a timing. The
+// status has already been validated to declare exactly one such class.
+function authorityHost(status) {
+  const [, runner] = Object.entries(status.runner_classes).find(([, candidate]) => candidate?.timing_authority === true);
+  return runner.host;
 }
 
 function readHistory() {
@@ -263,10 +316,18 @@ function normalizeHistoryRecord(record, lineNumber) {
       fail(`${label}.${key} must be a positive finite number`);
     }
   }
+  // Optional on read: rows written before hosts were recorded have no key, and
+  // that absence is kept as null rather than guessed. A key that is present
+  // must name something, so an empty label can never pass for a machine.
+  if (record.host !== undefined && (typeof record.host !== "string" || record.host.trim() === "")) {
+    fail(`${label}.host must be a non-empty string when present`);
+  }
+  if (record.host !== undefined) requireHostLabel(record.host, label);
   return {
     timestamp_unix: Number(record.timestamp_unix),
     commit: record.commit,
     target: record.target,
+    host: typeof record.host === "string" ? record.host : null,
     engine: record.engine,
     dialect: record.dialect,
     workload: record.workload,
@@ -322,7 +383,7 @@ function readMemoryResults() {
   }
   data.rows.forEach((row, index) => {
     const label = `memory results row ${index + 1}`;
-    for (const key of ["commit", "target", "engine", "dialect", "execution_mode", "workload", "classification"]) {
+    for (const key of ["commit", "target", "host", "engine", "dialect", "execution_mode", "workload", "classification"]) {
       if (typeof row[key] !== "string" || row[key] === "") fail(`${label}.${key} must be a string`);
     }
     if (row.metrics == null || typeof row.metrics !== "object" || Array.isArray(row.metrics)) {
@@ -340,6 +401,33 @@ function readMemoryResults() {
       }
     }
   });
+  if (data.status === "ready") {
+    // The memory table is merged the same way and ranks engines against each
+    // other, so it is subject to the same rule. This is the merge that actually
+    // published a mix: a Rustia-only run on the owned host refreshed eleven rows
+    // and left ninety-nine competitor rows from a rented cloud host standing.
+    data.rows.forEach((row, index) => requireHostLabel(row.host, `${relative(memoryResultsPath)} row ${index + 1}`));
+    const host = requireSingleHost(
+      data.rows,
+      relative(memoryResultsPath),
+      "the memory panel ranks engines against each other",
+    );
+    // Whichever provenance field the publication carries -- one cohort names
+    // `host`, a merge across engines names `hosts` -- must agree with the rows
+    // under it, so the summary can never outlive what it summarises.
+    if (data.metadata?.host != null && data.metadata.host !== host) {
+      fail(
+        `${relative(memoryResultsPath)}.metadata.host is ${JSON.stringify(data.metadata.host)}, ` +
+        `but its rows were measured on ${JSON.stringify(host)}`,
+      );
+    }
+    if (data.metadata?.hosts != null && JSON.stringify(data.metadata.hosts) !== JSON.stringify([host])) {
+      fail(
+        `${relative(memoryResultsPath)}.metadata.hosts is ${JSON.stringify(data.metadata.hosts)}, ` +
+        `but its rows were measured on ${JSON.stringify([host])}`,
+      );
+    }
+  }
   return data;
 }
 
@@ -373,11 +461,31 @@ function readMemoryHistory() {
     if (!Array.isArray(record.rows) || record.rows.length === 0) {
       fail(`${label}.rows must be a non-empty array`);
     }
-    records.push(record);
+    records.push({ ...record, host: memoryCohortHost(record, label) });
   }
   return records.sort(
     (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at),
   );
+}
+
+// A cohort is one run on one machine. Its rows say which, and the cohort may
+// repeat it; the two may not disagree, and rows may not half-say it. A cohort
+// whose rows carry no host at all predates the field and is kept as null, so
+// the history chart can decline to plot it beside rows that do know.
+function memoryCohortHost(record, label) {
+  const hosts = uniqueHosts(record.rows.map((row) => row.host));
+  if (hosts.length !== 1) {
+    fail(`${label} was measured on ${hosts.length} machines (${hosts.map((host) => host ?? "unnamed").join(", ")}); a cohort is one run on one machine`);
+  }
+  const host = hosts[0];
+  if (host !== null && (typeof host !== "string" || host === "")) {
+    fail(`${label}.rows[].host must be a non-empty string when present`);
+  }
+  if (host !== null) requireHostLabel(host, `${label}.rows[]`);
+  if (record.host !== undefined && record.host !== host) {
+    fail(`${label}.host is ${JSON.stringify(record.host)}, but its rows were measured on ${JSON.stringify(host)}`);
+  }
+  return host ?? null;
 }
 
 function readWasmResults() {
@@ -448,7 +556,7 @@ function normalizeCohortEvidence(data, filePath) {
 
 function validateRow(row, index) {
   const label = `rows[${index}]`;
-  for (const key of ["commit", "target", "engine", "dialect", "workload", "unit", "checksum"]) {
+  for (const key of ["commit", "target", "host", "engine", "dialect", "workload", "unit", "checksum"]) {
     if (typeof row[key] !== "string" || row[key].trim() === "") {
       fail(`${label}.${key} must be a non-empty string`);
     }
@@ -521,6 +629,7 @@ function validateMetadataMatchesRows(data) {
     engines: unique(data.rows.map((row) => row.engine)),
     workloads: unique(data.rows.map((row) => row.workload)),
     commits: unique(data.rows.map((row) => row.commit)),
+    hosts: unique(data.rows.map((row) => row.host)),
   };
 
   for (const [key, values] of Object.entries(expected)) {
@@ -553,6 +662,15 @@ function relative(filePath) {
 
 function unique(values) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+// Host labels, with "not recorded" kept as a value of its own. Rows written
+// before the field existed carry no host, and null here is that fact; it sorts
+// first and never collapses into a named machine.
+function uniqueHosts(values) {
+  return [...new Set(values.map((value) => value ?? null))].sort(
+    (left, right) => (left ?? "").localeCompare(right ?? ""),
+  );
 }
 
 function formatNumber(value) {
@@ -1031,21 +1149,23 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history, backfills, currentRows) {
+function historySection(history, backfills, currentRows, liveSeries) {
   const reference = mluaJitHistoryReference(currentRows);
-  const reconstructed = rustiaBackfillEras(backfills, reference, readLiveSeries());
-  const recorded = rustiaHistoryEras(history.rows, reference);
-  // One host, one protocol. When a reconstruction exists it is the whole
-  // chart: the recorded matrix runs are measured on a different machine, so
-  // drawing them alongside invites a host difference to be read as a
-  // performance change. Those runs stay in bench/history/runs.jsonl and still
-  // supply the 1x reference and the current-results tables.
+  const reconstructed = rustiaBackfillEras(backfills, reference, liveSeries);
+  const { eras: recorded, elsewhere } = rustiaHistoryEras(history.rows, reference);
+  // One machine, one protocol. When a reconstruction exists it is the whole
+  // chart: it replays every revision through one fixed harness, and the
+  // accepted matrix runs are a different measurement, so drawing them
+  // alongside invites a protocol difference to be read as a performance
+  // change. Those runs stay in bench/history/runs.jsonl and still supply the
+  // 1x reference and the current-results tables. Runs from any other machine
+  // are named as not drawn in either case.
   const visibleRecorded = reconstructed.length > 0 ? [] : recorded;
   const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
   const summary = reconstructed.length > 0
-    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against ${reconstructed.length === 1 ? "one fixed harness and one pinned dependency set, measured end to end on a single machine" : `${formatInteger(reconstructed.length)} fixed harnesses, each measured end to end on one machine and never blended with another`}.`
-    : `${formatInteger(snapshotCount)} recorded Linux matrix runs across two eras. Each chart is normalized to its own first run, so different hosts and protocols are never blended.`;
+    ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against ${reconstructed.length === 1 ? "one fixed harness and one pinned dependency set, measured end to end on a single machine" : `${formatInteger(reconstructed.length)} fixed harnesses, each measured end to end on one machine and never blended with another`}.${undrawnRowsNote(elsewhere)}`
+    : `${formatInteger(snapshotCount)} recorded Linux matrix runs on ${reference.host == null ? "an unnamed machine" : `<code>${escapeHtml(reference.host)}</code>`} across ${eras.length === 1 ? "one era" : `${formatInteger(eras.length)} eras`}. Each era is normalized to its own first run, so different protocols are never blended, and no other machine is drawn.${undrawnRowsNote(elsewhere)}`;
   const explanation = reconstructed.length > 0
     ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). Every point on this chart comes from the one machine named in the legend, so differences between points are engine changes rather than host changes.`
     : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
@@ -1071,6 +1191,15 @@ function historySection(history, backfills, currentRows) {
   `;
 }
 
+// Recorded rows the chart leaves undrawn, said precisely: rows from another
+// machine and rows from before hosts were recorded are different facts.
+function undrawnRowsNote(elsewhere) {
+  if (elsewhere.length === 0) return "";
+  const parts = elsewhere.map((entry) =>
+    `${formatInteger(entry.runCount)} run(s) measured ${entry.host == null ? "before hosts were recorded" : `on <code>${escapeHtml(entry.host)}</code>`}`);
+  return ` Not drawn: ${parts.join("; ")}.`;
+}
+
 function mluaJitHistoryReference(rows) {
   const referenceRows = rows.filter(
     (row) =>
@@ -1086,13 +1215,31 @@ function mluaJitHistoryReference(rows) {
   }
   return {
     commit: referenceRows[0].commit,
+    // The machine the reference was measured on. The current table is one
+    // machine by the time it reaches readData's caller, but this function is
+    // also called on its own, so it checks rather than assumes.
+    host: requireSingleHost(referenceRows, "the mlua/JIT reference", "it divides every point on the history chart") ?? null,
     byWorkload,
   };
+}
+
+// Every point on the history chart is divided into the mlua/JIT reference, so
+// a reconstruction or a live series is drawn only when it names the machine
+// the reference was measured on; a named machine that differs is refused, and
+// an unnamed one is drawn only against an unnamed reference.
+function requireReferenceMachine(host, what, reference) {
+  if ((host ?? null) === reference.host) return;
+  const name = (value) => (value == null ? "an unnamed machine" : JSON.stringify(value));
+  fail(
+    `${what} was measured on ${name(host)}, but the mlua/JIT reference was measured on ${name(reference.host)}; ` +
+    "every point on the history chart is divided into that reference, and a ratio across two machines is not a number this page publishes",
+  );
 }
 
 function rustiaBackfillEras(backfills, reference, liveSeries = []) {
   const unattached = new Set(liveSeries);
   const eras = backfills.map((backfill) => {
+    requireReferenceMachine(backfill.host, `the reconstruction with harness ${backfill.harness_commit.slice(0, 7)}`, reference);
     const targets = new Map(
       backfill.targets.map((target, index) => [
         target.commit,
@@ -1150,6 +1297,7 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
   // measurement and gets its own line rather than being silently folded into
   // one it is not comparable with.
   for (const series of unattached) {
+    requireReferenceMachine(series.manifest.host, `the live series with harness ${series.manifest.harness_commit.slice(0, 7)}`, reference);
     const commitOrder = new Map();
     let order = 0;
     for (const row of series.rows) {
@@ -1173,11 +1321,38 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
   return eras;
 }
 
+// Recorded matrix eras are one machine's: the machine the mlua/JIT reference
+// was measured on, which is the current table's. The chart's y-axis divides
+// the reference's nanoseconds by each row's, and that quotient means something
+// only when both ran on one machine, so rows from any other machine -- or from
+// before hosts were recorded -- are counted and named rather than drawn. Within
+// that machine, a gap of a day or more still splits the series as it did
+// before rows named their machine; both halves are the same box.
 function rustiaHistoryEras(rows, reference) {
-  const rustiaRows = rows
+  const allRustiaRows = rows
     .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
     .slice()
     .sort(compareRunTime);
+  const rustiaRows = allRustiaRows.filter((row) => (row.host ?? null) === reference.host);
+  // Counted in runs, the unit snapshotCount uses: one row per workload per
+  // run, so the count is the deepest workload. A matrix run stamps each row
+  // as it finishes, so timestamps would count one run several times.
+  const elsewhere = uniqueHosts(
+    allRustiaRows.filter((row) => (row.host ?? null) !== reference.host).map((row) => row.host),
+  ).map((host) => {
+    const hostRows = allRustiaRows.filter((row) => (row.host ?? null) === host);
+    return {
+      host,
+      runCount: Math.max(...REQUIRED_COMMON_WORKLOADS.map((workload) => hostRows.filter((row) => row.workload === workload).length)),
+    };
+  });
+  if (rustiaRows.length === 0) {
+    fail(
+      `${relative(historyPath)} has no recorded rustia rows measured on ` +
+      `${reference.host == null ? "an unnamed machine" : JSON.stringify(reference.host)}, the machine the mlua/JIT ` +
+      "reference was measured on; rows measured elsewhere are never drawn against it",
+    );
+  }
   const timestamps = unique(rustiaRows.map((row) => String(row.timestamp_unix))).map(Number).sort((left, right) => left - right);
   const gaps = [];
   for (let index = 1; index < timestamps.length; index += 1) {
@@ -1193,12 +1368,18 @@ function rustiaHistoryEras(rows, reference) {
     if (!REQUIRED_COMMON_WORKLOADS.every((workload) => current.some((row) => row.workload === workload))) {
       continue;
     }
-    return [
-      rustiaHistoryEra("Earlier Linux history", "Earlier host/protocol era; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference, "recorded", "Recorded · earlier hosts"),
-      rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference, "recorded", "Recorded dedicated"),
-    ];
+    return {
+      eras: [
+        rustiaHistoryEra("Earlier Linux history", "Earlier protocol era on the same machine; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference, "recorded", "Recorded · earlier era"),
+        rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference, "recorded", "Recorded dedicated"),
+      ],
+      elsewhere,
+    };
   }
-  return [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference, "recorded", "Recorded Linux history")];
+  return {
+    eras: [rustiaHistoryEra("Comparable Linux history", "All recorded Linux runs", rustiaRows, reference, "recorded", "Recorded Linux history")],
+    elsewhere,
+  };
 }
 
 // `kind` distinguishes a reconstructed era (one fixed harness replayed over old
@@ -1395,17 +1576,22 @@ function memoryHistoryModel(records) {
     const rows = MEMORY_HISTORY_WORKLOADS.map((workload) => byWorkload.get(workload));
     return rows.every(Boolean) ? rows : null;
   };
-  // The chart is a ratio against mlua/Luau/JIT, so it needs a reference cohort measured
-  // alongside the Rustia points. Returning null lets the section say so rather than fail:
-  // after the cloud cohorts were removed the only reference left would be a different host.
-  const referenceRecord = records.find((record) => completeRows(record, "mlua-luau-jit") != null);
+  // The chart is a ratio against mlua/Luau/JIT, so it needs a reference cohort
+  // measured on the same machine as the Rustia points: memory divided across
+  // two hosts would read the host difference as an engine change. The series
+  // is the latest cohort's machine; cohorts from any other machine are never
+  // drawn on this line, and the section counts them from the records. Null
+  // means there is no same-host reference yet, and the section says that too.
+  const host = records.at(-1)?.host ?? null;
+  const sameHost = records.filter((record) => (record.host ?? null) === host);
+  const referenceRecord = sameHost.find((record) => completeRows(record, "mlua-luau-jit") != null);
   if (referenceRecord == null) return null;
   const referenceRows = completeRows(referenceRecord, "mlua-luau-jit");
   const metricKeys = {
     peak: "peak_delta_kib",
     retained: "quiescent_retained_delta_anon_kib",
   };
-  const points = records.flatMap((record) => {
+  const points = sameHost.flatMap((record) => {
     const rustiaRows = completeRows(record, "rustia");
     if (rustiaRows == null) return [];
     const scores = Object.fromEntries(
@@ -1430,6 +1616,7 @@ function memoryHistoryModel(records) {
   });
   if (points.length === 0) return null;
   return {
+    host,
     points,
     reference: {
       commit: referenceRecord.commit,
@@ -1438,7 +1625,24 @@ function memoryHistoryModel(records) {
   };
 }
 
-function memoryHistorySection(records) {
+// Cohorts the memory history leaves undrawn, said precisely: a cohort from
+// another machine and a cohort from before hosts were recorded are different
+// facts, and the reader is told which.
+function undrawnCohortsNote(records, host) {
+  const others = records.filter((record) => (record.host ?? null) !== host);
+  if (others.length === 0) return "";
+  const named = others.filter((record) => record.host != null).length;
+  const unnamed = others.length - named;
+  const parts = [];
+  if (named > 0) parts.push(`${formatInteger(named)} cohort(s) measured on another machine`);
+  if (unnamed > 0) parts.push(`${formatInteger(unnamed)} cohort(s) measured before hosts were recorded`);
+  return ` ${parts.join(" and ")} ${others.length === 1 ? "is" : "are"} not drawn beside these.`;
+}
+
+// `authorityHost` is the machine the operations policy qualifies to produce
+// numbers. It is only spoken of when there are no cohorts to read a host from;
+// once there are, the section names the machine the cohorts name.
+function memoryHistorySection(records, authorityHost) {
   if (records.length === 0) {
     return `
       <section class="panel history-axis-panel memory-history-panel" id="memory-history">
@@ -1448,32 +1652,37 @@ function memoryHistorySection(records) {
             <p>No cohorts.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>The series starts again on <code>ci-bench</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.</p>
+        <p class="pending-note"><strong>The series starts again on <code>${escapeHtml(authorityHost)}</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.</p>
       </section>
     `;
   }
-  const model = records.length === 0 ? null : memoryHistoryModel(records);
+  const model = memoryHistoryModel(records);
   if (model == null) {
-    const cohorts = records.map((record) => record.cohort_id ?? record.commit.slice(0, 7));
+    const latestHost = records.at(-1).host;
+    const hostName = latestHost == null ? "an unnamed machine" : `<code>${escapeHtml(latestHost)}</code>`;
+    const cohorts = records
+      .filter((record) => (record.host ?? null) === (latestHost ?? null))
+      .map((record) => record.cohort_id ?? record.commit.slice(0, 7));
     return `
       <section class="panel history-axis-panel memory-history-panel" id="memory-history">
         <div class="section-head">
           <div>
             <h2>rustia Memory History</h2>
-            <p>${formatInteger(cohorts.length)} cohort(s) on <code>ci-bench</code>; no reference to plot against yet.</p>
+            <p>${formatInteger(cohorts.length)} cohort(s) on ${hostName}; no reference to plot against yet.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and the only mlua/JIT memory cohort was measured on a rented cloud host, so it has been removed. The line returns with the first cross-engine memory cohort measured on <code>ci-bench</code>. Rustia cohorts recorded so far: ${cohorts.map((cohort) => `<code>${escapeHtml(cohort)}</code>`).join(", ")}.</p>
+        <p class="pending-note"><strong>The chart needs a competitor reference from the same machine.</strong> It plots mlua/Luau/JIT memory divided by Rustia memory, and no mlua/JIT memory cohort has been measured on ${hostName}. The line returns with the first cross-engine memory cohort measured there. Rustia cohorts recorded so far on this machine: ${cohorts.map((cohort) => `<code>${escapeHtml(cohort)}</code>`).join(", ")}.${undrawnCohortsNote(records, latestHost ?? null)}</p>
       </section>
     `;
   }
   const latest = model.points.at(-1);
+  const hostName = model.host == null ? "an unnamed machine" : `<code>${escapeHtml(model.host)}</code>`;
   return `
     <section class="panel history-axis-panel memory-history-panel" id="memory-history">
       <div class="section-head">
         <div>
           <h2>rustia Memory History</h2>
-          <p>${formatInteger(model.points.length)} complete dedicated-Linux Rustia cohorts across ${formatInteger(MEMORY_HISTORY_WORKLOADS.length)} non-control workloads.</p>
+          <p>${formatInteger(model.points.length)} complete Rustia cohorts on ${hostName} across ${formatInteger(MEMORY_HISTORY_WORKLOADS.length)} non-control workloads.${undrawnCohortsNote(records, model.host)}</p>
         </div>
         <div class="comparison-controls">
           <div class="metric-toggle" role="group" aria-label="Memory history metric">
@@ -1496,7 +1705,7 @@ function memoryHistorySection(records) {
         <div data-memory-history-metric-view="retained" hidden>${memoryHistoryChart(model, "retained", "commit")}</div>
       </div>
       ${memoryHistoryTable(model)}
-      <p class="cohort-note">The mlua/JIT reference is fixed from cross-engine cohort <code>${escapeHtml(model.reference.cohort)}</code> at <code>${escapeHtml(model.reference.commit.slice(0, 7))}</code>. Rustia points are separate fresh-VM cohorts; the latest is <code>${escapeHtml(latest.commit.slice(0, 7))}</code>.</p>
+      <p class="cohort-note">The mlua/JIT reference is fixed from cross-engine cohort <code>${escapeHtml(model.reference.cohort)}</code> at <code>${escapeHtml(model.reference.commit.slice(0, 7))}</code>, measured on the same machine as every Rustia point. Rustia points are separate fresh-VM cohorts; the latest is <code>${escapeHtml(latest.commit.slice(0, 7))}</code>.</p>
     </section>
   `;
 }
@@ -1688,7 +1897,11 @@ function coldStartSection(rows) {
   `;
 }
 
-function memoryResultsSection(data) {
+// `authorityHost` is the machine the operations policy qualifies to produce
+// numbers; it is named only while the table is pending. A ready table names
+// the machine its rows name, which readMemoryResults has already required to
+// be a single one.
+function memoryResultsSection(data, authorityHost) {
   if (data.status === "pending") {
     return `
       <section class="panel" id="memory">
@@ -1698,10 +1911,12 @@ function memoryResultsSection(data) {
             <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>ci-bench</code>, the machine every other number on this page comes from.</p>
+        <p class="pending-note"><strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>${escapeHtml(authorityHost)}</code>, the machine every other number on this page comes from.</p>
       </section>
     `;
   }
+  const host = uniqueHosts(data.rows.map((row) => row.host));
+  if (host.length !== 1 || host[0] == null) fail(`memory results name ${host.length} machines; a published table is one machine`);
   const rows = [...data.rows].sort(
     (left, right) =>
       left.workload.localeCompare(right.workload) ||
@@ -1716,13 +1931,13 @@ function memoryResultsSection(data) {
     <section class="panel" id="memory">
       <div class="section-head">
         <div>
-          <h2>${comparative ? "Linux Memory Comparison" : "rustia Memory on ci-bench"}</h2>
+          <h2>${comparative ? `Linux Memory Comparison on ${escapeHtml(host[0])}` : `rustia Memory on ${escapeHtml(host[0])}`}</h2>
           <p>${comparative
-            ? "Best-first charts use fresh process+cgroup samples. Peak catches short spikes; retained uses anonymous memory after quiescence."
-            : "Fresh process+cgroup samples on the owned host. Peak catches short spikes; retained uses anonymous memory after quiescence."}</p>
+            ? "Best-first charts use fresh process+cgroup samples measured on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence."
+            : "Fresh process+cgroup samples on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence."}</p>
         </div>
       </div>
-      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>ci-bench</code>.</p>`}
+      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>${escapeHtml(host[0])}</code>.</p>`}
       ${comparative ? `<div class="memory-cohorts">
         ${memoryComparisonCharts(rows)}
       </div>` : ""}
@@ -2183,7 +2398,37 @@ function optimizationEvidenceSection(cohorts) {
   `;
 }
 
+// The page publishes one machine: the one the operations policy qualifies to
+// produce a timing. The checker pins both tables to it as well, but the
+// publication lane installs the data repository's memory table after the
+// checker has run and renders from that, so the page checks for itself.
+function requireAuthorityHost(host, label, authority) {
+  if (host !== authority) {
+    fail(
+      `${label} was measured on ${JSON.stringify(host)}, but ${relative(operationsStatusPath)} qualifies ` +
+      `${JSON.stringify(authority)} as the timing authority; the page publishes only the qualified machine`,
+    );
+  }
+}
+
+// The three things the page draws as the current machine: the timing table,
+// a ready memory table, and the memory history's latest cohort (the machine
+// that chart is keyed on). Older memory cohorts may name another machine;
+// they stay undrawn, and the section says so.
+function requirePublishedHosts(data, memoryResults, memoryHistory, operationsStatus) {
+  const authority = authorityHost(operationsStatus);
+  requireAuthorityHost(unique(data.rows.map((row) => row.host))[0], relative(sourcePath), authority);
+  if (memoryResults.status === "ready") {
+    requireAuthorityHost(uniqueHosts(memoryResults.rows.map((row) => row.host))[0], relative(memoryResultsPath), authority);
+  }
+  if (memoryHistory.length > 0) {
+    requireAuthorityHost(memoryHistory.at(-1).host ?? null, `${relative(memoryHistoryPath)} latest cohort`, authority);
+  }
+  return authority;
+}
+
 function render(data, operationsStatus, wasmResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
+  const authority = requirePublishedHosts(data, memoryResults, memoryHistory, operationsStatus);
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -3333,11 +3578,11 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
     ${operationsStatusSection(operationsStatus)}
     ${optimizationEvidenceSection(cohorts)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}
-    ${memoryResultsSection(memoryResults)}
-    ${memoryHistorySection(memoryHistory)}
+    ${memoryResultsSection(memoryResults, authority)}
+    ${memoryHistorySection(memoryHistory, authority)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-      ${historySection(history, historyBackfills, data.rows)}
+      ${historySection(history, historyBackfills, data.rows, readLiveSeries())}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm source <code>${escapeHtml(relative(wasmResultsPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
@@ -3443,7 +3688,12 @@ function main() {
 }
 
 if (require.main === module) {
-  main();
+  try {
+    main();
+  } catch (error) {
+    console.error(`render-current-results: ${error.message}`);
+    process.exit(1);
+  }
 }
 
 module.exports = {
@@ -3455,11 +3705,20 @@ module.exports = {
   linuxComparisonSection,
   languagesByTargetSection,
   memoryComparisonCharts,
+  memoryCohortHost,
   memoryHistoryModel,
+  historySection,
   memoryHistorySection,
   memoryResultsSection,
+  mluaJitHistoryReference,
+  normalizeHistoryRecord,
   optimizationEvidenceSection,
   operationsStatusSection,
+  requireAuthorityHost,
+  requirePublishedHosts,
+  requireSingleHost,
+  rustiaBackfillEras,
+  rustiaHistoryEras,
   summarizeLanguageTargets,
   wasmTargetRows,
 };

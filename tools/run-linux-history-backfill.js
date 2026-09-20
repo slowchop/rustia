@@ -71,6 +71,10 @@ const CORE_TREES = Object.freeze([
   "crates/rustia-vm",
 ]);
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+// A label, never an address: no dots and no colons, so it can be neither a
+// fully qualified name nor an IPv4 or IPv6 address, whatever an operator types.
+// The harness this lane builds is pinned by commit, so the guard lives here.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_TIMED_ATTEMPTS = 3;
 // A second run must not inherit a previous run's clone, worktrees, binaries,
@@ -192,6 +196,9 @@ function validateConfig(value) {
     "config.provider.host",
   );
   requireString(host.name, "config.provider.host.name");
+  if (!HOST_LABEL.test(host.name)) {
+    fail("config.provider.host.name must be a label of [A-Za-z0-9_-] characters, never an address");
+  }
   requireString(host.cpu_model, "config.provider.host.cpu_model");
   requireString(host.pinned_cpus, "config.provider.host.pinned_cpus");
   requireInteger(host.logical_cpus, "config.provider.host.logical_cpus", 1);
@@ -1341,6 +1348,16 @@ async function selfTest() {
     publication: { mode: "history_backfill", rows: 10 },
   };
   assert.equal(validateConfig(config), config);
+
+  // The label every row will carry is a label, never an address, and the
+  // harness this lane builds is a pinned commit whose --host cannot be
+  // relied on to refuse one, so the config refuses it first.
+  for (const name of ["bench.example.com", "10.0.0.5", "fe80::1"]) {
+    assert.throws(
+      () => validateConfig({ ...config, provider: { host: { ...config.provider.host, name } } }),
+      /never an address/,
+    );
+  }
 
   // Existing reconstruction configs omit target_relation and retain their
   // original target-before-harness interpretation. New configs make the

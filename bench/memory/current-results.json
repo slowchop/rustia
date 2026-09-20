@@ -6,6 +6,7 @@
     "description": "Memory rows measured on the owned host ci-bench. Competitor engines return when the memory matrix runs there.",
     "cohort_id": "rustia-ci-070c387b173c",
     "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
+    "host": "ci-bench",
     "evidence": "bench/memory/raw/070c387b173caa77d718f0f1d76fa8a9bbdaf8ee/rustia-ci-070c387b173c",
     "history": "history/runs.jsonl",
     "targets": [
@@ -78,6 +79,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -211,6 +213,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -344,6 +347,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -477,6 +481,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -610,6 +615,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -767,6 +773,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -924,6 +931,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -1057,6 +1065,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -1190,6 +1199,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -1347,6 +1357,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",
@@ -1504,6 +1515,7 @@
     {
       "commit": "070c387b173caa77d718f0f1d76fa8a9bbdaf8ee",
       "target": "linux-x86_64",
+      "host": "ci-bench",
       "engine": "rustia",
       "dialect": "luau",
       "execution_mode": "interpreter",

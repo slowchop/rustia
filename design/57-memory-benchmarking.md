@@ -257,11 +257,24 @@ Proposed schemas:
 - `rustia.bench.memory-run.v1` — one summarized engine/workload/mode/cohort row;
 - `rustia.bench.memory-current-results.v1` — latest coherent complete cohort selected for the dashboard.
 
-Every summary names its source hash, exact commit, mode, target, protocol version, sample count, problem size,
-work/epoch count, memory source, and confidence method. Promotion remains fail-closed and runs entirely on the
+Every summary names its source hash, exact commit, host, mode, target, protocol version, sample count, problem
+size, work/epoch count, memory source, and confidence method. Promotion remains fail-closed and runs entirely on the
 owned host: the run attests the host before the build, the cohort must reach `memory_complete` status, its
 evidence is validated against the frozen config, existing evidence is never overwritten, and the two
 publication files are staged atomically with rollback.
+
+A cohort is one run on one machine, and that is checked rather than assumed. The analyzer requires `--host` with
+no default and stamps it on every row; `publish-memory-analysis.js` refuses an analysis whose rows disagree about
+it; `tools/merge-rustia-ci-memory-data.js` refuses a generated cohort whose rows, `metadata.host` or history line
+disagree, and refuses to merge a table spanning two machines; and the dashboard refuses to render one. Each of
+those also refuses a host that is not a label. `bench/memory/current-results.json` merges cohorts, each engine's
+rows from the newest cohort that measured it, so without that rule a rustia-only refresh leaves every competitor
+row on whatever machine last measured it — which is what happened on 2026-09-05, when 11 new rows joined 99
+six-week-old cloud rows under metadata naming a single host. The merge is per engine, so a cross-engine cohort
+replaces every engine it measured, whatever machine the stored rows name: that is how a table from another machine
+is re-measured. The merge is also where a row's machine is last checked before publication, so the lane runs
+main's copy of it rather than the measured commit's, and a commit from before a row's host was confined to a label
+is refused before it is measured. See [`81-benchmark-operations.md`](81-benchmark-operations.md), "Row provenance".
 
 ## Dashboard
 

@@ -12,7 +12,8 @@
 // known-hosts entry belongs in this repository (AGENTS.md: nothing
 // infra-identifying lands here). `provider.host.name` is a provenance label
 // that is published in row data; it is NOT an ssh target and must never be
-// used as one.
+// used as one, and sshDestination() refuses a destination whose host is any
+// label this repository publishes.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -86,7 +87,72 @@ function sshDestination() {
         `(kept outside this repository; see rustia-ops)`,
     );
   }
+  const problem = sshDestinationProblem(destination.trim(), publishedHostLabels(REPO));
+  if (problem !== null) fail(problem);
   return destination.trim();
+}
+
+// A provenance label is public and an ssh destination is private, so the two
+// must never be one name. Saying so in prose did not make it so: an ssh_config
+// alias spelt like the published label would quietly make the label an ssh
+// target, and host-check and unlock reach the host without loading a config to
+// compare against. So every ssh and scp call takes its destination from
+// sshDestination(), which checks it against every label the repository
+// publishes, read afresh each time rather than restated here.
+//
+// Every owned-host lane freezes its config into bench/cloud under this prefix
+// -- history, matrix and both memory cohorts -- so a config frozen by a lane
+// added later is read without a second list.
+const DEDICATED_CONFIG = /^dedicated-.*\.json$/;
+
+/// Every provenance label this repository publishes: the host each runner
+/// class names in bench/operations-status.json, and provider.host.name of every
+/// frozen owned-host config in bench/cloud.
+function publishedHostLabels(root) {
+  const labels = new Set();
+  const status = JSON.parse(fs.readFileSync(path.join(root, "bench/operations-status.json"), "utf8"));
+  for (const runner of Object.values(status?.runner_classes ?? {})) {
+    if (typeof runner?.host === "string") labels.add(runner.host);
+  }
+  const configDir = path.join(root, "bench/cloud");
+  for (const name of fs.readdirSync(configDir).filter((file) => DEDICATED_CONFIG.test(file))) {
+    const label = JSON.parse(fs.readFileSync(path.join(configDir, name), "utf8"))?.provider?.host?.name;
+    if (typeof label === "string") labels.add(label);
+  }
+  return [...labels];
+}
+
+/// The host an ssh destination names, from `[ssh://][user@]host[:port][/]`. The
+/// user ends at the last `@`, which is where ssh splits it. The host ends at a
+/// `:` or a `/`, where ssh's URI parser ends it: that parser accepts an empty
+/// path, so `ssh://host/` reaches `host`. It also drops a trailing `.`, so
+/// `ssh://host.` reaches `host` too, and trailing dots are dropped here. The
+/// destination is interpolated into scp arguments as well, and scp reads an
+/// `scp://` URI the same way, so that scheme (and sftp's) is stripped alike.
+/// An IPv6 literal is bracketed so its colons are not read as a port.
+function sshHostPart(destination) {
+  const authority = destination.replace(/^(?:ssh|scp|sftp):\/\//i, "");
+  const host = authority.slice(authority.lastIndexOf("@") + 1);
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    return (close === -1 ? host : host.slice(1, close)).replace(/\.+$/, "");
+  }
+  return host.split(/[:/]/)[0].replace(/\.+$/, "");
+}
+
+/// Why `destination` must not be used as an ssh target, or null. ssh lowercases
+/// a host before matching it against ssh_config, so case is ignored. The message
+/// names the published label and nothing else of the destination: the user,
+/// port and spelling the operator chose stay out of the log.
+function sshDestinationProblem(destination, labels) {
+  const host = sshHostPart(destination).toLowerCase();
+  const label = labels.find((candidate) => candidate.toLowerCase() === host);
+  if (label === undefined) return null;
+  return (
+    `${SSH_ENV} names ${JSON.stringify(label)}, which is a provenance label published in row data, ` +
+    `never an ssh target: use a private ssh_config alias that is not a published label ` +
+    `(kept outside this repository; see rustia-ops)`
+  );
 }
 
 function git(args) {
@@ -829,6 +895,24 @@ const MATRIX_PUBLICATIONS = Object.freeze({
   dispatch: "publication/bench/wasm/dispatch-current-results.json",
 });
 
+/// Why an owned-lane matrix `host.json` uname must not be committed, or null.
+/// The file is committed to a public repository, so the lane records
+/// `uname -srvm`, which leaves out the node name. `uname -a` puts the node name
+/// second, where `uname -srvm` puts the kernel release, so the second field
+/// must be the release the attestation read. That checks the form rather than
+/// a list of names, which would pass every name it did not list. The message
+/// does not quote the uname, since a wrong one may carry the name.
+function matrixUnameProblem(uname, kernel, arch) {
+  const fields = String(uname ?? "").trim().split(/\s+/);
+  if (fields[0] === "Linux" && typeof kernel === "string" && fields[1] === kernel && fields.at(-1) === arch) {
+    return null;
+  }
+  return (
+    "matrix host evidence is not uname -srvm (Linux, the attested kernel release, the version, the machine); " +
+    "the owned lane must record uname -srvm, since any other form can carry the node name"
+  );
+}
+
 // The rented lane's evidence check asserts the host is a KVM guest, which is
 // exactly the thing that is no longer true. The rest of it -- manifest schema,
 // source hashes, protocol and provider hashes, per-file hashes, result shape --
@@ -861,11 +945,9 @@ function validateDedicatedMatrixEvidence(config, evidenceDirectory, providerFile
   if (host.benchmark_cpu !== config.host_gate.benchmark_cpu) {
     fail("matrix host evidence pinned a different CPU than the config");
   }
-  // The node name is deliberately absent from the owned lane's uname, because
-  // this file is committed to a public repository.
-  if (/(\s|^)[A-Za-z0-9-]*\bci-bench\b/.test(host.uname ?? "")) {
-    fail("matrix host evidence carries a node name; the owned lane must record uname -srvm");
-  }
+  const attested = JSON.parse(fs.readFileSync(providerFile, "utf8"));
+  const unameProblem = matrixUnameProblem(host.uname, attested.kernel, host.arch);
+  if (unameProblem !== null) fail(unameProblem);
   if (manifest.protocol_sha256 !== matrixRules.sha256File(path.join(evidenceDirectory, "protocol.json"))) {
     fail("matrix manifest protocol hash is wrong");
   }
@@ -1004,14 +1086,23 @@ function commandMatrix(options) {
 // rows, and is what puts the competitor rows and the mlua/Luau/JIT reference
 // on the same machine as the Rustia rows they are compared with.
 const MEMORY_COHORTS = Object.freeze(["rustia-only", "cross-engine"]);
+// `freeze` is the in-memory config each `generate` command writes, built by the
+// same freezer function its CLI calls. The self-test reads it to check the host
+// label every cohort's rows will carry, so a cohort added here is covered there
+// without a second list.
 const MEMORY_COHORT_FREEZERS = Object.freeze({
   "rustia-only": {
     file: (short) => `bench/cloud/dedicated-rustia-ci-memory-${short}.json`,
     generate: (relative) => ["tools/create-rustia-ci-memory-config.js", "--dedicated", "--output", relative],
+    freeze: (commit) => {
+      const freezer = require("./create-rustia-ci-memory-config.js");
+      return freezer.toDedicated(freezer.createConfig(commit));
+    },
   },
   "cross-engine": {
     file: (short) => `bench/cloud/dedicated-cross-engine-memory-${short}.json`,
     generate: (relative) => ["tools/create-cross-engine-memory-config.js", "--output", relative],
+    freeze: (commit) => require("./create-cross-engine-memory-config.js").createConfig(commit),
   },
 });
 
@@ -2169,6 +2260,148 @@ function selfTest() {
   assert.equal(medianOf([3, 1, 2]), 2);
   assert.equal(medianOf([4, 1, 3, 2]), 2.5);
 
+  // The label a row carries must be the machine the coordinator attested.
+  // attestHost() reports config.provider.host.name and compares the machine's
+  // own /sys and /proc readings against the rest of that block, so a row
+  // labelled with the same field is labelled with a machine that was checked.
+  // Three separately shipped runners stamp it -- they cannot share a module,
+  // because only one file at a time is copied to the host -- so the agreement is
+  // asserted here, where every lane is driven from.
+  const head = git(["rev-parse", "HEAD"]).trim();
+  const matrixFreezer = require("./create-linode-matrix-config.js");
+  const dedicatedMatrix = matrixFreezer.toDedicated(matrixFreezer.createConfig(head));
+  // Every memory cohort, not only the routine one: the cross-engine cohort's
+  // competitor rows share one published table with the rustia-only cohort's
+  // Rustia rows, and that table may name exactly one machine -- the timing
+  // authority in bench/operations-status.json, which the renderer and the
+  // checker both pin it to. A cohort frozen under another label would measure
+  // for an hour and then be refused at render, so it is refused here instead.
+  const operationsStatus = JSON.parse(fs.readFileSync(path.join(REPO, "bench/operations-status.json"), "utf8"));
+  const authorities = Object.values(operationsStatus.runner_classes)
+    .filter((runner) => runner?.timing_authority === true);
+  assert.equal(authorities.length, 1, "operations-status must name exactly one timing authority");
+  const authority = authorities[0].host;
+  const lanes = [["matrix", dedicatedMatrix, matrixRules.matrixHostLabel(dedicatedMatrix)]];
+  for (const cohort of MEMORY_COHORTS) {
+    const config = MEMORY_COHORT_FREEZERS[cohort].freeze(head);
+    lanes.push([`memory ${cohort}`, config, matrixRules.memoryHostLabel(config)]);
+  }
+  for (const [lane, config, label] of lanes) {
+    assert.equal(label, config.provider.host.name, `${lane} rows must be labelled with the attested host`);
+    assert.equal(label, authority, `${lane} rows must be labelled with the timing authority ${authority}`);
+  }
+  // An address in the frozen host block is refused before it can label a
+  // cross-engine row, as it is for the routine cohort.
+  const crossEngine = MEMORY_COHORT_FREEZERS["cross-engine"].freeze(head);
+  assert.throws(
+    () => matrixRules.memoryHostLabel({
+      ...crossEngine,
+      provider: { host: { ...crossEngine.provider.host, name: "bench.example.com" } },
+    }),
+    /not a label/,
+  );
+
+  // The label every lane stamps is one sshDestination() refuses, however the
+  // destination wraps it: the host part is compared, so a user, an ssh://
+  // scheme or a port does not hide the label, and neither does case, which ssh
+  // folds before it reads ssh_config. Every spelling yields the one message,
+  // so nothing of the destination but the label reaches the log.
+  const published = publishedHostLabels(REPO);
+  for (const [lane, , label] of lanes) {
+    assert(published.includes(label), `${lane} rows' label must be one sshDestination() refuses`);
+  }
+  const refusal = sshDestinationProblem(authority, published);
+  assert.match(
+    refusal ?? "",
+    new RegExp(
+      `^${SSH_ENV} names "${authority}", which is a provenance label published in row data, never an ssh ` +
+        "target: use a private ssh_config alias that is not a published label",
+    ),
+  );
+  for (const destination of [
+    `user@${authority}`,
+    `ssh://${authority}:22`,
+    `ssh://user@${authority}:22`,
+    // ssh strips the brackets from a URI's host, whatever they enclose.
+    `ssh://user@[${authority}]:22`,
+    // ssh accepts a URI with an empty path, and a trailing slash still reaches
+    // the host.
+    `ssh://${authority}/`,
+    `ssh://user@${authority}/`,
+    `ssh://user@${authority}:22/`,
+    // ssh drops a trailing dot from a URI's host.
+    `ssh://${authority}.`,
+    `ssh://user@${authority}.:22/`,
+    `ssh://[${authority}.]`,
+    // The scp calls take the same destination, and scp reads its own URI form.
+    `scp://${authority}/`,
+    `scp://user@${authority}:22/`,
+    authority.toUpperCase(),
+    `ssh://user@${authority.toUpperCase()}:22`,
+  ]) {
+    assert.equal(sshDestinationProblem(destination, published), refusal, `${destination} must be refused`);
+  }
+  // The refusal is wired into every ssh call, not just defined: host-check and
+  // unlock only ever run ssh, and each exits on the label before starting it.
+  // A stub ssh and scp ahead of the real ones record any call that gets through.
+  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-ssh-stub-"));
+  try {
+    const called = path.join(stubDir, "called");
+    for (const tool of ["ssh", "scp"]) {
+      fs.writeFileSync(path.join(stubDir, tool), `#!/bin/sh\necho "${tool}" >> "${called}"\n`, { mode: 0o755 });
+    }
+    for (const command of ["host-check", "unlock"]) {
+      for (const destination of [authority, `user@${authority}:22`, `ssh://${authority}/`, `ssh://${authority}.`]) {
+        const run = spawnSync(process.execPath, [__filename, command], {
+          encoding: "utf8",
+          env: { ...process.env, [SSH_ENV]: destination, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
+        });
+        assert.equal(run.status, 1, `${command} with ${destination} must be refused: ${run.stderr}`);
+        assert.equal(run.stderr, `run-dedicated-benchmark: ${refusal}\n`, `${command} with ${destination}`);
+        assert(!fs.existsSync(called), `${command} with ${destination} reached ssh`);
+      }
+    }
+  } finally {
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  }
+  // Anything whose host is not a published label is the operator's business.
+  for (const destination of ["box", "user@box", "ssh://user@box:22", "ssh://user@[fe80::1]:22", "10.0.0.5"]) {
+    assert.equal(sshDestinationProblem(destination, published), null, `${destination} is not a published label`);
+  }
+  // Each source adds its own labels. A runner class that names no host adds
+  // nothing, and a frozen config is read by the dedicated- prefix every lane's
+  // file carries, so a rented lane's config is not.
+  const labelRoot = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-labels-"));
+  try {
+    writeJson(path.join(labelRoot, "bench/operations-status.json"), {
+      runner_classes: {
+        shared: { timing_authority: false },
+        owned: { timing_authority: true, host: "owned-class" },
+      },
+    });
+    const frozen = {
+      "dedicated-history-abc1234.json": "owned-history",
+      "dedicated-cross-engine-matrix-abc.json": "owned-matrix",
+      "linode-cross-engine-matrix-abc.json": "rented",
+    };
+    for (const cohort of MEMORY_COHORTS) {
+      frozen[path.basename(MEMORY_COHORT_FREEZERS[cohort].file("abc"))] = `owned-${cohort}`;
+    }
+    for (const [name, label] of Object.entries(frozen)) {
+      writeJson(path.join(labelRoot, "bench/cloud", name), { provider: { host: { name: label } } });
+    }
+    const fixtureLabels = publishedHostLabels(labelRoot);
+    assert.deepEqual(
+      [...fixtureLabels].sort(),
+      ["owned-class", ...MEMORY_COHORTS.map((cohort) => `owned-${cohort}`), "owned-history", "owned-matrix"].sort(),
+    );
+    for (const label of fixtureLabels) {
+      assert.match(sshDestinationProblem(`user@${label}`, fixtureLabels) ?? "", new RegExp(`names "${label}"`));
+    }
+  } finally {
+    fs.rmSync(labelRoot, { recursive: true, force: true });
+  }
+
   const harness = "a".repeat(40);
   const paths = promotionPaths(harness);
   assert.ok(paths.publication.endsWith(`${harness}.json`));
@@ -2383,6 +2616,43 @@ function selfTest() {
   }
   for (const present of ["kvm", "vmware", "microsoft", "xen"]) {
     assert.notEqual(String(present).trim(), "none", `${present} must not read as bare metal`);
+  }
+
+  // The owned lane's uname is checked for its form, not for names. Every
+  // committed owned-host matrix evidence passes. `uname -a` fails whatever the
+  // node is called, and so does a uname from a kernel the attestation did not read.
+  const matrixEvidenceRoot = path.join(REPO, "bench/evidence/matrix");
+  let ownedEvidence = 0;
+  for (const commit of fs.readdirSync(matrixEvidenceRoot)) {
+    for (const run of fs.readdirSync(path.join(matrixEvidenceRoot, commit))) {
+      const dir = path.join(matrixEvidenceRoot, commit, run);
+      const providerPath = path.join(dir, "provider.json");
+      if (!fs.existsSync(providerPath)) continue;
+      const provider = JSON.parse(fs.readFileSync(providerPath, "utf8"));
+      if (provider.schema !== "rustia.bench.dedicated-provider.v1") continue;
+      const evidence = JSON.parse(fs.readFileSync(path.join(dir, "host.json"), "utf8"));
+      assert.equal(matrixUnameProblem(evidence.uname, provider.kernel, evidence.arch), null, `${commit}/${run}`);
+      ownedEvidence += 1;
+    }
+  }
+  assert(ownedEvidence > 0, "expected committed owned-host matrix evidence to check the uname form against");
+  const kernel = "6.8.0-138-generic";
+  const version = "#138-Ubuntu SMP PREEMPT_DYNAMIC Tue Jan 6 00:00:00 UTC 2026";
+  assert.equal(matrixUnameProblem(`Linux ${kernel} ${version} x86_64`, kernel, "x86_64"), null);
+  for (const node of ["localhost", "box", authority]) {
+    assert.match(
+      matrixUnameProblem(`Linux ${node} ${kernel} ${version} x86_64 x86_64 x86_64 GNU/Linux`, kernel, "x86_64") ?? "",
+      /must record uname -srvm/,
+      `uname -a with node ${node} must be refused`,
+    );
+  }
+  for (const [uname, attestedKernel] of [
+    [`Linux ${kernel} ${version} x86_64`, "6.8.0-139-generic"],
+    [`Linux ${kernel} ${version} x86_64`, undefined],
+    [`Linux ${kernel} ${version} aarch64`, kernel],
+    [undefined, kernel],
+  ]) {
+    assert.match(matrixUnameProblem(uname, attestedKernel, "x86_64") ?? "", /must record uname -srvm/, String(uname));
   }
 
   // A skipped screening still renders a summary a reader can act on.

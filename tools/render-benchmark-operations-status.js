@@ -10,10 +10,20 @@ const policyPath = path.join(root, "bench", "operations-policy.json");
 const resultsPath = path.join(root, "bench", "current-results.json");
 const outputPath = path.join(root, "bench", "operations-status.json");
 const checkOnly = process.argv.includes("--check");
+// A runner class that names its machine names it by a provenance label. The
+// timing authority's is the value every published table is pinned to, and this
+// policy is rendered verbatim into bench/operations-status.json, which is
+// mirrored into the public data repository. A label, never an address: no dots
+// and no colons, so it can be neither a fully qualified name nor an IPv4 or IPv6
+// address. Every emitter and validator carries this same literal; the self-test
+// in tools/check-benchmark-results.js asserts it.
+const HOST_LABEL = /^[A-Za-z0-9_-]{1,128}$/;
 
+// Thrown, not exited: selfTest() hands validatePolicy policies it must refuse,
+// and it needs to see the refusal to assert on it. The catch at the bottom of
+// the file turns any refusal into the exit status.
 function fail(message) {
-  console.error(`render-benchmark-operations-status: ${message}`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function relative(filePath) {
@@ -45,6 +55,15 @@ function requireString(value, label) {
   if (typeof value !== "string" || value.trim() === "") fail(`${label} must be a non-empty string`);
 }
 
+function requireHostLabel(value, label) {
+  if (typeof value !== "string" || !HOST_LABEL.test(value)) {
+    fail(
+      `${label} names its machine ${JSON.stringify(value)}, which is not a label: ` +
+      "a label may contain only [A-Za-z0-9_-], never an address",
+    );
+  }
+}
+
 // The v1 schema had a single `runner`, which could only say "runners are not
 // timing authorities". That was true of the shared pool and became false the
 // moment an owned, qualified machine started producing every published number.
@@ -66,6 +85,11 @@ function validateRunnerClasses(policy) {
     if (!Array.isArray(runner.allowed_roles) || runner.allowed_roles.length === 0) {
       fail(`runner_classes.${name}.allowed_roles must be a non-empty array`);
     }
+    // The timing authority must name its machine, because every published
+    // table is pinned to that name; any other class may. Whatever a class names
+    // is published, so it is a label.
+    if (runner.timing_authority === true) requireString(runner.host, `runner_classes.${name}.host`);
+    if (runner.host != null) requireHostLabel(runner.host, `runner_classes.${name}`);
     if (runner.timing_authority !== true) {
       // A class that cannot be trusted with a timing may not be assigned one.
       // design/81 said this in prose; here it is a rule.
@@ -78,7 +102,6 @@ function validateRunnerClasses(policy) {
       continue;
     }
     authoritative.push(name);
-    requireString(runner.host, `runner_classes.${name}.host`);
     const q = runner.qualification;
     if (q === null || typeof q !== "object") fail(`runner_classes.${name}.qualification must be an object`);
     if (!Array.isArray(q.isolated_cpus) || q.isolated_cpus.length === 0) {
@@ -212,8 +235,58 @@ function renderStatus(policy, results) {
   };
 }
 
+// The refusals in validatePolicy guard a file that is mirrored into the public
+// data repository, so they are exercised before anything is rendered or
+// checked: a validator that accepted everything would otherwise pass --check
+// without anyone noticing. The committed policy is the one that matters, so
+// each case is a one-edit variant of it rather than a lookalike fixture.
+function selfTest(policy) {
+  const variant = (edit) => {
+    const copy = JSON.parse(JSON.stringify(policy));
+    edit(copy);
+    return copy;
+  };
+  const refuses = (pattern, edit) => {
+    let message = null;
+    try {
+      validatePolicy(variant(edit));
+    } catch (error) {
+      message = error.message;
+    }
+    if (message == null || !pattern.test(message)) {
+      fail(`self-test expected a refusal matching ${pattern}, got ${JSON.stringify(message)}`);
+    }
+  };
+  const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+  validatePolicy(variant(() => {}));
+  const authority = Object.keys(policy.runner_classes).find((name) => policy.runner_classes[name].timing_authority === true);
+  if (authority === undefined) fail(`self-test needs ${relative(policyPath)} to declare a timing authority`);
+  refuses(literal(`runner_classes.${authority}.host must be a non-empty string`), (copy) => {
+    delete copy.runner_classes[authority].host;
+  });
+  refuses(literal(`runner_classes.${authority}.host must be a non-empty string`), (copy) => {
+    copy.runner_classes[authority].host = "";
+  });
+  // Only the authority must name a machine; another class may name none.
+  validatePolicy(variant((copy) => {
+    copy.runner_classes["general-linux"].host = null;
+  }));
+  // Whichever class names a machine, the name is published: a label, never an
+  // address.
+  for (const address of ["bench.example.com", "10.0.0.5", "fe80::1", "user@box"]) {
+    for (const name of [authority, "general-linux"]) {
+      refuses(literal(`runner_classes.${name} names its machine ${JSON.stringify(address)}, which is not a label`), (copy) => {
+        copy.runner_classes[name].host = address;
+      });
+    }
+  }
+}
+
 function main() {
-  const output = `${JSON.stringify(renderStatus(readJson(policyPath), readJson(resultsPath)), null, 2)}\n`;
+  const policy = readJson(policyPath);
+  selfTest(policy);
+  const output = `${JSON.stringify(renderStatus(policy, readJson(resultsPath)), null, 2)}\n`;
   if (checkOnly) {
     let current;
     try {
@@ -231,6 +304,13 @@ function main() {
   console.log(`wrote ${relative(outputPath)} from benchmark policy, results, and Git history`);
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`render-benchmark-operations-status: ${error.message}`);
+    process.exit(1);
+  }
+}
 
 module.exports = { renderStatus, validatePolicy };
