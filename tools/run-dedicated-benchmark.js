@@ -9,7 +9,7 @@
 //
 // The host is named only by an ssh destination in RUSTIA_BENCH_SSH, which the
 // operator keeps in their own ssh config. No hostname, address, key path or
-// known-hosts entry belongs in this repository (CLAUDE.md: nothing
+// known-hosts entry belongs in this repository (AGENTS.md: nothing
 // infra-identifying lands here). `provider.host.name` is a provenance label
 // that is published in row data; it is NOT an ssh target and must never be
 // used as one.
