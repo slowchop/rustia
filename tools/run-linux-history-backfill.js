@@ -733,6 +733,7 @@ function sleep(milliseconds) {
 async function waitForQuiet(config, gateFile, timedAttempt, deadline) {
   const gate = config.host_gate;
   let quietAttempt = 0;
+  let last = null;
   while (Date.now() < deadline) {
     quietAttempt += 1;
     await sleep(gate.cooldown_seconds * 1000);
@@ -744,6 +745,7 @@ async function waitForQuiet(config, gateFile, timedAttempt, deadline) {
       delta.idle_percent >= gate.minimum_idle_percent &&
       delta.steal_ticks <= gate.maximum_steal_ticks &&
       load1m <= gate.maximum_load_1m;
+    last = { load_1m: load1m, ...delta };
     appendJsonLine(gateFile, {
       phase: "pre",
       label: "rustia-history-backfill",
@@ -756,7 +758,21 @@ async function waitForQuiet(config, gateFile, timedAttempt, deadline) {
     });
     if (accepted) return;
   }
-  fail(`history backfill timed attempt ${timedAttempt} could not obtain a quiet host window`);
+  // The refusal is the only line of this that reaches a workflow log, so it
+  // has to carry the reading that caused it: two runs were refused with the
+  // bare message while the host sat at load 43 under a kernel log storm, and
+  // finding that out took a login.
+  const reading =
+    last === null
+      ? "no window was sampled before the deadline"
+      : `last window read load ${last.load_1m} (maximum ${gate.maximum_load_1m}), ` +
+        `idle ${last.idle_percent.toFixed(2)}% (minimum ${gate.minimum_idle_percent}), ` +
+        `steal ${last.steal_ticks} tick(s) (maximum ${gate.maximum_steal_ticks})`;
+  fail(
+    `history backfill timed attempt ${timedAttempt} could not obtain a quiet host window in ` +
+      `${quietAttempt} window(s) before the ${gate.wait_timeout_seconds}s quiet deadline, ` +
+      `which every timed attempt of the run shares; ${reading}`,
+  );
 }
 
 function timedGatePasses(gate, delta) {

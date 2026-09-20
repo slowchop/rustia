@@ -488,9 +488,13 @@ No hostname, address or key path belongs here; `provider.host.name` is a
 provenance label published in row data, never an ssh target. Before shipping
 anything it attests the machine against the frozen config — CPU model, logical
 CPU count, SMT off, free disk under the runner's home above the coordinator's
-`MINIMUM_FREE_GIB` floor, and that every pinned CPU really is in the kernel's
-isolated set. A pinned core the scheduler still uses is the failure this
-protocol exists to prevent, and it does not show up in the timings.
+`MINIMUM_FREE_GIB` floor, that every pinned CPU really is in the kernel's
+isolated set, and that each is held at its ceiling: the `performance` governor
+or a scaling range pinned to one frequency, with boost off wherever the kernel
+exposes a knob for it. A pinned core the scheduler still uses is the failure
+this protocol exists to prevent, and it does not show up in the timings; nor
+does one left to a dynamic governor, which can run a whole process at its
+floor.
 
 The reconstruction stays out of GitHub Actions: `tools/check-workflows.js`
 forbids the raw harness there, and starting a rebuild remains an explicit

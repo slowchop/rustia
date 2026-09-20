@@ -615,7 +615,8 @@ unreachable suspended-coroutine frames.
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
-   asserted: cores held off the scheduler, SMT disabled, timed work pinned to one isolated core, one job on
+   asserted: cores held off the scheduler, SMT disabled, each pinned core held at its ceiling with boost off,
+   timed work pinned to one isolated core, one job on
    the box at a time, and every run attested against the frozen config before it builds. Every workflow that
    measures reaches it through `tools/run-dedicated-benchmark.js`: the cross-engine matrix (`matrix`), the
    per-commit series (`main`), pull-request screening (`pr`, plus its `live-serde` and `calibrate` jobs),

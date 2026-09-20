@@ -48,6 +48,8 @@ check-benchmark-results:
     node tools/check-benchmark-commit-reachability.js
     node tools/check-benchmark-commit-reachability.js --self-test
     node bench/analyze-fixed-samples.js --self-test
+    node tools/run-dedicated-benchmark.js self-test
+    node tools/run-linux-history-backfill.js self-test
     node tools/run-linode-benchmark.js self-test
     node tools/run-linux-matrix-benchmark.js self-test
     node bench/run-memory-supervisor.js self-test

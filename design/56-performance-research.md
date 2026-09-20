@@ -895,7 +895,9 @@ The dedicated `ci-bench` host (AMD Ryzen 5 3600X, SMT off, `isolcpus=4,5`) measu
 **0.52% between-leg spread**, against 15.12% on DigitalOcean sfo3 and 8.65% on the
 developer Mac. A controlled governor test found `schedutil` at 0.52% and
 `performance` at 0.59%, so pinning frequency was not justified and the host was
-left as found.
+left as found. (Superseded 2026-09: a later acceptance run had a whole leg run
+at the `schedutil` floor, so the attestation now requires the ceiling; see the
+`bench-solo` section of [`81`](81-benchmark-operations.md).)
 
 Control `4e5eb70` versus candidate `eaf3917` on fixed `dense_tables` work at
 n=1500, 201 repetitions per leg, counterbalanced, 804 samples per side, all

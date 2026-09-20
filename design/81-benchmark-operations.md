@@ -50,9 +50,24 @@ scheduler, SMT disabled, timed work pinned to one isolated core, and one job on
 the box at a time. It is a timing authority precisely because those properties
 are checked rather than asserted — `tools/run-dedicated-benchmark.js` compares
 the machine's own report against the frozen config before it ships anything,
-including that every pinned core appears in the kernel's isolated set. A pinned
-core the scheduler still uses is the failure this arrangement exists to prevent,
-and it does not show up in the timings.
+including that every pinned core appears in the kernel's isolated set and is
+held at its ceiling. A pinned core the scheduler still uses is the failure this
+arrangement exists to prevent, and it does not show up in the timings.
+
+Neither does a pinned core left on a dynamic frequency governor, and that one
+was measured before it was checked. On an isolated, tickless core nothing
+drives the governor's next decision while a single process runs, so the first
+process after a long idle can run to completion at the floor: the first leg of
+an acceptance run read `dense_tables` at a median of 65,325 ns/unit against
+37,824-39,205 on every other leg of its side (a ratio of 1.68 to the core's
+3.8/2.2 GHz range of 1.73), the next process on the same core ran at full
+speed, and the leg passed every idle and steal gate. The attestation therefore refuses a pinned core
+unless it runs the `performance` governor or has `scaling_min_freq` equal to
+`scaling_max_freq`, and refuses it again when the kernel exposes a boost knob
+for it that is on: the governor holds the ceiling, boost lets the part float
+above it on thermal headroom. The acceptance summary names any leg that sits
+apart from the rest of its side, so the next such event is visible from the
+workflow rather than from a login.
 
 At most one class may be authoritative, so the shared pool cannot be promoted
 later by adding a second. Measurement is reachable from a workflow only through
@@ -184,6 +199,19 @@ passes, so it is never on a timer and never on a push — and it records nothing
 the reading lands in the job summary, not in the published history, because a
 comparison of two arbitrary historical commits is evidence for a decision
 rather than a row in a series.
+
+It measures the pair in eight passes by default (`--passes` takes any even count
+from two to sixteen), A B B A repeated, at the screening calibration's
+repetition count, and reads each workload through the same hierarchical
+bootstrap the screening lane uses, against that calibration's thresholds. Those
+thresholds were measured at two legs a side, so carried to eight they are
+conservative, which is the right direction for a guard. The summary reports,
+per workload, the delta, the interval, the threshold and the
+direction, and — because one leg can widen an interval across zero on its own —
+names any leg whose median sits more than the larger of 5% and three times the
+workload's threshold from the median leg of its side, by the pass it came from.
+A side of fewer than three legs has no median to stand apart from and is never
+flagged.
 
 The frozen owned-host config, `bench/cloud/dedicated-core2-tape-sparse.json`,
 is the one place the repository records what the host guarantees. The matrix
