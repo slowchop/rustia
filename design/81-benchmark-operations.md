@@ -203,8 +203,10 @@ rather than a row in a series.
 It measures the pair in eight passes by default (`--passes` takes any even count
 from two to sixteen), A B B A repeated, at the screening calibration's
 repetition count, and reads each workload through the same hierarchical
-bootstrap the screening lane uses, against that calibration's thresholds. The
-summary reports, per workload, the delta, the interval, the threshold and the
+bootstrap the screening lane uses, against that calibration's thresholds. Those
+thresholds were measured at two legs a side, so carried to eight they are
+conservative, which is the right direction for a guard. The summary reports,
+per workload, the delta, the interval, the threshold and the
 direction, and — because one leg can widen an interval across zero on its own —
 names any leg whose median sits more than the larger of 5% and three times the
 workload's threshold from the median leg of its side, by the pass it came from.

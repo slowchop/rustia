@@ -281,8 +281,9 @@ Three readings stand out of this:
   3's first leg was caught the same way part-way through (median 66,026 over
   a 38,228 minimum). That is a host event, now attested against
   ([`81`](81-benchmark-operations.md)), and it does not move the point
-  estimate. The O2 reachability-exact track (§C2.3) is measured against this
-  pair on the same lane next.
+  estimate. The O2 reachability-exact track (§C2.3) was measured as the
+  default on the same lane on 2026-09-13 and refused; the re-measurement of
+  the fixed tree is still pending.
 - `generic_iteration` reads about 4% slower here, against the 4.0059% faster
   DigitalOcean reading above; the refused DigitalOcean `dense_tables` attempt
   (+0.881%, inconclusive) sits the same way against the 10% here. The two
