@@ -398,7 +398,7 @@ release boundary is the four numbered gaps above plus the full target/golden and
 silent claims of completion.
 
 ## 🚀 Next actions (cold-start handoff — do in this order)
-**Read order for a fresh agent:** `CLAUDE.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
+**Read order for a fresh agent:** `AGENTS.md` (auto-loaded) → **this file** → [`02-pillars.md`](02-pillars.md)
 → [`30-architecture.md`](30-architecture.md) (the ADR)
 → the doc for your task. (A fresh Claude session in this repo also auto-loads the project memory.)
 
@@ -692,7 +692,7 @@ decision reset, maintained live-memory accounting, and the shared native/Node-V8
 implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoing gates.
 
 **Project setup facts:** dual `MIT OR Apache-2.0` (holder Gak Dev Pty Ltd); the public/private boundary +
-`private/` mount are in [`CLAUDE.md`](../CLAUDE.md); no Linear.
+`private/` mount are in [`AGENTS.md`](../AGENTS.md); no Linear.
 
 ## Canonical claims (corrected — supersede any stronger wording elsewhere)
 - **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2). The historical 11-workload seed

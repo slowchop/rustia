@@ -65,18 +65,18 @@
     "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
   },
   "progress": {
-    "state": "pending",
-    "measured_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
-    "measured_at_unix": 1789440743,
-    "latest_relevant_commit": "9bc64a16ce2e491a8ce1f922ffc2644b2dbb9916",
-    "latest_relevant_committed_at_unix": 1789445597,
-    "pending_relevant_commit_count": 5,
-    "next_action": "Measure the newest pending performance-relevant commit on the owned benchmark host."
+    "state": "current",
+    "measured_commit": "7826508f767013e14c0030cbc2f741c5471acd47",
+    "measured_at_unix": 1789936613,
+    "latest_relevant_commit": "7826508f767013e14c0030cbc2f741c5471acd47",
+    "latest_relevant_committed_at_unix": 1789935975,
+    "pending_relevant_commit_count": 0,
+    "next_action": "No progress measurement is currently required."
   },
   "landscape": {
     "state": "paused",
-    "measured_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
-    "measured_at_unix": 1789440743,
+    "measured_commit": "7826508f767013e14c0030cbc2f741c5471acd47",
+    "measured_at_unix": 1789936613,
     "refresh_interval_days": 35,
     "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
     "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
