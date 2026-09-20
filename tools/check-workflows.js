@@ -47,6 +47,39 @@ function forbidIncludes(text, needle, label) {
   }
 }
 
+function requireBefore(text, first, second, label) {
+  const firstAt = text.indexOf(first);
+  const secondAt = text.indexOf(second);
+  if (firstAt === -1 || secondAt === -1 || firstAt > secondAt) {
+    fail(`${label} must include ${JSON.stringify(first)} before ${JSON.stringify(second)}`);
+  }
+}
+
+// GitHub's markers for skipping push and pull-request workflows. Case is
+// ignored because GitHub documents none, so a variant it might honour still
+// counts here.
+const SKIP_MARKER = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks:\s*true/gi;
+
+// What the weekly matrix dispatches on main once its cohort has landed, exactly.
+const WEEKLY_MATRIX_DISPATCHES = [
+  '          failed=""',
+  "          curl -sSf -X POST \\",
+  '            -H "Authorization: Bearer $GITHUB_TOKEN" \\',
+  '            -H "Accept: application/vnd.github+json" \\',
+  '            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/publish-benchmark-data.yml/dispatches" \\',
+  "            -d '{\"ref\":\"main\"}' || failed=\"publish-benchmark-data.yml\"",
+  "          curl -sSf -X POST \\",
+  '            -H "Authorization: Bearer $GITHUB_TOKEN" \\',
+  '            -H "Accept: application/vnd.github+json" \\',
+  '            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \\',
+  "            -d '{\"ref\":\"main\"}' || failed=\"${failed:+$failed and }ci.yml\"",
+  '          if [ -n "$failed" ]; then',
+  '            echo "::error::The cohort has landed, but dispatching $failed on main failed. Dispatch each one named here on main by hand; re-running this job would measure and land another cohort." >&2',
+  "            exit 1",
+  "          fi",
+  "",
+].join("\n");
+
 function workflowFiles() {
   try {
     return fs.readdirSync(workflowDir)
@@ -156,6 +189,8 @@ const MEASUREMENT_COMMANDS = Object.freeze([
   RAW_HARNESS,
   "node tools/run-wasm-gate.js",
   "node tools/run-wasm-dispatch-gate.js",
+  // Deleted runner. The entry stays so the name cannot return through a
+  // workflow; a forbid needs no file to exist.
   "node tools/run-linux-fixed-benchmark.js",
   "node tools/run-linux-matrix-benchmark.js",
   "node tools/run-linux-history-backfill.js",
@@ -267,13 +302,70 @@ function checkRunnerLabels(files) {
   }
 }
 
+// The lanes that hold the bench host for a full measurement wait for it in one
+// concurrency group, in the order they began waiting. queue: max is the part
+// that makes it a queue: a group without it keeps a single pending run, and a
+// newly queued run cancels that one -- cancel-in-progress: false protects only
+// the run already going. That cancelled the per-commit run for f49646f on
+// 2026-09-15. Exclusivity is not this group's job; bench-solo holding one
+// runner is. Screening stays out because it cancels its own superseded runs,
+// which GitHub rejects alongside queue: max, and the publisher stays out
+// because the memory lane calls it while holding this group.
+const BENCH_HOST_QUEUE_GROUP = "rustia-bench-host-serial";
+const BENCH_HOST_QUEUE_BLOCK = [
+  "concurrency:",
+  `  group: ${BENCH_HOST_QUEUE_GROUP}`,
+  "  cancel-in-progress: false",
+  "  queue: max",
+  "",
+].join("\n");
+const BENCH_HOST_QUEUE_WORKFLOWS = Object.freeze([
+  "acceptance-bench.yml",
+  "main-bench.yml",
+  "rustia-memory.yml",
+  "weekly-matrix-bench.yml",
+]);
+
+function checkBenchHostQueue(files) {
+  for (const required of BENCH_HOST_QUEUE_WORKFLOWS) {
+    if (!files.includes(required)) fail(`missing .github/workflows/${required}`);
+  }
+  for (const file of files) {
+    const text = readWorkflow(path.join(workflowDir, file));
+    const label = `.github/workflows/${file}`;
+    if (!BENCH_HOST_QUEUE_WORKFLOWS.includes(file)) {
+      forbidIncludes(text, BENCH_HOST_QUEUE_GROUP, label);
+      continue;
+    }
+    requireIncludes(text, `\n${BENCH_HOST_QUEUE_BLOCK}`, label);
+    // One block, at workflow level. A job-level group beside it would put the
+    // measuring job back in a queue that holds one pending run.
+    if (text.split("concurrency:").length - 1 !== 1) {
+      fail(`${label} must declare exactly one concurrency block, the bench host queue`);
+    }
+  }
+}
+
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
   const releasePreflightJob = text.split("\n  portable-engine-build:\n", 1)[0];
   requireIncludes(text, "name: CI\n", label);
-  requireIncludes(text, "\"on\":\n  pull_request:\n  push:\n", label);
+  // workflow_dispatch is how the weekly matrix gets CI onto main's tip after a
+  // landing whose merge starts no push workflows.
+  requireIncludes(
+    text,
+    "\"on\":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n",
+    label,
+  );
   requireIncludes(text, "permissions:\n  contents: read\n", label);
+  // Anyone who can dispatch this can already run it through a same-repository
+  // pull request, which is what makes the manual trigger harmless -- as long as
+  // it holds a read-only token and no secret. The token is pinned read-only
+  // above; these reject a write scope or write-all added at any level, and the
+  // secrets context in any form, including toJSON(secrets) and bracket access.
+  if (/\bsecrets\b/i.test(text)) fail(`${label} must not reference the secrets context`);
+  if (/:\s*["']?write/.test(text)) fail(`${label} must not grant a write permission`);
   requireIncludes(
     text,
     "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
@@ -293,6 +385,13 @@ function checkCi(text) {
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, "node tools/run-release-preflight.js", label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
+  // Preflight lints the benchmark adapter for wasm32. The action's `rustup
+  // override` bypasses rust-toolchain.toml's target list, so the job names it.
+  requireIncludes(
+    releasePreflightJob,
+    "target: wasm32-unknown-unknown",
+    `${label} release-preflight job`,
+  );
   forbidIncludes(text, "cargo clippy --workspace", label);
   forbidIncludes(text, "cargo test --workspace", label);
   forbidIncludes(text, "node tools/check-package-files.js", label);
@@ -358,10 +457,6 @@ function checkMainBench(text) {
   requireIncludes(text, "\"on\":\n  push:\n    branches:\n      - main\n", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
-  // One group across every lane that touches the bench host, so a measurement
-  // never overlaps another job on the machine being measured.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false", label);
   requireIncludes(text, "persist-credentials: false", label);
   requireIncludes(text, "timeout-minutes:", label);
   requireIncludes(text, "node tools/run-dedicated-benchmark.js main --local", label);
@@ -432,8 +527,25 @@ function checkReleasePreflight(text) {
   for (const needle of [
     '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
     '"cargo", ["metadata", "--locked"',
+    // Every committed lock file, found by listing, fetched with --locked. The
+    // wasm adapter's own lock has gone stale more than once (smallvec, then
+    // serde_path_to_error); the second time it stopped the weekly matrix.
+    '"git", ["ls-files", "-z"]',
+    "/(^|\\/)Cargo\\.lock$/",
+    "for (const manifest of lockedManifests())",
+    '"cargo", ["fetch", "--locked", "--manifest-path", manifest]',
     '"cargo", ["fmt", "--all"',
     '"cargo", ["clippy", "--locked", "--workspace", "--all-targets"',
+    // The builds only the owned benchmark host compiles. Without these, a
+    // break under their cfgs is found by the weekly matrix or a memory run,
+    // after merge. The host denies warnings through the toolchain action's
+    // RUSTFLAGS, so each check denies them too.
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "all-engines",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/Cargo.toml",\n  "--bin",\n  "script-bench",\n' +
+      '  "--no-default-features",\n  "--features",\n  "mlua-lua54",\n  "--",\n  "-D",\n  "warnings",\n',
+    '"clippy",\n  "--locked",\n  "--manifest-path",\n  "bench/wasm/adapter-runner/Cargo.toml",\n' +
+      '  "--target",\n  "wasm32-unknown-unknown",\n  "--",\n  "-D",\n  "warnings",\n',
     '"tools/check-release-notes.js"',
     '"tools/check-crate-metadata.js"',
     '"tools/check-workflows.js"',
@@ -446,6 +558,10 @@ function checkReleasePreflight(text) {
     '"bench/analyze-fixed-samples.js"',
     '"tools/run-linode-benchmark.js"',
     '"tools/run-linux-matrix-benchmark.js"',
+    // The weekly matrix's landing helper. Nothing short of a real cohort
+    // reaches its merge path, so its self-test is the only run it gets before
+    // a forty-minute measurement depends on it.
+    '"tools/land-matrix-publication.js", "self-test"',
     // The owned-host lane. Its self-tests carry the rules that keep a source
     // repair honest and a host attested, so preflight must keep running them.
     '"tools/run-dedicated-benchmark.js"',
@@ -459,15 +575,22 @@ function checkReleasePreflight(text) {
     '"tools/retire-cloud-history.js"',
     '"tools/run-linux-history-backfill.js"',
     '"tools/freeze-history-backfill.js"',
+    // The frozen owned-host config: exact provider keys, SMT off, and the
+    // timed core inside the pinned set. Every lane copies that block.
+    '"tools/check-dedicated-config.js"',
     '"tools/push-benchmark-data-publication.js"',
     '"bench/run-memory-supervisor.js"',
     '"bench/analyze-memory-samples.js"',
     '"bench/run-memory-cohort.js"',
     '"bench/publish-memory-analysis.js"',
     '"tools/run-linux-memory-benchmark.js"',
+    // The cross-engine memory freezer and the two tools the memory workflow
+    // runs after measuring; preflight is where CI runs their self-tests.
+    '"tools/create-cross-engine-memory-config.js"',
     '"tools/run-wasm-gate.js"',
     '"tools/run-wasm-dispatch-gate.js"',
     '"tools/merge-rustia-ci-memory-data.js"',
+    '"tools/summarize-rustia-ci-memory.js"',
     '"tools/check-benchmark-results.js"',
     '"tools/check-wasm-gate-results.js"',
     '"tools/render-benchmark-operations-status.js", "--check"',
@@ -491,11 +614,14 @@ function checkRustiaMemory(text) {
   requireIncludes(text, "commit_sha:\n", label);
   requireIncludes(text, "required: true\n", label);
   requireIncludes(text, "type: string\n", label);
+  // The cohort is a closed choice with the routine cohort first and as the
+  // default, so a dispatch that says nothing measures 11 rows, not 110.
+  requireIncludes(text, "cohort:\n", label);
+  requireIncludes(text, "default: rustia-only\n", label);
+  requireIncludes(text, "type: choice\n", label);
+  requireIncludes(text, "options:\n          - rustia-only\n          - cross-engine\n", label);
+  requireIncludes(text, "COHORT: ${{ inputs.cohort }}", label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
-  // Shares the host's serialisation group: sampling must never overlap another
-  // job on the machine it is measuring.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
   requireIncludes(text, "BENCHMARK_COMMIT: ${{ inputs.commit_sha }}", label);
@@ -503,8 +629,13 @@ function checkRustiaMemory(text) {
   requireIncludes(text, 'git cat-file -e "${BENCHMARK_COMMIT}^{commit}"', label);
   requireIncludes(text, 'git merge-base --is-ancestor "$BENCHMARK_COMMIT" origin/main', label);
   requireIncludes(text, 'test "$(git rev-parse HEAD)" = "$BENCHMARK_COMMIT"', label);
-  // Measurement only through the driver that attests the machine first.
-  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local", label);
+  // Measurement only through the driver that attests the machine first. The
+  // routine cohort keeps the bare line, because the measured commit's own
+  // tools run and commits before the flag existed must stay measurable; an
+  // empty cohort input is the routine cohort.
+  requireIncludes(text, 'if [ "${COHORT:-rustia-only}" = rustia-only ]; then\n', label);
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js memory --local\n", label);
+  requireIncludes(text, 'node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"\n', label);
   requireIncludes(text, "node tools/summarize-rustia-ci-memory.js", label);
   requireIncludes(text, "BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}", label);
   requireIncludes(text, "git@github.com:slowchop/rustia-bench-data.git", label);
@@ -554,14 +685,41 @@ function checkWeeklyMatrix(text) {
   // push to main is the shape the branch rules reject.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
   requireIncludes(text, "node tools/land-matrix-publication.js", label);
+  // The helper merges only the commit this run pushed, and only while main is
+  // still the commit the publication was rendered on. It refuses to start
+  // without both, which would otherwise surface only after a full cohort.
+  requireIncludes(text, "--base \"$base_commit\"", label);
+  requireIncludes(text, "--head \"$publication_commit\"", label);
   requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);
+  // A comment names a command without running it, so the checks that say what
+  // the step runs, and where, read the file without its comment lines.
+  const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+  // GitHub holds pull-request runs on a pull request this token opens until a
+  // person approves them, and the helper merges within seconds, so the first
+  // landing left three failed runs with no jobs. The publication commit carries
+  // the skip marker, and it is the only thing in the file that may, comments
+  // included: the title becomes the body of main's merge commit. The helper's
+  // merge starts no push workflows and dispatched runs ignore markers, but a
+  // person merging by hand would push that commit, and a marker there would
+  // skip CI, the series and the dashboard publication on main.
+  requireIncludes(code, 'git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"\n', label);
+  requireIncludes(code, '--title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?\n', label);
+  const skipMarkers = text.match(SKIP_MARKER) || [];
+  if (skipMarkers.length !== 1) {
+    fail(`${label} must carry exactly one CI-skip marker, on the publication commit; found ${skipMarkers.length}`);
+  }
+  // The merge starts no push workflows, so the dashboard publication and CI on
+  // main's new tip are dispatched once the cohort has landed. Both go to main,
+  // each is attempted whatever happens to the other, and a failure fails the
+  // job, so main's new tip is never left without CI behind a green run. The
+  // per-commit series never is: a publication changes no engine code, so the
+  // series would have nothing new to measure.
+  requireIncludes(code, WEEKLY_MATRIX_DISPATCHES, label);
+  requireBefore(code, "nothing was landed\" >&2\n            exit 1\n          fi\n", WEEKLY_MATRIX_DISPATCHES, label);
+  forbidIncludes(text, "main-bench.yml/dispatches", label);
   requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
-  // Shares the host's serialisation group: a cohort takes about forty minutes
-  // and must never overlap another job on the machine it is measuring.
-  requireIncludes(text, "group: rustia-bench-host-serial", label);
-  requireIncludes(text, "cancel-in-progress: false\n", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
   requireIncludes(text, "toolchain: 1.95.0", label);
@@ -573,6 +731,19 @@ function checkWeeklyMatrix(text) {
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-package-files.js", label);
   requireIncludes(text, "node tools/check-publishability.js", label);
+  // The preflight checkers whose result a cohort can change and that the step
+  // did not otherwise run. They run inside the retry loop, after the last render
+  // and just before the publication is staged and committed, so they check the
+  // tree that lands and a cohort that would turn main red is never landed.
+  requireIncludes(
+    code,
+    "            node tools/check-benchmark-results.js\n" +
+      "            node tools/check-wasm-gate-results.js\n" +
+      "            node tools/check-project-status.js\n" +
+      "            git add bench design tools/check-benchmark-results.js\n" +
+      '            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"\n',
+    label,
+  );
   // Nothing here may start, pay for, or authenticate to a cloud instance. The
   // lane that did is gone, and these are the strings that would bring it back.
   forbidIncludes(text, "LINODE_TOKEN", label);
@@ -677,6 +848,7 @@ if (files.includes("benchmarks.yml")) {
   fail(".github/workflows/benchmarks.yml must remain absent; fresh timing runs belong to the explicit Linode lifecycle");
 }
 checkRunnerLabels(files);
+checkBenchHostQueue(files);
 checkCi(readWorkflow(ciPath));
 checkRustiaMemory(readWorkflow(rustiaMemoryPath));
 checkWeeklyMatrix(readWorkflow(weeklyMatrixPath));

@@ -38,16 +38,13 @@ check-crate-metadata:
 check-workflows:
     node tools/check-workflows.js
 
-# Read-only schema validation of a frozen benchmark config; no host, no build.
-bench-validate config:
-    node tools/run-linux-fixed-benchmark.js validate "{{ config }}"
-
 # Every commit hash a committed benchmark artifact cites must stay reachable.
 check-benchmark-commit-reachability:
     node tools/check-benchmark-commit-reachability.js
 
 check-benchmark-results:
-    node tools/run-linux-fixed-benchmark.js validate bench/cloud/dedicated-core2-tape-sparse.json
+    node tools/check-dedicated-config.js
+    node tools/check-dedicated-config.js --self-test
     node tools/check-benchmark-commit-reachability.js
     node tools/check-benchmark-commit-reachability.js --self-test
     node bench/analyze-fixed-samples.js --self-test
@@ -60,6 +57,9 @@ check-benchmark-results:
     node bench/run-memory-cohort.js self-test
     node bench/publish-memory-analysis.js self-test
     node tools/run-linux-memory-benchmark.js self-test
+    node tools/create-cross-engine-memory-config.js self-test
+    node tools/merge-rustia-ci-memory-data.js self-test
+    node tools/summarize-rustia-ci-memory.js self-test
     node tools/run-wasm-gate.js self-test
     node tools/run-wasm-dispatch-gate.js self-test
     node tools/check-benchmark-results.js
@@ -80,6 +80,11 @@ check-array-slot-coverage:
     cargo clippy --locked -p rustia-compiler --all-targets --features table-write-diagnostics -- -D warnings
     cargo test --locked -p rustia-compiler --features table-write-diagnostics --test array_slot_write_coverage -- --nocapture
 
+# Report which executor (tape, HotIR, leaf plans on both call paths) owns each benchmark workload.
+check-executor-ownership:
+    cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings
+    cargo test --locked -p rustia-compiler --features executor-diagnostics --test executor_ownership -- --nocapture
+
 check-examples:
     cargo test --locked -p rustia --examples --no-run
 
@@ -96,6 +101,7 @@ bench-memory-self-test:
     node bench/run-memory-cohort.js self-test
     node bench/publish-memory-analysis.js self-test
     node tools/run-linux-memory-benchmark.js self-test
+    node tools/create-cross-engine-memory-config.js self-test
 
 # Takes no arguments: the series starts at the first commit that contains an
 # engine and ends at HEAD. Pass replace=1 to supersede an existing artifact,
@@ -113,9 +119,13 @@ bench-history-plan:
 bench-history-fetch replace="":
     node tools/run-dedicated-benchmark.js fetch {{ if replace == "" { "" } else { "--replace" } }}
 
-# Clear a lock a killed run left on the benchmark host.
+# Clear the lane locks a killed run left on the benchmark host.
 bench-history-unlock:
     node tools/run-dedicated-benchmark.js unlock
+
+# Read-only: free space, journal size, load and driver state on the host.
+bench-host-check:
+    node tools/run-dedicated-benchmark.js host-check
 
 # Reports only: no row is recorded and nothing is published. CI runs this per
 # pull request; this recipe is the same lane driven by hand.

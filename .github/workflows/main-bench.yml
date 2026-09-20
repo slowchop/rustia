@@ -22,11 +22,30 @@ name: Per-Commit Rustia Series
 permissions:
   contents: read
 
-# Shares one group with every other lane that uses the bench host, so a
-# measurement can never overlap another job on the machine it is measuring.
+# Host exclusivity comes from the bench-solo group holding exactly one runner:
+# a second job sent there waits rather than sharing the machine. This shared
+# concurrency group adds ordering between the four lanes that hold the host for
+# a full measurement -- this one, the cross-engine matrix, the memory cohort and
+# acceptance -- so they start in the order they began waiting.
+#
+# queue: max is what makes it a queue. Without it a group keeps one pending run
+# and a newly queued run cancels it; cancel-in-progress: false protects only the
+# run already going. That is how this lane lost its run for f49646f on
+# 2026-09-15, to a matrix dispatch fourteen seconds later. Order matters most
+# here: rows are appended in the order runs execute, the chart draws them in
+# file order, and the unchanged-binary gate compares against the last row. The
+# runner queue documents no order at all, which is why the group stays rather
+# than leaving the waiting to bench-solo alone.
+#
+# PR screening deliberately sits outside it, because it cancels its own
+# superseded runs, and GitHub rejects cancel-in-progress: true alongside
+# queue: max. It relies on the single-runner group alone, so registering a
+# second runner into bench-solo would let a screening run and a measurement
+# share the same pinned cores.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false
+  queue: max
 
 jobs:
   measure:

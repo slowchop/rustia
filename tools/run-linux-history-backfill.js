@@ -149,11 +149,9 @@ function sha256File(file) {
   return sha256(fs.readFileSync(file));
 }
 
-// Mirrors expandCpuList in run-linux-fixed-benchmark.js: provider.host.pinned_cpus
-// is a taskset-style CPU-list string ("4", "4,5", "4-5"). This file's
-// host_gate.benchmark_cpu cross-check (below) is what the fixed runner has no
-// equivalent of, since it names its pinned core directly rather than through
-// a separate host_gate section.
+// provider.host.pinned_cpus is a taskset-style CPU-list string ("4", "4,5",
+// "4-5"). The host_gate.benchmark_cpu cross-check below requires the timed
+// core to be one of them.
 function expandCpuList(text, location) {
   const cpus = new Set();
   for (const token of String(text).trim().split(",")) {
@@ -181,10 +179,11 @@ function validateConfig(value) {
   }
 
   // An owned host has no provider catalog to validate against -- no region,
-  // image, size, or per-hour price. Mirrors validateDedicatedProvider in
-  // run-linux-fixed-benchmark.js: the provider section instead names what
-  // the operator guarantees -- the machine, the cores held off the
-  // scheduler, and the one core a timed leg must run on.
+  // image, size, or per-hour price. The provider section instead names what
+  // the operator guarantees -- the machine, the cores held off the scheduler,
+  // and the one core a timed leg must run on. The same rules validate the
+  // frozen host config in tools/check-dedicated-config.js; this runner ships
+  // to the host as one file, so it carries its own copy.
   requireExactKeys(root.provider, ["host"], "config.provider");
   const host = requireObject(root.provider.host, "config.provider.host");
   requireExactKeys(

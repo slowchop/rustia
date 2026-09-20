@@ -10,10 +10,10 @@ name: Benchmark Acceptance
 # its passes, so it is never on a timer and never on a push: someone decides a
 # specific comparison is worth the machine's time.
 #
-# It records nothing. The reading lands in the job summary and in an artifact,
-# not in the published history -- promoting a number is the series lane's job,
-# and a comparison of two arbitrary historical commits is evidence for a
-# decision rather than a row in a series.
+# It records nothing. The reading lands in the job summary, not in the
+# published history -- promoting a number is the series lane's job, and a
+# comparison of two arbitrary historical commits is evidence for a decision
+# rather than a row in a series.
 "on":
   workflow_dispatch:
     inputs:
@@ -34,11 +34,14 @@ name: Benchmark Acceptance
 permissions:
   contents: read
 
-# The same group every other lane on the bench host uses, so an acceptance run
-# can never overlap the machine it is measuring.
+# Waits in start order behind the other full-measurement lanes rather than
+# cancelling one already waiting. What keeps it off a machine another job is
+# using is the single-runner bench-solo group, not this; main-bench.yml carries
+# the reasoning.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false
+  queue: max
 
 jobs:
   accept:

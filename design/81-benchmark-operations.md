@@ -78,19 +78,99 @@ The qualification record carries the machine's measured repeatability. Quote it
 per workload: spread scales inversely with per-unit cost, so the same host reads
 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
-### Blocked: the memory cohort needs a delegated cgroup
+### Waiting for the host
 
-The memory lane is ported and its workflow runs on the owned host, but it cannot
-complete there yet, and the reason is a property of the machine rather than of
-the code. Per-VM memory is measured inside a dedicated cgroup; the benchmark
-host runs its CI as an unprivileged user (`uid 1001`), and that user has no
-cgroup-v2 subtree it can create children in.
+Exclusivity and order are separate mechanisms. `bench-solo` holds exactly one
+runner, so a second job sent to it waits in GitHub's runner queue rather than
+sharing the machine. That alone keeps a pull-request screening run off the
+pinned cores while a measurement holds them, and it stops being true the moment
+a second runner joins the group.
 
-Root is one way to have one. The other, which keeps the runner unprivileged, is
-a systemd-delegated subtree that *contains the job's own process*: on the unit
-that runs the runner, `Delegate=memory` plus `DelegateSubgroup=` (so the
-unit's own cgroup holds no processes and may enable the controller for its
-children) and no `ProtectControlGroups=`. A subtree delegated beside that
+The four lanes that hold the host for a full measurement — the per-commit
+series, the cross-engine matrix, the memory cohort and A/B acceptance — also
+share the concurrency group `rustia-bench-host-serial`, declared with
+`queue: max` so that every waiting run is kept. The key is load-bearing. A
+concurrency group otherwise keeps one pending run, and a newly queued run
+cancels it; `cancel-in-progress: false` protects only the run already in
+progress. On 2026-09-15 that cancelled the per-commit run for `f49646f` (Actions
+run 34921991922) two seconds after a matrix dispatch joined the group, while the
+run for `08cf383` was measuring. #39 changed no engine code, so no row was lost;
+an engine-changing commit would have lost its row with nothing reporting it.
+With `queue: max` GitHub keeps up to 100 pending runs and starts them first in,
+first out by when each began waiting, and cancels any beyond the hundredth. Its
+documentation adds that the order is not guaranteed, because start times vary.
+
+The group stays, rather than leaving all waiting to the runner queue, because
+the per-commit series depends on order and the runner queue documents none.
+Rows are appended in the order runs execute, the published chart draws them in
+file order, and the unchanged-binary gate compares a new build with the last
+row. If a per-commit run does execute after a later commit's run has recorded
+a row, `check-benchmark-series.js` refuses the append before anything is
+pushed — the recorded commit is not an ancestor of the one being measured — so
+an inversion costs that row visibly rather than bending the line. The exception
+is a build identical to the last row's binary: it records nothing, and the
+change is attributed to the later commit. The matrix, memory and acceptance
+lanes measure main's tip or commits named at dispatch, and do not depend on
+order.
+
+Screening stays outside the group: it cancels its own superseded runs per pull
+request, and GitHub rejects `cancel-in-progress: true` combined with
+`queue: max`. The publisher stays outside too, because the memory lane calls it
+while holding this group. `tools/check-workflows.js` pins the exact block in
+the four lanes, allows no second concurrency block beside it, and rejects the
+group name in every other workflow.
+
+**No catch-up.** A per-commit run that fails, is cancelled by hand, or waits
+more than GitHub's 24-hour limit for a self-hosted runner records no row for
+its commit, and nothing measures that commit later. Re-running it recovers the
+row only while no later commit has recorded one; after that the ancestry rule
+refuses the append. The series already has three such gaps: `0fce032` (#14),
+`50a5bfb` (#15) and `7b8d334` (#17) changed engine code, and their runs failed
+on 2026-09-01 and 2026-09-02. Catch-up — each run measuring every unrecorded
+first-parent commit since the last row, oldest first — would close those gaps
+and make the lane independent of run order. It is not built: it needs the
+`main` command to measure a commit other than HEAD, a per-run budget inside the
+30-minute timeout, and a decision on whether a point measured long after its
+commit landed is drawn like one measured on landing. Queueing removes the loss
+that prompted it; the failure gaps remain open.
+
+### The memory cohort and its delegated cgroup
+
+Per-VM memory is measured inside a dedicated cgroup, so the memory lane needs
+something the timing lanes do not: a cgroup-v2 subtree the unprivileged CI user
+can create children in. The owned host has one, and the lane completed there on
+2026-09-05, producing its first cohort — `rustia-ci-070c387b173c` at commit
+`070c387`, 11 Rustia rows from 99 raw samples.
+
+The lane measures one of two cohorts, chosen by the workflow's `cohort` input.
+The routine cohort keeps the bare `memory --local` line, because the measured
+commit's own tools run and commits from before the flag existed must stay
+measurable; only the cross-engine cohort is passed through as `--cohort`, and
+only commits that carry its freezer can measure it. Both go through the same attesting entrypoint
+and inherit one frozen protocol — samples, bootstrap, thresholds, host block,
+pinned cores — and differ in the engine set alone. `rustia-only`, the default,
+is the routine per-commit cohort: 11 rows from 99 samples, and the only one
+that runs the wasm32 quota probe. `cross-engine` measures the thirteen matrix
+engines under the protocol the rented lane measured as `pre-reclamation-18b58d8`:
+110 rows from 990 fresh processes. It is the cohort that puts the competitor
+rows and the mlua/Luau/JIT memory reference on the same machine as the Rustia
+rows they are compared with; one such cohort returns the comparison, and it is
+re-run when a competitor dependency moves rather than on a cadence. Its build
+carries twelve competitor crates the rustia-only build does not, so its first
+run on a cold cache is the long one; the workflow's 75-minute timeout is the
+lane's only runtime ceiling, since the host block's `max_runtime_minutes` is
+inherited from the shared config and not enforced by the memory runner. In the
+published data each engine's rows come from the newest cohort that measured it,
+so a rustia-only cohort after a cross-engine one swaps the Rustia rows and
+keeps the competitors. No cross-engine cohort has been measured on the owned
+host yet; the comparison stays pending until the first is dispatched.
+
+Root is one way to have such a subtree. The other, which keeps the runner
+unprivileged and is the arrangement in place, is a systemd-delegated subtree
+that *contains the job's own process*: on the unit that runs the runner,
+`Delegate=memory` plus `DelegateSubgroup=` (so the unit's own cgroup holds no
+processes and may enable the controller for its children) and no
+`ProtectControlGroups=`. A subtree delegated beside that
 unit — a lingering `user@<uid>.service` — is no use, because cgroup v2 refuses
 to move a process across a common ancestor the mover cannot write. The tools
 find the delegated root by walking up from the process's own cgroup
@@ -102,34 +182,44 @@ controller — is the one present.
 **The check must not be relaxed to make the lane pass.** Without the cgroup there
 is no per-VM figure — the accounting is the cgroup's — so a run that skipped it
 would produce numbers that look like measurements and are not. The lane is
-dispatch-only, so until the host is configured it fails immediately and costs
-nothing; the alternative, restoring the cloud lane, would reintroduce the ability
-to spend money to work around a one-line host setting.
+dispatch-only and the check is a preflight that fails closed before anything is
+cloned, so a host that loses the delegation costs a dispatch and nothing else;
+the alternative, restoring the cloud lane, would reintroduce the ability to
+spend money to work around a one-line host setting.
 
-### Acceptance: two historical commits, eight legs a side
+### A/B acceptance on the owned host
 
-A full A/B acceptance runs through the same attesting entrypoint as screening:
-`acceptance-bench.yml` dispatches `run-dedicated-benchmark.js accept` with a
-baseline and a candidate, both of which must already be in the checked-out
-history. It measures the pair in eight passes by default (`--passes` takes any
-even count from two to sixteen), A B B A repeated, at the screening
-calibration's repetition count of five a leg, and reads each workload through
-the same hierarchical bootstrap the screening lane uses, against that
-calibration's thresholds. Those thresholds were measured at two legs a side;
-carried to eight they are conservative, which is the right direction for a
-guard. The summary lands in the job's step summary and reports, per workload,
-the delta, the interval, the threshold, the direction, and — because one leg
-can widen an interval across zero on its own — any leg whose median sits more
-than the larger of 5% and three times the workload's threshold from the median
-leg of its side, named by the pass it came from. A side of fewer than three
-legs has no median to stand apart from and is never flagged.
+`.github/workflows/acceptance-bench.yml` answers what screening cannot: not "did
+this pull request move anything" against a merge base, but "did this change move
+this workload, and by how much" for a pair of commits named explicitly. It takes
+a baseline, a candidate, and an even number of legs per side between 2 and 16,
+and measures on `bench-solo` through the same attesting entrypoint as every
+other lane. It is dispatch-only — a run holds the host for the length of its
+passes, so it is never on a timer and never on a push — and it records nothing:
+the reading lands in the job summary, not in the published history, because a
+comparison of two arbitrary historical commits is evidence for a decision
+rather than a row in a series.
 
-The lane replaced rather than ported the rented-model A/B runner.
-`tools/run-linux-fixed-benchmark.js` still assumes root, `/root/.cargo`, and
-permanent masking of the host's package timers; nothing executes it, and its
-only remaining caller is `validate`, which reads a frozen config and takes no
-timing. It is due for deletion with that caller once the acceptance lane has a
-second campaign behind it.
+It measures the pair in eight passes by default (`--passes` takes any even count
+from two to sixteen), A B B A repeated, at the screening calibration's
+repetition count, and reads each workload through the same hierarchical
+bootstrap the screening lane uses, against that calibration's thresholds. The
+summary reports, per workload, the delta, the interval, the threshold and the
+direction, and — because one leg can widen an interval across zero on its own —
+names any leg whose median sits more than the larger of 5% and three times the
+workload's threshold from the median leg of its side, by the pass it came from.
+A side of fewer than three legs has no median to stand apart from and is never
+flagged.
+
+The frozen owned-host config, `bench/cloud/dedicated-core2-tape-sparse.json`,
+is the one place the repository records what the host guarantees. The matrix
+and memory config generators copy its provider block, and the history freezer
+cross-checks host identity against it, so `tools/check-dedicated-config.js`
+validates it — exact provider keys, SMT off, the timed core inside the pinned
+set — on every `just check-benchmark-results` and release-preflight run. The
+rented-model A/B runner that once carried that check is deleted; the three
+runners that execute on the host — history, matrix, memory — are checked for
+the absence of its assumptions.
 
 ### Cost
 
@@ -137,15 +227,15 @@ second campaign behind it.
 timer, not on a push, not by dispatch, and not by a justfile recipe. Every lane
 — the reconstruction, the per-commit series, pull-request screening, A/B
 acceptance, the cross-engine matrix and the memory cohort — runs on the owned
-host, so the cloud
-lifecycle's cost ceilings, ownership journal and deletion gate have nothing left
-to govern and are retired with it.
+host, so the cloud lifecycle's cost ceilings, ownership journal and deletion
+gate have nothing left to govern and are retired with it.
 
 One file remains from that model. `tools/run-linode-benchmark.js` is the only
 home of the matrix and memory acceptance rules, and the owned-host coordinator
 borrows them rather than carrying a second copy that agrees until one is edited.
-It is documented as retired at the top of the file, nothing invokes it, and it
-goes when those rules move to a shared module.
+It is documented as retired at the bottom of the file; nothing runs its
+lifecycle, release preflight runs only its offline self-test, and it goes when
+those rules move to a shared module.
 
 ## Evidence lanes
 
@@ -277,6 +367,16 @@ derived from reviewed commit identities, so rewriting those identities while
 landing a change makes the generated operations view stale immediately after
 an otherwise green merge.
 
+The weekly matrix publication depends on that rule. GitHub holds pull-request
+runs on a pull request the workflow token opens until a person approves them,
+and the landing helper merges within seconds, so the publication commit carries
+GitHub's CI-skip marker and its pull request starts no checks. A squash or
+rebase would copy the marker onto `main`; GitHub still offers both there, so
+the rule is a convention rather than a setting. The same landing means `main`
+cannot require status checks: a skipped check stays expected and the merge is
+refused. The merge starts no push workflows, so the workflow dispatches CI on
+`main` after landing.
+
 ## Automation
 
 1. Shared self-hosted CI performs correctness and artifact validation only.
@@ -285,8 +385,9 @@ an otherwise green merge.
    changes; merging an update marks the landscape pending but spends no money.
 4. An operator explicitly plans and starts a qualified progress, bridge,
    landscape, or candidate campaign.
-5. Promotion requires a complete cohort, semantic checks, provenance, accepted
-   host gates, and confirmed resource deletion.
+5. Promotion requires a complete cohort, semantic checks, provenance, and the
+   accepted host gates — the attestation against the frozen config plus the
+   committed checkers.
 6. Artifact-only publication validates committed evidence, renders the report,
    and pushes Pages directly. Data-repository updates are one commit on a
    fresh clone of that repository's `main`, pushed there as a fast-forward by
@@ -320,7 +421,10 @@ can measure and merge memory rows but cannot render or write Pages. The publishe
 checks out current main, hydrates current data-owned memory and live series, keeps
 the selected Grabby source, and serializes its writes under
 `rustia-benchmark-data-publication`. It never measures or needs an actions-write
-token. The benchmark-host group is distinct, preventing a self-deadlock.
+token. The benchmark-host group is distinct, preventing a self-deadlock. Unlike
+that group it keeps GitHub's default single pending slot on purpose: each run
+renders current main and the data repository's current rows, so a newer
+publication supersedes a waiting one rather than losing anything.
 
 This preserves accepted memory/series data and keeps later memory updates from
 replacing the dashboard with a historical renderer. Publication uses the data
@@ -353,9 +457,7 @@ CI, merge, publication and live verification remain delivery gates.
 
 ## Cost policy
 
-- No scheduled job may create a billed host.
+- No job can create a billed host, because no path in this repository can.
 - Progress runs are batched around relevant changes and decisions.
 - Landscape runs occur at most monthly by default.
 - Candidate runs require a concrete, credible optimization hypothesis.
-- Every campaign freezes a maximum runtime, rounded billing ceiling, cleanup
-  reserve, and exact resource scope before the first billable request.

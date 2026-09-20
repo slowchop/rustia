@@ -24,6 +24,13 @@ name: Cross-Engine Matrix (weekly)
 # request and merges it with a merge commit. That needs pull-requests: write and
 # the repository setting that lets Actions create pull requests.
 #
+# Nothing runs on that pull request. GitHub holds pull-request runs on a pull
+# request this token opens until someone with write access approves them, and
+# the helper merges within seconds, so the first landing (#40) left three failed
+# runs with no jobs behind it. The publication commit therefore carries GitHub's
+# CI-skip marker and no run is created. The merge starts no push workflows
+# either, so once the cohort has landed this workflow dispatches CI on main.
+#
 # Weekly on Sunday 15:00 UTC (early Monday morning at the host, when the machine
 # is idle), plus manual dispatch for an out-of-cycle cohort. The schedule was
 # withheld until the first owned-host cohort (f480758, 2026-08-30) had landed and
@@ -39,9 +46,12 @@ permissions:
   actions: write
   pull-requests: write
 
+# Waits in start order behind the other full-measurement lanes rather than
+# cancelling one already waiting; main-bench.yml carries the reasoning.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false
+  queue: max
 
 jobs:
   matrix:
@@ -98,6 +108,9 @@ jobs:
           for attempt in 1 2 3; do
             git fetch origin main
             git checkout -B "$branch" origin/main
+            # Every file rendered below describes this commit, so the landing
+            # helper merges only while main is still exactly this commit.
+            base_commit="$(git rev-parse HEAD)"
             git checkout "$snapshot" -- \
               "$config" \
               bench/history \
@@ -115,27 +128,60 @@ jobs:
             node bench/render-current-results.js
             node bench/render-claims.js
             node tools/check-benchmark-results.js
+            # The release-preflight checkers whose result this commit can
+            # change and that nothing above runs. A cohort that would turn
+            # main red is not landed; CI on main still covers everything else.
+            node tools/check-wasm-gate-results.js
+            node tools/check-project-status.js
             git add bench design tools/check-benchmark-results.js
-            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}"
+            # The marker stops GitHub creating pull-request runs that would
+            # wait for an approval the merge never gives (see the header). Only
+            # this commit carries it: the title below becomes the body of
+            # main's merge commit. The helper's merge starts no push workflows
+            # and the runs dispatched afterwards ignore markers, but if a person
+            # merged this pull request by hand, a marker there would skip CI,
+            # the per-commit series and the dashboard publication on main.
+            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"
+            publication_commit="$(git rev-parse HEAD)"
             git push --force origin "HEAD:refs/heads/$branch"
-            # Exit 3 means main moved and the branch no longer merges cleanly;
-            # anything else that is not success is a failure.
+            # Exit 3 means main moved, so the publication no longer describes
+            # it and is rebuilt; anything else that is not success is a
+            # failure, and the helper has already printed GitHub's reason.
             landing=0
             node tools/land-matrix-publication.js \
               --branch "$branch" \
+              --base "$base_commit" \
+              --head "$publication_commit" \
               --title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?
             if [ "$landing" -eq 0 ]; then
               published=yes
               break
             fi
             [ "$landing" -eq 3 ] || exit "$landing"
-            echo "landing raced with new commits on main; rebuilding publication (attempt $attempt)"
+            echo "main moved before the publication could land (attempt $attempt of 3)"
           done
-          test -n "$published"
-          # A merge performed with GITHUB_TOKEN does not trigger downstream
-          # workflows, so the dashboard publication is dispatched explicitly.
+          if [ -z "$published" ]; then
+            echo "main moved under the publication on all three attempts; nothing was landed" >&2
+            exit 1
+          fi
+          # A merge performed with GITHUB_TOKEN starts no push workflows, so the
+          # dashboard publication and CI on main's new tip are dispatched
+          # explicitly. Each is attempted whatever happens to the other, and a
+          # failure names what to dispatch by hand. The per-commit series is not
+          # dispatched: the publication changes no engine code, so it has
+          # nothing to measure.
+          failed=""
           curl -sSf -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/publish-benchmark-data.yml/dispatches" \
-            -d '{"ref":"main"}'
+            -d '{"ref":"main"}' || failed="publish-benchmark-data.yml"
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
+            -d '{"ref":"main"}' || failed="${failed:+$failed and }ci.yml"
+          if [ -n "$failed" ]; then
+            echo "::error::The cohort has landed, but dispatching $failed on main failed. Dispatch each one named here on main by hand; re-running this job would measure and land another cohort." >&2
+            exit 1
+          fi

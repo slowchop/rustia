@@ -8,6 +8,13 @@ name: Rustia Memory Cohort
 # reached only through run-dedicated-benchmark.js, which attests the machine
 # against the frozen config before it builds anything.
 #
+# One of two cohorts, same protocol, same entrypoint, different engine set.
+# rustia-only is the routine per-commit cohort: 11 Rustia rows. cross-engine
+# measures the thirteen matrix engines, 110 rows, and is what puts the
+# competitor rows and the mlua/Luau/JIT reference on the same machine as the
+# Rustia rows they are compared with. Its build carries twelve competitor
+# crates, so it takes materially longer; the timeout below is its ceiling.
+#
 # The protocol pins two isolated cores rather than one: the supervisor samples
 # while the benchmark runs, and sharing a core would make the supervisor part of
 # what it measures.
@@ -21,17 +28,28 @@ name: Rustia Memory Cohort
         description: Exact 40-character commit SHA already present on main
         required: true
         type: string
+      cohort:
+        description: Which engines to measure
+        required: false
+        default: rustia-only
+        type: choice
+        options:
+          - rustia-only
+          - cross-engine
 
 permissions:
   contents: read
 
+# Waits in start order behind the other full-measurement lanes rather than
+# cancelling one already waiting; main-bench.yml carries the reasoning.
 concurrency:
   group: rustia-bench-host-serial
   cancel-in-progress: false
+  queue: max
 
 jobs:
   benchmark:
-    name: Rustia-only memory on the owned host
+    name: Memory cohort on the owned host
     if: github.ref == 'refs/heads/main'
     runs-on:
       group: bench-solo
@@ -69,8 +87,23 @@ jobs:
         with:
           node-version: "22"
 
+      # The measured commit's own tools run here, since the checkout above is
+      # detached at it. The routine cohort therefore keeps the bare line, which
+      # every commit since the lane moved to the owned host accepts; only the
+      # cross-engine cohort passes the flag, and only commits that carry its
+      # freezer can measure it. An API dispatch that omits the input leaves it
+      # empty, and empty is the routine cohort: a bare dispatch must not become
+      # the long one.
       - name: Measure and promote the memory cohort
-        run: node tools/run-dedicated-benchmark.js memory --local
+        env:
+          COHORT: ${{ inputs.cohort }}
+        run: |
+          set -euo pipefail
+          if [ "${COHORT:-rustia-only}" = rustia-only ]; then
+            node tools/run-dedicated-benchmark.js memory --local
+          else
+            node tools/run-dedicated-benchmark.js memory --local --cohort "$COHORT"
+          fi
 
       - name: Summarize improvement
         run: |
@@ -84,6 +117,7 @@ jobs:
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
           BENCHMARK_COMMIT: ${{ inputs.commit_sha }}
+          COHORT: ${{ inputs.cohort }}
         run: |
           set -euo pipefail
           test -n "$BENCH_DATA_DEPLOY_KEY"
@@ -103,7 +137,7 @@ jobs:
           git -C "$data_dir" config user.email "benchmark@rustia.invalid"
           git -C "$data_dir" add bench/memory
           if ! git -C "$data_dir" diff --cached --quiet; then
-            git -C "$data_dir" commit -m "Record Rustia memory ${BENCHMARK_COMMIT:0:12}"
+            git -C "$data_dir" commit -m "Record ${COHORT:-rustia-only} memory ${BENCHMARK_COMMIT:0:12}"
             node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind memory
           fi
 

@@ -1751,7 +1751,7 @@ fn mlua_lua54_checksum(value: &mlua_lua54::Value) -> String {
             Ok(text) => format!("string:{text}"),
             Err(_) => format!("bytes:{}", value.as_bytes().len()),
         },
-        other => format!("{}", other.type_name()),
+        other => other.type_name().to_owned(),
     }
 }
 
@@ -1870,7 +1870,7 @@ fn mlua_luau_checksum(value: &mlua_luau::Value) -> String {
             Ok(text) => format!("string:{text}"),
             Err(_) => format!("bytes:{}", value.as_bytes().len()),
         },
-        other => format!("{}", other.type_name()),
+        other => other.type_name().to_owned(),
     }
 }
 

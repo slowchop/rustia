@@ -13,6 +13,7 @@ const {
   memoryComparisonCharts,
   memoryHistoryModel,
   memoryHistorySection,
+  memoryResultsSection,
   optimizationEvidenceSection,
   operationsStatusSection,
   summarizeLanguageTargets,
@@ -366,6 +367,67 @@ function main() {
   assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="peak"'), 2);
   assert.equal(count(memoryHistoryHtml, 'data-memory-history-metric-view="retained" hidden'), 2);
   assert.match(memoryHistoryHtml, /mlua<\/strong> \/ Luau \/ JIT · 1×/);
+
+  // Without a same-host competitor cohort there is no reference to divide by, so the panel has to
+  // say so instead of plotting a line against a host it no longer trusts.
+  const rustiaOnlyHistory = [{
+    schema_version: 1,
+    schema: "rustia.bench.memory-cohort.v1",
+    cohort_id: "ci-bench-only",
+    commit: "ci-bench-commit",
+    created_at: "2026-07-03T00:00:00.000Z",
+    rows: memoryHistoryWorkloads.map((workload) =>
+      memoryHistoryRow("rustia", workload, 50, 25)
+    ),
+  }];
+  assert.equal(memoryHistoryModel(rustiaOnlyHistory), null);
+  const rustiaOnlyHistoryHtml = memoryHistorySection(rustiaOnlyHistory);
+  assert.match(rustiaOnlyHistoryHtml, /1 cohort\(s\) on <code>ci-bench<\/code>; no reference to plot against yet\./);
+  assert.match(rustiaOnlyHistoryHtml, /The chart needs a competitor reference from the same machine\./);
+  assert.match(rustiaOnlyHistoryHtml, /Rustia cohorts recorded so far: <code>ci-bench-only<\/code>\./);
+  assert.equal(count(rustiaOnlyHistoryHtml, "<svg"), 0);
+
+  const emptyHistoryHtml = memoryHistorySection([]);
+  assert.match(emptyHistoryHtml, /No cohorts\./);
+  assert.match(emptyHistoryHtml, /The series starts again on <code>ci-bench<\/code>\./);
+  assert.equal(count(emptyHistoryHtml, "<svg"), 0);
+
+  const memoryResultRow = (engine, workload) => ({
+    target: "linux-x86_64",
+    engine,
+    dialect: engine === "rustia" ? "luau" : "koto",
+    execution_mode: "interpreter",
+    workload,
+    classification: "stable_in_tested_window",
+    metrics: {
+      spawned_anon_kib: { median: 2_048 },
+      prepared_delta_anon_kib: { median: 128 },
+      peak_delta_kib: { median: engine === "rustia" ? 1_024 : 256 },
+      quiescent_retained_delta_anon_kib: { median: engine === "rustia" ? 512 : 16 },
+      tail_growth_kib_per_epoch: { median: 0 },
+    },
+  });
+  const memoryResults = (engines) => ({
+    schema_version: 1,
+    schema: "rustia.bench.memory-current-results.v1",
+    status: "ready",
+    detector_coverage: engines.map((engine) => ({ engine, detector_validated: true })),
+    rows: engines.flatMap((engine) =>
+      memoryWorkloads.map((workload) => memoryResultRow(engine, workload))
+    ),
+  });
+
+  // One engine cannot be a comparison: the panel reads rustia's own figures and drops the charts.
+  const singleEngineMemoryHtml = memoryResultsSection(memoryResults(["rustia"]));
+  assert.match(singleEngineMemoryHtml, /<h2>rustia Memory on ci-bench<\/h2>/);
+  assert.match(singleEngineMemoryHtml, /No competitor engines yet\./);
+  assert.doesNotMatch(singleEngineMemoryHtml, /Linux Memory Comparison/);
+  assert.equal(count(singleEngineMemoryHtml, 'class="memory-cohort-summary"'), 0);
+
+  const comparativeMemoryHtml = memoryResultsSection(memoryResults(["rustia", "koto"]));
+  assert.match(comparativeMemoryHtml, /<h2>Linux Memory Comparison<\/h2>/);
+  assert.doesNotMatch(comparativeMemoryHtml, /No competitor engines yet/);
+  assert.equal(count(comparativeMemoryHtml, 'class="memory-cohort-summary"'), 3);
 
   const wasmRows = wasmTargetRows({
     runs: [

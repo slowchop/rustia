@@ -25,11 +25,88 @@ function node(script, ...args) {
   run("node", [script, ...args]);
 }
 
+// The manifest beside every committed Cargo.lock. The wasm runners are
+// standalone packages with their own lock files, so a dependency added to a
+// shared crate updates the root lock and leaves theirs stale. The workspace
+// build never reads them. The weekly matrix and the rustia-only memory lane
+// build the benchmark adapter with --locked on the host, where a stale lock
+// stops the run, and the demo's README documents a --locked build. Filtering
+// the full tracked list here, not with a pathspec glob, covers a new lock file
+// without an edit, and no git environment setting can shrink the list.
+function lockedManifests() {
+  const tracked = childProcess.execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const locks = tracked.split("\0").filter((file) => /(^|\/)Cargo\.lock$/.test(file));
+  if (!locks.includes("Cargo.lock")) {
+    console.error("release-preflight: git ls-files did not list the root Cargo.lock");
+    process.exit(1);
+  }
+  return locks.map((lock) => path.posix.join(path.posix.dirname(lock), "Cargo.toml"));
+}
+
 run("git", ["diff", "--quiet", "--", "Cargo.lock"]);
 run("git", ["diff", "--cached", "--quiet", "--", "Cargo.lock"]);
 run("cargo", ["metadata", "--locked", "--no-deps", "--format-version", "1"]);
+// The same command the matrix lane runs on the host before it builds.
+for (const manifest of lockedManifests()) {
+  run("cargo", ["fetch", "--locked", "--manifest-path", manifest]);
+}
 run("cargo", ["fmt", "--all", "--", "--check"]);
 run("cargo", ["clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
+// The three builds that otherwise compile only on the owned benchmark host,
+// for the weekly matrix and the memory lanes: the competitor engines, the Lua
+// 5.4 binary (the one build with rustia-engine off), and the wasm adapter (a
+// standalone package that calls rustia's API). The workspace Clippy above sees
+// none of their cfg paths: bench's default features are rustia-engine alone,
+// and the adapter is a workspace of its own. A break in any of them showed up
+// only as a failed host run after merge. Both host workflows inherit the
+// toolchain action's default RUSTFLAGS=-D warnings, so a warning fails the
+// host build too, and a plain `cargo check` would miss it. Clippy with
+// -D warnings holds these builds to the bar the rest of the code meets. None
+// needs its own CARGO_TARGET_DIR. Cargo keys artifacts by feature set, so the
+// bench checks sit beside the workspace build without evicting it. The
+// adapter builds in its own target/, as it does on the host.
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/Cargo.toml",
+  "--bin",
+  "script-bench",
+  "--no-default-features",
+  "--features",
+  "all-engines",
+  "--",
+  "-D",
+  "warnings",
+]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/Cargo.toml",
+  "--bin",
+  "script-bench",
+  "--no-default-features",
+  "--features",
+  "mlua-lua54",
+  "--",
+  "-D",
+  "warnings",
+]);
+run("cargo", [
+  "clippy",
+  "--locked",
+  "--manifest-path",
+  "bench/wasm/adapter-runner/Cargo.toml",
+  "--target",
+  "wasm32-unknown-unknown",
+  "--",
+  "-D",
+  "warnings",
+]);
 
 node("tools/check-release-notes.js");
 node("tools/check-crate-metadata.js", "--check");
@@ -49,16 +126,21 @@ node("tools/record-host-bridge.js", "--self-test");
 node("tools/retire-cloud-history.js", "--self-test");
 node("tools/run-linux-history-backfill.js", "self-test");
 node("tools/freeze-history-backfill.js", "--self-test");
+node("tools/check-dedicated-config.js");
+node("tools/check-dedicated-config.js", "--self-test");
 node("tools/push-benchmark-data-publication.js", "self-test");
 node("tools/run-linux-matrix-benchmark.js", "self-test");
+node("tools/land-matrix-publication.js", "self-test");
 node("bench/run-memory-supervisor.js", "self-test");
 node("bench/analyze-memory-samples.js", "self-test");
 node("bench/run-memory-cohort.js", "self-test");
 node("bench/publish-memory-analysis.js", "self-test");
 node("tools/run-linux-memory-benchmark.js", "self-test");
+node("tools/create-cross-engine-memory-config.js", "self-test");
 node("tools/run-wasm-gate.js", "self-test");
 node("tools/run-wasm-dispatch-gate.js", "self-test");
 node("tools/merge-rustia-ci-memory-data.js", "self-test");
+node("tools/summarize-rustia-ci-memory.js", "self-test");
 node("tools/check-benchmark-results.js");
 node("tools/check-wasm-gate-results.js");
 node("tools/render-benchmark-operations-status.js", "--check");

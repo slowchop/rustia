@@ -56,8 +56,8 @@
       "bench-solo"
     ],
     "scheduled_billing_allowed": false,
-    "billed_host_creation": "operator-dispatch-only",
-    "reason": "No timer may start a billed instance. The retired cloud matrix remains reachable by explicit dispatch only, because it is still the sole producer of the cross-engine reference every published Rustia number is normalised against."
+    "billed_host_creation": "none-possible",
+    "reason": "All timing runs on the attested owned host. Nothing in this repository creates or pays for a billed instance: not on a timer, not on a push, not by dispatch, and not by a recipe. The cross-engine matrix is one of that host's own lanes, and it remains the sole producer of the reference every published Rustia number is normalised against."
   },
   "publication": {
     "state": "active",
@@ -66,17 +66,17 @@
   },
   "progress": {
     "state": "pending",
-    "measured_commit": "f4807587780aec5829b297c037d5dd03ca40d251",
-    "measured_at_unix": 1788130091,
-    "latest_relevant_commit": "0a5eaf729c80948a64c5697afe3bd8c272d07d90",
-    "latest_relevant_committed_at_unix": 1788928922,
-    "pending_relevant_commit_count": 8,
+    "measured_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
+    "measured_at_unix": 1789440743,
+    "latest_relevant_commit": "9bc64a16ce2e491a8ce1f922ffc2644b2dbb9916",
+    "latest_relevant_committed_at_unix": 1789445597,
+    "pending_relevant_commit_count": 5,
     "next_action": "Measure the newest pending performance-relevant commit on the owned benchmark host."
   },
   "landscape": {
     "state": "paused",
-    "measured_commit": "f4807587780aec5829b297c037d5dd03ca40d251",
-    "measured_at_unix": 1788130091,
+    "measured_commit": "f49646ff11b0028c2a003ae12a48fe509525d903",
+    "measured_at_unix": 1789440743,
     "refresh_interval_days": 35,
     "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
     "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."

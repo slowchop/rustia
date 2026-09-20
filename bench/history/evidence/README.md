@@ -27,19 +27,20 @@ and SHA-256 value. Accepted eight-leg comparisons use `--expected-legs 4` and
 of pooled and leg-clustered hierarchical bootstrap intervals, with the
 analyzer's nominal-coverage caveat retained in the output.
 
-`../runs.jsonl` remains the public summary schema. The active dedicated-Linode
-matrix publishes a fresh, complete Linux cohort there; this directory retains
-older accepted fixed-work sidecars even when their rows are no longer in the
-active snapshot. Evidence files do not add fields to the summary schema, and a
-pooled or hand-computed result must never be inserted as a history row. The
+`../runs.jsonl` remains the public summary schema. Every timing this repository
+publishes is measured on the owned benchmark host, and this directory holds
+only evidence measured there. The ten accepted fixed-work cohorts measured on
+rented cloud hosts were removed on 2026-09-13; their samples remain in Git
+history. Evidence files do not add fields to the summary schema, and a pooled
+or hand-computed result must never be inserted as a history row. The
 `final-<workload>-*` rows must come from the exact candidate binary and match the
 actual summaries produced by those three invocations.
 
-Provider-backed runs may additionally retain `host.json`, `provider.json`,
-`protocol.json`, `gate.jsonl`, `qualification.json`, qualification-only
-sidecars, and a remote log. Those files are provenance around the same fixed
-sample schema; qualification samples are never inputs to `analysis.json` or
-rows in `../runs.jsonl`.
+The one retained comparison, `eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/`,
+predates the manifest layout above: it records the host in `host.txt` and its
+protocol deviations in `protocol.md` instead of a `manifest.json`, so the
+dashboard's optimization-check table does not read it. A future owned-host
+comparison that writes a manifest appears there without any renderer change.
 
 Evidence-only protocols that do not append throughput history live outside this
 tree. The paired many-VM string-memory corpus is under

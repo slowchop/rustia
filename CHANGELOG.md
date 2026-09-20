@@ -98,15 +98,16 @@ Current unpublished workspace version: `0.0.1`.
 
 - Automated cross-engine matrix benchmarking on the owned host:
   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines
-  across the five workloads on `ci-bench` and pushes the accepted cohort to
-  `main`, so the published history and dashboard update without operator
-  action. It replaces a nightly job that created a billed cloud instance and
-  ran only when performance-relevant commits had landed; that gate asked the
-  Rustia-progress question, which the per-commit series now answers directly,
-  and running unconditionally makes host drift visible rather than hiding it.
-  Dispatch-only until the first owned-host cohort has been inspected. The
-  workflow shape — including the repository's only CI contents-write grant —
-  is pinned by `tools/check-workflows.js`.
+  across the five workloads on `ci-bench` and lands the accepted cohort on
+  `main` through a pull request it opens and merges, so the published history
+  and dashboard update without operator action. It replaces a nightly job that
+  created a billed cloud instance and ran only when performance-relevant
+  commits had landed; that gate asked the Rustia-progress question, which the
+  per-commit series now answers directly, and running unconditionally makes
+  host drift visible rather than hiding it. It runs weekly, plus manual
+  dispatch; the schedule was added once the first owned-host cohort had been
+  inspected. The workflow shape — including the repository's only CI
+  contents-write grant — is pinned by `tools/check-workflows.js`.
 
 - VM Core 2 C2.2 replaces the plain-mode per-PC Region/receipt selection
   ladder with one loader-built, whole-function executable tape. Every source
@@ -133,9 +134,9 @@ Current unpublished workspace version: `0.0.1`.
   ns/unit against the receipt baseline (pooled medians 13,092.320 versus
   12,567.856), with a conservative nominal 95% interval from -7.1417% to
   -2.8710%. All 808 formal samples matched the checksum, all 19 timed legs
-  observed zero steal, and the Droplet/key cleanup gate passed. Evidence is
-  retained under
-  `bench/history/evidence/77e0d92871133277340b03b2eda119974babecda/`.
+  observed zero steal, and the Droplet/key cleanup gate passed. Its evidence
+  was measured on a rented Droplet and removed on 2026-09-13 (see Changed);
+  the samples remain in Git history.
 
 - VM Core 2 C2.2 adds frame-local immutable execution receipts over unchanged
   public bytecode. Region Engine can execute the compiler's exact
@@ -156,8 +157,9 @@ Current unpublished workspace version: `0.0.1`.
   lower candidate `generic_iteration` ns/unit, with a conservative nominal 95%
   interval from -10.2126% to -5.9577%. All 808 formal samples matched the
   checksum, three final-binary measurements were retained as sidecars, and the
-  Droplet/key cleanup gate passed. Evidence is retained under
-  `bench/history/evidence/84e732add4863150bd993f3354b274ab9c3ee41a/`.
+  Droplet/key cleanup gate passed. Its evidence was measured on a rented
+  Droplet and removed on 2026-09-13 (see Changed); the samples remain in Git
+  history.
 
 - Region Engine v1 precomputes private side metadata for consecutive,
   effect-certified primitive-constant, register-bookkeeping, guarded-numeric,
@@ -170,9 +172,9 @@ Current unpublished workspace version: `0.0.1`.
   coverage fallback, deterministic collection cadence, and coexistence with
   HotIR. The accepted controlled DigitalOcean A/B measured +1.3181% candidate
   ns/unit with a conservative 95% interval from -4.5763% to +3.9306%. That
-  excludes a material 5% regression but does not establish a speedup; evidence
-  is retained under
-  `bench/history/evidence/b861ee998ebb986b662cd6249e61169f86d685ac/`.
+  excludes a material 5% regression but does not establish a speedup. Its
+  evidence was measured on a rented Droplet and removed on 2026-09-13 (see
+  Changed); the samples remain in Git history.
 
 - Benchmark operations now have a versioned policy, generated machine-readable
   freshness status, and a prominent generated-dashboard notice. The status
@@ -237,7 +239,34 @@ Current unpublished workspace version: `0.0.1`.
   never ran on: `linode-build.json` and `linode-run-gate.json` become
   `build.json` and `run-gate.json` for that lifecycle. The validator accepts both,
   so committed evidence from the retired lane keeps validating.
+- The rented-model A/B runner `tools/run-linux-fixed-benchmark.js` is deleted.
+  Nothing measured through it: acceptance runs on the owned host through
+  `tools/run-dedicated-benchmark.js accept`. Its one live job — validating the
+  frozen owned-host config that every lane copies its host block from — moves
+  to `tools/check-dedicated-config.js`, which `just check-benchmark-results`
+  and release preflight both run. The `bench-validate` recipe goes with the
+  runner.
+- **The owned-host memory lane measures a second cohort.** `cohort:
+  cross-engine` on `.github/workflows/rustia-memory.yml` — `--cohort
+  cross-engine` on `tools/run-dedicated-benchmark.js memory` — freezes the same
+  protocol over the thirteen matrix engines, 110 rows from 990 fresh
+  processes, the protocol the rented lane measured as
+  `pre-reclamation-18b58d8`, through the same attesting entrypoint. It is what
+  puts the memory comparison and the mlua/Luau/JIT reference on the machine
+  the Rustia rows come from. The default stays `rustia-only`. In the published
+  data each engine's rows now come from the newest cohort that measured it,
+  and the job summary reports the Rustia rows whichever cohort ran.
 
+- **Removed the ten accepted fixed-work A/B evidence cohorts measured on rented
+  cloud hosts** from `bench/history/evidence/`: seven DigitalOcean Droplets and
+  three Linode instances, 265 files. They were the only source of the
+  dashboard's "Accepted Optimization Checks" table, so that table showed
+  rented-host timings directly under the sentence that every timing on the page
+  comes from the owned host. The table now says what happened and stays wired,
+  so it returns the day an owned-host comparison lands with a manifest. The
+  measured deltas stay in this changelog and in `design/`, and the samples
+  remain in this repository's Git history. The one owned-host comparison,
+  `eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/`, is kept.
 - **Removed 1,230 cross-engine rows measured on retired cloud hosts** from
   `bench/history/runs.jsonl`, leaving the single cohort measured on the owned
   host. This is a destructive change to a published dataset and is recorded as
@@ -306,9 +335,9 @@ Current unpublished workspace version: `0.0.1`.
   instructions on four tracked workloads. A controlled dedicated-host A/B
   (baseline `6d22fa3`, `generic_iteration`, fixed `n=4000`, interleaved
   ABBA/BAAB) measured -8.45% candidate median ns/unit with a conservative 95%
-  interval of -9.06% to -7.35%; evidence under
-  `bench/history/evidence/f412e2dadd4568b4ba35158090978c79413fd0f7/`. The
-  single-workload rows stay out of public history per the dedicated-cohort
+  interval of -9.06% to -7.35%. Its evidence was measured on a rented Linode
+  and removed on 2026-09-13 (see Changed); the samples remain in Git history.
+  The single-workload rows stay out of public history per the dedicated-cohort
   policy and land in the published results with the next full-matrix cohort.
 
 - `LoadStringCompiler` now receives the VM's `Profile` as a third parameter so
@@ -317,6 +346,49 @@ Current unpublished workspace version: `0.0.1`.
   loadstring compilers to the new signature.
 
 ### Fixed
+
+- **The owned-host benchmark lanes queue instead of cancelling a waiting run.**
+  The per-commit series, weekly matrix, memory cohort and A/B acceptance share
+  one concurrency group, whose comment said they queued. A group keeps one
+  pending run by default, and a newly queued run cancels it —
+  `cancel-in-progress: false` protects only the run in progress — so on
+  2026-09-15 a matrix dispatch cancelled the waiting per-commit run for
+  `f49646f`. No row was lost, because that commit changed no engine code. The
+  group now declares `queue: max`, which keeps up to 100 pending runs in
+  start order. It stays, rather than leaving the waiting to the single-runner
+  `bench-solo` group, because the per-commit series is appended and charted in
+  run order and the runner queue promises none. `tools/check-workflows.js`
+  pins the block in all four lanes, including acceptance, which it previously
+  did not check, and rejects the group in any other workflow.
+
+- **The wasm runners' lock files match their manifests again.** The typed
+  error work added `serde_path_to_error` to the `rustia` crate and refreshed
+  the root lock, but the benchmark adapter and the live-wasm demo carry their
+  own lock files, and both stayed stale. The weekly matrix and the rustia-only
+  memory cohort build the adapter with `--locked`, so the 2026-09-13 weekly
+  cross-engine matrix stopped before measuring anything, and a memory dispatch
+  at any commit from that change onward would have stopped the same way. Both
+  locks now add the two packages at the root lock's versions and checksums.
+  Release preflight, and so CI, now runs `cargo fetch --locked` for the
+  manifest beside every committed `Cargo.lock`, so a stale nested lock turns
+  the pull request's preflight check red before the change reaches the host.
+
+- **Release preflight now compiles the builds that only the benchmark host
+  used to compile.** The weekly matrix and the memory lanes build `bench`
+  with every competitor engine (`--features all-engines`), `bench` with
+  `rustia-engine` off (`--features mlua-lua54`), and the wasm adapter
+  against rustia's API. CI built none of them, so a compile error under
+  their cfgs was first seen on the host, after merge. Preflight, and so the
+  pull request's CI check, now runs Clippy with `-D warnings` on all three.
+  That is warnings as errors, as on the host, where both workflows inherit the
+  pinned toolchain action's default `RUSTFLAGS=-D warnings`. The CI
+  preflight job now installs the `wasm32-unknown-unknown` target for the
+  adapter check. On an M4 Max already running other builds, the three checks
+  add about 0.4 s to a warm preflight with nothing changed, about 2.3 s after
+  an engine-crate edit, and about 51 s from cold. Bringing the mlua
+  checksum helpers in `bench` under the gate fixed two `useless_format`
+  lints that had never been linted. The benchmark checksum strings are
+  unchanged.
 
 - Quiescent spare-capacity release now bumps a table's mutation version when
   it pops trailing array nils: the pop moves the observable length border,
@@ -358,6 +430,44 @@ Current unpublished workspace version: `0.0.1`.
   first and skips any split whose newer side lacks full five-workload
   coverage, so a partial tail cohort can no longer poison the rendered
   current-results report; output is byte-identical on existing history.
+
+- **The weekly matrix lands a publication only on the `main` it describes.**
+  `tools/land-matrix-publication.js` merged whenever GitHub reported the
+  branch mergeable, so a commit that reached `main` after the workflow fetched
+  it would have been merged under an operations status, package and
+  publishability inventories, and current-results report rendered for the
+  previous `main`. The workflow now passes the commit it rendered on and the
+  commit it pushed; the helper reads `main` just before merging, rebuilds
+  unless `main` is still the publication's parent, names the pushed commit in
+  the merge so GitHub refuses a branch that moved, and trusts an adopted pull
+  request's mergeability only once its head is that commit. It also no longer
+  treats every HTTP 405 as a race: only "base branch was modified" and
+  conflict refusals rebuild, while a ruleset or other refusal fails at once
+  with GitHub's reason instead of after two pointless rebuilds and a silent
+  `test -n`. Nothing short of a real cohort reaches its merge path, so its
+  self-test now runs in release preflight, and therefore in CI;
+  `tools/check-workflows.js` pins both the preflight step and the helper's two
+  new arguments.
+
+- **The weekly matrix's publication pull request no longer leaves failed
+  checks, and `main` gets CI after it lands.** The first pull-request landing
+  (#40, `aaa71be`) left three failed CI, fuzzing and screening runs with no
+  jobs. GitHub holds pull-request runs on a pull request opened with the
+  workflow token until a person approves them, and the helper merged seconds
+  after opening it, so they never started. The publication commit now carries
+  `[skip ci]`, so GitHub creates none. The pull request title does not,
+  because it becomes the body of the merge commit on `main`. That merge starts
+  no push workflows, so `main`'s new tip got no CI either: `ci.yml` now accepts
+  `workflow_dispatch`, and the weekly workflow dispatches it on `main` beside
+  the dashboard publication, attempting each whatever happens to the other and
+  failing the run with the name of any it could not dispatch. Before
+  committing, the publish step also runs `tools/check-wasm-gate-results.js` and
+  `tools/check-project-status.js`, the two release-preflight checkers whose
+  result a cohort can change and that it did not run, so a cohort that would
+  turn `main` red is not landed. `tools/check-workflows.js` pins the marker to
+  the publication commit alone, the title without it, the exact dispatch block
+  after the landing, the two checkers between the last render and the commit,
+  and that `ci.yml` holds no secret and no write permission.
 
 - One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
   collides with compiler constructor pre-sizing hints: constructor
