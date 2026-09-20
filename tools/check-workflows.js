@@ -47,6 +47,39 @@ function forbidIncludes(text, needle, label) {
   }
 }
 
+function requireBefore(text, first, second, label) {
+  const firstAt = text.indexOf(first);
+  const secondAt = text.indexOf(second);
+  if (firstAt === -1 || secondAt === -1 || firstAt > secondAt) {
+    fail(`${label} must include ${JSON.stringify(first)} before ${JSON.stringify(second)}`);
+  }
+}
+
+// GitHub's markers for skipping push and pull-request workflows. Case is
+// ignored because GitHub documents none, so a variant it might honour still
+// counts here.
+const SKIP_MARKER = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks:\s*true/gi;
+
+// What the weekly matrix dispatches on main once its cohort has landed, exactly.
+const WEEKLY_MATRIX_DISPATCHES = [
+  '          failed=""',
+  "          curl -sSf -X POST \\",
+  '            -H "Authorization: Bearer $GITHUB_TOKEN" \\',
+  '            -H "Accept: application/vnd.github+json" \\',
+  '            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/publish-benchmark-data.yml/dispatches" \\',
+  "            -d '{\"ref\":\"main\"}' || failed=\"publish-benchmark-data.yml\"",
+  "          curl -sSf -X POST \\",
+  '            -H "Authorization: Bearer $GITHUB_TOKEN" \\',
+  '            -H "Accept: application/vnd.github+json" \\',
+  '            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \\',
+  "            -d '{\"ref\":\"main\"}' || failed=\"${failed:+$failed and }ci.yml\"",
+  '          if [ -n "$failed" ]; then',
+  '            echo "::error::The cohort has landed, but dispatching $failed on main failed. Dispatch each one named here on main by hand; re-running this job would measure and land another cohort." >&2',
+  "            exit 1",
+  "          fi",
+  "",
+].join("\n");
+
 function workflowFiles() {
   try {
     return fs.readdirSync(workflowDir)
@@ -318,8 +351,21 @@ function checkCi(text) {
   const rustChannel = pinnedRustChannel();
   const releasePreflightJob = text.split("\n  portable-engine-build:\n", 1)[0];
   requireIncludes(text, "name: CI\n", label);
-  requireIncludes(text, "\"on\":\n  pull_request:\n  push:\n", label);
+  // workflow_dispatch is how the weekly matrix gets CI onto main's tip after a
+  // landing whose merge starts no push workflows.
+  requireIncludes(
+    text,
+    "\"on\":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n",
+    label,
+  );
   requireIncludes(text, "permissions:\n  contents: read\n", label);
+  // Anyone who can dispatch this can already run it through a same-repository
+  // pull request, which is what makes the manual trigger harmless -- as long as
+  // it holds a read-only token and no secret. The token is pinned read-only
+  // above; these reject a write scope or write-all added at any level, and the
+  // secrets context in any form, including toJSON(secrets) and bracket access.
+  if (/\bsecrets\b/i.test(text)) fail(`${label} must not reference the secrets context`);
+  if (/:\s*["']?write/.test(text)) fail(`${label} must not grant a write permission`);
   requireIncludes(
     text,
     "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]",
@@ -647,6 +693,32 @@ function checkWeeklyMatrix(text) {
   requireIncludes(text, "git push --force origin \"HEAD:refs/heads/$branch\"", label);
   forbidIncludes(text, "HEAD:main", label);
   forbidIncludes(text, ":refs/heads/main", label);
+  // A comment names a command without running it, so the checks that say what
+  // the step runs, and where, read the file without its comment lines.
+  const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+  // GitHub holds pull-request runs on a pull request this token opens until a
+  // person approves them, and the helper merges within seconds, so the first
+  // landing left three failed runs with no jobs. The publication commit carries
+  // the skip marker, and it is the only thing in the file that may, comments
+  // included: the title becomes the body of main's merge commit. The helper's
+  // merge starts no push workflows and dispatched runs ignore markers, but a
+  // person merging by hand would push that commit, and a marker there would
+  // skip CI, the series and the dashboard publication on main.
+  requireIncludes(code, 'git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"\n', label);
+  requireIncludes(code, '--title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?\n', label);
+  const skipMarkers = text.match(SKIP_MARKER) || [];
+  if (skipMarkers.length !== 1) {
+    fail(`${label} must carry exactly one CI-skip marker, on the publication commit; found ${skipMarkers.length}`);
+  }
+  // The merge starts no push workflows, so the dashboard publication and CI on
+  // main's new tip are dispatched once the cohort has landed. Both go to main,
+  // each is attempted whatever happens to the other, and a failure fails the
+  // job, so main's new tip is never left without CI behind a green run. The
+  // per-commit series never is: a publication changes no engine code, so the
+  // series would have nothing new to measure.
+  requireIncludes(code, WEEKLY_MATRIX_DISPATCHES, label);
+  requireBefore(code, "nothing was landed\" >&2\n            exit 1\n          fi\n", WEEKLY_MATRIX_DISPATCHES, label);
+  forbidIncludes(text, "main-bench.yml/dispatches", label);
   requireIncludes(text, "publish-benchmark-data.yml/dispatches", label);
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "ref: main", label);
@@ -659,6 +731,19 @@ function checkWeeklyMatrix(text) {
   requireIncludes(text, "node tools/check-benchmark-results.js", label);
   requireIncludes(text, "node tools/check-package-files.js", label);
   requireIncludes(text, "node tools/check-publishability.js", label);
+  // The preflight checkers whose result a cohort can change and that the step
+  // did not otherwise run. They run inside the retry loop, after the last render
+  // and just before the publication is staged and committed, so they check the
+  // tree that lands and a cohort that would turn main red is never landed.
+  requireIncludes(
+    code,
+    "            node tools/check-benchmark-results.js\n" +
+      "            node tools/check-wasm-gate-results.js\n" +
+      "            node tools/check-project-status.js\n" +
+      "            git add bench design tools/check-benchmark-results.js\n" +
+      '            git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"\n',
+    label,
+  );
   // Nothing here may start, pay for, or authenticate to a cloud instance. The
   // lane that did is gone, and these are the strings that would bring it back.
   forbidIncludes(text, "LINODE_TOKEN", label);

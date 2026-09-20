@@ -98,15 +98,16 @@ Current unpublished workspace version: `0.0.1`.
 
 - Automated cross-engine matrix benchmarking on the owned host:
   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines
-  across the five workloads on `ci-bench` and pushes the accepted cohort to
-  `main`, so the published history and dashboard update without operator
-  action. It replaces a nightly job that created a billed cloud instance and
-  ran only when performance-relevant commits had landed; that gate asked the
-  Rustia-progress question, which the per-commit series now answers directly,
-  and running unconditionally makes host drift visible rather than hiding it.
-  Dispatch-only until the first owned-host cohort has been inspected. The
-  workflow shape — including the repository's only CI contents-write grant —
-  is pinned by `tools/check-workflows.js`.
+  across the five workloads on `ci-bench` and lands the accepted cohort on
+  `main` through a pull request it opens and merges, so the published history
+  and dashboard update without operator action. It replaces a nightly job that
+  created a billed cloud instance and ran only when performance-relevant
+  commits had landed; that gate asked the Rustia-progress question, which the
+  per-commit series now answers directly, and running unconditionally makes
+  host drift visible rather than hiding it. It runs weekly, plus manual
+  dispatch; the schedule was added once the first owned-host cohort had been
+  inspected. The workflow shape — including the repository's only CI
+  contents-write grant — is pinned by `tools/check-workflows.js`.
 
 - VM Core 2 C2.2 replaces the plain-mode per-PC Region/receipt selection
   ladder with one loader-built, whole-function executable tape. Every source
@@ -443,9 +444,30 @@ Current unpublished workspace version: `0.0.1`.
   treats every HTTP 405 as a race: only "base branch was modified" and
   conflict refusals rebuild, while a ruleset or other refusal fails at once
   with GitHub's reason instead of after two pointless rebuilds and a silent
-  `test -n`. This path has not yet landed a cohort, so its self-test now runs
-  in release preflight, and therefore in CI; `tools/check-workflows.js` pins
-  both the preflight step and the helper's two new arguments.
+  `test -n`. Nothing short of a real cohort reaches its merge path, so its
+  self-test now runs in release preflight, and therefore in CI;
+  `tools/check-workflows.js` pins both the preflight step and the helper's two
+  new arguments.
+
+- **The weekly matrix's publication pull request no longer leaves failed
+  checks, and `main` gets CI after it lands.** The first pull-request landing
+  (#40, `aaa71be`) left three failed CI, fuzzing and screening runs with no
+  jobs. GitHub holds pull-request runs on a pull request opened with the
+  workflow token until a person approves them, and the helper merged seconds
+  after opening it, so they never started. The publication commit now carries
+  `[skip ci]`, so GitHub creates none. The pull request title does not,
+  because it becomes the body of the merge commit on `main`. That merge starts
+  no push workflows, so `main`'s new tip got no CI either: `ci.yml` now accepts
+  `workflow_dispatch`, and the weekly workflow dispatches it on `main` beside
+  the dashboard publication, attempting each whatever happens to the other and
+  failing the run with the name of any it could not dispatch. Before
+  committing, the publish step also runs `tools/check-wasm-gate-results.js` and
+  `tools/check-project-status.js`, the two release-preflight checkers whose
+  result a cohort can change and that it did not run, so a cohort that would
+  turn `main` red is not landed. `tools/check-workflows.js` pins the marker to
+  the publication commit alone, the title without it, the exact dispatch block
+  after the landing, the two checkers between the last render and the commit,
+  and that `ci.yml` holds no secret and no write permission.
 
 - One-argument `table.create(n)` under `Profile::Puc51Compat` no longer
   collides with compiler constructor pre-sizing hints: constructor
