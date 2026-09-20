@@ -571,9 +571,11 @@ unreachable suspended-coroutine frames.
    not comparable with the new one's, so the response to new hardware is to re-derive rather than append.
    The runner attests the machine before building, takes an exclusive lock, applies declared source
    repairs by re-deriving them from Git, and records the identical-binary repeatability check in evidence.
-   Every commit landing on `main` is now measured automatically on the owned host under that same
-   protocol and appended to the published series, so the chart advances rather than freezing at the last
-   reconstructed revision; a commit whose binary is byte-identical records nothing. Runner policy is
+   Every commit landing on `main` now starts an automatic measurement on the owned host under that same
+   protocol, appended to the published series, so the chart advances rather than freezing at the last
+   reconstructed revision; a commit whose binary is byte-identical records nothing. The weekly matrix's
+   publication merge starts none (the workflow token that makes it starts no push workflows, and it
+   changes no engine code), and a run that fails or is cancelled records no point for its commit. Runner policy is
    split into classes: the shared pool may not produce a timing and holds no `measurement-` role, at most
    one class may be authoritative, and measurement is reachable from a workflow only through the
    entrypoint that attests the machine first.
@@ -623,12 +625,18 @@ unreachable suspended-coroutine frames.
    `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines on the owned host and lands
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
-   repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`). It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
+   repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`).
+   GitHub holds pull-request runs on a pull request the workflow token opens until a person approves them,
+   and the helper merges within seconds, so the publication commit carries `[skip ci]` and the pull
+   request starts no checks; that merge starts no push workflows either, so the workflow dispatches CI on
+   `main` once the cohort has landed. `main` therefore cannot require status checks while cohorts land
+   this way, and a publication pull request must land as a merge commit. It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
-   (`f480758`) has landed, and `bench/history/runs.jsonl` holds only cohorts measured on `ci-bench`, one per
-   accepted weekly publication (`f49646f` was the second): the 1,230 rows measured on retired cloud hosts
-   were removed once every generated report reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
+   (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land
+   through the pull request, so `bench/history/runs.jsonl` now holds only those two cohorts, both measured
+   on `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
+   reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
    the ratio ranges 0.71x to 1.86x by engine, so absolute nanoseconds do not carry across the change while
    the published same-run ratios do. Every emitted row now names its machine in a `host` field
