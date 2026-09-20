@@ -228,7 +228,10 @@ Current unpublished workspace version: `0.0.1`.
   memory cohort's host evidence records `uname -srvm` rather than `uname -a`,
   as the matrix runner's owned lane already did. The published data
   repository's memory table and history were stamped the same way
-  (slowchop/rustia-bench-data PR #9).
+  (slowchop/rustia-bench-data PR #9). The weekly cohort `7826508f` landed
+  while this was open, measured on the owned host by a commit that predates
+  the field: its 65 rows are stamped here like the two before them, from its
+  own evidence, and the published tables are regenerated from that history.
 - The memory merge treats a generated cohort as one machine before merging it.
   `tools/merge-rustia-ci-memory-data.js` refuses a cohort whose rows,
   `metadata.host` or history line disagree, and names the side that is wrong.

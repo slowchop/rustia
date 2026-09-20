@@ -634,7 +634,8 @@ unreachable suspended-coroutine frames.
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land
-   through the pull request, so `bench/history/runs.jsonl` now holds only those two cohorts, both measured
+   through the pull request, joined by `7826508f` (2026-09-20), so `bench/history/runs.jsonl` now holds
+   only those three cohorts of 65 rows, every one measured
    on `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
    reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
