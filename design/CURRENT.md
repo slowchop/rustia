@@ -587,9 +587,12 @@ unreachable suspended-coroutine frames.
    `just bench-calibrate` measures one revision four times and compares it against itself under all
    three balanced splits of those passes, both sides of every split being the same binary, so each
    interval is the host's own spread and each threshold is the widest end of the widest split. The
-   committed values are 1.61% to 3.88% per workload — every one above the 1.5% this lane was planned
-   around, which is why they had to be measured. There is no default, because a declared figure sitting
-   inside that spread would report movement on changes that did nothing.
+   committed values are 1.20% to 7.60% per workload, calibrated on 2026-09-20 with the timed cores held
+   at the `performance` governor (the earlier 1.61% to 3.88% set was measured under `schedutil`). They
+   are not all above the 1.5% this lane was planned around: `sparse_tables` sits below it and
+   `generic_iteration` is five times above it, widened by one slow leg in the calibration — which is why
+   they had to be measured. There is no default, because a declared figure sitting inside that spread
+   would report movement on changes that did nothing.
    The A/A run doubles as the protocol's canary and found real drift, twice. `sparse_tables` read 1.2%
    faster than itself, and on a later run `stdlib_math_table` read slower, both under the split that
    places each candidate pass immediately after its baseline, both excluding zero. That is monotonic
