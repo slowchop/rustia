@@ -1,0 +1,15 @@
+{
+  "schema": "rustia.bench.matrix-host.v1",
+  "captured_at": "2026-09-21T05:38:14.299Z",
+  "platform": "linux",
+  "arch": "x86_64",
+  "uname": "Linux 6.8.0-138-generic #138-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 31 22:41:49 UTC 2026 x86_64",
+  "os_release": "PRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.4 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+  "virtualization": "none",
+  "cpu_model": "AMD Ryzen 5 3600X 6-Core Processor",
+  "cpuinfo_sha256": "fc500a0fc2002d9c37a98fdcedb2a6ae397402dcd97873361a9e6fda278665d1",
+  "benchmark_cpu": 4,
+  "rustc_vv": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+  "taskset_version": "taskset from util-linux 2.39.3"
+}

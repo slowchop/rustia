@@ -25,6 +25,24 @@ const extendedProvenanceCohorts = new Set([
 ]);
 const expectedEngineCohorts = new Map([
   [
+    "a5cd40cbd8d752ce40ee4304b8ca20f39b156f94",
+    new Map([
+      ["rustia", "luau"],
+      ["boa", "javascript"],
+      ["koto", "koto"],
+      ["luaur", "luau"],
+      ["mlua-luau", "luau"],
+      ["mlua-luau-jit", "luau"],
+      ["rhai", "rhai"],
+      ["roto", "roto"],
+      ["ruau", "luau"],
+      ["rquickjs", "javascript"],
+      ["wasmi", "wasm"],
+      ["wasmtime", "wasm"],
+      ["mlua-lua54", "lua54"],
+    ]),
+  ],
+  [
     "7826508f767013e14c0030cbc2f741c5471acd47",
     new Map([
       ["rustia", "luau"],
