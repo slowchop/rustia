@@ -123,7 +123,8 @@ bench-history-fetch replace="":
 bench-history-unlock:
     node tools/run-dedicated-benchmark.js unlock
 
-# Read-only: free space, journal size, load and driver state on the host.
+# Read-only: free space, journal size, load, driver state and the isolated
+# cores' frequency policy on the host.
 bench-host-check:
     node tools/run-dedicated-benchmark.js host-check
 

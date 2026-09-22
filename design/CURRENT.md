@@ -620,7 +620,12 @@ unreachable suspended-coroutine frames.
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
    asserted: cores held off the scheduler, SMT disabled, each pinned core held at its ceiling with boost off,
    timed work pinned to one isolated core, one job on
-   the box at a time, and every run attested against the frozen config before it builds. Every workflow that
+   the box at a time, and every run attested against the frozen config before it builds. Each of those properties is a
+   key of the `qualification` record in `bench/operations-policy.json`, which the status renderer refuses to
+   drop one of, so the record and this list do not drift apart. The ceiling is read from the cpufreq policy the
+   kernel publishes: a pinned core
+   exposing none is accepted as unscaled, and `just bench-host-check` prints each isolated core's governor,
+   range and boost so that reading is available before a run rather than only from a refusal after one. Every workflow that
    measures reaches it through `tools/run-dedicated-benchmark.js`: the cross-engine matrix (`matrix`), the
    per-commit series (`main`), pull-request screening (`pr`, plus its `live-serde` and `calibrate` jobs),
    dispatch-only A/B acceptance (`accept`, `.github/workflows/acceptance-bench.yml`: two to sixteen legs, a

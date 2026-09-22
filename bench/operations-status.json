@@ -28,7 +28,15 @@
         "pinned_cpu": 4,
         "smt": "disabled",
         "concurrent_jobs": 1,
-        "attested_by": "tools/run-dedicated-benchmark.js compares the machine's own report against the frozen config before shipping, including that every pinned core is in /sys/devices/system/cpu/isolated",
+        "cpu_frequency": {
+          "pinned_cores": "held-at-ceiling",
+          "governor": "performance",
+          "boost": "off",
+          "equivalent": "scaling_min_freq equal to scaling_max_freq, under any governor",
+          "exemption": "A pinned core that exposes no cpufreq policy is accepted: the kernel is not scaling it. This qualifies the policy the kernel publishes, not the frequency the core ran at.",
+          "reason": "On an isolated, tickless core nothing drives a dynamic governor's next decision while one process runs, so a process after a long idle can run to completion at the floor. One acceptance leg read dense_tables 1.68x slow that way and passed every idle and steal gate."
+        },
+        "attested_by": "tools/run-dedicated-benchmark.js compares the machine's own report against the frozen config before shipping anything and refuses the run on any disagreement. This field names the mechanism, not the checks: the qualified properties are the keys beside it, and each run's provider record carries the readings taken.",
         "repeatability": {
           "protocol": "rustia_history_backfill_v1",
           "repetitions": 5,

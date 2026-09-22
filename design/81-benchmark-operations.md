@@ -61,11 +61,18 @@ process after a long idle can run to completion at the floor: the first leg of
 an acceptance run read `dense_tables` at a median of 65,325 ns/unit against
 37,824-39,205 on every other leg of its side (a ratio of 1.68 to the core's
 3.8/2.2 GHz range of 1.73), the next process on the same core ran at full
-speed, and the leg passed every idle and steal gate. The attestation therefore refuses a pinned core
-unless it runs the `performance` governor or has `scaling_min_freq` equal to
+speed, and the leg passed every idle and steal gate. The attestation therefore reads the cpufreq
+policy of every pinned core, and refuses a core that exposes one unless it
+runs the `performance` governor or has `scaling_min_freq` equal to
 `scaling_max_freq`, and refuses it again when the kernel exposes a boost knob
 for it that is on: the governor holds the ceiling, boost lets the part float
-above it on thermal headroom. The acceptance summary names any leg that sits
+above it on thermal headroom. A pinned core that exposes no cpufreq policy at
+all is accepted, because nothing is scaling it; a report that omits the field
+altogether is refused, as every other unreported field is. It is a check on
+the policy the kernel publishes, not a proof of the frequency the core ran at,
+so a machine whose scaling driver never loaded is taken at its word.
+`just bench-host-check` prints each isolated core's policy, so that reading is
+available before a run rather than only from a refusal after one. The acceptance summary names any leg that sits
 apart from the rest of its side, so the next such event is visible from the
 workflow rather than from a login.
 
@@ -74,9 +81,17 @@ later by adding a second. Measurement is reachable from a workflow only through
 that one attesting entrypoint; the on-host runners may not be invoked from a
 workflow at all.
 
-The qualification record carries the machine's measured repeatability. Quote it
-per workload: spread scales inversely with per-unit cost, so the same host reads
-0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
+The `qualification` block in `bench/operations-policy.json` names every property
+the class is qualified by, one key each: the isolated cores, the pinned core,
+SMT, one job at a time, and the frequency ceiling.
+`tools/render-benchmark-operations-status.js` refuses a policy whose timing
+authority drops one, so the record cannot quietly lose a property; the list in
+`design/CURRENT.md` names that same set. What the attestation read, rather than
+what it demands, is in each run's provider block.
+
+The qualification record also carries the machine's measured repeatability.
+Quote it per workload: spread scales inversely with per-unit cost, so the same
+host reads 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
 ### Waiting for the host
 

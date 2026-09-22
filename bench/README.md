@@ -492,9 +492,12 @@ provenance label published in row data, never an ssh target. Before shipping
 anything it attests the machine against the frozen config — CPU model, logical
 CPU count, SMT off, free disk under the runner's home above the coordinator's
 `MINIMUM_FREE_GIB` floor, that every pinned CPU really is in the kernel's
-isolated set, and that each is held at its ceiling: the `performance` governor
-or a scaling range pinned to one frequency, with boost off wherever the kernel
-exposes a knob for it. A pinned core the scheduler still uses is the failure
+isolated set, and that each pinned core exposing a cpufreq policy is held at
+its ceiling by it: the `performance` governor or a scaling range pinned to one
+frequency, with boost off wherever the kernel exposes a knob for it. A pinned
+core with no cpufreq policy at all is accepted, since nothing is scaling it, so
+this checks the policy the kernel publishes rather than proving the frequency
+the core ran at. A pinned core the scheduler still uses is the failure
 this protocol exists to prevent, and it does not show up in the timings; nor
 does one left to a dynamic governor, which can run a whole process at its
 floor.
@@ -525,9 +528,11 @@ automatically once its pid is gone; `just bench-history-unlock` clears the
 history, matrix and memory lanes' locks by hand. A run wipes its working state
 at startup but keeps the cargo target directory warm, which is what makes each
 revision cost about 26 seconds rather than minutes. `just bench-host-check`
-prints the host's free space, journal size, load average and driver state
-without touching anything; it is the first thing to run when a lane refuses a
-quiet window twice in a row.
+prints the host's free space, journal size, load average, driver state and each
+isolated core's frequency policy — governor, range, boost and whether the
+attestation would accept it — without touching anything; it is the first thing
+to run when a lane refuses a quiet window twice in a row, or when a leg comes
+back slow.
 
 Revisions that predate the harness entry point need source changes to be
 drivable at all: the workspace must declare the overlaid `bench` crate, and a
