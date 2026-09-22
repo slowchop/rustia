@@ -146,8 +146,4 @@ gen-current-results:
     node bench/render-current-results.js
     node bench/render-claims.js
 
-bench-recover-linux-history:
-    node tools/recover-linode-linux-history.js
-    just gen-current-results
-
 gen-benchmark-results: gen-current-results

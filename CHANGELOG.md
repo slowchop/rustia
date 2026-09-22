@@ -405,6 +405,19 @@ Current unpublished workspace version: `0.0.1`.
   change would otherwise see engine movements that never happened. Published
   figures are ratios against the reference measured in the same run, so they are
   unaffected.
+- **Deleted the ledger-recovery tool** `tools/recover-linode-linux-history.js`
+  and its `just bench-recover-linux-history` recipe. It rebuilt
+  `bench/history/runs.jsonl` from eleven committed snapshots into 905 rows
+  measured on the retired rented hosts — the rows the deletion above
+  removed — and none of them carry the `host` field every published row is
+  now required to name. It could therefore only overwrite the good ledger with one
+  `tools/check-benchmark-results.js` refuses on its first row, and its
+  `--check` mode, which asserted the ledger equals exactly that snapshot set,
+  could only fail. Nothing else invoked it and no self-test ran it. Re-deriving
+  a series for a new machine is `just bench-history`, not a replay of another
+  machine's numbers; removing a cohort is `tools/retire-cloud-history.js`,
+  which covers nothing this carried. The code remains in this repository's Git
+  history.
 
 - Every benchmark now runs on one owned, attested machine. The DigitalOcean,
   Vultr and Scaleway coordinators are deleted, and the cross-engine matrix moved
