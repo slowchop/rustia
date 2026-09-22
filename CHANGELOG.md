@@ -96,6 +96,31 @@ Current unpublished workspace version: `0.0.1`.
   hosts only if every generated report comes out byte-identical, and restores the
   file if any of them moves.
 
+- A frequency attestation on every timed core, and a `host-check` that reports
+  it. A pinned core left to a dynamic governor is not merely noisy: on an
+  isolated, tickless core nothing drives the governor's next decision while one
+  process runs, so a process after a long idle can run to completion at the
+  floor. The first leg of an acceptance run read `dense_tables` at a median of
+  65,325 ns/unit against 37,824-39,205 on every other leg of its side — a ratio
+  of 1.68 to the core's 3.8/2.2 GHz range of 1.73 — while passing every idle and
+  steal gate, which is why it had to become a check rather than a caution.
+  `tools/run-dedicated-benchmark.js` now reads each pinned core's cpufreq policy
+  before a run and refuses one that exposes a policy unless it runs the
+  `performance` governor or has `scaling_min_freq` equal to `scaling_max_freq`,
+  and refuses it again when the kernel exposes a boost knob for it that is on.
+  A pinned core exposing no cpufreq policy is accepted, since nothing is scaling
+  it; a report that omits the field altogether is refused like every other
+  unreported field. The policies of the pinned cores are recorded in each run's
+  provider block. `just bench-host-check` prints every isolated core's governor,
+  range, boost and verdict from the same parser, so the reading is available
+  before a run rather than only from a refusal after one, and the
+  `qualification` record in `bench/operations-policy.json` now names the
+  property as a `cpu_frequency` key, validated by
+  `tools/render-benchmark-operations-status.js`, so it and `design/CURRENT.md`
+  enumerate the same qualified properties. This qualifies the policy the kernel
+  publishes, not the frequency the core ran at; a machine whose scaling driver
+  never loaded is taken at its word.
+
 - Automated cross-engine matrix benchmarking on the owned host:
   `.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines
   across the five workloads on `ci-bench` and lands the accepted cohort on

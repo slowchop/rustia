@@ -545,6 +545,11 @@ function parseArgs(argv) {
 // Host attestation
 // ---------------------------------------------------------------------------
 
+// One reading with one spelling. The attestation refuses a run on these
+// policies and `host-check` reports them; a second probe written for the
+// second reader would be a second thing to keep true.
+const CPUFREQ_PROBE = `printf 'cpufreq=%s\\n' "$(for d in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do [ -d "$d" ] || continue; printf '%s:%s:%s:%s:%s ' "$(basename "$(dirname "$d")" | sed 's/^cpu//')" "$(cat "$d/scaling_governor" 2>/dev/null || echo unknown)" "$(cat "$d/scaling_min_freq" 2>/dev/null || echo 0)" "$(cat "$d/scaling_max_freq" 2>/dev/null || echo 0)" "$(cat "$d/cpb" 2>/dev/null || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || { t=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null) && echo $((1 - t)); } || echo none)"; done)"`;
+
 /// Reads the machine's own account of itself. Only the three isolation tokens
 /// are taken from /proc/cmdline: the full command line carries root=UUID= and
 /// other host detail that must not enter this repository.
@@ -559,7 +564,7 @@ printf 'free_kib=%s\\n' "$(df -Pk "$HOME" | awk 'NR==2{print $4}')"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
-printf 'cpufreq=%s\\n' "$(for d in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do [ -d "$d" ] || continue; printf '%s:%s:%s:%s:%s ' "$(basename "$(dirname "$d")" | sed 's/^cpu//')" "$(cat "$d/scaling_governor" 2>/dev/null || echo unknown)" "$(cat "$d/scaling_min_freq" 2>/dev/null || echo 0)" "$(cat "$d/scaling_max_freq" 2>/dev/null || echo 0)" "$(cat "$d/cpb" 2>/dev/null || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || { t=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null) && echo $((1 - t)); } || echo none)"; done)"
+${CPUFREQ_PROBE}
 `;
 
 function attestHost(config) {
@@ -2086,10 +2091,11 @@ function commandUnlock() {
 }
 
 /// A read-only look at the host between runs, limited to what has actually
-/// stopped a run here: free space under $HOME (a filled disk stopped the weekly
-/// matrix before this script ran on 2026-09-06), the journal's share of it, the
-/// load average (a driver fault held it at 43 for a day), and whether that
-/// driver is loaded. Nothing printed names the machine.
+/// stopped a run here or spoiled a measurement: free space under $HOME (a
+/// filled disk stopped the weekly matrix before this script ran on
+/// 2026-09-06), the journal's share of it, the load average (a driver fault
+/// held it at 43 for a day), whether that driver is loaded, and the frequency
+/// policy of each isolated core. Nothing printed names the machine.
 const HOST_CHECK_SCRIPT = `
 set -u
 printf 'free_under_home=%s GiB (floor ${MINIMUM_FREE_GIB})\\n' "$(df -Pk "$HOME" | awk 'NR==2{printf "%.1f", $4/1048576}')"
@@ -2100,11 +2106,63 @@ printf 'runner_diag=%s\\n' "\${diag:-none}"
 printf 'loadavg=%s\\n' "$(cut -d' ' -f1-3 /proc/loadavg)"
 printf 'nouveau_loaded=%s\\n' "$(lsmod | grep -c '^nouveau ')"
 printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
+${CPUFREQ_PROBE}
 `;
 
+/// The frequency half of host-check, as an operator reads it. A pinned core
+/// left to a dynamic governor is the one host fault here that produced a wrong
+/// number rather than a failed run, so the command reached for first says what
+/// the attestation would say -- and says it for every isolated core, because
+/// this command loads no config and a pinned core is always one of them.
+/// Verdicts are the attestation's own, from the same parser and predicate, so
+/// the two cannot drift into disagreeing about the same reading.
+function formatFrequencyReport(isolatedCpus, cpufreq) {
+  if (cpufreq === undefined) return "cpufreq=the host reported no policies\n";
+  let isolated;
+  try {
+    isolated = isolatedCpus ? parseCpuList(isolatedCpus) : [];
+  } catch (error) {
+    return `cpufreq=unreadable isolated set (${error.message})\n`;
+  }
+  if (isolated.length === 0) return "cpufreq=no isolated cores to report\n";
+  let policies;
+  try {
+    policies = parseFrequencyPolicies(cpufreq);
+  } catch (error) {
+    return `cpufreq=${error.message}\n`;
+  }
+  let report = "";
+  for (const cpu of isolated) {
+    const policy = policies.get(cpu);
+    if (!policy) {
+      report += `cpufreq_cpu${cpu}=no cpufreq node (the kernel is not scaling it; accepted)\n`;
+      continue;
+    }
+    // Both faults, not the first: they have separate fixes, and an operator
+    // who reads one, fixes it and re-runs would meet the other.
+    const faults = [];
+    if (!heldAtCeiling(policy)) faults.push("NOT held at its ceiling");
+    if (policy.boost === "1") faults.push("boost is on");
+    const verdict =
+      faults.length === 0 ? "held at its ceiling" : `${faults.join(", ")}; a run pinned here is refused`;
+    report +=
+      `cpufreq_cpu${cpu}=${policy.governor} ${policy.min_khz}-${policy.max_khz} kHz ` +
+      `boost=${policy.boost} (${verdict})\n`;
+  }
+  return report;
+}
+
 function commandHostCheck() {
-  const out = sshCapture(HOST_CHECK_SCRIPT);
-  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+  const lines = sshCapture(HOST_CHECK_SCRIPT).split("\n").filter((line) => line.trim() !== "");
+  const fields = new Map();
+  for (const line of lines) {
+    const at = line.indexOf("=");
+    if (at > 0) fields.set(line.slice(0, at), line.slice(at + 1).trim());
+  }
+  // The raw policy line is replaced by the per-core reading, not printed
+  // beside it: one line of every core's five fields is what nobody reads.
+  for (const line of lines) if (!line.startsWith("cpufreq=")) process.stdout.write(`${line}\n`);
+  process.stdout.write(formatFrequencyReport(fields.get("isolated_cpus"), fields.get("cpufreq")));
 }
 
 function selfTest() {
@@ -2242,6 +2300,35 @@ function selfTest() {
     4: { governor: "performance", min_khz: 3800000, max_khz: 3800000, boost: "0" },
   });
   assert.deepEqual(pinnedFrequencyPolicies("4", ""), { 4: null });
+
+  // host-check reports the same reading the attestation refuses on, for every
+  // isolated core, since a pinned core is one of them and this command loads no
+  // config to learn which. An operator reading "held at its ceiling" must be
+  // reading the attestation's own verdict.
+  assert.equal(
+    formatFrequencyReport("4-5", "0:schedutil:2200000:3800000:0 4:performance:3800000:3800000:0"),
+    "cpufreq_cpu4=performance 3800000-3800000 kHz boost=0 (held at its ceiling)\n" +
+      "cpufreq_cpu5=no cpufreq node (the kernel is not scaling it; accepted)\n",
+    "an unpinned core is not reported, and a core with no node reads as the attestation takes it",
+  );
+  assert.match(
+    formatFrequencyReport("4", "4:schedutil:2200000:3800000:0"),
+    /^cpufreq_cpu4=schedutil 2200000-3800000 kHz boost=0 \(NOT held at its ceiling; a run pinned here is refused\)\n$/,
+  );
+  assert.match(
+    formatFrequencyReport("4", "4:performance:3800000:3800000:1"),
+    /boost=1 \(boost is on; a run pinned here is refused\)/,
+  );
+  assert.match(
+    formatFrequencyReport("4", "4:schedutil:2200000:3800000:1"),
+    /\(NOT held at its ceiling, boost is on; a run pinned here is refused\)/,
+    "both faults are named, because they have separate fixes",
+  );
+  assert.equal(formatFrequencyReport("4", ""), "cpufreq_cpu4=no cpufreq node (the kernel is not scaling it; accepted)\n");
+  assert.equal(formatFrequencyReport("", ""), "cpufreq=no isolated cores to report\n");
+  assert.equal(formatFrequencyReport("4", undefined), "cpufreq=the host reported no policies\n");
+  assert.match(formatFrequencyReport("x", "4:performance:3800000:3800000:0"), /^cpufreq=unreadable isolated set/);
+  assert.match(formatFrequencyReport("4", "4:performance:3800000"), /^cpufreq=unreadable cpufreq policy/);
 
   // One leg 69% out is flagged; ordinary spread is not; two legs cannot say
   // which of them is apart; three thresholds applies once wider than 5%.
@@ -2711,7 +2798,8 @@ function usage() {
       "                                         the per-workload screening thresholds\n" +
       "  fetch     [--config FILE] [--replace]  re-collect and promote the last remote run\n" +
       "  unlock                                 clear stale lane locks on the benchmark host\n" +
-      "  host-check                             print free space, journal size and load there\n" +
+      "  host-check                             print free space, journal size, load and the\n" +
+      "                                         isolated cores' frequency policy there\n" +
       "  self-test                              run the pure-function checks\n" +
       "\n" +
       `Set ${SSH_ENV} to the host's ssh destination or ssh_config alias.\n`,

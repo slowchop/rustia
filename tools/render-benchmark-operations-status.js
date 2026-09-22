@@ -114,6 +114,23 @@ function validateRunnerClasses(policy) {
     }
     if (q.smt !== "disabled") fail(`runner_classes.${name}.qualification.smt must be "disabled"`);
     if (q.concurrent_jobs !== 1) fail(`runner_classes.${name}.qualification.concurrent_jobs must be 1`);
+    // design/CURRENT.md lists the frequency ceiling among the properties this
+    // host is qualified by, so the record enumerates it as a key rather than
+    // leaving it to the prose in attested_by. A pinned core left to a dynamic
+    // governor is the one qualification fault here that produced a wrong
+    // number instead of a failed run. Only the two invariants are rules: the
+    // attestation holds a core at its ceiling under the performance governor
+    // or a range pinned to one frequency, so the governor a machine gets there
+    // by is a reading it declares, not a value this may demand.
+    const frequency = q.cpu_frequency;
+    if (frequency === null || typeof frequency !== "object"
+      || frequency.pinned_cores !== "held-at-ceiling"
+      || frequency.boost !== "off") {
+      fail(
+        `runner_classes.${name}.qualification.cpu_frequency must hold every pinned core at its ` +
+        "ceiling with boost off",
+      );
+    }
     const r = q.repeatability;
     if (r === null || typeof r !== "object"
       || typeof r.median_spread_percent !== "number"
@@ -268,6 +285,24 @@ function selfTest(policy) {
   refuses(literal(`runner_classes.${authority}.host must be a non-empty string`), (copy) => {
     copy.runner_classes[authority].host = "";
   });
+  const ceiling = literal(
+    `runner_classes.${authority}.qualification.cpu_frequency must hold every pinned core at its ` +
+    "ceiling with boost off",
+  );
+  refuses(ceiling, (copy) => {
+    delete copy.runner_classes[authority].qualification.cpu_frequency;
+  });
+  refuses(ceiling, (copy) => {
+    copy.runner_classes[authority].qualification.cpu_frequency.pinned_cores = "scaled";
+  });
+  refuses(ceiling, (copy) => {
+    copy.runner_classes[authority].qualification.cpu_frequency.boost = "on";
+  });
+  // The attestation accepts a pinned range under any governor, so the governor
+  // this machine gets there by is a declared reading rather than a rule.
+  validatePolicy(variant((copy) => {
+    copy.runner_classes[authority].qualification.cpu_frequency.governor = "userspace";
+  }));
   // Only the authority must name a machine; another class may name none.
   validatePolicy(variant((copy) => {
     copy.runner_classes["general-linux"].host = null;
