@@ -638,8 +638,8 @@ unreachable suspended-coroutine frames.
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land
-   through the pull request, joined by `7826508f` (2026-09-20), so `bench/history/runs.jsonl` now holds
-   only those three cohorts of 65 rows, every one measured
+   through the pull request, joined by `7826508f` (2026-09-20) and `a5cd40cb` (2026-09-21), so
+   `bench/history/runs.jsonl` now holds only those four cohorts of 65 rows, every one measured
    on `ci-bench`: the 1,230 rows measured on retired cloud hosts were removed once every generated report
    reproduced byte-identically without them. `bench/evidence/matrix/f480758.../host-bridge.json` records how
    the two machines compared first, because that could not be recovered afterwards and is not a constant —
@@ -690,7 +690,11 @@ unreachable suspended-coroutine frames.
    memory acceptance rules the owned-host coordinator borrows — nothing runs its lifecycle, and release
    preflight runs only its offline self-test. The rented-model A/B runner, `tools/run-linux-fixed-benchmark.js`,
    is deleted; the frozen-config validation it carried lives in `tools/check-dedicated-config.js`, which also
-   refuses a `provider.host.name` that is not a label.
+   refuses a `provider.host.name` that is not a label. The ledger-recovery tool,
+   `tools/recover-linode-linux-history.js`, and its `just bench-recover-linux-history` recipe are deleted
+   with them: it rebuilt the ledger into 905 rows from the retired hosts, none naming a `host`, so after the
+   retirement it could only replace the good file with one the checker refuses. Re-deriving the series for a
+   new machine is `just bench-history`; removing a cohort is `tools/retire-cloud-history.js`.
 
 **Pre-release gates:** see the "What's next" section below. Object reclamation/limits and deterministic
 decision reset, maintained live-memory accounting, and the shared native/Node-V8 mixed-heap pressure gate are
