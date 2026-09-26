@@ -18,18 +18,25 @@ name: Cross-Engine Matrix (weekly)
 # contents-write: the cohort belongs in this repository's history, unlike the
 # per-commit series, whose rows grow forever and live in the data repository.
 #
-# main takes changes only through pull requests -- an organisation rule with no
-# bypass for anyone, this token included -- so the accepted cohort is pushed to
-# a branch and landed by tools/land-matrix-publication.js, which opens the pull
-# request and merges it with a merge commit. That needs pull-requests: write and
-# the repository setting that lets Actions create pull requests.
+# main takes changes only through pull requests -- an organisation rule covering
+# every active private repository, which no workflow token can bypass -- so the
+# accepted cohort is pushed to a branch and landed by
+# tools/land-matrix-publication.js, which opens the pull request and merges it
+# with a merge commit.
 #
-# Nothing runs on that pull request. GitHub holds pull-request runs on a pull
-# request this token opens until someone with write access approves them, and
-# the helper merges within seconds, so the first landing (#40) left three failed
-# runs with no jobs behind it. The publication commit therefore carries GitHub's
-# CI-skip marker and no run is created. The merge starts no push workflows
-# either, so once the cohort has landed this workflow dispatches CI on main.
+# The landing merge is made as the slowchop-ops-controller app rather than with
+# the workflow token, and that identity is the point: a named app can be a
+# ruleset bypass actor, github-actions[bot] cannot, so this is what lets main
+# require status checks at all. Only the merge uses the app token. The
+# dispatches below stay on the workflow token because the app holds
+# actions: read and dispatching a workflow needs write.
+#
+# Nothing runs on that pull request. The publication commit carries GitHub's
+# CI-skip marker, so no pull-request run is created -- and a required check
+# that never reports would block the merge for good, which is precisely what
+# the app's bypass answers. The marker predates the app: runs on a pull request
+# the workflow token opened were held for an approval the merge never gave, and
+# the first landing (#40) left three failed runs with no jobs behind it.
 #
 # Weekly on Sunday 15:00 UTC (early Monday morning at the host, when the machine
 # is idle), plus manual dispatch for an out-of-cycle cohort. The schedule was
@@ -89,9 +96,19 @@ jobs:
           printf 'RUSTIA_MATRIX_COMMIT=%s\n' "$short_commit" >> "$GITHUB_ENV"
           printf 'RUSTIA_BENCHMARK_COMMIT=%s\n' "$benchmark_commit" >> "$GITHUB_ENV"
 
+      # Minted after the measurement rather than at job start: an installation
+      # token lives one hour and the cohort takes about forty minutes.
+      - name: Mint the landing token
+        id: landing-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.OPS_CONTROLLER_APP_ID }}
+          private-key: ${{ secrets.OPS_CONTROLLER_PRIVATE_KEY }}
+
       - name: Publish the accepted cohort to main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTIA_LANDING_TOKEN: ${{ steps.landing-token.outputs.token }}
         run: |
           set -euo pipefail
           config="bench/cloud/dedicated-cross-engine-matrix-${RUSTIA_MATRIX_COMMIT}.json"
@@ -134,13 +151,13 @@ jobs:
             node tools/check-wasm-gate-results.js
             node tools/check-project-status.js
             git add bench design tools/check-benchmark-results.js
-            # The marker stops GitHub creating pull-request runs that would
-            # wait for an approval the merge never gives (see the header). Only
-            # this commit carries it: the title below becomes the body of
-            # main's merge commit. The helper's merge starts no push workflows
-            # and the runs dispatched afterwards ignore markers, but if a person
-            # merged this pull request by hand, a marker there would skip CI,
-            # the per-commit series and the dashboard publication on main.
+            # The marker stops GitHub creating pull-request runs on this
+            # branch (see the header), which is what the app's ruleset bypass
+            # answers for. Only this commit carries it: the title below becomes
+            # the body of main's merge commit, so main's tip is unmarked and
+            # the merge's own push runs are created normally. If a person
+            # merged this pull request by hand, a marker on main would skip CI,
+            # the per-commit series and the dashboard publication.
             git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"
             publication_commit="$(git rev-parse HEAD)"
             git push --force origin "HEAD:refs/heads/$branch"
@@ -148,6 +165,7 @@ jobs:
             # it and is rebuilt; anything else that is not success is a
             # failure, and the helper has already printed GitHub's reason.
             landing=0
+            GITHUB_TOKEN="$RUSTIA_LANDING_TOKEN" \
             node tools/land-matrix-publication.js \
               --branch "$branch" \
               --base "$base_commit" \
@@ -164,12 +182,18 @@ jobs:
             echo "main moved under the publication on all three attempts; nothing was landed" >&2
             exit 1
           fi
-          # A merge performed with GITHUB_TOKEN starts no push workflows, so the
-          # dashboard publication and CI on main's new tip are dispatched
-          # explicitly. Each is attempted whatever happens to the other, and a
-          # failure names what to dispatch by hand. The per-commit series is not
-          # dispatched: the publication changes no engine code, so it has
-          # nothing to measure.
+          # A merge made with the app token does start push workflows, unlike
+          # one made with the workflow token, so these dispatches may duplicate
+          # runs the merge already created. Both targets tolerate that: CI on
+          # main shares one concurrency group, and the dashboard publication
+          # commits only when its render actually changes. They are kept until
+          # a landing has shown which runs the merge creates by itself, because
+          # a cohort that lands without CI costs another forty minutes of host
+          # time to recover. Each is attempted whatever happens to the other,
+          # and a failure names what to dispatch by hand. The per-commit series
+          # is still not dispatched, but the merge's own push now reaches it:
+          # the publication changes no engine code, so its byte-identical gate
+          # records nothing, at the cost of one build on the host.
           failed=""
           curl -sSf -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \

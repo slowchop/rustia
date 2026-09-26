@@ -352,7 +352,8 @@ function checkCi(text) {
   const releasePreflightJob = text.split("\n  portable-engine-build:\n", 1)[0];
   requireIncludes(text, "name: CI\n", label);
   // workflow_dispatch is how the weekly matrix gets CI onto main's tip after a
-  // landing whose merge starts no push workflows.
+  // landing. Its app-token merge does start push workflows, so the dispatch may
+  // now duplicate that run; the concurrency group below collapses the pair.
   requireIncludes(
     text,
     "\"on\":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n",
@@ -1001,9 +1002,10 @@ function checkWeeklyMatrix(text) {
   // The single sanctioned contents-write grant: this workflow may land accepted
   // matrix cohorts on main and nothing else may. The per-commit series writes to
   // the data repository precisely so that it does not need a second one. main
-  // accepts changes only through pull requests, with no bypass for this token,
+  // accepts changes only through pull requests, which this token cannot bypass,
   // so the cohort goes to a branch and is merged by the landing helper; a direct
-  // push to main is the shape the branch rules reject.
+  // push to main is the shape the branch rules reject. pull-requests: write is
+  // kept while the app identity below is still unproven on a real landing.
   requireIncludes(text, "permissions:\n  contents: write\n  actions: write\n  pull-requests: write\n", label);
   requireIncludes(text, "node tools/land-matrix-publication.js", label);
   // The helper merges only the commit this run pushed, and only while main is
@@ -1017,26 +1019,41 @@ function checkWeeklyMatrix(text) {
   // A comment names a command without running it, so the checks that say what
   // the step runs, and where, read the file without its comment lines.
   const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
-  // GitHub holds pull-request runs on a pull request this token opens until a
-  // person approves them, and the helper merges within seconds, so the first
-  // landing left three failed runs with no jobs. The publication commit carries
-  // the skip marker, and it is the only thing in the file that may, comments
-  // included: the title becomes the body of main's merge commit. The helper's
-  // merge starts no push workflows and dispatched runs ignore markers, but a
-  // person merging by hand would push that commit, and a marker there would
-  // skip CI, the series and the dashboard publication on main.
+  // The landing merge is the thing a ruleset bypass can be granted to, so it
+  // must be made as the slowchop-ops-controller app and not with the workflow
+  // token: github-actions[bot] cannot be a bypass actor, and without the app
+  // the CI-skip marker above would leave any required check pending for good.
+  requireIncludes(text, "app-id: ${{ secrets.OPS_CONTROLLER_APP_ID }}", label);
+  requireIncludes(text, "private-key: ${{ secrets.OPS_CONTROLLER_PRIVATE_KEY }}", label);
+  requireIncludes(text, "RUSTIA_LANDING_TOKEN: ${{ steps.landing-token.outputs.token }}", label);
+  // Scoped to the one command. The dispatch curls keep the workflow token,
+  // because the app holds actions: read and dispatching a workflow needs write.
+  requireIncludes(code, "GITHUB_TOKEN=\"$RUSTIA_LANDING_TOKEN\" \\\n            node tools/land-matrix-publication.js", label);
+  // An installation token lives one hour and a cohort takes about forty
+  // minutes, so it is minted after the measurement, never at job start.
+  requireBefore(code, "node tools/run-dedicated-benchmark.js matrix --local", "create-github-app-token", label);
+  // The publication commit carries the skip marker, and it is the only thing in
+  // the file that may, comments included: the title becomes the body of main's
+  // merge commit, so main's tip stays unmarked. The marker is why the app needs
+  // a ruleset bypass -- a check that never reports would block the merge for
+  // good -- and it dates from a landing made with the workflow token, whose
+  // pull-request runs were held for an approval the merge never gave. A person
+  // merging by hand would push that commit, and a marker on main would skip CI,
+  // the series and the dashboard publication.
   requireIncludes(code, 'git commit -m "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT} [skip ci]"\n', label);
   requireIncludes(code, '--title "Publish cross-engine matrix ${RUSTIA_MATRIX_COMMIT}" || landing=$?\n', label);
   const skipMarkers = text.match(SKIP_MARKER) || [];
   if (skipMarkers.length !== 1) {
     fail(`${label} must carry exactly one CI-skip marker, on the publication commit; found ${skipMarkers.length}`);
   }
-  // The merge starts no push workflows, so the dashboard publication and CI on
-  // main's new tip are dispatched once the cohort has landed. Both go to main,
-  // each is attempted whatever happens to the other, and a failure fails the
-  // job, so main's new tip is never left without CI behind a green run. The
-  // per-commit series never is: a publication changes no engine code, so the
-  // series would have nothing new to measure.
+  // The dashboard publication and CI on main's new tip are dispatched once the
+  // cohort has landed. An app-token merge starts push workflows, so each may
+  // duplicate a run the merge already created; both tolerate it, and they stay
+  // until a landing has shown which runs arrive by themselves. Each is
+  // attempted whatever happens to the other, and a failure fails the job, so
+  // main's new tip is never left without CI behind a green run. The per-commit
+  // series is still not dispatched: the push already reaches it, and its
+  // byte-identical gate records nothing for a publication.
   requireIncludes(code, WEEKLY_MATRIX_DISPATCHES, label);
   requireBefore(code, "nothing was landed\" >&2\n            exit 1\n          fi\n", WEEKLY_MATRIX_DISPATCHES, label);
   forbidIncludes(text, "main-bench.yml/dispatches", label);

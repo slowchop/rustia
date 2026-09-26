@@ -547,9 +547,12 @@ rest of the series exactly.
 
 Every commit that lands on `main` starts a run that measures it on the owned
 host under exactly the reconstruction's protocol, so the chart continues rather
-than restarting. The weekly matrix's publication merge starts none: it is made
-with the workflow token, which starts no push workflows, and it changes no
-engine code.
+than restarting. The weekly matrix's publication merge is no exception, now
+that it is made with an app token and so starts push workflows as any person's
+merge would: that run builds the engine, finds a byte-identical binary and
+records nothing. It is the same exact gate that keeps a documentation commit
+out of the series, and it costs one build on the host rather than a
+measurement.
 `.github/workflows/main-bench.yml` runs on the qualified runner class and reaches
 measurement only through `run-dedicated-benchmark.js`, which attests the machine
 before it builds — including when it runs on that machine, where local mode
@@ -743,7 +746,8 @@ the five workloads on the owned host and lands the accepted cohort on `main`.
 It is this repository's single sanctioned contents-write grant: the cohort
 belongs in source history, unlike the per-commit series, whose rows grow forever
 and live in the data repository. `main` accepts changes only through pull
-requests — an organisation rule with no bypass for the workflow token — so the
+requests — an organisation rule covering every active private repository, which
+no workflow token can bypass — so the
 publication commit goes to a `matrix-publish/<commit>` branch and
 `tools/land-matrix-publication.js` opens the pull request and merges it with a
 merge commit. The operations status, package and publishability inventories,
@@ -754,31 +758,48 @@ moved meanwhile, the publication is rebuilt on top of it and landed again,
 three attempts at most. A refusal that rebuilding cannot fix — a repository
 rule, a missing permission — fails the run at once with GitHub's reason.
 
-Nothing runs on that pull request. GitHub holds pull-request runs on a pull
-request opened with the workflow token until someone with write access
-approves them, and the helper merges seconds after opening it, so the first
-landing (#40, `aaa71be`) left three failed runs with no jobs behind it. The
-publication commit therefore carries `[skip ci]`, and GitHub creates none. The
-pull request title does not carry it, because the title becomes the body of the
-merge commit on `main`. That merge starts no push workflows either, so once the
-cohort has landed the workflow dispatches `ci.yml` on `main`, after the
-dashboard publication. The dispatched run reports on `main`'s new tip but gates
-nothing, and since a bot started it, a failure notifies no one: it shows only
-as a red check on that commit. The per-commit series is not dispatched,
-because a publication changes no engine code. Each dispatch is attempted
-whatever happens to the other, and a failed one fails the run with the name of
-the workflow to dispatch by hand; re-running the job would measure and land
-another cohort. Before committing, the step also runs the two release-preflight
-checkers whose result a cohort can change and that it did not otherwise run —
-the wasm results and the project status — so a cohort that would turn `main`
-red is not landed.
+Nothing runs on that pull request: the publication commit carries `[skip ci]`,
+so GitHub creates no pull-request run for it. The marker predates the app
+identity below — runs on a pull request opened with the workflow token were
+held until someone with write access approved them, and the helper merges
+seconds after opening it, so the first landing (#40, `aaa71be`) left three
+failed runs with no jobs behind it. The pull request title does not carry the
+marker, because the title becomes the body of the merge commit on `main`.
 
-Two constraints follow. `main` cannot require status checks while cohorts land
-this way: a skipped workflow leaves a required check waiting for good, and the
-merge is refused. And a publication pull request lands only as a merge commit,
-which the helper always uses. One left open by a failed run should be closed,
-not merged by hand: a hand merge does not check that `main` is still the commit
-it was rendered on, and a squash or rebase would copy the marker onto `main`.
+The merge itself is made as the `slowchop-ops-controller` app rather than with
+the workflow token. A named app can be named as a ruleset bypass actor and
+`github-actions[bot]` cannot, so this is what lets `main` require status checks
+even though the publication commit is never checked. The workflow mints an
+installation token after the measurement — such a token lives one hour and a
+cohort takes about forty minutes — and scopes it to the landing helper alone;
+the dispatches keep the workflow token, because the app holds `actions: read`
+and dispatching a workflow needs write.
+
+A merge made with an app token does start push workflows, unlike one made with
+the workflow token, so the explicit dispatches of the dashboard publication and
+`ci.yml` on `main` may duplicate runs the merge already created. Both tolerate
+that: CI on `main` shares one concurrency group, and the dashboard publication
+commits only when its render changes. They are kept until a landing has shown
+which runs the merge creates by itself. A dispatched run reports on `main`'s new
+tip but gates nothing, and since a bot started it, a failure notifies no one: it
+shows only as a red check on that commit. The per-commit series is not
+dispatched, because a publication changes no engine code. Each dispatch is
+attempted whatever happens to the other, and a failed one fails the run with the
+name of the workflow to dispatch by hand; re-running the job would measure and
+land another cohort. Before committing, the step also runs the two
+release-preflight checkers whose result a cohort can change and that it did not
+otherwise run — the wasm results and the project status — so a cohort that would
+turn `main` red is not landed.
+
+Two constraints follow. Required status checks reach a publication pull request
+like any other, and it has none to show, so the app's bypass is load-bearing:
+withdraw it and every cohort stops landing. `main` requires no checks yet — that
+ruleset is the next step, not a current one. And a publication pull request
+lands only as a merge commit, which the helper always uses and which is now the
+only merge the repository offers, squash and rebase being disabled. One left
+open by a failed run should be closed, not merged by hand: a hand merge does not
+check that `main` is still the commit it was rendered on, and the squash and
+rebase buttons that would copy the marker onto `main` are off for that reason.
 
 It replaced a nightly job that created a billed cloud instance whenever `main`
 had gained performance-relevant commits since the last cohort. Both properties

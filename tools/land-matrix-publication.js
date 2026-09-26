@@ -5,18 +5,22 @@
 // Lands an accepted cross-engine matrix cohort on main through a pull request.
 //
 // The organisation's branch rules let nothing reach main except through a pull
-// request, with no bypass for anyone, so the workflow that measures the cohort
-// cannot push it. It pushes the publication commit to a branch instead and
-// this helper opens (or adopts) the pull request for that branch and merges it
-// with a merge commit, the only merge shape the benchmark-operations
-// artifacts accept. Nothing here is reviewed by hand: the cohort was accepted
-// by tools/check-benchmark-results.js before the branch was pushed.
+// request, which no workflow token can bypass, so the workflow that measures
+// the cohort cannot push it. It pushes the publication commit to a branch
+// instead and this helper opens (or adopts) the pull request for that branch
+// and merges it with a merge commit, the only merge shape the
+// benchmark-operations artifacts accept -- and now the only one the repository
+// offers, squash and rebase being disabled. Nothing here is reviewed by hand:
+// the cohort was accepted by tools/check-benchmark-results.js before the
+// branch was pushed.
 //
-// Nothing runs on the pull request either. GitHub holds pull-request runs on a
-// pull request the workflow token opens until someone with write access
-// approves them, and this merges within seconds, so the publication commit
-// asks GitHub to skip pull-request workflows and none are created. The merge
-// starts no push workflows, so the workflow dispatches CI on main afterwards.
+// GITHUB_TOKEN is the caller's choice of identity, and the weekly workflow
+// passes an installation token for the slowchop-ops-controller app rather than
+// the workflow token. A named app can be named as a ruleset bypass actor and
+// github-actions[bot] cannot, which is what allows main to require status
+// checks while the publication commit still carries a CI-skip marker: no
+// pull-request run is created, so no required check ever reports, and the
+// bypass is what keeps the merge below from being refused.
 //
 // The publication is one commit rendered on one main commit (--base): the
 // operations status, the package and publishability inventories and the
