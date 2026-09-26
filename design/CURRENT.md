@@ -574,8 +574,9 @@ unreachable suspended-coroutine frames.
    Every commit landing on `main` now starts an automatic measurement on the owned host under that same
    protocol, appended to the published series, so the chart advances rather than freezing at the last
    reconstructed revision; a commit whose binary is byte-identical records nothing. The weekly matrix's
-   publication merge starts none (the workflow token that makes it starts no push workflows, and it
-   changes no engine code), and a run that fails or is cancelled records no point for its commit. Runner policy is
+   publication merge is now seen by that lane like any other commit, because the app token that makes it
+   does start push workflows; the byte-identical gate records nothing for it, at the cost of one build.
+   A run that fails or is cancelled records no point for its commit. Runner policy is
    split into classes: the shared pool may not produce a timing and holds no `measurement-` role, at most
    one class may be authoritative, and measurement is reachable from a workflow only through the
    entrypoint that attests the machine first.
@@ -635,11 +636,13 @@ unreachable suspended-coroutine frames.
    accepted cohorts on `main` through a pull request it opens and merges itself with a merge commit
    (`tools/land-matrix-publication.js`; `main` takes nothing but pull requests, and this is the
    repository's single sanctioned CI contents-write grant, shape-pinned by `tools/check-workflows.js`).
-   GitHub holds pull-request runs on a pull request the workflow token opens until a person approves them,
-   and the helper merges within seconds, so the publication commit carries `[skip ci]` and the pull
-   request starts no checks; that merge starts no push workflows either, so the workflow dispatches CI on
-   `main` once the cohort has landed. `main` therefore cannot require status checks while cohorts land
-   this way, and a publication pull request must land as a merge commit. It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
+   The publication commit carries `[skip ci]`, so the pull request starts no checks. The merge is made as
+   the `slowchop-ops-controller` app rather than with the workflow token, because a named app can be named
+   as a ruleset bypass actor and `github-actions[bot]` cannot: that is what allows `main` to require status
+   checks while a publication pull request still shows none. No check is required on `main` yet; the
+   ruleset is the next step. An app-token merge starts push workflows, so the dispatches after landing may
+   duplicate runs the merge already made, and they are kept until a landing has shown which. A publication
+   pull request must land as a merge commit, now the only method the repository enables. It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land

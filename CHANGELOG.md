@@ -328,6 +328,27 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- The weekly cross-engine matrix now lands its cohort as the
+  `slowchop-ops-controller` GitHub App rather than with the workflow token. A
+  named app can be named as a ruleset bypass actor and `github-actions[bot]`
+  cannot, so this is what lets `main` require status checks even though the
+  publication commit carries `[skip ci]` and its pull request reports none. The
+  token is minted after the measurement, because an installation token lives one
+  hour and a cohort takes about forty minutes, and it is scoped to the landing
+  helper alone: the dispatches keep the workflow token, which has the
+  `actions: write` the app lacks. `tools/check-workflows.js` pins each of those
+  properties, including the ordering. An app-token merge starts push workflows,
+  unlike a workflow-token one, so the per-commit series now sees publication
+  commits — its byte-identical gate records nothing for them, at the cost of one
+  build — and the two explicit dispatches may duplicate a run the merge already
+  created; both targets tolerate that, and the dispatches stay until a landing
+  has shown which runs arrive by themselves. `main` requires no status checks
+  yet; that ruleset is a separate change.
+- Squash and rebase merging are disabled on the repository, so a merge commit is
+  the only method offered. `AGENTS.md` already required one, because the
+  generated benchmark-operations artifacts derive their state from reviewed
+  commit identities, but nothing enforced it; it is now a setting rather than a
+  convention.
 - Low-level VM host functions now own their callback operations in generation-safe
   heap slots. `FunctionKind::Host` no longer exposes a registry index, and the
   contextual dispatcher receives owned type-erased handler data instead of an

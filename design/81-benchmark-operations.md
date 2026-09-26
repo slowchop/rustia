@@ -559,15 +559,20 @@ derived from reviewed commit identities, so rewriting those identities while
 landing a change makes the generated operations view stale immediately after
 an otherwise green merge.
 
-The weekly matrix publication depends on that rule. GitHub holds pull-request
-runs on a pull request the workflow token opens until a person approves them,
-and the landing helper merges within seconds, so the publication commit carries
-GitHub's CI-skip marker and its pull request starts no checks. A squash or
-rebase would copy the marker onto `main`; GitHub still offers both there, so
-the rule is a convention rather than a setting. The same landing means `main`
-cannot require status checks: a skipped check stays expected and the merge is
-refused. The merge starts no push workflows, so the workflow dispatches CI on
-`main` after landing.
+The weekly matrix publication depends on that rule. The publication commit
+carries GitHub's CI-skip marker, so its pull request starts no checks; the
+marker dates from a landing made with the workflow token, whose pull-request
+runs GitHub held until a person approved them. A squash or rebase would copy
+that marker onto `main`, and the repository now offers neither — merge is the
+only method enabled — so the rule is a setting rather than a convention.
+
+The landing merge is made as the `slowchop-ops-controller` app, which can be
+named as a ruleset bypass actor where `github-actions[bot]` cannot. That is
+what allows `main` to require status checks at all, given a publication pull
+request that shows none, and it makes the bypass load-bearing: withdraw it and
+cohorts stop landing. An app-token merge also starts push workflows, unlike a
+workflow-token one, so the dispatches after landing may duplicate runs the
+merge already created; they are kept until a landing has shown which.
 
 ## Automation
 
