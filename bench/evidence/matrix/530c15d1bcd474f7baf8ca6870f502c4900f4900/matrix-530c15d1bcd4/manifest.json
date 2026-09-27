@@ -1,0 +1,48 @@
+{
+  "schema": "rustia.bench.cross-engine-matrix-evidence.v1",
+  "created_at": "2026-09-27T19:10:08.136Z",
+  "benchmark_commit": "530c15d1bcd474f7baf8ca6870f502c4900f4900",
+  "source_hashes": {
+    "bench_manifest": "e8303805267eacc831e1bb356ef0ebff80f3da25a22655eae08862a5babe0498",
+    "native_harness": "fe8a12f8eb0b361f407c24def07fa5b3e1deafdd18004305d0e26506cf047abb",
+    "cargo_lock": "32facf2322d44bc2638dd6b39958a6aeaccfc1881a323df07428b4db10de3794",
+    "toolchain": "30eff4223d4c2ca4c49c8a6e6e74e871fda2577e54903a8c9dad34becf0e40b1",
+    "wasm_gate": "d51e8b5313f5f70428c569b198143fbc1cf001670fdcfe25a65209fbe8fc3846",
+    "wasm_dispatch_gate": "1dbf2a164797f910071131db9ac41ac8fb1746082c39a57a69deaa06a6015495",
+    "wasm_adapter_manifest": "49bfd1e998c463b8e381a1c3d23c59cdbef7359e45404d4e7d7542db83ee3ac5",
+    "wasm_measure_module": "a2811a6f607ac820799a4fd877e50eea54542a6903aa9d776f91dbec3a942a04",
+    "wasm_dispatch_measure": "e995d836d7bda397a4a878c6496286068e16ba6f9dd2ba0eb85440bfd886119f",
+    "history_before": "27aec9bdfde6cd972a4d17eec5f08ee5a484a0b3c812988b30104ef6c22dc548"
+  },
+  "protocol_sha256": "23067e456671e35423fbd9dccc1b17b29f442bc002f891d3fe2badb332ae6614",
+  "provider_sha256": "fa818efe30b528086553b268acb42e16e9d315667bcd05b2815d1fb4ba19e86a",
+  "host_sha256": "1b450af83a8936230a343df6e69f6c062a708f34053739d618493cfdc52e2139",
+  "publication_sha256": {
+    "history": "e57c30cb0d3df2aa46b734c4813b7e472219ee9ba84f0dd9753071fed149d1bc",
+    "wasm": "0d297afe3f97d8a39d9e4d1274a665f4bd81bc82554fe457be5f5f60f3a81c7c",
+    "dispatch": "9355a640e34d4d623daac5f89d5d31ddd4f476536ff6dac7cfaae4aa53c81422"
+  },
+  "result_shape": {
+    "native_rows": 65,
+    "wasm_rows": 15,
+    "dispatch_runtimes": 1
+  },
+  "build": {
+    "all_engines_binary_sha256": "e2331141185ea8f5495e0e7576debc31ebc671ef3fbf4c055522ef2248061d7f",
+    "lua54_binary_sha256": "5f625530f21a4422627d007386ea21d840c9f9b87357d55c2cee14a3e08419e8",
+    "wasm_artifact_sha256": "d5d848e0d68be0dbb680b1a414a9c8bade4ec54ac6143d09256ca2b711161f42",
+    "cargo_incremental": "0",
+    "rustc_wrapper": "unset",
+    "locked": true,
+    "offline_build_after_fetch": true
+  },
+  "evidence_sha256": {
+    "gate.jsonl": "d19ad948ac691d28b6ccdb86344295def7eb18fab7a931b2eb1a0a05ecbe34ba",
+    "host.json": "1b450af83a8936230a343df6e69f6c062a708f34053739d618493cfdc52e2139",
+    "native-all-samples.json": "d95944584f9ba5b1ab70b6e8b06a019da19d494aae23bacfc32c713163f33e75",
+    "native-lua54-samples.json": "dfc00d692628e5f299c7dafc85f4ef7e73f8fab565cc409c60706c8f3c3f0866",
+    "protocol.json": "23067e456671e35423fbd9dccc1b17b29f442bc002f891d3fe2badb332ae6614",
+    "provider.json": "fa818efe30b528086553b268acb42e16e9d315667bcd05b2815d1fb4ba19e86a",
+    "runtime-versions.json": "21fea8c59fcee882ac232992549785bed8ec69b39ab3b1c6452c9e2722d29635"
+  }
+}
