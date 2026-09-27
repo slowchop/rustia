@@ -793,13 +793,14 @@ turn `main` red is not landed.
 
 Two constraints follow. Required status checks reach a publication pull request
 like any other, and it has none to show, so the app's bypass is load-bearing:
-withdraw it and every cohort stops landing. `main` requires no checks yet — that
-ruleset is the next step, not a current one. And a publication pull request
-lands only as a merge commit, which the helper always uses and which is now the
-only merge the repository offers, squash and rebase being disabled. One left
-open by a failed run should be closed, not merged by hand: a hand merge does not
-check that `main` is still the commit it was rendered on, and the squash and
-rebase buttons that would copy the marker onto `main` are off for that reason.
+withdraw it and every cohort stops landing. `main` now requires eleven checks
+through a repository ruleset whose only bypass actor is that app. And a
+publication pull request lands only as a merge commit, which the helper always
+uses and which is now the only merge the repository offers, squash and rebase
+being disabled. One left open by a failed run should be closed, not merged by
+hand: a hand merge does not check that `main` is still the commit it was
+rendered on, and the squash and rebase buttons that would copy the marker onto
+`main` are off for that reason.
 
 It replaced a nightly job that created a billed cloud instance whenever `main`
 had gained performance-relevant commits since the last cohort. Both properties

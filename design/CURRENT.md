@@ -639,10 +639,11 @@ unreachable suspended-coroutine frames.
    The publication commit carries `[skip ci]`, so the pull request starts no checks. The merge is made as
    the `slowchop-ops-controller` app rather than with the workflow token, because a named app can be named
    as a ruleset bypass actor and `github-actions[bot]` cannot: that is what allows `main` to require status
-   checks while a publication pull request still shows none. No check is required on `main` yet; the
-   ruleset is the next step. An app-token merge starts push workflows, so the dispatches after landing may
-   duplicate runs the merge already made, and they are kept until a landing has shown which. A publication
-   pull request must land as a merge commit, now the only method the repository enables. It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
+   checks while a publication pull request still shows none. `main` requires eleven checks through a
+   repository ruleset whose only bypass actor is that app. An app-token merge starts push workflows, so the
+   dispatches after landing may duplicate runs the merge already made, and they are kept until a landing
+   has shown which. A publication pull request must land as a merge commit, now the only method the
+   repository enables. It runs weekly (Sunday 15:00 UTC, plus manual dispatch) and unconditionally rather than gated on pending commits: the gate asked
    the Rustia-progress question, which the per-commit series now answers directly, while an ungated run also
    makes host drift — kernel, microcode, thermal — visible instead of hiding it. Its first cohort
    (`f480758`) landed by direct push, and the second (`f49646f`, 2026-09-15) was the first to land

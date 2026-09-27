@@ -19,7 +19,7 @@ serves them.
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
-- `main` requires no status checks yet, so auto-merge lands a pull request the moment it is opened rather than when it is green. Until the ruleset exists, wait for CI and then merge; do not arm auto-merge and call it gated.
+- `main` requires status checks through a repository ruleset, so auto-merge lands a pull request when it is green rather than when it is opened. The ruleset's only bypass actor is the `slowchop-ops-controller` app, which lands the weekly benchmark cohort: that publication pull request carries a CI-skip marker and so reports no checks at all.
 - Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. The repository enforces this rather than trusting it: squash and rebase merging are disabled, so merge is the only method offered.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)

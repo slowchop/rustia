@@ -328,6 +328,14 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Changed
 
+- `main` now requires the eleven `CI` and error-fuzzing status checks through a
+  repository ruleset, so auto-merge waits for green instead of landing a pull
+  request the moment it opens. The `slowchop-ops-controller` app is the only
+  bypass actor, which is what keeps the weekly cohort landing: its publication
+  pull request reports no checks at all. Pull-request screening is deliberately
+  not required, because it runs on a one-runner pool where an offline runner
+  queues silently rather than reporting red. The rule lives at repository level,
+  not on the organisation ruleset that covers every active private repository.
 - The weekly cross-engine matrix now lands its cohort as the
   `slowchop-ops-controller` GitHub App rather than with the workflow token. A
   named app can be named as a ruleset bypass actor and `github-actions[bot]`
