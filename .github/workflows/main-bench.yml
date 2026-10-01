@@ -14,10 +14,24 @@ name: Per-Commit Rustia Series
 # A commit that builds a byte-identical binary records nothing. That gate is
 # exact rather than a path heuristic, so a documentation or tooling commit does
 # not add a duplicate point claiming to be a new measurement.
+#
+# The host installs its own operating-system updates (at 05:20 Hobart, only
+# while idle) and restarts for them. Before measuring anything, this lane
+# compares the host's software fingerprint with the last one recorded; if it
+# changed, it measures the last recorded commit again and compares that with its
+# own row (tools/bench-host-control.js). A move beyond the calibrated same-host
+# spread fails the run after publishing, so a person decides whether the history
+# needs re-measuring on the updated host. The daily schedule runs that check
+# after the update window even when nothing lands on main; on those runs the
+# byte-identical gate keeps HEAD from being recorded twice.
 "on":
   push:
     branches:
       - main
+  schedule:
+    # 21:00 UTC is 07:00 AEST / 08:00 AEDT, after the host's restart window.
+    - cron: "0 21 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,7 +67,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on:
       group: bench-solo
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout the measured commit
@@ -94,6 +108,19 @@ jobs:
 
           git clone --branch main git@github.com:slowchop/rustia-bench-data.git "$data_dir"
           rows_file="$data_dir/bench/history/series/ci-bench-main.jsonl"
+          controls_file="$data_dir/bench/history/series/ci-bench-host-controls.jsonl"
+          install -d "$data_dir/bench/history/series"
+
+          # Host first: a control measured after HEAD's row would compare
+          # against that row rather than the one the host change sits behind.
+          node tools/run-dedicated-benchmark.js host-fingerprint --local > "$work_dir/host.json"
+          host_status="$(node tools/bench-host-control.js status --rows "$rows_file" --controls "$controls_file" --fingerprint "$work_dir/host.json")"
+          control_commit="$(node -e 'const s=JSON.parse(process.argv[1]);console.log(s.changed ? s.control_commit : "")' "$host_status")"
+          verdict=""
+          if [ -n "$control_commit" ]; then
+            node tools/run-dedicated-benchmark.js main --local --commit "$control_commit" --out "$work_dir/control.jsonl"
+            verdict="$(node tools/bench-host-control.js record --rows "$rows_file" --controls "$controls_file" --fingerprint "$work_dir/host.json" --control-rows "$work_dir/control.jsonl" --summary "$GITHUB_STEP_SUMMARY")"
+          fi
 
           # The binary hash of the last measured commit, so an unchanged engine
           # is skipped rather than recorded twice.
@@ -102,33 +129,54 @@ jobs:
             previous="$(node -e 'const fs=require("fs");const lines=fs.readFileSync(process.argv[1],"utf8").trim().split("\n");console.log(JSON.parse(lines[lines.length-1]).binary_sha256 ?? "")' "$rows_file")"
           fi
 
-          node tools/run-dedicated-benchmark.js main --local --out "$work_dir/rows.jsonl" ${previous:+--previous-binary "$previous"}
-
-          if [ ! -s "$work_dir/rows.jsonl" ]; then
-            echo "no engine change; nothing recorded" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          # Only a push measures HEAD. A scheduled or dispatched run is the host
+          # check alone: after a host update the same commit can build different
+          # bytes (a new linker), so the byte-identical gate would no longer
+          # stop it recording a commit already in the series, or one whose
+          # engine never changed.
+          : > "$work_dir/rows.jsonl"
+          if [ "$GITHUB_EVENT_NAME" != push ]; then
+            echo "$GITHUB_EVENT_NAME run: host check only" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -s "$rows_file" ] && grep -qF "\"commit\":\"$(git rev-parse HEAD)\"" "$rows_file"; then
+            echo "$(git rev-parse --short HEAD) is already in the series" >> "$GITHUB_STEP_SUMMARY"
+          else
+            node tools/run-dedicated-benchmark.js main --local --out "$work_dir/rows.jsonl" ${previous:+--previous-binary "$previous"}
           fi
-
-          install -d "$data_dir/bench/history/series"
-          cat "$work_dir/rows.jsonl" >> "$rows_file"
-
-          # Validated against the committed protocol before anything is pushed,
-          # so a row that does not belong to this series never reaches the
-          # published data.
-          node tools/check-benchmark-series.js --rows-root "$data_dir"
 
           git -C "$data_dir" config user.name "rustia-benchmark"
           git -C "$data_dir" config user.email "benchmark@rustia.invalid"
-          git -C "$data_dir" add bench/history/series/ci-bench-main.jsonl
-          git -C "$data_dir" commit -m "Record per-commit series row $(git rev-parse --short HEAD)"
-          node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series
+          if [ -n "$verdict" ]; then
+            git -C "$data_dir" add bench/history/series/ci-bench-host-controls.jsonl
+            git -C "$data_dir" commit -m "Record host control of $(printf '%s' "$control_commit" | cut -c1-7): $verdict"
+          fi
 
-          {
-            echo "## Series row recorded"
-            echo
-            echo "Commit \`$(git rev-parse --short HEAD)\` measured on the owned benchmark host."
-            echo
-            echo '```'
-            cat "$work_dir/rows.jsonl"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$work_dir/rows.jsonl" ]; then
+            cat "$work_dir/rows.jsonl" >> "$rows_file"
+            # Validated against the committed protocol before anything is
+            # pushed, so a row that does not belong to this series never
+            # reaches the published data.
+            node tools/check-benchmark-series.js --rows-root "$data_dir"
+            git -C "$data_dir" add bench/history/series/ci-bench-main.jsonl
+            git -C "$data_dir" commit -m "Record per-commit series row $(git rev-parse --short HEAD)"
+            {
+              echo "## Series row recorded"
+              echo
+              echo "Commit \`$(git rev-parse --short HEAD)\` measured on the owned benchmark host."
+              echo
+              echo '```'
+              cat "$work_dir/rows.jsonl"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "no engine change; nothing recorded" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -n "$verdict" ] || [ -s "$work_dir/rows.jsonl" ]; then
+            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series
+          fi
+
+          # After publishing, so the control is on record either way.
+          if [ "$verdict" = moved ]; then
+            echo "::error title=ci-bench host change moved the series::The control re-measure of ${control_commit} moved beyond the calibrated same-host spread after a host update. See the step summary; decide whether to re-measure the history."
+            exit 1
+          fi

@@ -143,9 +143,9 @@ refuses the append. The series already has three such gaps: `0fce032` (#14),
 `50a5bfb` (#15) and `7b8d334` (#17) changed engine code, and their runs failed
 on 2026-09-01 and 2026-09-02. Catch-up — each run measuring every unrecorded
 first-parent commit since the last row, oldest first — would close those gaps
-and make the lane independent of run order. It is not built: it needs the
-`main` command to measure a commit other than HEAD, a per-run budget inside the
-30-minute timeout, and a decision on whether a point measured long after its
+and make the lane independent of run order. It is not built: it needs a
+per-run budget inside the 45-minute timeout (`main --commit` now measures a
+commit other than HEAD, for the host-change control), and a decision on whether a point measured long after its
 commit landed is drawn like one measured on landing. Queueing removes the loss
 that prompted it; the failure gaps remain open.
 

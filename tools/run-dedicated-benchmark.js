@@ -417,7 +417,7 @@ function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
     "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
-    "unlock", "host-check", "self-test",
+    "unlock", "host-check", "host-fingerprint", "self-test",
   ]);
   if (!known.has(command)) return null;
   const parsed = {
@@ -427,6 +427,7 @@ function parseArgs(argv) {
     cohort: undefined,
     out: undefined,
     previousBinary: undefined,
+    commit: undefined,
     local: false,
     plan: false,
     base: undefined,
@@ -466,6 +467,13 @@ function parseArgs(argv) {
       const value = rest[++index];
       if (!value) return null;
       parsed.previousBinary = value;
+    } else if (option === "--commit") {
+      // A full SHA only: this names a commit already in the series, which is
+      // recorded by its full SHA, and a short or symbolic name could resolve to
+      // something else by the time it is measured.
+      const value = rest[++index];
+      if (!value || !FULL_COMMIT.test(value)) return null;
+      parsed.commit = value;
     } else if (option === "--base") {
       const value = rest[++index];
       if (!value) return null;
@@ -509,6 +517,7 @@ function parseArgs(argv) {
     return null;
   }
   if (parsed.previousBinary !== undefined && command !== "main") return null;
+  if (parsed.commit !== undefined && command !== "main") return null;
   // --config names a frozen file for the lanes that freeze one. The other
   // lanes derive everything from HEAD, so a --config there would be read by
   // nothing, and an option that is accepted and ignored is worse than one
@@ -550,6 +559,18 @@ function parseArgs(argv) {
 // second reader would be a second thing to keep true.
 const CPUFREQ_PROBE = `printf 'cpufreq=%s\\n' "$(for d in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do [ -d "$d" ] || continue; printf '%s:%s:%s:%s:%s ' "$(basename "$(dirname "$d")" | sed 's/^cpu//')" "$(cat "$d/scaling_governor" 2>/dev/null || echo unknown)" "$(cat "$d/scaling_min_freq" 2>/dev/null || echo 0)" "$(cat "$d/scaling_max_freq" 2>/dev/null || echo 0)" "$(cat "$d/cpb" 2>/dev/null || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || { t=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null) && echo $((1 - t)); } || echo none)"; done)"`;
 
+/// What an operating-system update can change underneath an unchanged binary:
+/// the running kernel, the CPU microcode and the installed packages (libc, the
+/// linker, the runner's own tooling). The package list is hashed, never
+/// shipped, so the record names versions of nothing it does not have to.
+const HOST_STATE_PROBE = `microcode="$(grep -m1 '^microcode' /proc/cpuinfo | cut -d: -f2 | tr -d ' ')"
+printf 'microcode=%s\\n' "\${microcode:-unreported}"
+if command -v dpkg-query >/dev/null; then
+  printf 'packages_sha256=%s\\n' "$(dpkg-query -W -f='\${Package} \${Version} \${Architecture}\\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
+else
+  printf 'packages_sha256=unavailable\\n'
+fi`;
+
 /// Reads the machine's own account of itself. Only the three isolation tokens
 /// are taken from /proc/cmdline: the full command line carries root=UUID= and
 /// other host detail that must not enter this repository.
@@ -564,10 +585,11 @@ printf 'free_kib=%s\\n' "$(df -Pk "$HOME" | awk 'NR==2{print $4}')"
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
+${HOST_STATE_PROBE}
 ${CPUFREQ_PROBE}
 `;
 
-function attestHost(config) {
+function observeHost() {
   const raw = sshCapture(ATTEST_SCRIPT);
   const observed = {};
   for (const line of raw.split("\n")) {
@@ -576,6 +598,30 @@ function attestHost(config) {
   }
   observed.logical_cpus = Number(observed.logical_cpus);
   observed.free_kib = Number(observed.free_kib);
+  return observed;
+}
+
+/// One hash for "the host software this run measured on". The per-commit lane
+/// compares it with the last recorded one, and a change makes the lane measure
+/// the last recorded commit again before anything new: an unchanged binary
+/// that moves is the host, not the code (tools/bench-host-control.js).
+function hostFingerprint(observed) {
+  for (const field of ["kernel", "microcode", "packages_sha256"]) {
+    if (typeof observed[field] !== "string" || observed[field] === "") {
+      fail(`the host did not report ${field}, so its software cannot be fingerprinted`);
+    }
+  }
+  const material = `kernel=${observed.kernel}\nmicrocode=${observed.microcode}\npackages_sha256=${observed.packages_sha256}\n`;
+  return {
+    kernel: observed.kernel,
+    microcode: observed.microcode,
+    packages_sha256: observed.packages_sha256,
+    host_fingerprint: crypto.createHash("sha256").update(material).digest("hex"),
+  };
+}
+
+function attestHost(config) {
+  const observed = observeHost();
   const declared = config.provider.host;
   const problems = compareAttestation(declared, observed);
   if (observed.node === "missing") {
@@ -607,6 +653,7 @@ function providerRecord(declared, observed) {
     smt: observed.smt,
     isolated_cpus: observed.isolated_cpus,
     kernel: observed.kernel,
+    ...hostFingerprint(observed),
     free_gib: Number((observed.free_kib / 1024 / 1024).toFixed(1)),
     cpu_isolation: observed.isolation,
     pinned_cpus: declared.pinned_cpus,
@@ -830,14 +877,17 @@ function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.
 
 function commandMain(options) {
   if (!options.out) fail("main requires --out FILE to write the series rows to");
-  const configFile = path.join(STATE_ROOT, `main-${git(["rev-parse", "--short", "HEAD"]).trim()}.json`);
+  const configFile = path.join(
+    STATE_ROOT,
+    `main-${git(["rev-parse", "--short", options.commit ?? "HEAD"]).trim()}.json`,
+  );
   fs.rmSync(configFile, { force: true });
   local(
     "node",
     [
       "tools/freeze-history-backfill.js",
       "--only",
-      "HEAD",
+      options.commit ?? "HEAD",
       "--series",
       freezer.MAIN_SERIES,
       "--output",
@@ -878,7 +928,14 @@ function commandMain(options) {
     return;
   }
 
-  const rows = publication.rows.map((row) => ({ ...row, binary_sha256: target.binary_sha256 }));
+  // The host state rides on every row, so a step in the series can be told
+  // apart from a host update by reading the rows alone.
+  const rows = publication.rows.map((row) => ({
+    ...row,
+    binary_sha256: target.binary_sha256,
+    kernel: provider.kernel,
+    host_fingerprint: provider.host_fingerprint,
+  }));
   fs.writeFileSync(options.out, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
   process.stdout.write(
     `measured ${commit.slice(0, 8)}: ${rows.length} rows, binary ${target.binary_sha256.slice(0, 12)}\n`,
@@ -2152,6 +2209,10 @@ function formatFrequencyReport(isolatedCpus, cpufreq) {
   return report;
 }
 
+function commandHostFingerprint() {
+  process.stdout.write(`${JSON.stringify(hostFingerprint(observeHost()))}\n`);
+}
+
 function commandHostCheck() {
   const lines = sshCapture(HOST_CHECK_SCRIPT).split("\n").filter((line) => line.trim() !== "");
   const fields = new Map();
@@ -2202,12 +2263,24 @@ function selfTest() {
     isolation: "isolcpus=4,5 nohz_full=4,5",
     node: "v22.0.0",
     cargo: "cargo 1.95.0",
+    microcode: "0x8701034",
+    packages_sha256: "c".repeat(64),
   });
   const forbidden = /ip|addr|account|token|key|user|label|region|instance|id$/i;
   const leaked = Object.keys(record).filter((field) => forbidden.test(field));
   assert.deepEqual(leaked, [], `provider record field(s) may carry infrastructure detail: ${leaked}`);
   assert.equal(record.host, declared.name);
   assert.equal(record.pinned_cpus, declared.pinned_cpus);
+  // The fingerprint moves with each of its three inputs and with nothing else,
+  // so a control run is triggered by a host update and never by a re-run.
+  const state = { kernel: "6.8.0-146-generic", microcode: "0x8701034", packages_sha256: "c".repeat(64) };
+  const fingerprint = hostFingerprint(state).host_fingerprint;
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(record.host_fingerprint, hostFingerprint({ ...state, kernel: "6.8.0-generic" }).host_fingerprint);
+  assert.equal(hostFingerprint({ ...state, free_kib: 1 }).host_fingerprint, fingerprint);
+  for (const [field, value] of [["kernel", "6.8.0-147-generic"], ["microcode", "0x8701035"], ["packages_sha256", "d".repeat(64)]]) {
+    assert.notEqual(hostFingerprint({ ...state, [field]: value }).host_fingerprint, fingerprint, field);
+  }
   // The floor is inclusive, and a host that cannot report its free space is
   // refused rather than assumed fine: the filled-disk failure this guards
   // against never reached this script, so silence is not evidence.
@@ -2502,7 +2575,7 @@ function selfTest() {
   assert.deepEqual(existingBackfills(present[0]), [], "a run excludes its own artifact");
 
   const defaults = {
-    replace: false, config: undefined, cohort: undefined, out: undefined, previousBinary: undefined,
+    replace: false, config: undefined, cohort: undefined, out: undefined, previousBinary: undefined, commit: undefined,
     local: false, plan: false, base: undefined, json: undefined, repetitions: undefined,
     confidence: undefined, baseline: undefined, candidate: undefined, passes: undefined,
   };
@@ -2518,6 +2591,11 @@ function selfTest() {
   assert.equal(parseArgs(["history", "--out", "rows.jsonl"]), null);
   assert.equal(parseArgs(["main", "--out"]), null);
   assert.equal(parseArgs(["main", "--previous-binary"]), null);
+  assert.equal(parseArgs(["main", "--local", "--out", "c.jsonl", "--commit", "a".repeat(40)]).commit, "a".repeat(40));
+  assert.equal(parseArgs(["main", "--out", "c.jsonl", "--commit", "abc1234"]), null);
+  assert.equal(parseArgs(["main", "--out", "c.jsonl", "--commit"]), null);
+  assert.equal(parseArgs(["pr", "--out", "c.jsonl", "--commit", "a".repeat(40)]), null);
+  assert.equal(parseArgs(["host-fingerprint", "--local"]).local, true);
   assert.equal(parseArgs(["bogus"]), null);
   assert.equal(parseArgs(["plan", "--replace"]), null, "plan promotes nothing");
   assert.equal(parseArgs(["fetch", "--replace"]).replace, true, "fetch promotes, so it may supersede");
@@ -2785,7 +2863,9 @@ function usage() {
       "\n" +
       "  plan      [--config FILE]              freeze, attest the host, print the plan\n" +
       "  history   [--config FILE] [--replace]  measure every revision and promote\n" +
-      "  main      --out FILE [--previous-binary SHA]  measure HEAD alone for the live series\n" +
+      "  main      --out FILE [--previous-binary SHA] [--commit SHA]\n" +
+      "                                         measure HEAD (or one series commit) alone\n" +
+      "                                         for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
       "                                         full acceptance comparison of two commits\n" +
@@ -2800,6 +2880,8 @@ function usage() {
       "  unlock                                 clear stale lane locks on the benchmark host\n" +
       "  host-check                             print free space, journal size, load and the\n" +
       "                                         isolated cores' frequency policy there\n" +
+      "  host-fingerprint                       print the kernel, microcode and package-set\n" +
+      "                                         hash, and the fingerprint over all three\n" +
       "  self-test                              run the pure-function checks\n" +
       "\n" +
       `Set ${SSH_ENV} to the host's ssh destination or ssh_config alias.\n`,
@@ -2833,6 +2915,7 @@ try {
     else if (parsed.command === "fetch") commandFetch(parsed);
     else if (parsed.command === "unlock") commandUnlock();
     else if (parsed.command === "host-check") commandHostCheck();
+    else if (parsed.command === "host-fingerprint") commandHostFingerprint();
   }
 } catch (error) {
   process.stderr.write(`run-dedicated-benchmark: ${error.message}\n`);
