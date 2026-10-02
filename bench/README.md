@@ -600,6 +600,37 @@ A commit that builds a byte-identical binary records nothing. The gate is the
 compiled binary's hash rather than a path heuristic, so documentation and tooling
 commits do not add duplicate points.
 
+#### Host updates
+
+The host installs its own operating-system security updates, kernel included,
+at 05:20 Hobart time and restarts for them in a slot after that, both only while
+no benchmark is running. A new kernel, libc, linker or microcode can move every
+number after it, and the series alone cannot show that: its next point is a new
+commit, so a host step and a code step look alike.
+
+So every series row carries `kernel` and `host_fingerprint`, a hash over the
+running kernel, the CPU microcode and the installed package set
+(`run-dedicated-benchmark.js host-fingerprint`). Before measuring anything, the
+lane compares the host's fingerprint with the last one recorded. When it
+differs, it first measures the last recorded commit again (`main --commit`)
+and `tools/bench-host-control.js` compares that control with the commit's own
+rows: same code, same protocol, different host software. The result is
+appended to `bench/history/series/ci-bench-host-controls.jsonl` in the data
+repository whether or not anything moved, so the spread between controls is
+measured rather than assumed. A workload that moved beyond its calibrated
+same-host threshold from `bench/pr-screening.json`, in either direction, fails
+the run after publishing. A person then decides whether to re-measure the
+history on the updated host (`just bench-history replace=1`, about 35 minutes).
+Nothing re-measures or rewrites rows by itself yet: that waits until enough
+controls exist to set a threshold for it.
+
+The workflow also runs daily at 21:00 UTC, after the host's restart window, so
+an update is controlled the morning it lands, not at the next merge. Those
+runs check the host only and never measure HEAD. After an update the same
+commit can build a different binary (a new linker), so the byte-identical gate
+would no longer stop a commit being recorded twice. For the same reason, a push
+run never measures a HEAD that is already in the series.
+
 The renderer joins the live series to a reconstruction only when host, pinned
 core, harness, workloads, fixed `N` and every checksum agree; otherwise it draws
 a separate labelled line. Two protocols on one line is the confound that moving
