@@ -624,6 +624,12 @@ history on the updated host (`just bench-history replace=1`, about 35 minutes).
 Nothing re-measures or rewrites rows by itself yet: that waits until enough
 controls exist to set a threshold for it.
 
+Host steps a person looked at and left in the series:
+
+| Host change | Control | Moved | Decision |
+| --- | --- | --- | --- |
+| Kernel `6.8.0-138` to `6.8.0-146` plus a package upgrade, 2026-10-01 | `911bad60`, byte-identical binary, 2026-10-02 | `sparse_tables` +3.5% median (threshold 1.2%); the other four within threshold (`closures_upvalues` -3.3%, `generic_iteration` +2.3%, `stdlib_math_table` +0.2%, `dense_tables` 0.0%) | Kept. Series points from 2026-10-01 on read `sparse_tables` about 3.5% slower than the points before them for host reasons, not code |
+
 The workflow also runs daily at 21:00 UTC, after the host's restart window, so
 an update is controlled the morning it lands, not at the next merge. Those
 runs check the host only and never measure HEAD. After an update the same
