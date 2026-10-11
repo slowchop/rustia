@@ -2,8 +2,8 @@
   "schema_version": 1,
   "schema": "rustia.bench.wasm-dispatch-current-results.v1",
   "source": "script-bench-harness",
-  "updated": "2026-10-04",
-  "commit": "c13940bd14fcb1076588aecb524e3b12229cb8ea",
+  "updated": "2026-10-11",
+  "commit": "343c2615e6f2a38b918258c86c5c7dac0f2ca7fe",
   "requirements": {
     "call-ref-vs-br-table": true
   },
@@ -15,8 +15,8 @@
       "schema_version": 1,
       "schema": "rustia.bench.wasm-dispatch-results.v1",
       "source": "script-bench-harness",
-      "timestamp_unix": 1791139613,
-      "commit": "c13940bd14fcb1076588aecb524e3b12229cb8ea",
+      "timestamp_unix": 1791747486,
+      "commit": "343c2615e6f2a38b918258c86c5c7dac0f2ca7fe",
       "target": "wasm32-dispatch-v8-node-linux-x64",
       "runtime": {
         "name": "node",
@@ -46,24 +46,24 @@
         {
           "style": "br_table",
           "feature": "core br_table dispatch",
-          "n": 71524541,
+          "n": 110435247,
           "reps": 5,
           "wasm_bytes": 131,
-          "ns_per_dispatch_min": 0.9868574759536021,
-          "ns_per_dispatch_median": 0.9868616842993794,
-          "dispatches_per_sec": 1013317550.2710747,
-          "checksum": "i32:-1834351671"
+          "ns_per_dispatch_min": 0.7237153188963301,
+          "ns_per_dispatch_median": 0.7238513261984191,
+          "dispatches_per_sec": 1381758785.3812537,
+          "checksum": "i32:1382362189"
         },
         {
           "style": "call_ref",
           "feature": "typed function reference dispatch",
-          "n": 10136811,
+          "n": 10151403,
           "reps": 5,
           "wasm_bytes": 143,
-          "ns_per_dispatch_min": 6.4968081184506605,
-          "ns_per_dispatch_median": 6.530871099401976,
-          "dispatches_per_sec": 153921738.45492563,
-          "checksum": "i32:1104520476"
+          "ns_per_dispatch_min": 6.495462252853124,
+          "ns_per_dispatch_median": 6.49685920261465,
+          "dispatches_per_sec": 153953631.17701918,
+          "checksum": "i32:-2100633700"
         }
       ],
       "skipped": [],
@@ -75,8 +75,8 @@
         "status": "measured",
         "baseline": "br_table",
         "candidate": "call_ref",
-        "candidate_vs_baseline_min": 6.583329687169653,
-        "candidate_vs_baseline_median": 6.6178180826207225
+        "candidate_vs_baseline_min": 8.975162032992117,
+        "candidate_vs_baseline_median": 8.975405539056453
       }
     }
   ],
