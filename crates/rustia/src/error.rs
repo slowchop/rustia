@@ -6,13 +6,17 @@ use std::{fmt, sync::Arc};
 /// A typed failure with independently renderable, handle-free diagnostics.
 #[derive(Debug)]
 pub struct Error {
-    pub kind: ErrorKind,
+    pub(crate) kind: ErrorKind,
     pub(crate) diagnostic: Option<Arc<Diagnostic>>,
     contexts: Vec<String>,
 }
 
 /// The original failure category. Match this instead of parsing error text.
+///
+/// New categories can be added as the language and embedding API grow. Include
+/// a fallback arm when matching an error's [`kind`](Error::kind).
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ErrorKind {
     Source(SourceError),
     Compile(CompileError),
@@ -30,6 +34,17 @@ impl Error {
         }
     }
 
+    /// Returns this failure's original category without consuming its diagnostics.
+    ///
+    /// ```
+    /// use rustia::{Error, ErrorKind};
+    ///
+    /// let error = Error::embed("configuration is missing");
+    /// match error.kind() {
+    ///     ErrorKind::Embed(message) => assert_eq!(message, "configuration is missing"),
+    ///     _ => unreachable!("this example constructs an embedding error"),
+    /// }
+    /// ```
     pub fn kind(&self) -> &ErrorKind {
         &self.kind
     }

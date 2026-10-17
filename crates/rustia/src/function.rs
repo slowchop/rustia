@@ -1,4 +1,4 @@
-use crate::live_value::{ensure_current_epoch, Value as LiveValue};
+use crate::live_value::Value as LiveValue;
 use crate::serde_value::from_live;
 use crate::value::{
     embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustia,
@@ -43,17 +43,12 @@ impl Function {
         Args: IntoRustiaMulti,
         Return: FromRustiaMulti,
     {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
+        let function = self.value.raw(rustia.vm(), "function handle")?;
         let raw_args = args
             .into_rustia_multi()?
             .iter()
             .map(|value| load_owned_value(rustia.vm_mut(), value))
             .collect::<Result<Vec<_>>>()?;
-        let function = self.value.raw(rustia.vm(), "function handle")?;
         let raw_results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
@@ -67,11 +62,6 @@ impl Function {
 
     /// Calls this function with rooted live values and retains every result.
     pub fn call_values(&self, rustia: &mut Rustia, args: &[LiveValue]) -> Result<Vec<LiveValue>> {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
         let function = self.value.raw(rustia.vm(), "function handle")?;
         let raw_args = args
             .iter()
@@ -97,11 +87,6 @@ impl Function {
         Args: IntoRustiaMulti,
         Return: FromRustiaMulti,
     {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            invocation.vm.decision_epoch(),
-        )?;
         let function = self.value.raw(invocation.vm, "function handle")?;
         invocation.convert_call(function, args)
     }
@@ -115,11 +100,6 @@ impl Function {
     where
         C: HostSchema,
     {
-        ensure_current_epoch(
-            "function handle",
-            self.decision_epoch,
-            invocation.vm.decision_epoch(),
-        )?;
         invocation.scoped(|invocation| {
             let function = self.value.raw(invocation.vm, "function handle")?;
             let raw_args = args
@@ -162,11 +142,6 @@ impl Exports {
     }
 
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
         let value = self.value.raw(rustia.vm(), "exports handle")?;
         snapshot_value(rustia.vm_mut(), value)
     }
@@ -175,11 +150,6 @@ impl Exports {
     where
         C: HostSchema,
     {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            invocation.vm.decision_epoch(),
-        )?;
         invocation.scoped(|invocation| {
             let value = self.value.raw(invocation.vm, "exports handle")?;
             snapshot_value(invocation.vm, value)
@@ -191,11 +161,6 @@ impl Exports {
     where
         T: serde::de::DeserializeOwned,
     {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
         let value = self.value.raw(rustia.vm(), "exports handle")?;
         from_live(rustia.vm_mut(), value)
     }
@@ -265,13 +230,8 @@ impl Exports {
     }
 
     fn raw_get(&self, rustia: &mut Rustia, name: &str) -> Result<RawValue> {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            rustia.decision_epoch(),
-        )?;
-        let key = rustia.vm_mut().string(name);
         let table = self.value.raw(rustia.vm(), "exports handle")?;
+        let key = rustia.vm_mut().string(name);
         rustia
             .vm_mut()
             .raw_table_get_value(table, key)
@@ -282,13 +242,8 @@ impl Exports {
     where
         C: HostSchema,
     {
-        ensure_current_epoch(
-            "exports handle",
-            self.decision_epoch,
-            invocation.vm.decision_epoch(),
-        )?;
-        let key = invocation.vm.string(name);
         let table = self.value.raw(invocation.vm, "exports handle")?;
+        let key = invocation.vm.string(name);
         invocation
             .vm
             .raw_table_get_value(table, key)

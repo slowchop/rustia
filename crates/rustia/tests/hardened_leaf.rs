@@ -156,8 +156,8 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
         .err()
         .expect("memory limit is mandatory");
     assert!(matches!(
-        missing_limit,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        missing_limit.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -177,8 +177,8 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
         .err()
         .expect("hardened leaves require DeterministicSim");
     assert!(matches!(
-        wrong_profile,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        wrong_profile.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -193,8 +193,8 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
         .err()
         .expect("hardened leaves require a typed host facade");
     assert!(matches!(
-        context_free,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        context_free.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -216,8 +216,8 @@ fn hardened_leaf_builder_requires_deterministic_profile_and_memory_limit() {
         .invoke_entry_into::<i32>(&mut context, InvocationLimits::new(100), &mut lane, &entry)
         .expect_err("the infallible constructor must fail closed");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -309,8 +309,8 @@ return {
     .expect("surface module");
 
     assert!(matches!(
-        vm.insert_global("decision_input", 7),
-        Err(Error { kind: rustia::ErrorKind::Vm(ref error), .. })
+        (vm.insert_global("decision_input", 7)).as_ref().err().map(|error| error.kind()),
+        Some(rustia::ErrorKind::Vm(error))
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -328,8 +328,8 @@ return {
         "53"
     );
     assert!(matches!(
-        vm.install_host_module(HostModule::<LeafSchema>::new("late").pure("value", 1, || 1i32)),
-        Err(Error { kind: rustia::ErrorKind::Vm(ref error), .. }) if matches!(&error.kind, VmErrorKind::GuestEnvironmentSealed)
+        (vm.install_host_module(HostModule::<LeafSchema>::new("late").pure("value", 1, || 1i32))).as_ref().err().map(|error| error.kind()),
+        Some(rustia::ErrorKind::Vm(error)) if matches!(&error.kind, VmErrorKind::GuestEnvironmentSealed)
     ));
 
     for (source_name, source) in [
@@ -425,8 +425,8 @@ return leaf.answer() + scratch[1] + scratch[2] + scratch[3]
         )
         .expect_err("hardened entries must reject an ordinary surface");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -506,8 +506,8 @@ fn compiled_entry_is_shareable_across_hardened_vms_and_module_handles_go_stale()
         })
         .expect_err("stale hardened function must reject");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Embed(ref message), .. } if message.contains("stale function handle")
+        error.as_vm_error().map(|error| &error.kind),
+        Some(VmErrorKind::StaleRetainedValue { .. })
     ));
 }
 
@@ -537,15 +537,15 @@ fn hardened_leaf_rejects_global_upvalue_and_host_module_mutation() {
             .expect_err("policy violation must reject before guest execution");
         assert!(
             matches!(
-                error,
-                Error { kind: rustia::ErrorKind::Vm(ref error), .. }
-                    if matches!(
-                        &error.kind,
-                        VmErrorKind::HardenedLeafViolation {
-                            feature: actual
-                        } if *actual == feature
-                    )
-            ),
+            error.kind(),
+            rustia::ErrorKind::Vm(error)
+                        if matches!(
+                            &error.kind,
+                            VmErrorKind::HardenedLeafViolation {
+                                feature: actual
+                            } if *actual == feature
+                        )
+                ),
             "{name}: {error}"
         );
     }
@@ -640,8 +640,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         &record_overflow,
     );
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HostResourceExhausted {
@@ -663,8 +663,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         &byte_overflow,
     );
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HostResourceExhausted {
@@ -686,8 +686,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         &fuel,
     );
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(&error.kind, VmErrorKind::FuelExhausted { limit: 64 })
     ));
 
@@ -704,8 +704,8 @@ fn hardened_entry_lifecycle_is_atomic_and_recovers_from_every_failure_class() {
         &host_panic,
     );
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(&error.kind, VmErrorKind::HostPanicked { .. })
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(&error.kind, VmErrorKind::HostPanicked { .. })
     ));
 
     let panicking_conversion = Rustia::compile_entry(
@@ -753,8 +753,8 @@ return #scratch
         &out_of_memory,
     );
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(&error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(&error.kind, VmErrorKind::OutOfMemory)
     ));
 
     let healthy = Rustia::compile_entry("healthy-entry.luau", "leaf.emit(9)\nreturn 42")

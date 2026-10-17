@@ -1,12 +1,12 @@
 {
   "metadata": {
-    "date": "2026-09-09",
+    "date": "2026-10-18",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
     ],
     "notes": [
-      "Percentages are rough engineering estimates, not automated metrics.",
+      "Percentages are retained historical planning estimates, not automated metrics or first-release acceptance criteria; use design/92-first-release.md.",
       "The scope tracks public rustia crates, conformance, benchmarks, docs, tooling, and release readiness.",
       "Project pillars and non-goals are canonical in design/02-pillars.md.",
       "The public host-bridge remains generic; grabby-specific types and effect catalogs stay outside public rustia."
@@ -69,7 +69,8 @@
           "oversized_allocation_bytes": 8388608,
           "wasm_runtime": "Node 22/V8",
           "wasm_linear_memory": "constant throughout the warmed second half"
-        }
+        },
+        "batched_execution": "Memory-limited VMs retain scalar instruction-boundary quota checks; former HotIR/tape collection-window gap closed by admission policy."
       },
       "decision_reset": {
         "abi_version": 1,
@@ -135,6 +136,11 @@
         "runtime": "Node 22/V8",
         "tests": "bare no-default-feature host adapters, the shared mixed-heap pressure lifecycle, and default web-live adapters",
         "runner": "wasm-bindgen-test-runner 0.2.126"
+      },
+      "first_release": {
+        "target": "1.0.0 after a release-candidate cycle",
+        "status": "in progress; workspace remains unpublished at 0.0.1",
+        "checklist": "design/92-first-release.md"
       }
     }
   },
@@ -143,15 +149,15 @@
       "name": "Whole public rustia project",
       "complete": 94,
       "confidence": 90,
-      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, snapshot-free live serde, a coherent chunk execution API, atomic extension/module installation with fresh lazy dependency cohorts, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. The remaining release gates are safe function construction, semantic-tail hardening, and packaging.",
-      "future_plan": "Complete safe function construction; then continue semantic-tail hardening, measured optimization, and public release work."
+      "state": "The architecture is locked and production crates are substantial: the safe-Rust VM/compiler, pending-free pinned conformance corpus, host-pluggable output/time services, host-owned canonical-identity require resolution/cache, lifetime-safe per-invocation host contexts, bounded transactional effect journals, graph-preserving rooted live Value/Table/Function handles with live globals, quota-aware table construction, snapshot-free live serde, a coherent chunk execution API, atomic extension/module installation with fresh lazy dependency cohorts, CLI, benchmark matrix, private HotIR, closure-call PIC, generation-safe object/program reclamation, VM-owned memory telemetry, maintained logical-live quota accounting and script counters, atomic catchable OOM, epoch-safe decision reset, exact dedicated-Linux native plus wasm quota evidence, and a shared native/Node-V8 mixed-heap pressure gate are in-tree. Synchronous host-function construction and diagnostics are implemented with verified client rollouts. The first-release checklist now tracks public settings/userdata design, semantic-tail hardening, real-platform goldens, and publication.",
+      "future_plan": "Close the explicit API, runtime, platform, and publication gates in design/92-first-release.md."
     },
     {
       "name": "Usable embedded scripting crate",
       "complete": 99,
       "confidence": 95,
-      "state": "The facade now includes typed eval/exec, a composable load/source_name/environment builder with owned/live/serde/install terminals, owned scalar/table conversions, host-owned canonical-identity require resolution with per-install cohorts, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, VM/decision-epoch-safe exports, owned-value serde plus snapshot-free live deserialization, atomic extensions and installation, host-owned replacement, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. Safe function construction remains before this is a complete rich embedding boundary.",
-      "future_plan": "Complete safe function construction, diagnostics, and API stabilization."
+      "state": "The facade now includes typed eval/exec, a composable load/source_name/environment builder with owned/live/serde/install terminals, owned scalar/table conversions, host-owned canonical-identity require resolution with per-install cohorts, a lifetime-independent HostSchema with fresh borrowed HostContext values per invocation, capability-specific host views, shared fuel, bounded transactional record publication, usage receipts, rooted live Value/Table/Function handles that preserve rich payloads and graph identity, live globals, quota-aware table construction, owned-key/live-value insertion, VM/decision-epoch-safe exports, owned-value serde plus snapshot-free live deserialization, atomic extensions and installation, host-owned replacement, epoch-safe decision reset, examples, diagnostics, migration guidance, host-pluggable stdout/clock services, VM-owned memory telemetry, maintained logical-live accounting, and configurable quotas. Synchronous host-function construction and bounded source diagnostics are implemented. Public userdata and the exported settings stability review remain open.",
+      "future_plan": "Settle public settings/userdata contracts, maintain diagnostics, and verify the complete facade with external consumers."
     },
     {
       "name": "Full public standalone Luau engine release",
@@ -491,7 +497,7 @@
           "name": "Workloads",
           "complete": 75,
           "confidence": 86,
-          "state": "Five default workload families are wired, with 19 workload entries present; #12 array-mutation covers the five dialects with in-place element stores, #15 string-building/concat has cross-adapter source coverage, #16–#18 provide portable burst/churn/intentional-retention probes, and #19–#21 provide deterministic steady/history/intentional-retention todo-app probes for Luau and Koto. A coherent 990-process cross-engine memory baseline and the 99-sample safe-memory Rustia refresh are committed.",
+          "state": "Five default workload families are wired, with 19 workload entries present; #12 array-mutation covers the five dialects with in-place element stores, #15 string-building/concat has cross-adapter source coverage, #16\u2013#18 provide portable burst/churn/intentional-retention probes, and #19\u2013#21 provide deterministic steady/history/intentional-retention todo-app probes for Luau and Koto. A coherent 990-process cross-engine memory baseline and the 99-sample safe-memory Rustia refresh are committed.",
           "future_plan": "Expand the remaining #12 interop, #13 serde, and #14 fuel/limit workload plan, then extend intentional external memory-measurement history."
         },
         {

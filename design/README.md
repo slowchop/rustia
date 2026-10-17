@@ -2,16 +2,10 @@
 
 > ⚠️ **Read [`CURRENT.md`](CURRENT.md) first — it is the single canonical state.** This index and the dated
 > docs are staged snapshots and can lag; `CURRENT.md` wins on any disagreement. (Drift fixed per review H1.)
-> **Status note (2026-08-13):** the broad production VM/compiler/API slice, pending-free pinned conformance
-> corpus, 12-adapter Linux benchmark snapshot, cross-engine wasm pre-lock gate, and host output/time services
-> slice are in-tree. Historical spike
-> multipliers are not current product claims. Bounded object/program lifetimes, quotas/OOM, and deterministic
-> reset are implemented, as is the typed schema/context invocation with bounded record transactions. The
-> hardened stateless action-leaf guest surface, direct compiled-entry path, and graph-preserving rooted live
-> `Value`/`Table`/`Function` spine are also implemented. Stable preflight now mutates the frontend and all 131
-> VM opcodes under bounded resources, while hosted CI executes the wasm adapters and the 96-epoch mixed-heap
-> pressure lifecycle on Node/V8. The next release gates are remaining live-object ergonomics/serde, transactional failure semantics,
-> longer differential/fuzz campaigns, and real-host/browser goldens — see `CURRENT.md`.
+> New to Rustia? Start with the [README examples](../README.md). For the stable
+> release target, use [the first-release checklist](92-first-release.md).
+> This directory keeps detailed design decisions and historical research;
+> a successful experiment is not automatically a shipped product feature.
 
 **rustia** = a fast, low-memory, wasm-friendly **Luau interpreter in Rust** with a great embedding API,
 built to replace **koto** in `../grabby-aliens/`. Design-first: we explore ~5 directions per decision,
@@ -44,11 +38,14 @@ docs are design intent.
 | [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — coherent execution facade, typed schema/context transaction, serde, transactional installation/replacement, extension/linker | **[TRANSACTIONAL INSTALLATION IMPLEMENTED]** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
-| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions, live construction, persistent registration, reclamation and reset | **[IMPLEMENTED; CLIENT ROLLOUT PENDING]** |
+| [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions, live construction, persistent registration, reclamation and reset | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
+| [`79-script-diagnostics.md`](79-script-diagnostics.md) | bounded source reports, typed errors, and console source mapping | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
 | [`81-benchmark-operations.md`](81-benchmark-operations.md) | qualified-host measurement, freshness/publication state, landscape refresh, and no-scheduled-billing policy | **[ROLLING OUT]** |
+| [`82-error-behaviour-fuzzing.md`](82-error-behaviour-fuzzing.md) | error recovery, bounded embedding fuzzing, and pinned-Luau differential campaigns | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
+| [`92-first-release.md`](92-first-release.md) | Rustia 1.0 acceptance checklist: API, runtime gaps, platforms, documentation, and publication | **[IN PROGRESS]** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for every workspace package | **[GENERATED]** |
 | [`package-files.json`](package-files.json) | generated `cargo package --list` audit for every workspace package | **[GENERATED]** |
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |
@@ -58,11 +55,10 @@ docs are design intent.
 canonical-identity module resolution,
 block-local invocation contexts, capability views, shared fuel, and bounded record transactions,
 CLI, deterministic profiles, reusable
-private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. The current `a562919` snapshot
-puts rustia 3.494x behind `mlua-luau` and 3.833x behind Luaur by five-workload minimum-time geometric mean; the
-targeted closure slice reduced rustia median latency by 15.036%. Before public release, prioritize
-live-object constructors/serde,
-semantic-tail hardening, then further measured optimization and packaging. Object/program reclamation,
+private HotIR, and a reproducible 12-adapter dedicated-Linux benchmark pipeline. For current measurements,
+read the generated [benchmark results](../bench/RESULTS.md) and [claim checks](../bench/CLAIMS.md).
+Before public release, settle the public settings/userdata contracts,
+yieldable module loading, error behavior, real-platform validation, and packaging. Object/program reclamation,
 quotas/OOM, maintained live-memory accounting, script counters, epoch-safe decision reset, and the
 per-invocation host seam are implemented. A maintained 96-epoch/3,072-wave mixed-heap soak now runs on native
 and Node/V8 wasm with an exact reset plateau and stable warmed wasm linear-memory pages; this is correctness

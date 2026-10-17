@@ -213,10 +213,10 @@ fn rejected_constructors_release_their_captures() {
         .unwrap();
     let before = rustia.memory_stats().live_bytes;
     let (definition, capture) = callback(1);
-    assert!(
-        matches!(rustia.create_function(definition), Err(rustia::Error { kind: rustia::ErrorKind::Vm(error), .. })
-        if matches!(error.kind, VmErrorKind::HardenedLeafViolation { .. }))
-    );
+    assert!(matches!(
+        (rustia.create_function(definition)).as_ref().err().map(|error| error.kind()),
+        Some(rustia::ErrorKind::Vm(error))
+        if matches!(error.kind, VmErrorKind::HardenedLeafViolation { .. })));
     assert!(capture.upgrade().is_none());
     assert_eq!(before, rustia.memory_stats().live_bytes);
 
@@ -286,9 +286,9 @@ fn constructor_quota_failure_drops_candidate_and_recovers_after_root_release() {
         match rustia.create_function(definition) {
             Ok(function) => functions.push(function),
             Err(error) => {
-                assert!(
-                    matches!(error, rustia::Error { kind: rustia::ErrorKind::Vm(error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory))
-                );
+                assert!(matches!(
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)));
                 assert!(
                     capture.upgrade().is_none(),
                     "failed admission must release the candidate"
@@ -342,10 +342,10 @@ fn created_host_panics_poison_and_reset_releases_callback() {
             panic!("host failed")
         })
         .unwrap();
-    assert!(
-        matches!(function.call::<_, i64>(&mut rustia, ()), Err(rustia::Error { kind: rustia::ErrorKind::Vm(error), .. })
-        if matches!(error.kind, VmErrorKind::HostPanicked { .. }))
-    );
+    assert!(matches!(
+        (function.call::<_, i64>(&mut rustia, ())).as_ref().err().map(|error| error.kind()),
+        Some(rustia::ErrorKind::Vm(error))
+        if matches!(error.kind, VmErrorKind::HostPanicked { .. })));
     assert!(rustia.eval::<i64>("return 1").is_err());
     rustia.reset_decision().unwrap();
     assert!(weak.upgrade().is_none());

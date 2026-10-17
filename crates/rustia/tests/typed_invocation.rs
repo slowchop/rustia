@@ -627,8 +627,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 error.kind,
                 VmErrorKind::HostResourceExhausted {
@@ -812,8 +812,8 @@ fn byte_budget_is_checked_before_publication() {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 error.kind,
                 VmErrorKind::HostResourceExhausted {
@@ -865,8 +865,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 70 })
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 70 })
     ));
 }
 
@@ -913,8 +913,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::HostPanicked { .. })
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(lane.is_empty());
 
@@ -928,8 +928,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        poisoned,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+        poisoned.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
 
     rustia.reset_decision().unwrap();
@@ -1154,8 +1154,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HostPanicked { function }
@@ -1164,14 +1164,14 @@ return {
     ));
     assert!(lane.is_empty());
     assert!(matches!(
-        rustia
+        (rustia
             .invoke(
                 &mut host,
                 InvocationLimits::new(10_000),
                 |_invocation| Ok(()),
             )
-            .unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+            .unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
 }
 
@@ -1182,19 +1182,19 @@ fn direct_host_panic_poisoning_is_enforced_by_the_vm_core() {
         .add_fn("panic_now", || -> i64 { panic!("direct callback panic") })
         .unwrap();
     assert!(matches!(
-        rustia.eval::<()>("panic_now()").unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        (rustia.eval::<()>("panic_now()").unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
-        rustia.eval::<i64>("return 1").unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+        (rustia.eval::<i64>("return 1").unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     assert!(matches!(
-        rustia
+        (rustia
             .invoke(&mut (), InvocationLimits::new(0), |_invocation| Ok(()))
-            .unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+            .unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     rustia.reset_decision().unwrap();
     assert_eq!(rustia.eval::<i64>("return 1").unwrap(), 1);
@@ -1256,8 +1256,8 @@ return {
         )
         .unwrap_err();
     assert!(matches!(
-        &error,
-        Error { kind: rustia::ErrorKind::Vm(error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::HostPanicked { function }
@@ -1266,22 +1266,22 @@ return {
     ));
     assert!(lane.is_empty());
     assert!(matches!(
-        rustia
+        (rustia
             .invoke(&mut host, InvocationLimits::new(0), |_invocation| Ok(()))
-            .unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+            .unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     let mut poison_probe = Vec::new();
     assert!(matches!(
-        rustia
+        (rustia
             .invoke_into(
                 &mut host,
                 InvocationLimits::new(0).with_max_records(4),
                 &mut poison_probe,
                 |_invocation| Ok(()),
             )
-            .unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+            .unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
     assert_eq!(poison_probe.capacity(), 0);
     rustia.reset_decision().unwrap();
@@ -1298,12 +1298,12 @@ fn typed_builder_preserves_profile_validation() {
         .build_for_host::<Host>()
         .unwrap();
     assert!(matches!(
-        rustia.add_external(
+        (rustia.add_external(
             "external",
             1,
             |mut host: HostMut<'_, Host>| host.get_mut().input
-        ),
-        Err(Error { kind: rustia::ErrorKind::Vm(ref error), .. })
+        )).as_ref().err().map(|error| error.kind()),
+        Some(rustia::ErrorKind::Vm(error))
             if matches!(
                 error.kind,
                 VmErrorKind::CapabilityRemoved {
@@ -1354,8 +1354,8 @@ fn typed_host_modules_are_inspectable_atomic_and_persist_across_reset() {
         });
     let error = rustia.install_host_module(rejected).unwrap_err();
     assert!(matches!(
-        &error,
-        Error { kind: rustia::ErrorKind::Vm(error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 &error.kind,
                 VmErrorKind::CapabilityRemoved {
@@ -1460,8 +1460,8 @@ fn mutable_external_context_is_profile_gated() {
         host.get_mut().input
     });
     assert!(matches!(
-        rejected.unwrap_err(),
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        (rejected.unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::CapabilityRemoved { .. })
     ));
 
@@ -1638,8 +1638,8 @@ fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
         )
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
 }
 
@@ -1689,8 +1689,8 @@ return {
         })
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::YieldAcrossBoundary)
     ));
 }
@@ -1743,8 +1743,8 @@ return {
         })
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::YieldAcrossBoundary)
     ));
 }
@@ -1802,8 +1802,8 @@ return {
         .unwrap_err();
     assert!(
         matches!(
-            error,
-            Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
         ),
         "unexpected deterministic OOM error: {error:?}"
     );

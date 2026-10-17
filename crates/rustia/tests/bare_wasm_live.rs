@@ -4,7 +4,7 @@
     not(feature = "web-live")
 ))]
 
-use rustia::{Error, RustiaBuilder, ServiceClock, ServiceEntropy, VmErrorKind};
+use rustia::{RustiaBuilder, ServiceClock, ServiceEntropy, VmErrorKind};
 use serde::Deserialize;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -33,14 +33,13 @@ fn bare_wasm_live_accepts_explicit_host_inputs() {
 #[wasm_bindgen_test]
 fn bare_wasm_live_reports_a_missing_platform_adapter() {
     let result = RustiaBuilder::live().build();
-    let Err(Error {
-        kind: rustia::ErrorKind::Vm(error),
-        ..
-    }) = result
-    else {
+    let Err(error) = result else {
         panic!("expected a typed missing-adapter error");
     };
-    assert!(matches!(error.kind, VmErrorKind::Unsupported { .. }));
+    assert!(matches!(
+        error.as_vm_error().map(|error| &error.kind),
+        Some(VmErrorKind::Unsupported { .. })
+    ));
 }
 
 #[wasm_bindgen_test]

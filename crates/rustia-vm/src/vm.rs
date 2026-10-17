@@ -2515,6 +2515,12 @@ impl Vm {
 
     #[inline]
     fn hot_ir_enabled(&self) -> bool {
+        // HotIR can grow tables between scalar instruction boundaries. Keep
+        // memory-limited execution on the dispatcher that enforces the quota
+        // at every instruction (design/58-vm-core2.md §C2.3).
+        if self.settings.memory_limit_bytes.is_some() {
+            return false;
+        }
         #[cfg(test)]
         {
             self.hot_ir_mode != HotIrTestMode::Off
@@ -2527,6 +2533,11 @@ impl Vm {
 
     #[inline]
     fn tape_enabled(&self) -> bool {
+        // The tape's dense-array write lane has the same admission policy as
+        // HotIR until it can preserve per-instruction memory-limit checks.
+        if self.settings.memory_limit_bytes.is_some() {
+            return false;
+        }
         #[cfg(test)]
         {
             self.tape_mode != TapeTestMode::Off
@@ -2539,6 +2550,11 @@ impl Vm {
 
     #[inline]
     fn closure_call_fast_path_enabled(&self) -> bool {
+        // Even an allocation-free leaf must not skip quota enforcement after
+        // a previous instruction allocated past the boundary.
+        if self.settings.memory_limit_bytes.is_some() {
+            return false;
+        }
         #[cfg(test)]
         {
             self.closure_call_mode != ClosureCallTestMode::Off
@@ -4048,8 +4064,8 @@ impl Vm {
             // coverage/census instrumentation cannot appear mid-frame, so a
             // plain (unmetered, uninstrumented) frame resolves its
             // loader-built executable tape here and never retests those
-            // policies per instruction. Metered and instrumented frames stay
-            // entirely on the scalar dispatcher.
+            // policies per instruction. Metered, memory-limited, and
+            // instrumented frames stay on the scalar dispatcher.
             let plain_mode = fuel.state.fuel.is_none()
                 && !self.scalar_instrumentation_forced()
                 && self.tape_enabled();
@@ -30281,6 +30297,31 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn memory_limit_keeps_array_growth_off_hot_ir_and_tape() {
+        let program = hot_ir_array_program();
+        let mut unbounded = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(unbounded.run(&program).unwrap().as_number(), Some(64.0));
+        assert!(unbounded.dynamic_programs[0].hot_ir_iterations > 0);
+        assert!(unbounded.dynamic_programs[0].tape_entries > 0);
+
+        let mut limited = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                memory_limit_bytes: Some(1024 * 1024),
+                ..VmSettings::default()
+            },
+        );
+        limited.hot_ir_mode = HotIrTestMode::Force;
+        assert_eq!(limited.run(&program).unwrap().as_number(), Some(64.0));
+        assert_eq!(limited.dynamic_programs[0].hot_ir_entries, 0);
+        assert_eq!(limited.dynamic_programs[0].tape_entries, 0);
+        assert_eq!(
+            limited.executed_instructions,
+            unbounded.executed_instructions
+        );
+    }
+
+    #[test]
     fn hot_ir_matches_interpreter_for_supported_numeric_semantics() {
         let program = hot_ir_numeric_semantics_program();
         let mut fast = Vm::new(Profile::ReproducibleStandard);
@@ -30984,6 +31025,78 @@ mod inline_cache_tests {
         assert_eq!(interpreted_loaded.closure_call_prototype_hits, 0);
         assert_eq!(interpreted_loaded.closure_call_fast_entries, 0);
         assert_eq!(interpreted_loaded.closure_call_guard_exits, 0);
+    }
+
+    #[test]
+    fn memory_limit_precedes_leaf_mutation_after_an_allocating_instruction() {
+        let template = closure_call_counter_program();
+        let program = Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::with_aux(Opcode::LoadFunction, 2, 0, 0, 0),
+                    Instruction::with_aux(Opcode::GetGlobal, 3, 0, 0, 2),
+                    Instruction::with_aux(Opcode::Call, 4, 3, 2, 1),
+                    Instruction::new(Opcode::NewArray, 4, 0, 0),
+                    Instruction::with_aux(Opcode::Call, 5, 2, 0, 0),
+                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                ],
+                6,
+            ),
+            vec![
+                Constant::Number(0.0),
+                Constant::Number(1.0),
+                Constant::String(b"arm_quota".to_vec()),
+            ],
+            template.functions,
+        );
+
+        let mut instruction_counts = Vec::new();
+        for mode in [ClosureCallTestMode::Off, ClosureCallTestMode::Force] {
+            let mut vm = Vm::with_settings(
+                Profile::ReproducibleStandard,
+                VmSettings {
+                    memory_limit_bytes: Some(usize::MAX),
+                    ..VmSettings::default()
+                },
+            );
+            vm.closure_call_mode = mode;
+            vm.install_host_function(HostFunctionOp::new(
+                "arm_quota",
+                1,
+                OpCapability::Pure,
+                Arc::new(|vm, args| {
+                    vm.set_global_value("quota_leaf", args[0])?;
+                    // Calibrate the exact pre-allocation boundary, including
+                    // the caller frame and roots, without assuming layout
+                    // sizes. The limit is present throughout the frame.
+                    vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+                    Ok(Vec::new())
+                }),
+            ))
+            .unwrap();
+
+            let error = vm
+                .run(&program)
+                .expect_err("the new table exceeds the quota");
+            assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+            let leaf = vm
+                .get_global_value("quota_leaf")
+                .unwrap()
+                .as_function()
+                .unwrap();
+            let capture = vm.heap.function_capture(leaf, 0).unwrap();
+            assert_eq!(
+                vm.heap.capture_get(capture).and_then(Value::as_number),
+                Some(0.0)
+            );
+            assert_eq!(vm.executor_census().closure_call_fast_entries, 0);
+            instruction_counts.push(vm.executed_instructions);
+        }
+        // NewArray (pc 5) completed; the scalar quota check at the Call
+        // (pc 6) must abort before executing the counter's first instruction.
+        assert_eq!(instruction_counts, [7, 7]);
     }
 
     /// [`closure_call_loop_program`] with a logical-unit schedule: `main`

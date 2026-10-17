@@ -230,9 +230,9 @@ impl Value {
     }
 
     pub(crate) fn raw(&self, vm: &Vm, label: &str) -> Result<RawValue> {
-        ensure_current_epoch(label, self.decision_epoch, vm.decision_epoch())?;
-        ensure_same_vm(label, &self.value, vm)?;
-        self.value.value(vm).map_err(Error::from)
+        self.value
+            .value(vm)
+            .map_err(|error| Error::from(error).with_context(label))
     }
 }
 
@@ -298,9 +298,9 @@ impl Table {
         K: IntoRustia,
         C: HostSchema,
     {
+        let table = self.value.raw(rustia.vm(), "table handle")?;
         let key = key.into_rustia()?;
         let key = load_owned_value(rustia.vm_mut(), &key)?;
-        let table = self.value.raw(rustia.vm(), "table handle")?;
         let value = rustia
             .vm_mut()
             .raw_table_get_value(table, key)
@@ -351,11 +351,11 @@ impl Table {
         V: IntoRustia,
         C: HostSchema,
     {
+        let table = self.value.raw(rustia.vm(), "table handle")?;
         let key = key.into_rustia()?;
         let value = value.into_rustia()?;
         let key = load_owned_value(rustia.vm_mut(), &key)?;
         let value = load_owned_value(rustia.vm_mut(), &value)?;
-        let table = self.value.raw(rustia.vm(), "table handle")?;
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
@@ -386,28 +386,6 @@ impl Table {
             .map(|pair| (pair[0].clone(), pair[1].clone()))
             .collect())
     }
-}
-
-pub(crate) fn ensure_current_epoch(
-    label: &str,
-    handle_epoch: u64,
-    current_epoch: u64,
-) -> Result<()> {
-    if handle_epoch == current_epoch {
-        return Ok(());
-    }
-    Err(Error::embed(format!(
-        "stale {label} from decision epoch {handle_epoch}; current decision epoch is {current_epoch}"
-    )))
-}
-
-pub(crate) fn ensure_same_vm(label: &str, value: &RetainedValue, vm: &Vm) -> Result<()> {
-    if value.belongs_to(vm) {
-        return Ok(());
-    }
-    Err(Error::embed(format!(
-        "{label} belongs to a different Rustia VM"
-    )))
 }
 
 fn raw_value_type(value: RawValue) -> Result<ValueType> {

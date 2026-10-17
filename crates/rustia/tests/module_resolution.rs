@@ -260,8 +260,8 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
         .eval::<f64>(r#"return require("expensive")"#)
         .unwrap_err();
     assert!(matches!(
-        error,
-        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 20 })
     ));
 }
@@ -342,8 +342,8 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         .err()
         .expect("deterministic profile rejection");
     assert!(matches!(
-        error,
-        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 error.kind,
                 VmErrorKind::CapabilityRemoved {
@@ -361,8 +361,8 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         .err()
         .expect("hardened leaf rejection");
     assert!(matches!(
-        error,
-        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 error.kind,
                 VmErrorKind::HardenedLeafViolation {
@@ -406,13 +406,13 @@ fn resolver_panics_poison_until_decision_reset() {
 
     let first = vm.eval::<f64>(r#"return require("probe")"#).unwrap_err();
     assert!(matches!(
-        first,
-        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        first.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(error.kind, VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
-        vm.eval::<f64>("return 1").unwrap_err(),
-        rustia::Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::VmPoisoned)
+        (vm.eval::<f64>("return 1").unwrap_err()).kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
     ));
 
     vm.reset_decision().expect("reset poisoned VM");

@@ -16,6 +16,10 @@ only; grabby-specific integration code remains outside this repository.
   is deliberately re-pinned and the conformance oracle is refreshed.
 - The minimum supported Rust version is the workspace `rust-version` in
   `Cargo.toml`.
+- The first stable release target is `1.0.0`, following a release-candidate cycle
+  and the acceptance checklist in [`92-first-release.md`](92-first-release.md).
+  This is a target, not a declaration that the current API is frozen or ready
+  to publish. The workspace version remains `0.0.1` until its gates pass.
 
 ## Public Crate Roles
 
@@ -33,11 +37,16 @@ only; grabby-specific integration code remains outside this repository.
 
 ## Stability Tiers
 
-- **Stable facade:** the `rustia` crate items used by the public examples and
-  README. These require migration notes for breaking changes after `0.1.0`.
-- **Advanced/internal:** parser/compiler/VM bytecode, raw VM value handles,
-  conformance helpers, and implementation knobs. These can change in minor
-  releases before `1.0` when needed for correctness or performance.
+- **Public facade:** every public item reachable through the `rustia` crate,
+  including re-exports and public field/trait contracts. At `1.0`, all of this
+  surface follows SemVer; the promise is not limited to README examples. An
+  “advanced” label does not exempt an exported type from compatibility.
+- **Lower-level crates:** parser/compiler/VM bytecode, raw VM handles,
+  conformance helpers, and implementation knobs have their own package-version
+  contracts. They can change in minor releases while their package is pre-1.0;
+  a lower-level crate at 1.0 follows the same major-version rule as any other
+  stable crate. Before facade 1.0, audit re-exports so engine details do not
+  accidentally become permanent facade commitments.
 - **Generated/data artifacts:** conformance coverage, benchmark history, current
   result JSON, and generated HTML. Schema changes require schema-version bumps
   and migration notes.
@@ -46,14 +55,27 @@ only; grabby-specific integration code remains outside this repository.
 
 - `0.0.x`: unpublished or private-preview snapshots. Breaking changes are
   allowed, but docs and examples should stay current.
-- `0.1.x`: first public preview. The embedding facade should compile from the
+- `0.1.x`: optional public preview. The embedding facade should compile from the
   examples and README without private setup. Breaking API changes are allowed
   only in minor releases, with migration notes.
 - `0.y.z` for `y > 1`: follow normal Rust pre-1.0 convention: patch releases
   avoid breaking public facade APIs; minor releases may break with documented
   migration notes.
 - `1.0.0`: reserved for a stable public facade, documented profile semantics,
-  completed release gates, and credible per-workload benchmark claims.
+  completed release gates, and credible per-workload benchmark evidence. It
+  does not require being faster than every other engine.
+- `1.x`: add compatible functionality in minor releases and fixes in patch
+  releases. Do not add required trait methods, remove public items, change
+  public signatures, or add variants to exhaustive public enums without a
+  major release. Prefer private fields and builders for evolving configuration
+  and non-exhaustive enums for classifications expected to grow. Match
+  non-exhaustive classifications with a fallback arm.
+
+Before the first candidate, record the complete facade API and run consumer
+compilation tests. After 1.0, compare proposed changes with that released API
+baseline in CI. Migration notes explain a breaking change; they do not make it
+compatible with 1.x. Replay/fuel/module ABI identifiers remain separately
+versioned and must be included in an application's replay identity.
 
 ## Breaking Change Checklist
 

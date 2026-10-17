@@ -1,5 +1,5 @@
 use rustia::{
-    Error, ModuleSource, OwnedValue, Profile, Rustia, RustiaBuilder, RustiaExtension,
+    ModuleSource, OwnedValue, Profile, Rustia, RustiaBuilder, RustiaExtension,
     ServiceModuleResolver, VmErrorKind, RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
 };
 use std::cell::Cell;
@@ -334,8 +334,8 @@ fn quota_failure_rolls_back_installation_and_keeps_the_vm_reusable() {
         .install()
         .unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.eval::<i32>("return shared.value").unwrap(), 1);
     assert_eq!(rustia.eval::<i32>("return 40 + 2").unwrap(), 42);
@@ -368,8 +368,8 @@ fn transaction_snapshot_is_quota_checked_before_guest_mutation() {
             .install()
             .unwrap_err();
         assert!(matches!(
-            error,
-            Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
         ));
         let after = rustia.memory_stats().live_bytes;
         assert!(
@@ -467,8 +467,8 @@ fn global_extension_batches_are_atomic_on_quota_failure() {
 
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.memory_stats().live_bytes, before_live);
     assert!(matches!(
@@ -494,8 +494,8 @@ fn namespaced_extension_batches_are_atomic_on_quota_failure() {
 
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. } if matches!(error.kind, VmErrorKind::OutOfMemory)
+        error.kind(),
+        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.memory_stats().live_bytes, before_live);
     assert!(matches!(

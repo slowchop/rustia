@@ -8,6 +8,26 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A first-release milestone targeting a stable 1.0 API after a release-candidate
+  cycle. The README now opens with runnable examples, plain-language environment
+  choices, and feature/speed comparisons backed by a dated remote benchmark
+  cohort. A contributor guide and preflight checks keep the examples executable
+  and the comparison numbers tied to their evidence.
+
+- Pre-release error API hardening: `ErrorKind` is non-exhaustive and the facade
+  `Error` classification is accessed through `kind()` or `into_kind()` rather
+  than a public field. Match with a fallback arm. Stale and foreign live handles
+  now expose `VmErrorKind::StaleRetainedValue` and
+  `VmErrorKind::RetainedValueFromDifferentVm` instead of requiring message parsing.
+  Table reads/writes, retained-function calls, and export access reject invalid
+  receivers before converting inputs or allocating guest keys and values.
+
+- Memory-limited execution now keeps batched paths on the scalar dispatcher's
+  instruction-boundary checks. This closes the collection-window quota gap for
+  unmetered table growth; tests cover the four profiles, multiple collection
+  intervals, and instruction accounting. Remote performance screening remains
+  required before delivery; no local measurements are used.
+
 - Human-facing `Error::report()` with immutable executed-source snapshots,
   expression spans, bounded logical callers, factual operation explanations,
   parser-proven unclosed-block notes, typed host causes, serde field paths, and

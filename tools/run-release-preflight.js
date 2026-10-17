@@ -6,12 +6,12 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 
-function run(command, args) {
+function run(command, args, extraEnv = {}) {
   process.stdout.write(`+ ${command} ${args.join(" ")}\n`);
   try {
     childProcess.execFileSync(command, args, {
       cwd: root,
-      env: process.env,
+      env: { ...process.env, ...extraEnv },
       stdio: "inherit",
     });
   } catch (error) {
@@ -117,6 +117,11 @@ node("tools/check-package-dry-runs.js");
 node("tools/verify-conformance-package.js");
 node("design/render-progress.js", "--check");
 node("tools/check-project-status.js");
+node("tools/check-readme-examples.js");
+node("tools/check-readme-comparisons.js");
+run("cargo", ["doc", "--locked", "--workspace", "--lib", "--no-deps"], {
+  RUSTDOCFLAGS: [process.env.RUSTDOCFLAGS, "-D warnings"].filter(Boolean).join(" "),
+});
 
 node("bench/analyze-fixed-samples.js", "--self-test");
 node("tools/run-linode-benchmark.js", "self-test");

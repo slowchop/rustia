@@ -2,9 +2,29 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-09-15.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-18.)
 
 ## One-paragraph state
+
+**First-release milestone:** target a stable Rustia 1.0 after a release-candidate
+cycle, tracked in [`92-first-release.md`](92-first-release.md). The workspace
+remains unpublished at `0.0.1`. The landing page now starts with executable API
+examples and plain-language feature/speed comparisons; contributor instructions
+and README example checks are part of the release workflow. The API hardening
+in this change makes facade error classifications non-exhaustive and private
+behind accessors, reports stale/cross-VM live handles through typed VM errors,
+and checks table/function/export receivers before converting inputs or allocating
+guest values. Handle validation uses the core VM's ownership-first, epoch-second
+contract. These changes do not
+close the remaining public settings/userdata design, yieldable `require`,
+language error-phase, real-platform golden, or packaging gates.
+
+**Memory-limit hardening:** memory-limited VMs now avoid batched execution paths
+and use the scalar dispatcher's instruction-boundary quota checks, closing the
+former HotIR/tape collection-window gap. Cross-profile, cross-interval regressions
+and instrumentation-free execution counters cover this policy. See the
+[quota-window resolution](58-vm-core2.md). Remote screening remains pending until
+the PR's final checks complete; no local timings or new speed claim are used.
 
 [Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is complete in
 [PR #34](https://github.com/slowchop/rustia/pull/34): cross-profile failure/recovery
@@ -378,8 +398,8 @@ facility is finished. The highest-impact gaps are:
    permits explicit nondeterminism over reproducible defaults, and `live()` is a first-class intentionally
    non-reproducible environment rather than a restricted or second-class mode.
 4. **Semantic-tail and diagnostics hardening.** Continue differential parser/compiler testing, keep valid
-   runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and finish
-   public stack traces/source diagnostics. Module/extension installation failure is now transactional; external
+   runtime errors catchable at runtime rather than prematurely rejecting them at compile time, and maintain
+   the implemented bounded stack/source diagnostics. Module/extension installation failure is now transactional; external
    host callback and resolver effects remain deliberately outside rollback. The final audit closed untracked
    `buffer.readf32`/`readf64` NaN-payload loss by
    separating exact buffer-bit ingress from canonicalized arithmetic results and giving f32 NaNs an explicit
@@ -857,8 +877,8 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 1. **Complete the ordered advanced API boundary:** the composable chunk builder is implemented on the
    graph-preserving live `Value`/`Table`/`Function` spine plus its globals/table constructors. Atomic
    installation, fresh dependency cohorts, host-owned replacement, live-value serde, and synchronous
-   host-function construction are implemented, with controlled-client integrations verified. Complete stronger
-   traceback diagnostics. The
+   host-function construction are implemented, with controlled-client integrations verified. Settle the
+   public settings/export and opaque-userdata contracts before freezing the facade. The
    worker-local typed invocation seam, hardened stateless leaf, direct compiled-entry path, binary/rich/cyclic
    live values, memory telemetry, and quota enforcement are implemented. Preserve the concise typed facade and
    apply determinism restrictions according to the selected builder: `live()` intentionally promises none.
@@ -879,7 +899,7 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 6. **Stabilize and publish the crates** in the generated dependency order after release preflight is green.
 7. **Watch `FFlag::LuauIntegerType2`** upstream (the f64-only tripwire).
 
-These span the remaining P1 engine hardening and P4 product/release work. The architecture decisions are
+These span the remaining engine hardening and product/release work. The architecture decisions are
 complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
-already active; cloud-provider credentials and an explicit operator start remain the external operational
-prerequisites for fresh performance measurements.
+already active. Fresh performance measurements use the owned `ci-bench` workflows;
+local timings and the retired cloud lifecycle are not release evidence.

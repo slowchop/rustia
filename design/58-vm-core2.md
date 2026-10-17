@@ -576,42 +576,33 @@ reproduces the divergence directly (confirmed failing before the fix -- `execute
 10 on `local total = 0; for i = 1, 5 do total += i end`) and sweeps every fuel level from 0 to `minimum_fuel +
 2`, comparing `executed_instructions` and the deterministic-collection lattice, not just the outcome.
 
-**A pre-existing gap, not an O2 bug: HotIR/tape don't re-check `memory_limit_bytes` mid-loop (found
-2026-09-15, deferred).** Neither `try_hot_ir`'s loop nor the general tape's `TapeOp::DenseArraySet` lane
-calls `enforce_memory_limit` -- it only runs from `maybe_collect`, which the scalar dispatcher calls after
-every charged instruction but which neither fast tier calls at all. Both instead gate purely on
-`weak_collection_due_within`, the deterministic-collection boundary distance, so a loop that keeps growing a
-table's array part (`heap::write_append_array_slot`/`try_write_numeric_array_slot`, called with no growth
-check from either tier) is not re-priced against the memory quota until it yields back to the scalar
-dispatcher at that boundary -- one `deterministic_gc_interval` window of unchecked growth, not the unbounded
-run-to-completion the initial report worried about, but not zero either. This predates O2 (HotIR is a
-default-on fast tier, ungated by `ExperimentalO2Options`) and was exposed by auditing the C2.3 fast-tier gate
-above with the same "does a hot loop see everything the scalar dispatcher would enforce" question.
-Reachability: real, but narrower than every memory-limited embedder. Both fast tiers require
-`fuel.state.fuel.is_none()` to be admitted at all, and every typed `invoke`/`invoke_entry_into` call threads
-an `InvocationLimits` fuel budget into exactly that field (`crates/rustia/src/invocation.rs`'s
-`Invocation::new`), so the one profile that *mandates* a memory limit -- hardened-leaf -- can never reach
-either tier and never observes this gap (pinned directly by
-`hardened_leaf_invocations_never_reach_the_fast_tiers_that_have_this_gap` below). The gap is reachable only
-through the unmetered surface -- `Rustia::eval`/`exec`/`install` (`Vm::run`, which takes its fuel from
-`VmSettings::initial_fuel`, `None` by default) -- combined with an explicit `.memory_limit_bytes(...)`, e.g.
-`RustiaBuilder::standard().memory_limit_bytes(n).build()` with no `.fuel(...)` call: a real, unremarkable
-embedding shape, not a contrived one. Measured (not asserted, per principle 3) on a ~57 KiB limit with the
-canonical `array_mutation`-shaped loop (`local t = {} for i = 1, 5000000 do t[i] = i end`, the same shape the
-C2.3 census tracks): overshoot tracks `deterministic_gc_interval` almost linearly -- 15 B at interval 8, 127 B
-at 128, 239 B at 1,000, 14,239 B at the crate default of 10,000 (about 1.25x the configured limit) -- against
-15 B when fuel forces the scalar dispatcher, confirming the interval, not the loop's five-million-iteration
-length, is what bounds it; the tape's `DenseArraySet` lane (non-numeric values, no calls, so HotIR's
-recognizer doesn't match but the general tape still does) overshoots by the same ~14.7 KB at the default
-interval. Not fixed here: a periodic in-loop check is exactly the kind of change to the two hot loops this
-programme exists to keep fast, and principle 3 requires a measured cost before adding one, which this
-finding does not include -- writing that check and pricing it against the `array_mutation`/`dense_tables`
-gates is left as follow-up work, not bundled into an unmeasured change to execution-path code.
-`crates/rustia/tests/hot_path_memory_limit.rs` pins today's bound instead: HotIR and tape overshoot bounded by
-the interval and clearly larger than the scalar-dispatch reference at every interval tested, and the
-hardened-leaf invocation path confirmed to stay off both tiers and within one instruction of the limit -- so
-a change to fast-tier admission that turned this into an unbounded overshoot would fail these tests before
-it could ship.
+**Memory-limited execution uses scalar quota boundaries (found 2026-09-15; resolved 2026-10-18).**
+HotIR and the executable tape do not call `enforce_memory_limit` inside their batched execution. Their
+array-write lanes could therefore grow a table until the next deterministic collection boundary before
+the scalar dispatcher detected the quota breach. An ordinary unmetered
+`RustiaBuilder::standard().memory_limit_bytes(n).build()` was affected. Typed invocations already
+supplied fuel, which excluded both tiers.
+
+Memory-limited VMs now reject HotIR, tape, and leaf-call admission, regardless of their fuel setting,
+profile, or collection interval. Array growth runs through the scalar dispatcher's existing per-instruction quota
+checks and collection retry. This preserves the documented instruction-boundary limit; it does not
+promise that an instruction's transient allocation or allocator-reserved capacity stays below that
+limit. Although the leaf-call plans do not allocate, they can mutate an upvalue before checking growth
+from the preceding instruction. They therefore use the same scalar admission policy to preserve quota
+error precedence and prevent that mutation after a quota breach. No periodic checks were
+added inside a fast executor. Restoring those executors under a quota requires equivalent
+instruction-boundary enforcement and remote `ci-bench` evidence before making performance claims.
+
+`crates/rustia/tests/hot_path_memory_limit.rs` now compares unmetered and fuel-forced scalar execution for
+numeric and non-numeric array assignments across all four profiles and collection intervals
+{1, 8, 128, 1,000, 10,000}. Both must return `OutOfMemory` with identical live and peak memory and
+single-instruction quota precision. Hardened-leaf invocation coverage retains the same tight boundary.
+Memory tracking does not force scalar dispatch. An instrumentation-free VM regression also executes a
+program known to enter both HotIR and tape without a quota, then verifies that a memory-limited VM
+returns the same result and charged instruction count with neither tier entered. These are correctness
+checks; they make no performance claim. A near-limit `NewArray` immediately followed by a counter
+leaf call also verifies that `OutOfMemory` precedes the leaf's upvalue mutation, matching the explicitly
+scalar reference's instruction count.
 
 **What follows.** The default stays off, and per-workload enabling was not the answer while the gate was per
 program: any program with a leaf-shaped closure or a HotIR loop regressed the moment one deletion fired
