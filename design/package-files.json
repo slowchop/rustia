@@ -1382,7 +1382,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 43,
+      "file_count": 44,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1421,6 +1421,7 @@
         "tests/host_functions.rs",
         "tests/hot_path_memory_limit.rs",
         "tests/live_serde.rs",
+        "tests/live_value_contract.rs",
         "tests/mixed_heap_pressure.rs",
         "tests/module_resolution.rs",
         "tests/puc51_compat.rs",

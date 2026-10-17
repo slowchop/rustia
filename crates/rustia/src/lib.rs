@@ -1,3 +1,32 @@
+//! Embed Luau scripts in a Rust application.
+//!
+//! Start with [`Rustia::builder`], load a script, and choose the Rust type you
+//! want back. Use [`Rustia::add_fn`] to make a Rust function available to scripts.
+//!
+//! ```
+//! use rustia::Rustia;
+//!
+//! let mut vm = Rustia::builder().build()?;
+//! vm.add_fn("double", |n: f64| n * 2.0)?;
+//! let answer: f64 = vm.load("return double(21)").source_name("example.luau").eval()?;
+//! assert_eq!(answer, 42.0);
+//! # Ok::<(), rustia::Error>(())
+//! ```
+//!
+//! [`RustiaBuilder::standard`] provides repeatable defaults;
+//! [`RustiaBuilder::live`] adds real clocks and randomness;
+//! [`RustiaBuilder::deterministic`] enforces the stricter replay contract.
+//! Set an instruction budget with [`RustiaBuilder::fuel`] and a VM-owned memory
+//! limit with [`RustiaBuilder::memory_limit_bytes`] when running bounded work.
+//!
+//! Use [`Error::report`] for readable diagnostics and [`Error::kind`] or
+//! [`Error::as_vm_error`] for program decisions. [`Value`], [`Table`], and
+//! [`Function`] keep script objects alive in their owning VM; reset invalidates
+//! old handles. [`OwnedValue`] is a separate, acyclic copy of ordinary data.
+//!
+//! The API is currently unpublished. See the repository's first-release checklist
+//! before treating it as a stable 1.0 contract.
+
 mod chunk;
 mod diagnostic;
 mod error;
@@ -49,9 +78,10 @@ pub use value::{
     FromRustia, FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedKey, OwnedTable, OwnedValue,
 };
 
-/// Safe Rust facade over one Luau VM.
+/// Owns one Luau interpreter and the Rust functions installed in it.
 ///
-/// `Rustia<()>` is the context-free compatibility surface. `Rustia<H>` stores
+/// For ordinary embedding, start with [`Rustia::builder`] and [`load`](Self::load).
+/// `Rustia<()>` needs no per-call host context. `Rustia<H>` stores
 /// only the lifetime-independent [`HostSchema`] and registered callbacks; each
 /// guest execution borrows a fresh [`HostContext<H>`] through
 /// [`invoke`](Self::invoke) or [`invoke_into`](Self::invoke_into).
@@ -598,10 +628,18 @@ impl Rustia<()> {
         RustiaBuilder::standard()
     }
 
+    /// Creates a service-free interpreter with the selected language profile.
+    ///
+    /// Unlike [`builder`](Self::builder), this constructor installs no stdout
+    /// sink. Use the builder presets for normal application defaults and host
+    /// clock, output, entropy, or module services.
     pub fn new(profile: Profile) -> Self {
         Self::from_profile(profile)
     }
 
+    /// Creates an interpreter with explicit low-level settings and services.
+    ///
+    /// Prefer [`builder`](Self::builder) for ordinary application configuration.
     pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
         Self::from_settings(profile, settings)
     }
@@ -817,6 +855,8 @@ impl Rustia<()> {
 }
 
 impl Default for Rustia {
+    /// Creates a service-free interpreter with reproducible standard semantics.
+    /// Use [`Rustia::builder`] for the standard preset with native stdout.
     fn default() -> Self {
         Self::new(Profile::ReproducibleStandard)
     }
@@ -1007,18 +1047,25 @@ return root
         );
 
         let mut other = Rustia::new(Profile::ReproducibleStandard);
-        assert!(root
-            .kind(&other)
-            .unwrap_err()
-            .to_string()
-            .contains("different Rustia VM"));
+        assert!(matches!(
+            root.kind(&other)
+                .unwrap_err()
+                .as_vm_error()
+                .map(|error| &error.kind),
+            Some(VmErrorKind::RetainedValueFromDifferentVm)
+        ));
         other.reset_decision().unwrap();
         rustia.reset_decision().unwrap();
-        assert!(root
-            .kind(&rustia)
-            .unwrap_err()
-            .to_string()
-            .contains("stale value handle"));
+        assert!(matches!(
+            root.kind(&rustia)
+                .unwrap_err()
+                .as_vm_error()
+                .map(|error| &error.kind),
+            Some(VmErrorKind::StaleRetainedValue {
+                retained_epoch: 0,
+                current_epoch: 1
+            })
+        ));
     }
 
     #[test]
@@ -1084,7 +1131,10 @@ return root
         let foreign_value = first_table
             .set_live(&mut first, "foreign", &second_table.as_value())
             .expect_err("a value from another VM must reject");
-        assert!(foreign_value.to_string().contains("different Rustia VM"));
+        assert!(matches!(
+            foreign_value.as_vm_error().map(|error| &error.kind),
+            Some(VmErrorKind::RetainedValueFromDifferentVm)
+        ));
         assert!(first_table
             .get(&mut first, "foreign")
             .unwrap()
@@ -1094,7 +1144,10 @@ return root
         let foreign_table = second_table
             .set_live(&mut first, "foreign", &first_table.as_value())
             .expect_err("a table from another VM must reject");
-        assert!(foreign_table.to_string().contains("different Rustia VM"));
+        assert!(matches!(
+            foreign_table.as_vm_error().map(|error| &error.kind),
+            Some(VmErrorKind::RetainedValueFromDifferentVm)
+        ));
     }
 
     #[test]
@@ -1107,16 +1160,28 @@ return root
             .unwrap();
 
         rustia.reset_decision().unwrap();
-        assert!(globals
-            .get(&mut rustia, "decision_local")
-            .unwrap_err()
-            .to_string()
-            .contains("stale table handle"));
-        assert!(table
-            .set(&mut rustia, "value", 1_i32)
-            .unwrap_err()
-            .to_string()
-            .contains("stale table handle"));
+        assert!(matches!(
+            globals
+                .get(&mut rustia, "decision_local")
+                .unwrap_err()
+                .as_vm_error()
+                .map(|error| &error.kind),
+            Some(VmErrorKind::StaleRetainedValue {
+                retained_epoch: 0,
+                current_epoch: 1
+            })
+        ));
+        assert!(matches!(
+            table
+                .set(&mut rustia, "value", 1_i32)
+                .unwrap_err()
+                .as_vm_error()
+                .map(|error| &error.kind),
+            Some(VmErrorKind::StaleRetainedValue {
+                retained_epoch: 0,
+                current_epoch: 1
+            })
+        ));
         let discarded: bool = rustia.eval("return decision_local == nil").unwrap();
         assert!(discarded);
     }
@@ -2089,19 +2154,15 @@ return {
         let mut second = Rustia::new(Profile::ReproducibleStandard);
 
         let exports_error = exports.value(&mut second).unwrap_err();
-        assert!(
-            exports_error
-                .to_string()
-                .contains("belongs to a different Rustia VM"),
-            "{exports_error}"
-        );
+        assert!(matches!(
+            exports_error.as_vm_error().map(|error| &error.kind),
+            Some(VmErrorKind::RetainedValueFromDifferentVm)
+        ));
         let function_error = read.call::<_, f64>(&mut second, ()).unwrap_err();
-        assert!(
-            function_error
-                .to_string()
-                .contains("belongs to a different Rustia VM"),
-            "{function_error}"
-        );
+        assert!(matches!(
+            function_error.as_vm_error().map(|error| &error.kind),
+            Some(VmErrorKind::RetainedValueFromDifferentVm)
+        ));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Per-function control-flow and liveness analysis over lowered bytecode.
 //!
-//! This is the C2.3 analysis layer from [`design/58-vm-core2.md`]: it builds
+//! This is the C2.3 analysis layer from `design/58-vm-core2.md`: it builds
 //! basic blocks over one [`Function`], runs a backward register-liveness
 //! fixpoint plus a forward local-cell may-attach fixpoint, classifies register
 //! slots and cleanup instructions, and exposes the block-boundary summary the

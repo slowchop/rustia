@@ -13,8 +13,9 @@ trail. Guest error values, message strings, protected-call behavior, fuel,
 and location suppression remain language semantics, not presentation policy.
 Rust backtraces remain conventional function/file/line reports.
 
-`Error` owns an `ErrorKind` and exposes `as_vm_error`, `source_location`,
-`source_span`, `diagnostic`, and `report`. `Error::from` wraps frontend/core
+`Error` privately owns a non-exhaustive `ErrorKind` and exposes `kind`, `into_kind`,
+`as_vm_error`, `source_location`, `source_span`, `diagnostic`, and `report`.
+`Error::from` wraps frontend/core
 failures; `Error::embed` is the concise message constructor and
 `Error::external` preserves a typed host cause. `with_context` must preserve
 the original typed classification. `Display` stays concise; clients opt into

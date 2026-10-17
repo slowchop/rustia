@@ -3,7 +3,7 @@
 //! This module is the single source of truth for what one production
 //! instruction may read, must write, and how it can leave the current basic
 //! block. [`crate::liveness`] consumes these facts to build the C2.3
-//! control-flow/liveness analysis ([`design/58-vm-core2.md`] §C2.3), and the
+//! control-flow/liveness analysis (`design/58-vm-core2.md` §C2.3), and the
 //! planned whole-function executable tape consumes the same facts through
 //! [`crate::liveness::BlockReceipt`].
 //!
@@ -15,7 +15,7 @@
 //! - **Reads over-approximate.** Every register the semantic interpreter can
 //!   read on any path is included. Exotic shapes that are not worth modeling
 //!   precisely set [`InstructionFacts::reads_all_registers`] instead.
-//! - **Definite writes under-approximate.** [`InstructionFacts::writes`]
+//! - **Definite writes under-approximate.** `InstructionFacts::writes`
 //!   contains only registers written on *every* non-throwing path before the
 //!   instruction completes or branches. Writes that depend on a runtime
 //!   condition (loop continuation, result-count adjustment) appear only in
@@ -306,7 +306,7 @@ impl InstructionFacts {
     }
 
     /// True when the successful common path is pure register bookkeeping, the
-    /// same certification [`crate::region`] uses for `RegisterOnly` effects.
+    /// same certification the region analysis uses for `RegisterOnly` effects.
     pub fn is_register_only(&self) -> bool {
         !self.may_enter_guest && !self.may_allocate && !self.reads_varargs
     }

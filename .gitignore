@@ -5,6 +5,7 @@ target/
 .fastembed_cache/
 *.profraw
 .claude/worktrees/
+/.worktrees/
 private/
 tools/puc51-oracle/build/
 

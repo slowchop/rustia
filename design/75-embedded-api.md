@@ -129,6 +129,17 @@ ordinary handles survive successful module replacement, while explicit decision 
 Live tables preserve identity, shared/cyclic graphs, binary data, and mutation; `OwnedValue` remains the
 portable deep-copy boundary for callers that prefer isolation.
 
+Retained-handle misuse has a typed host contract: stale handles return
+`VmErrorKind::StaleRetainedValue` with their retained and current decision epochs;
+foreign handles return `VmErrorKind::RetainedValueFromDifferentVm`. Ownership is
+checked before the decision epoch, so a foreign handle is identified correctly even
+when the two VMs have different epochs. Inspect these through `Error::as_vm_error()`
+rather than parsing text. Table access, retained-function calls, and export access
+validate their receiver before running owned-value conversions, interning names, or
+allocating guest keys and values. This applies to ordinary calls and typed invocations,
+with owned or live arguments/results. A rejected receiver therefore cannot run caller
+conversion code or consume the target VM's guest-memory or invocation-fuel budget.
+
 The environment is chosen independently of the API layer:
 
 | builder | promise | advanced API policy |

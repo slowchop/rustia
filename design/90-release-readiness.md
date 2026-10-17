@@ -1,8 +1,12 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-09-02; the ordered runtime
+from `publish = false` to publishable. Updated 2026-10-18; the ordered runtime
 blockers below take precedence over packaging polish.
+
+The first stable release target and its acceptance checklist are in
+[`92-first-release.md`](92-first-release.md). The current workspace remains
+unpublished; passing preflight does not by itself close this checklist.
 
 These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
 caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
@@ -20,23 +24,32 @@ semantic invariants and exact post-reset VM plateau; warmed wasm linear-memory
 pages also remain constant. This does not claim equal process RSS or allocator
 overhead across targets.
 
+The optimized-loop memory-quota window is closed conservatively: memory-limited
+VMs avoid batched execution paths and use the scalar dispatcher's existing
+instruction-boundary checks. Cross-profile append regressions compare unmetered
+execution with a fuel-forced scalar reference; execution counters verify the
+admission policy without instrumentation. See [`58-vm-core2.md`](58-vm-core2.md).
+Remote screening remains part of final PR validation; no new speed claim is made.
+
 1. Complete the release value ergonomics on the implemented VM/epoch-safe,
    graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
    binary strings, buffers, vectors, non-scalar/identity keys, shared/cyclic
    tables, mutation, raw equality, and ordinary or typed invocation exchange.
    Live globals, quota-aware tables, owned-key/live-value insertion, and the
    composable chunk builder, snapshot-free live serde, and reclaimable synchronous host functions
-   are implemented. Complete the controlled-client migration and define a concrete opaque-userdata
-   registration contract. Preserve the
+   are implemented and the controlled-client callback/diagnostics/fuzzing
+   rollouts are verified. Define a concrete opaque-userdata registration
+   contract and finish the public-export/settings stability review. Preserve the
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
-2. Harden compiler/runtime error-phase parity, stack traces, source diagnostics,
-   yieldable `require` and
+2. Harden compiler/runtime error-phase parity, yieldable `require` and
    differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
-   f32/f64 buffer-bit round trips, including NaN payloads, are covered.
+   f32/f64 buffer-bit round trips, including NaN payloads, are covered. Bounded
+   source reports, expression spans, typed host causes and console source
+   mapping are implemented by the diagnostics rollout; keep them covered.
 3. Close the full correctness/build/golden target matrix from
    [`00-constraints.md`](00-constraints.md); Linux remains the only active
    timing source, but not the only correctness target.

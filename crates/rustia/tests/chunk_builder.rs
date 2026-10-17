@@ -1,4 +1,4 @@
-use rustia::{Error, GuestSurface, OwnedValue, Rustia, RustiaBuilder, VmErrorKind};
+use rustia::{GuestSurface, OwnedValue, Rustia, RustiaBuilder, VmErrorKind};
 
 #[test]
 fn chunk_builder_evaluates_typed_live_and_exports_results() {
@@ -135,8 +135,8 @@ fn custom_environment_is_validated_before_source_compilation() {
         .exec()
         .expect_err("cross-VM environment must reject first");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Embed(ref message), .. } if message.contains("different Rustia VM")
+        error.as_vm_error().map(|error| &error.kind),
+        Some(VmErrorKind::RetainedValueFromDifferentVm)
     ));
     let stale = second.create_table().expect("soon-stale environment");
     second.reset_decision().expect("reset");
@@ -146,8 +146,11 @@ fn custom_environment_is_validated_before_source_compilation() {
         .exec()
         .expect_err("stale environment must reject first");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Embed(ref message), .. } if message.contains("stale chunk environment handle")
+        error.as_vm_error().map(|error| &error.kind),
+        Some(VmErrorKind::StaleRetainedValue {
+            retained_epoch: 0,
+            current_epoch: 1,
+        })
     ));
 }
 
@@ -183,8 +186,8 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
         .eval::<f64>()
         .expect_err("dynamic loading must reject");
     assert!(matches!(
-        error,
-        Error { kind: rustia::ErrorKind::Vm(ref error), .. }
+        error.kind(),
+        rustia::ErrorKind::Vm(error)
             if matches!(
                 error.kind,
                 VmErrorKind::HardenedLeafViolation {

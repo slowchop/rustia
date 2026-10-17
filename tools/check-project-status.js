@@ -4,6 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const assert = require("assert/strict");
 
 const root = path.resolve(__dirname, "..");
 
@@ -117,37 +118,57 @@ function benchmarkInventory() {
   }
 }
 
-function checkProgressGoals(progress, readme) {
+function checkProgressMetadata(progress) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(progress.metadata.date)) {
     fail("design/progress.json metadata.date must use YYYY-MM-DD format");
   }
   if (!progress.metadata.excludes.includes("Actual grabby integration work")) {
     fail("design/progress.json metadata.excludes must keep grabby integration out of scope");
   }
-  requireIncludes(
-    "README.md",
-    readme,
-    `as of ${progress.metadata.date}`,
-    "the progress snapshot date",
-  );
-  requireIncludes(
-    "README.md",
-    readme,
-    "actual grabby integration work is explicitly out of scope",
-    "the grabby integration exclusion",
-  );
+}
 
-  for (const goal of progress.overall_goals) {
-    requireIncludes(
-      "README.md",
-      readme,
-      `| ${goal.name} | ${goal.complete}% | ${goal.confidence}% |`,
-      `${goal.name} progress row from design/progress.json`,
-    );
+// The README can omit counts or use everyday language. Any numeric claims it
+// does display must still agree with the executable corpus, including bold or
+// line-wrapped prose and either "named behaviors" or the engineering "refs".
+function readmeConformanceProblems(readme, summary) {
+  const prose = readme.replace(/```[\s\S]*?```/g, "").replace(/\*\*|__/g, "").replace(/\s+/g, " ");
+  const rules = [
+    [/\b([\d,]+)\s+fixtures\b/gi, summary.fixtures, "fixture count"],
+    [/\b([\d,]+)\s+(?:named\s+behavio(?:u)?rs|refs)\b/gi, summary.refs, "named behavior count"],
+    [/\b([\d,]+)\s+pending-oracle\b/gi, summary.pendingOracle, "pending oracle count"],
+    [/\b([\d,]+)\s+pending-impl\b/gi, summary.pendingImpl, "pending implementation count"],
+    [/\b([\d,]+)\s+pending\b(?!-)/gi, summary.pendingOracle + summary.pendingImpl, "pending case count"],
+  ];
+  const problems = [];
+  for (const [pattern, expected, label] of rules) {
+    for (const match of prose.matchAll(pattern)) {
+      const actual = Number(match[1].replace(/,/g, ""));
+      if (actual !== expected) problems.push(`README.md ${label}: corpus has ${expected}, README claims ${match[1]}`);
+    }
+  }
+  return problems;
+}
+
+function testReadmeConformance(summary) {
+  const valid = `**${summary.fixtures} fixtures** cover **${summary.refs} named\nbehaviors**, with **0 pending** cases.`;
+  assert.deepEqual(readmeConformanceProblems(valid, summary), []);
+  assert.deepEqual(readmeConformanceProblems("See the compatibility coverage guide.", summary), []);
+  assert.deepEqual(readmeConformanceProblems(`${summary.refs} refs, 0 pending-oracle, 0 pending-impl`, summary), []);
+  for (const [claim, expected] of [
+    [`${summary.fixtures + 1} fixtures`, "fixture count"],
+    [`${summary.refs + 1} named behaviors`, "named behavior count"],
+    [`${summary.refs + 1} refs`, "named behavior count"],
+    ["1 pending-oracle", "pending oracle count"],
+    ["1 pending-impl", "pending implementation count"],
+    ["1 pending", "pending case count"],
+  ]) {
+    const problems = readmeConformanceProblems(`**${claim}**`, summary);
+    assert.equal(problems.length, 1, `must reject incorrect README claim: ${claim}`);
+    assert.ok(problems[0].includes(expected), problems[0]);
   }
 }
 
-function checkConformance(progress, readme, current) {
+function checkConformance(progress, current, readme) {
   const summary = conformanceSummary();
   const expected = progress.metadata.canonical_facts.conformance;
   assertEqual(expected.fixtures, summary.fixtures, "progress conformance fixture count");
@@ -168,13 +189,13 @@ function checkConformance(progress, readme, current) {
     `${summary.pendingImpl} pending-impl`,
   ];
   for (const fact of facts) {
-    requireIncludes("README.md", readme, fact, `current conformance fact ${fact}`);
     requireIncludes("design/CURRENT.md", current, fact, `current conformance fact ${fact}`);
   }
-  requireIncludes("README.md", readme, `${expected.pending} pending`, "compact pending summary");
+  testReadmeConformance(summary);
+  for (const problem of readmeConformanceProblems(readme, summary)) fail(problem);
 }
 
-function checkBenchmark(progress, readme, current) {
+function checkBenchmark(progress, current) {
   const inventory = benchmarkInventory();
   const currentResults = readJson("bench/current-results.json");
   const facts = progress.metadata.canonical_facts.benchmark_adapters;
@@ -236,13 +257,6 @@ function checkBenchmark(progress, readme, current) {
   );
 
   requireIncludes(
-    "README.md",
-    readme,
-    `all ${facts.present} requested adapters`,
-    "requested benchmark adapter count",
-  );
-  requireIncludes("README.md", readme, "`string_building`", "string_building benchmark status");
-  requireIncludes(
     "design/CURRENT.md",
     current,
     "19 workload entries including cross-adapter `string_building` source coverage",
@@ -256,17 +270,11 @@ function checkBenchmark(progress, readme, current) {
   );
 }
 
-function checkPublishability(readme, current) {
+function checkPublishability(current) {
   const publishability = readJson("design/publishability.json");
   assertEqual(publishability.summary.package_count, 8, "publishability package count");
   assertEqual(publishability.summary.publish_false_count, 8, "publishability publish=false count");
   assertEqual(publishability.summary.blocked_count, 8, "publishability blocked count");
-  requireIncludes(
-    "README.md",
-    readme,
-    "Current publish blockers are generated at",
-    "generated publishability blockers",
-  );
   requireIncludes(
     "design/CURRENT.md",
     current,
@@ -275,14 +283,31 @@ function checkPublishability(readme, current) {
   );
 }
 
+function checkReadmeEvidence(readme) {
+  // The landing page is for people choosing a scripting engine. Keep the
+  // engineering snapshot in design/ and link readers to the audited evidence
+  // without prescribing progress tables, terminology, or sentence wording.
+  const links = [...readme.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)];
+  for (const [target, description] of [
+    ["conformance/COVERAGE.md", "compatibility coverage"],
+    ["bench/CLAIMS.md", "the generated benchmark claim limits"],
+    ["design/90-release-readiness.md", "the release readiness checklist"],
+  ]) {
+    if (!links.some((match) => match[1].split(/[?#]/, 1)[0].endsWith(target))) {
+      fail(`README.md must link to ${description}: ${target}`);
+    }
+  }
+}
+
 const progress = readJson("design/progress.json");
 const readme = readText("README.md");
 const current = readText("design/CURRENT.md");
 
-checkProgressGoals(progress, readme);
-checkConformance(progress, readme, current);
-checkBenchmark(progress, readme, current);
-checkPublishability(readme, current);
+checkProgressMetadata(progress);
+checkConformance(progress, current, readme);
+checkBenchmark(progress, current);
+checkPublishability(current);
+checkReadmeEvidence(readme);
 
 const conformance = progress.metadata.canonical_facts.conformance;
 const adapters = progress.metadata.canonical_facts.benchmark_adapters;
