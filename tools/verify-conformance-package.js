@@ -94,8 +94,7 @@ runCargo([
 ]);
 
 const unpacked = path.join(
-  root,
-  "target",
+  metadata.target_directory,
   "package",
   `${packageName}-${packageMetadata.version}`,
 );
