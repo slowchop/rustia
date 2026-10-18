@@ -15,7 +15,7 @@ Add this to your application's `Cargo.toml` (Rust 1.95 or newer):
 
 ```toml
 [dependencies]
-rustia = { git = "https://github.com/slowchop/rustia", rev = "aab09d1ea24458ebe5592a820f426b0e6e4fa58f" }
+rustia = { git = "https://github.com/slowchop/rustia", rev = "038c708062bbe2cd6add970a2996e599675a59b9" }
 ```
 
 Put this in `src/main.rs` and run `cargo run`:
