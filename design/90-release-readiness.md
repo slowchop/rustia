@@ -38,8 +38,9 @@ Remote screening remains part of final PR validation; no new speed claim is made
    Live globals, quota-aware tables, owned-key/live-value insertion, and the
    composable chunk builder, snapshot-free live serde, and reclaimable synchronous host functions
    are implemented and the controlled-client callback/diagnostics/fuzzing
-   rollouts are verified. Define a concrete opaque-userdata registration
-   contract and finish the public-export/settings stability review. Preserve the
+   rollouts are verified. Typed Rust-object registration and methods are implemented;
+   complete their final checks, reviews, and real-consumer use under
+   [83-rust-objects.md](83-rust-objects.md), then finish candidate API acceptance. Preserve the
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.

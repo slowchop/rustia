@@ -1,8 +1,8 @@
 use crate::live_value::Value as LiveValue;
 use crate::serde_value::from_live;
 use crate::value::{
-    embed_to_vm_error, load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustia,
-    IntoRustiaMulti, OwnedValue,
+    embed_to_vm_error, load_owned_arguments, load_owned_value, snapshot_value, FromRustia,
+    FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedValue,
 };
 use crate::{Error, HostSchema, Invocation, Result, Rustia};
 use rustia_vm::{HostFunctionOp, OpCapability, RetainedValue, Value as RawValue, ValueKind, Vm};
@@ -70,11 +70,8 @@ impl Function {
         Return: FromRustiaMulti,
     {
         let function = self.value.raw(rustia.vm(), "function handle")?;
-        let raw_args = args
-            .into_rustia_multi()?
-            .iter()
-            .map(|value| load_owned_value(rustia.vm_mut(), value))
-            .collect::<Result<Vec<_>>>()?;
+        let args = args.into_rustia_multi()?;
+        let (raw_args, _argument_roots) = load_owned_arguments(rustia.vm_mut(), &args)?;
         let raw_results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
@@ -378,6 +375,11 @@ impl<T, Args, Return> IntoHostFunction<Args, Return> for T where T: adapter::Fun
 pub(crate) enum HostReturnValue {
     Owned(OwnedValue),
     Live(LiveValue),
+    NewObject {
+        rust_type_id: std::any::TypeId,
+        rust_type_name: &'static str,
+        value: Box<dyn std::any::Any>,
+    },
 }
 
 /// One callback result supported by Rustia's built-in callback adapters.
@@ -679,22 +681,31 @@ where
         .map_err(|error| host_embed_error(function_name, "return value", error))?;
     // Validate every live handle before allocating an owned result. Keep all live
     // values and each newly loaded owned value rooted through later conversions.
+    let mut live_roots = Vec::new();
     for value in &values {
-        if let HostReturnValue::Live(value) = value {
-            value
-                .raw(vm, "host function result")
-                .map_err(embed_to_vm_error)?;
+        match value {
+            HostReturnValue::Live(value) => {
+                value
+                    .raw(vm, "host function result")
+                    .map_err(embed_to_vm_error)?;
+                live_roots.push(value.clone());
+            }
+            HostReturnValue::NewObject { rust_type_id, .. } => {
+                vm.validate_host_object_creation(*rust_type_id)?;
+            }
+            HostReturnValue::Owned(_) => {}
         }
     }
     let mut roots = Vec::new();
     let mut results = Vec::with_capacity(values.len());
-    for (index, value) in values.iter().enumerate() {
+    let count = values.len();
+    for (index, value) in values.into_iter().enumerate() {
         let raw = match value {
             HostReturnValue::Owned(value) => {
-                let raw = load_owned_value(vm, value).map_err(|error| {
+                let raw = load_owned_value(vm, &value).map_err(|error| {
                     host_embed_error(function_name, format!("return value {}", index + 1), error)
                 })?;
-                if index + 1 < values.len()
+                if index + 1 < count
                     && !matches!(
                         raw.kind(),
                         ValueKind::Nil | ValueKind::Boolean | ValueKind::Number
@@ -707,6 +718,17 @@ where
             HostReturnValue::Live(value) => value
                 .raw(vm, "host function result")
                 .map_err(embed_to_vm_error)?,
+            HostReturnValue::NewObject {
+                rust_type_id,
+                rust_type_name,
+                value,
+            } => {
+                let raw = vm.create_host_object(rust_type_id, rust_type_name, value)?;
+                if index + 1 < count {
+                    roots.push(vm.retain_value(raw)?);
+                }
+                raw
+            }
         };
         results.push(raw);
     }

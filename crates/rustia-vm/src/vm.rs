@@ -2,6 +2,8 @@
 
 mod expanded_calls;
 mod host_functions;
+mod host_objects;
+use host_objects::HostObjectTypeBinding;
 
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
@@ -486,6 +488,7 @@ pub struct Vm {
     conformance_vertex_metatable: Option<u32>,
     extensions: ExtensionRegistry,
     host_function_bindings: Vec<HostFunctionBinding>,
+    host_object_types: Vec<HostObjectTypeBinding>,
     dynamic_programs: LoadedPrograms,
     module_cohorts: BTreeMap<u32, ModuleCohort>,
     next_module_cohort: u32,
@@ -2463,6 +2466,7 @@ impl Vm {
             conformance_vertex_metatable: standard_globals.conformance_vertex_metatable,
             extensions: ExtensionRegistry::default(),
             host_function_bindings: Vec::new(),
+            host_object_types: Vec::new(),
             dynamic_programs: LoadedPrograms::default(),
             module_cohorts: BTreeMap::from([(0, ModuleCohort::default())]),
             next_module_cohort: 1,
@@ -2772,6 +2776,7 @@ impl Vm {
             self.conformance_vec2_metatable = standard_globals.conformance_vec2_metatable;
             self.conformance_vertex_metatable = standard_globals.conformance_vertex_metatable;
             self.guest_environment_sealed = false;
+            self.restore_host_object_types();
             self.restore_host_function_bindings();
         }
 
@@ -15655,6 +15660,12 @@ impl Vm {
         );
         roots.extend(self.external_roots.borrow().values.values().copied());
         roots.extend(
+            self.host_object_types
+                .iter()
+                .filter_map(|binding| binding.metatable)
+                .map(Value::table),
+        );
+        roots.extend(
             self.module_cohorts
                 .get(&0)
                 .into_iter()
@@ -23763,6 +23774,19 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     let (extension_live, extension_reserved) = vm.extensions.memory_usage();
     usage.add(extension_live, extension_reserved);
     usage.add_vec(&vm.host_function_bindings);
+    usage.add_vec(&vm.host_object_types);
+    for binding in &vm.host_object_types {
+        let definition = &binding.definition;
+        usage.add(definition.name.len(), definition.name.capacity());
+        usage.add_vec(&definition.methods);
+        for method in &definition.methods {
+            let (live, reserved) = method.memory_usage();
+            usage.add(
+                live.saturating_sub(size_of::<HostFunctionOp>()),
+                reserved.saturating_sub(size_of::<HostFunctionOp>()),
+            );
+        }
+    }
     for binding in &vm.host_function_bindings {
         match binding {
             HostFunctionBinding::Global { name, function } => {
