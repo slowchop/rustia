@@ -24,7 +24,10 @@ fn main() -> Result<()> {
         .unwrap_or(2_000);
     let rounds = 6;
 
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let exports = rustia
         .load(
             r#"

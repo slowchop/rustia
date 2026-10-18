@@ -67,7 +67,7 @@ impl Value {
         let decision_epoch = vm.decision_epoch();
         vm.retain_value(value)
             .map(|value| Self::new(value, decision_epoch))
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     pub(crate) fn retain_many(vm: &mut Vm, values: &[RawValue]) -> Result<Vec<Self>> {
@@ -79,7 +79,7 @@ impl Value {
                     .map(|value| Self::new(value, decision_epoch))
                     .collect()
             })
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Returns the decision epoch in which this value was retained.
@@ -147,7 +147,7 @@ impl Value {
         rustia
             .vm_mut()
             .string_value_bytes(value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Copies the current buffer bytes, or returns `None` for another kind.
@@ -159,7 +159,7 @@ impl Value {
         rustia
             .vm_mut()
             .buffer_value_bytes(value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Returns the three vector components, or `None` for another value kind.
@@ -171,7 +171,7 @@ impl Value {
         rustia
             .vm_mut()
             .vector_value_components(value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Copies this value and any nested tables into Rust-owned data.
@@ -235,13 +235,13 @@ impl Value {
         rustia
             .vm_mut()
             .raw_equal_values(lhs, rhs)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     pub(crate) fn raw(&self, vm: &Vm, label: &str) -> Result<RawValue> {
         self.value
             .value(vm)
-            .map_err(|error| Error::from(error).with_context(label))
+            .map_err(|error| Error::from_engine(error).with_context(label))
     }
 }
 
@@ -311,7 +311,7 @@ impl Table {
         let value = rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         Value::retain(rustia.vm_mut(), value)
     }
 
@@ -327,7 +327,7 @@ impl Table {
         let value = rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         Value::retain(rustia.vm_mut(), value)
     }
 
@@ -342,7 +342,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Stores a live value under a Rust key without invoking `__newindex`.
@@ -363,7 +363,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Converts and stores a Rust key and value without invoking `__newindex`.
@@ -383,7 +383,7 @@ impl Table {
         rustia
             .vm_mut()
             .raw_table_set_value(table, key, value)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     /// Returns the current entries in insertion order as live key/value handles.
@@ -399,7 +399,7 @@ impl Table {
         let entries = rustia
             .vm_mut()
             .raw_table_entries_value(table)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         let raw_values = entries
             .into_iter()
             .flat_map(|(key, value)| [key, value])

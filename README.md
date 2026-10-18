@@ -189,6 +189,7 @@ To run a script without writing a Rust application:
 cargo run --locked -p rustia-cli -- path/to/script.luau
 cargo run --locked -p rustia-cli -- --eval "return 40 + 2"
 cargo run --locked -p rustia-cli -- --repl
+cargo run --locked -p rustia-cli -- --version
 ```
 
 ## Contributing

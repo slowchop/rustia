@@ -1,10 +1,10 @@
-use rustia::{Function, OwnedValue, Profile, Rustia};
+use rustia::{Function, OwnedValue, Rustia};
 use std::cell::RefCell;
 use std::slice;
 use std::str;
 
 thread_local! {
-    static ENGINE: RefCell<Rustia> = RefCell::new(Rustia::new(Profile::ReproducibleStandard));
+    static ENGINE: RefCell<Rustia> = RefCell::new(Rustia::builder().without_stdout().build().expect("valid standard preset"));
     static BENCH: RefCell<Option<BenchState>> = const { RefCell::new(None) };
     static LAST_RESULT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
@@ -128,7 +128,10 @@ fn run_source(source: &str) -> String {
 
 fn prepare_bench_source(source: &str) -> Result<BenchState, rustia::Error> {
     let wrapped = format!("return {{ f = (function()\n{source}\nend)() }}");
-    let mut engine = Rustia::new(Profile::ReproducibleStandard);
+    let mut engine = Rustia::builder()
+        .without_stdout()
+        .build()
+        .expect("valid standard preset");
     let exports = engine
         .load(&wrapped)
         .source_name("bench/workload.luau")

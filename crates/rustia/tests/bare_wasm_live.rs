@@ -37,7 +37,7 @@ fn bare_wasm_live_reports_a_missing_platform_adapter() {
         panic!("expected a typed missing-adapter error");
     };
     assert!(matches!(
-        error.as_vm_error().map(|error| &error.kind),
+        error.as_vm_error().map(|error| error.kind()),
         Some(VmErrorKind::Unsupported { .. })
     ));
 }

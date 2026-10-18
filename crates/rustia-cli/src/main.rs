@@ -1,4 +1,4 @@
-use rustia::{ModuleSource, OwnedValue, Profile, Rustia, ServiceModuleResolver, VmSettings};
+use rustia::{ModuleSource, OwnedValue, Profile, Rustia, ServiceModuleResolver};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::env;
@@ -21,6 +21,7 @@ options:
       --fuel <instructions>  set an instruction fuel budget
       --source-name <name>   override the source name used in diagnostics
   -h, --help                 show this help
+  -V, --version              show the version
 ";
 
 fn main() -> ExitCode {
@@ -28,6 +29,10 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(CliError::Help) => {
             print!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        Err(CliError::Version) => {
+            println!("rustia {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Err(CliError::Usage(message)) => {
@@ -125,8 +130,11 @@ fn run_source(config: &Config, source_name: &str, source: &[u8]) -> Result<(), C
 fn configured_rustia(config: &Config) -> Result<Rustia, CliError> {
     let mut builder = Rustia::builder()
         .profile(config.profile)
-        .settings(config.settings.clone())
         .stdout(|text| print!("{text}"));
+
+    if let Some(fuel) = config.fuel {
+        builder = builder.fuel(fuel);
+    }
 
     if config.profile != Profile::DeterministicSim {
         let base_directory = module_base_directory(config)?;
@@ -372,7 +380,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError
                 continue;
             }
             if let Some(value) = arg.strip_prefix("--fuel=") {
-                config.settings.initial_fuel = Some(parse_fuel(value)?);
+                config.fuel = Some(parse_fuel(value)?);
                 continue;
             }
             if let Some(value) = arg.strip_prefix("--source-name=") {
@@ -382,6 +390,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError
 
             match arg.as_str() {
                 "-h" | "--help" => return Err(CliError::Help),
+                "-V" | "--version" => return Err(CliError::Version),
                 "--repl" => {
                     config.set_input(Input::Repl)?;
                 }
@@ -401,7 +410,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, CliError
                     let value = args
                         .next()
                         .ok_or_else(|| CliError::usage("--fuel requires a value"))?;
-                    config.settings.initial_fuel = Some(parse_fuel(&value)?);
+                    config.fuel = Some(parse_fuel(&value)?);
                 }
                 "--source-name" => {
                     let value = args
@@ -465,7 +474,7 @@ fn parse_non_empty(label: &'static str, value: &str) -> Result<String, CliError>
 #[derive(Clone, Debug)]
 struct Config {
     profile: Profile,
-    settings: VmSettings,
+    fuel: Option<u64>,
     input: Option<Input>,
     source_name: Option<String>,
 }
@@ -486,7 +495,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             profile: Profile::ReproducibleStandard,
-            settings: VmSettings::default(),
+            fuel: None,
             input: None,
             source_name: None,
         }
@@ -504,6 +513,7 @@ enum Input {
 #[derive(Debug)]
 enum CliError {
     Help,
+    Version,
     Usage(String),
     Io { label: String, error: io::Error },
     Rustia { error: Box<rustia::Error> },
@@ -549,7 +559,7 @@ mod tests {
             config.input,
             Some(Input::File(PathBuf::from("script.luau")))
         );
-        assert_eq!(config.settings.initial_fuel, None);
+        assert_eq!(config.fuel, None);
         assert_eq!(config.source_name, None);
     }
 
@@ -567,7 +577,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.profile, Profile::DeterministicSim);
-        assert_eq!(config.settings.initial_fuel, Some(1000));
+        assert_eq!(config.fuel, Some(1000));
         assert_eq!(config.source_name.as_deref(), Some("inline.luau"));
         assert_eq!(config.input, Some(Input::Eval("return 42".to_owned())));
     }
@@ -584,7 +594,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.profile, Profile::LuauCompat);
-        assert_eq!(config.settings.initial_fuel, Some(10));
+        assert_eq!(config.fuel, Some(10));
         assert_eq!(config.source_name.as_deref(), Some("stdin.luau"));
         assert_eq!(config.input, Some(Input::Stdin));
     }
@@ -600,7 +610,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.profile, Profile::DeterministicSim);
-        assert_eq!(config.settings.initial_fuel, Some(1000));
+        assert_eq!(config.fuel, Some(1000));
         assert_eq!(config.source_name.as_deref(), Some("session"));
         assert_eq!(config.input, Some(Input::Repl));
     }

@@ -24,8 +24,21 @@ behind accessors, reports stale/cross-VM live handles through typed VM errors,
 and checks table/function/export receivers before converting inputs or allocating
 guest values. Handle validation uses the core VM's ownership-first, epoch-second
 contract. These changes do not
-close the remaining public settings/userdata design, yieldable `require`,
+close the remaining typed Rust-object design, yieldable `require`,
 language error-phase, real-platform golden, or packaging gates.
+
+**Application API boundary work is in progress:** the facade now owns settings,
+profiles/capabilities, memory samples, source/compile/runtime errors, and
+source diagnostics. Builder configuration replaces raw VM constructors/settings;
+`Default` matches the standard preset. Callback adapter traits are sealed marker
+bounds, while owned conversions and borrowed typed contexts remain application
+extension points. Settings have opaque versioned identity bytes covering all
+effective options. A captured non-string guest error returned through Rust is
+re-raised as its original text, avoiding stale/foreign raw object IDs; protected
+calls entirely within guest code keep object identity. Focused external error,
+settings, callback, and CLI tests pass; full checks, independent review, and
+active-client rollout remain pending. The CLI now accepts `-V`/`--version`.
+See [the boundary contract](75-embedded-api.md#application-api-boundary).
 
 The [private delivery order](92-first-release.md#delivery-order) groups the work
 into a green baseline, facade boundary, construction/failure contracts, typed

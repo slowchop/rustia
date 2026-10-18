@@ -81,7 +81,7 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                     .exec("pcall(function() while true do end end)")
                     .unwrap_err();
                 assert!(matches!(
-                    error.as_vm_error().map(|e| &e.kind),
+                    error.as_vm_error().map(|e| e.kind()),
                     Some(VmErrorKind::FuelExhausted { .. })
                 ));
             }

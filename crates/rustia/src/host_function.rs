@@ -1,6 +1,6 @@
 //! Shared synchronous callback definitions for live values and persistent configuration.
 
-use crate::function::IntoHostFunction;
+use crate::function::{adapter::Token, IntoHostFunction};
 use crate::invocation::{
     IntoEffectFunction, IntoExternalFunction, IntoInputFunction, IntoSlotReadFunction,
     IntoSlotWriteFunction,
@@ -72,7 +72,9 @@ impl<C: HostSchema> HostFunction<C> {
     where
         F: IntoHostFunction<A, R>,
     {
-        Self::from_factory(move |name, fuel| function.into_host_function(name, fuel, capability))
+        Self::from_factory(move |name, fuel| {
+            function.into_host_function(Token, name, fuel, capability.to_core())
+        })
     }
 
     /// Creates a callback that borrows the invocation's deterministic input.
@@ -80,7 +82,9 @@ impl<C: HostSchema> HostFunction<C> {
     where
         F: IntoInputFunction<C, A, R>,
     {
-        Self::from_factory(move |name, fuel| function.into_input_function(name, fuel).into_op())
+        Self::from_factory(move |name, fuel| {
+            function.into_input_function(Token, name, fuel).into_op()
+        })
     }
 
     /// Creates a callback that borrows the invocation's deterministic slot state.
@@ -88,7 +92,11 @@ impl<C: HostSchema> HostFunction<C> {
     where
         F: IntoSlotReadFunction<C, A, R>,
     {
-        Self::from_factory(move |name, fuel| function.into_slot_read_function(name, fuel).into_op())
+        Self::from_factory(move |name, fuel| {
+            function
+                .into_slot_read_function(Token, name, fuel)
+                .into_op()
+        })
     }
 
     /// Creates a callback that stages effects in the invocation's record journal.
@@ -96,7 +104,9 @@ impl<C: HostSchema> HostFunction<C> {
     where
         F: IntoEffectFunction<C, A, R>,
     {
-        Self::from_factory(move |name, fuel| function.into_effect_function(name, fuel).into_op())
+        Self::from_factory(move |name, fuel| {
+            function.into_effect_function(Token, name, fuel).into_op()
+        })
     }
 
     /// Creates a callback that stages slot writes in the invocation's record journal.
@@ -105,7 +115,9 @@ impl<C: HostSchema> HostFunction<C> {
         F: IntoSlotWriteFunction<C, A, R>,
     {
         Self::from_factory(move |name, fuel| {
-            function.into_slot_write_function(name, fuel).into_op()
+            function
+                .into_slot_write_function(Token, name, fuel)
+                .into_op()
         })
     }
 
@@ -116,7 +128,12 @@ impl<C: HostSchema> HostFunction<C> {
     {
         Self::from_factory(move |name, fuel| {
             function
-                .into_external_function(name, fuel, OpCapability::ReadsExternalMutableState)
+                .into_external_function(
+                    Token,
+                    name,
+                    fuel,
+                    OpCapability::ReadsExternalMutableState.to_core(),
+                )
                 .into_op()
         })
     }
@@ -128,7 +145,12 @@ impl<C: HostSchema> HostFunction<C> {
     {
         Self::from_factory(move |name, fuel| {
             function
-                .into_external_function(name, fuel, OpCapability::NondeterministicEffect)
+                .into_external_function(
+                    Token,
+                    name,
+                    fuel,
+                    OpCapability::NondeterministicEffect.to_core(),
+                )
                 .into_op()
         })
     }
@@ -145,24 +167,47 @@ impl<C: HostSchema> HostFunction<C> {
     }
 }
 
-/// Converts a plain typed callback or a configured [`HostFunction`] definition.
-#[doc(hidden)]
-pub trait IntoHostFunctionDefinition<C: HostSchema, Signature> {
-    fn into_definition(self) -> HostFunction<C>;
+mod adapter {
+    use super::*;
+
+    pub(crate) trait Definition<C: HostSchema, Signature> {
+        fn into_definition(self, token: Token) -> HostFunction<C>;
+    }
 }
 
-impl<C: HostSchema> IntoHostFunctionDefinition<C, ()> for HostFunction<C> {
-    fn into_definition(self) -> HostFunction<C> {
+/// A plain callback or configured [`HostFunction`] accepted by Rustia.
+///
+/// This sealed trait can be used as a generic bound. Closures and function
+/// pointers implement it automatically when their arguments and results are
+/// supported by Rustia's callback conversions.
+///
+/// ```compile_fail
+/// struct CustomDefinition;
+/// impl rustia::IntoHostFunctionDefinition<(), ()> for CustomDefinition {}
+/// ```
+#[allow(private_bounds)]
+pub trait IntoHostFunctionDefinition<C: HostSchema, Signature>:
+    adapter::Definition<C, Signature>
+{
+}
+
+impl<C: HostSchema, Signature, F> IntoHostFunctionDefinition<C, Signature> for F where
+    F: adapter::Definition<C, Signature>
+{
+}
+
+impl<C: HostSchema> adapter::Definition<C, ()> for HostFunction<C> {
+    fn into_definition(self, _token: Token) -> HostFunction<C> {
         self
     }
 }
 
-impl<C, F, A, R> IntoHostFunctionDefinition<C, (A, R)> for F
+impl<C, F, A, R> adapter::Definition<C, (A, R)> for F
 where
     C: HostSchema,
     F: IntoHostFunction<A, R>,
 {
-    fn into_definition(self) -> HostFunction<C> {
+    fn into_definition(self, _token: Token) -> HostFunction<C> {
         HostFunction::pure(self)
     }
 }
@@ -203,11 +248,11 @@ impl<C: HostSchema> Rustia<C> {
                 .without_source_location(),
             ));
         }
-        let function = function.into_definition().into_op(debug_name.into());
+        let function = function.into_definition(Token).into_op(debug_name.into());
         let value = self
             .vm
             .create_retained_function(function)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         Ok(Function::new(value, self.vm.decision_epoch()))
     }
 
@@ -228,7 +273,7 @@ impl<C: HostSchema> Rustia<C> {
             ));
         }
         self.vm
-            .install_host_function(function.into_definition().into_op(name))
-            .map_err(Error::from)
+            .install_host_function(function.into_definition(Token).into_op(name))
+            .map_err(Error::from_engine)
     }
 }

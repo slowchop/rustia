@@ -258,14 +258,11 @@ fn prepare(adapter: u32, source: &str) -> Result<BenchState, String> {
 
 fn prepare_rustia(source: &str, memory_limit_bytes: Option<usize>) -> Result<BenchState, String> {
     let wrapped = format!("return {{ f = (function()\n{source}\nend)() }}");
-    let mut engine = match memory_limit_bytes {
-        Some(limit) => Rustia::builder()
-            .profile(Profile::ReproducibleStandard)
-            .memory_limit_bytes(limit)
-            .build()
-            .map_err(|error| error.to_string())?,
-        None => Rustia::new(Profile::ReproducibleStandard),
-    };
+    let mut builder = RustiaBuilder::standard().without_stdout();
+    if let Some(limit) = memory_limit_bytes {
+        builder = builder.memory_limit_bytes(limit);
+    }
+    let mut engine = builder.build().map_err(|error| error.to_string())?;
     let exports = engine
         .load(&wrapped)
         .source_name("bench/workload.luau")
@@ -322,9 +319,7 @@ return {
         engine
             .insert_global("input", 5.0)
             .map_err(|error| error.to_string())?;
-        let exports = engine
-            .install(&module)
-            .map_err(|error| error.to_string())?;
+        let exports = engine.install(&module).map_err(|error| error.to_string())?;
         if exports
             .get::<usize>(&mut engine, "count")
             .map_err(|error| error.to_string())?

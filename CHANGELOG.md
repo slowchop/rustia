@@ -8,6 +8,19 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Pre-release embedding API cleanup: use builder presets and individual limit
+  methods instead of raw VM constructors/settings. `Rustia::default()` now
+  matches the standard builder; `without_stdout()` selects silent output.
+  `Settings` provides immutable readback and opaque configuration identity bytes.
+  Profiles, capabilities, errors, diagnostics, and memory samples are facade-owned.
+  Runtime classifications use `VmError::kind()`; evolving enums require a fallback
+  match arm. Callback adapter traits are sealed bounds; custom data continues to
+  use `IntoRustia`/`FromRustia` and typed host contexts remain implementable.
+  Captured guest-object failures returned from Rust callbacks become their
+  original text, keeping stale/foreign guest IDs out of other executions.
+- CLI `-V` / `--version` prints the package version and exits successfully.
+
+
 - A shorter README and a task-based API reference, with runnable examples and
   clearer explanations of value conversion, callback lifetimes, reset, resource
   limits, and error reporting.

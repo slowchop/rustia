@@ -14,7 +14,7 @@ impl IntoRustia for ConversionProbe<'_> {
 }
 
 fn assert_invalid_handle(error: &Error, stale: bool, label: &str) {
-    let kind = &error.as_vm_error().expect("typed handle error").kind;
+    let kind = error.as_vm_error().expect("typed handle error").kind();
     if stale {
         assert!(matches!(
             kind,

@@ -96,7 +96,7 @@ impl SourceMap {
             diagnostic.snapshot = if diagnostic.generated_source {
                 None
             } else {
-                rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
+                crate::SourceSnapshot::copy_with_limit(
                     &source[self.prefix_bytes..source.len() - self.suffix_bytes],
                     limits.source_bytes,
                 )

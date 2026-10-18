@@ -1,7 +1,10 @@
-use rustia::{Profile, Rustia};
+use rustia::Profile;
 
 fn main() -> rustia::Result<()> {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
 
     let active = rustia
         .load(

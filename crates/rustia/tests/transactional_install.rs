@@ -1,6 +1,6 @@
 use rustia::{
-    ModuleSource, OwnedValue, Profile, Rustia, RustiaBuilder, RustiaExtension,
-    ServiceModuleResolver, VmErrorKind, RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
+    ModuleSource, OwnedValue, Profile, RustiaBuilder, RustiaExtension, ServiceModuleResolver,
+    VmErrorKind, RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,7 +10,10 @@ use std::sync::Arc;
 #[test]
 fn default_install_uses_an_isolated_environment_that_inherits_globals() {
     assert_eq!(RUSTIA_INSTALL_TRANSACTION_ABI_VERSION, 1);
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     rustia.insert_global("host_value", 40).unwrap();
 
     let exports = rustia
@@ -209,7 +212,10 @@ fn failed_install_restores_shared_graphs_upvalues_buffers_metatables_and_rng() {
 
 #[test]
 fn explicit_globals_environment_is_shared_across_installs_and_later_execution() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let globals = rustia.globals().unwrap();
 
     let first = rustia
@@ -232,7 +238,10 @@ fn explicit_globals_environment_is_shared_across_installs_and_later_execution() 
 
 #[test]
 fn weak_table_collection_is_observable_on_commit_and_reversed_on_rollback() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     rustia
         .exec(
             r#"
@@ -310,7 +319,7 @@ fn each_install_has_a_fresh_lazy_require_cohort() {
 #[test]
 fn quota_failure_rolls_back_installation_and_keeps_the_vm_reusable() {
     let mut baseline = RustiaBuilder::deterministic().build().unwrap();
-    let limit = baseline.memory_stats().live_bytes + 128 * 1024;
+    let limit = baseline.memory_stats().live_bytes() + 128 * 1024;
     drop(baseline);
     let mut rustia = RustiaBuilder::deterministic()
         .memory_limit_bytes(limit)
@@ -335,7 +344,7 @@ fn quota_failure_rolls_back_installation_and_keeps_the_vm_reusable() {
         .unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
     ));
     assert_eq!(rustia.eval::<i32>("return shared.value").unwrap(), 1);
     assert_eq!(rustia.eval::<i32>("return 40 + 2").unwrap(), 42);
@@ -350,7 +359,7 @@ fn transaction_snapshot_is_quota_checked_before_guest_mutation() {
     "#;
     let mut probe = RustiaBuilder::deterministic().build().unwrap();
     probe.exec(setup).unwrap();
-    let limit = probe.memory_stats().live_bytes + 64 * 1024;
+    let limit = probe.memory_stats().live_bytes() + 64 * 1024;
     drop(probe);
 
     let mut rustia = RustiaBuilder::deterministic()
@@ -361,7 +370,7 @@ fn transaction_snapshot_is_quota_checked_before_guest_mutation() {
     let globals = rustia.globals().unwrap();
     let mut failed_live = None;
     for _ in 0..2 {
-        let before = rustia.memory_stats().live_bytes;
+        let before = rustia.memory_stats().live_bytes();
         let error = rustia
             .load("shared.value = 99; buffer.writeu8(bytes, 0, 255); return {}")
             .environment(&globals)
@@ -369,9 +378,9 @@ fn transaction_snapshot_is_quota_checked_before_guest_mutation() {
             .unwrap_err();
         assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
         ));
-        let after = rustia.memory_stats().live_bytes;
+        let after = rustia.memory_stats().live_bytes();
         assert!(
             after <= before,
             "failed admission must not leak live memory"
@@ -453,13 +462,13 @@ fn failed_install_does_not_claim_to_undo_external_host_effects() {
 #[test]
 fn global_extension_batches_are_atomic_on_quota_failure() {
     let mut baseline = RustiaBuilder::standard().build().unwrap();
-    let limit = baseline.memory_stats().live_bytes + 32 * 1024;
+    let limit = baseline.memory_stats().live_bytes() + 32 * 1024;
     drop(baseline);
     let mut rustia = RustiaBuilder::standard()
         .memory_limit_bytes(limit)
         .build()
         .unwrap();
-    let before_live = rustia.memory_stats().live_bytes;
+    let before_live = rustia.memory_stats().live_bytes();
     let oversized_name = "oversized".repeat(64 * 1024);
     let extension = RustiaExtension::global()
         .fn_pure("must_not_leak", || 1_i32)
@@ -468,9 +477,9 @@ fn global_extension_batches_are_atomic_on_quota_failure() {
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
     ));
-    assert_eq!(rustia.memory_stats().live_bytes, before_live);
+    assert_eq!(rustia.memory_stats().live_bytes(), before_live);
     assert!(matches!(
         rustia.eval::<OwnedValue>("return must_not_leak").unwrap(),
         OwnedValue::Nil
@@ -480,13 +489,13 @@ fn global_extension_batches_are_atomic_on_quota_failure() {
 #[test]
 fn namespaced_extension_batches_are_atomic_on_quota_failure() {
     let mut baseline = RustiaBuilder::standard().build().unwrap();
-    let limit = baseline.memory_stats().live_bytes + 32 * 1024;
+    let limit = baseline.memory_stats().live_bytes() + 32 * 1024;
     drop(baseline);
     let mut rustia = RustiaBuilder::standard()
         .memory_limit_bytes(limit)
         .build()
         .unwrap();
-    let before_live = rustia.memory_stats().live_bytes;
+    let before_live = rustia.memory_stats().live_bytes();
     let oversized_name = "oversized".repeat(64 * 1024);
     let extension = RustiaExtension::new("candidate")
         .fn_pure("must_not_leak", || 1_i32)
@@ -495,9 +504,9 @@ fn namespaced_extension_batches_are_atomic_on_quota_failure() {
     let error = rustia.install_extension(extension).unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
     ));
-    assert_eq!(rustia.memory_stats().live_bytes, before_live);
+    assert_eq!(rustia.memory_stats().live_bytes(), before_live);
     assert!(matches!(
         rustia.eval::<OwnedValue>("return candidate").unwrap(),
         OwnedValue::Nil

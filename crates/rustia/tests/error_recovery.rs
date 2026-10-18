@@ -1,5 +1,5 @@
 //! Observable failure/recovery contracts, independent of report wording.
-use rustia::{ErrorKind, Profile, Rustia, RustiaBuilder};
+use rustia::{ErrorKind, Profile, RustiaBuilder};
 
 #[test]
 fn builder_profile_globals_can_be_rebound_after_reset() {
@@ -48,7 +48,12 @@ fn optimized_protected_failure_and_recovery_match_unoptimized_execution() {
         return not ok and rawequal(token, caught) and saved() == 42
     "#;
     let chunk = rustia_parser::parse_source_bytes(source.as_bytes()).unwrap();
-    for profile in profiles() {
+    for profile in [
+        rustia_vm::Profile::LuauCompat,
+        rustia_vm::Profile::ReproducibleStandard,
+        rustia_vm::Profile::DeterministicSim,
+        rustia_vm::Profile::Puc51Compat,
+    ] {
         for experimental_o2 in [
             ExperimentalO2Options::default(),
             ExperimentalO2Options::reachability_exact(),
@@ -57,7 +62,7 @@ fn optimized_protected_failure_and_recovery_match_unoptimized_execution() {
                 &chunk,
                 CompileOptions {
                     experimental_o2,
-                    puc51_constructor_order: profile == Profile::Puc51Compat,
+                    puc51_constructor_order: profile == rustia_vm::Profile::Puc51Compat,
                     ..CompileOptions::default()
                 }
                 .with_source("optimized-errors.luau", source),
@@ -82,7 +87,10 @@ fn optimized_protected_failure_and_recovery_match_unoptimized_execution() {
 #[test]
 fn compile_rejection_in_uncalled_function_precedes_side_effects() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         vm.insert_global("seen", 0).unwrap();
         let error = vm
             .exec("seen = 1; local function unused() break end")
@@ -95,7 +103,10 @@ fn compile_rejection_in_uncalled_function_precedes_side_effects() {
 #[test]
 fn owned_conversion_failure_does_not_roll_back_guest_execution() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         let error = vm
             .load("seen = 42; return {}")
             .source_name("conversion.luau")
@@ -110,7 +121,10 @@ fn owned_conversion_failure_does_not_roll_back_guest_execution() {
 #[test]
 fn coroutine_failure_closes_upvalues_and_preserves_error_identity() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         assert!(
             vm.eval::<bool>(
                 r#"
@@ -148,7 +162,7 @@ fn ordinary_quota_oom_is_catchable_and_reset_recovers() {
         let error = vm.exec("return string.rep('x', 2000000)").unwrap_err();
         assert!(
             matches!(
-                error.as_vm_error().map(|error| &error.kind),
+                error.as_vm_error().map(|error| error.kind()),
                 Some(rustia::VmErrorKind::OutOfMemory)
             ),
             "{error:?}"
@@ -169,7 +183,10 @@ fn ordinary_quota_oom_is_catchable_and_reset_recovers() {
 #[test]
 fn invalid_uncalled_function_prevents_all_execution() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         vm.insert_global("seen", 0).unwrap();
         let error = vm
             .load("seen = 1; local function unused() local x = end")
@@ -185,7 +202,10 @@ fn invalid_uncalled_function_prevents_all_execution() {
 #[test]
 fn ordinary_failure_keeps_prior_mutations_and_vm_remains_usable() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         vm.insert_global("seen", 0).unwrap();
         let error = vm
             .load("seen = seen + 1; error('deliberate', 0)")
@@ -201,7 +221,10 @@ fn ordinary_failure_keeps_prior_mutations_and_vm_remains_usable() {
 #[test]
 fn protected_errors_preserve_object_identity_and_close_captured_locals() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         let ok = vm
             .eval::<bool>(
                 r#"
@@ -224,7 +247,10 @@ fn protected_errors_preserve_object_identity_and_close_captured_locals() {
 #[test]
 fn retained_reports_survive_reset_without_reviving_handles() {
     for profile in profiles() {
-        let mut vm = Rustia::new(profile);
+        let mut vm = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         let table = vm.create_table().unwrap();
         let error = vm
             .load("local missing = nil; return missing.health")

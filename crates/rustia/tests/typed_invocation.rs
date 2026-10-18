@@ -1,7 +1,7 @@
 use rustia::{
     CompiledModule, Effects, Error, Exports, HostContext, HostModule, HostMut, HostSchema, Input,
     InvocationLimits, ModuleSource, OpCapability, Profile, Result, Rustia, ServiceModuleResolver,
-    SlotWrites, Slots, VmError, VmErrorKind, VmSettings,
+    SlotWrites, Slots, VmError, VmErrorKind,
 };
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -69,7 +69,10 @@ impl HostContext<Host> for Host {
 }
 
 fn configured_vm() -> Rustia<Host> {
-    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     rustia
         .add_input("read_input", 2, |input: Input<'_, Host>, offset: i64| {
             *input.get() + offset
@@ -103,7 +106,10 @@ fn configured_vm() -> Rustia<Host> {
 fn created_context_callbacks_rebind_inputs_exchange_live_values_and_release_on_reset() {
     use rustia::{HostFunction, Table};
     use std::sync::Arc;
-    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     let capture = Arc::new(());
     let weak = Arc::downgrade(&capture);
     let read = rustia
@@ -160,7 +166,10 @@ fn created_context_callbacks_rebind_inputs_exchange_live_values_and_release_on_r
 fn replacing_typed_registrations_releases_obsolete_handlers() {
     use rustia::HostFunction;
     use std::sync::Arc;
-    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     let capture = Arc::new(());
     let weak = Arc::downgrade(&capture);
     rustia
@@ -195,7 +204,10 @@ fn replacing_typed_registrations_releases_obsolete_handlers() {
 #[test]
 fn shared_definitions_keep_empty_name_validation_and_live_signature_metadata() {
     use rustia::{HostFunction, Table};
-    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     assert!(rustia
         .add_input("", 1, |input: Input<'_, Host>| *input.get())
         .is_err());
@@ -630,7 +642,7 @@ return {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::HostResourceExhausted {
                     resource: "effect-record count",
                     limit: 1
@@ -815,7 +827,7 @@ fn byte_budget_is_checked_before_publication() {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::HostResourceExhausted {
                     resource: "effect-record bytes",
                     limit: 31
@@ -866,7 +878,7 @@ return {
         .unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 70 })
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::FuelExhausted { limit: 70 })
     ));
 }
 
@@ -914,7 +926,7 @@ return {
         .unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::HostPanicked { .. })
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::HostPanicked { .. })
     ));
     assert!(lane.is_empty());
 
@@ -929,7 +941,7 @@ return {
         .unwrap_err();
     assert!(matches!(
         poisoned.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
 
     rustia.reset_decision().unwrap();
@@ -1054,7 +1066,10 @@ fn context_reaches_metamethods_and_accepts_unrelated_block_local_borrows() {
     }
 
     let marker = Rc::new(Cell::new(0));
-    let mut rustia = Rustia::for_host::<BorrowedSchema>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<BorrowedSchema>()
+        .unwrap();
     rustia
         .add_input("nested_input", 2, |input: Input<'_, BorrowedSchema>| {
             *input.get()
@@ -1157,7 +1172,7 @@ return {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                &error.kind,
+                error.kind(),
                 VmErrorKind::HostPanicked { function }
                     if function == "pure_panic"
             )
@@ -1171,30 +1186,33 @@ return {
                 |_invocation| Ok(()),
             )
             .unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
 }
 
 #[test]
 fn direct_host_panic_poisoning_is_enforced_by_the_vm_core() {
-    let mut rustia = Rustia::new(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build()
+        .unwrap();
     rustia
         .add_fn("panic_now", || -> i64 { panic!("direct callback panic") })
         .unwrap();
     assert!(matches!(
         (rustia.eval::<()>("panic_now()").unwrap_err()).kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::HostPanicked { .. })
+            if matches!(error.kind(), VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
         (rustia.eval::<i64>("return 1").unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
     assert!(matches!(
         (rustia
             .invoke(&mut (), InvocationLimits::new(0), |_invocation| Ok(()))
             .unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
     rustia.reset_decision().unwrap();
     assert_eq!(rustia.eval::<i64>("return 1").unwrap(), 1);
@@ -1259,7 +1277,7 @@ return {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                &error.kind,
+                error.kind(),
                 VmErrorKind::HostPanicked { function }
                     if function == "service::stdout"
             )
@@ -1269,7 +1287,7 @@ return {
         (rustia
             .invoke(&mut host, InvocationLimits::new(0), |_invocation| Ok(()))
             .unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
     let mut poison_probe = Vec::new();
     assert!(matches!(
@@ -1281,7 +1299,7 @@ return {
                 |_invocation| Ok(()),
             )
             .unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
     assert_eq!(poison_probe.capacity(), 0);
     rustia.reset_decision().unwrap();
@@ -1305,7 +1323,7 @@ fn typed_builder_preserves_profile_validation() {
         )).as_ref().err().map(|error| error.kind()),
         Some(rustia::ErrorKind::Vm(error))
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::CapabilityRemoved {
                     feature: "host function reading external mutable state",
                     operation: Some(ref operation),
@@ -1327,7 +1345,10 @@ fn typed_builder_preserves_profile_validation() {
 
 #[test]
 fn invocation_run_compiles_source_with_the_vm_profile() {
-    let mut rustia = Rustia::for_host::<Host>(Profile::Puc51Compat);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::Puc51Compat)
+        .build_for_host::<Host>()
+        .unwrap();
     let mut host = Host {
         input: 0,
         slots: Vec::new(),
@@ -1346,7 +1367,10 @@ fn invocation_run_compiles_source_with_the_vm_profile() {
 
 #[test]
 fn typed_host_modules_are_inspectable_atomic_and_persist_across_reset() {
-    let mut rustia = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     let rejected = HostModule::<Host>::new("rejected")
         .input("input", 2, |input: Input<'_, Host>| *input.get())
         .external("mutate", 2, |mut host: HostMut<'_, Host>| {
@@ -1357,7 +1381,7 @@ fn typed_host_modules_are_inspectable_atomic_and_persist_across_reset() {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                &error.kind,
+                error.kind(),
                 VmErrorKind::CapabilityRemoved {
                     feature: "host function reading external mutable state",
                     operation: Some(operation),
@@ -1454,7 +1478,10 @@ return {
 
 #[test]
 fn mutable_external_context_is_profile_gated() {
-    let mut deterministic = Rustia::for_host::<Host>(Profile::DeterministicSim);
+    let mut deterministic = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build_for_host::<Host>()
+        .unwrap();
     let rejected = deterministic.add_external("increment", 2, |mut host: HostMut<'_, Host>| {
         host.get_mut().input += 1;
         host.get_mut().input
@@ -1462,10 +1489,13 @@ fn mutable_external_context_is_profile_gated() {
     assert!(matches!(
         (rejected.unwrap_err()).kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::CapabilityRemoved { .. })
+            if matches!(error.kind(), VmErrorKind::CapabilityRemoved { .. })
     ));
 
-    let mut standard = Rustia::for_host::<Host>(Profile::ReproducibleStandard);
+    let mut standard = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build_for_host::<Host>()
+        .unwrap();
     standard
         .add_external("increment", 2, |mut host: HostMut<'_, Host>| {
             host.get_mut().input += 1;
@@ -1602,7 +1632,10 @@ fn invocation_run_conversion_failure_rolls_back_module_main_records() {
 
 #[test]
 fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
-    let mut legacy = Rustia::new(Profile::DeterministicSim);
+    let mut legacy = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .build()
+        .unwrap();
     legacy
         .add_fn("oom", || -> Result<()> {
             Err(Error::from(VmError::new(VmErrorKind::OutOfMemory)))
@@ -1639,7 +1672,7 @@ fn transactional_resource_errors_are_hard_without_changing_legacy_pcall() {
         .unwrap_err();
     assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
     ));
 }
 
@@ -1691,7 +1724,7 @@ return {
     assert!(matches!(
         error.kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::YieldAcrossBoundary)
+            if matches!(error.kind(), VmErrorKind::YieldAcrossBoundary)
     ));
 }
 
@@ -1745,17 +1778,16 @@ return {
     assert!(matches!(
         error.kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::YieldAcrossBoundary)
+            if matches!(error.kind(), VmErrorKind::YieldAcrossBoundary)
     ));
 }
 
 #[test]
 fn deterministic_oom_escapes_pcall_and_discards_the_outer_journal() {
-    let settings = VmSettings {
-        memory_limit_bytes: Some(1_000_000),
-        ..VmSettings::default()
-    };
-    let mut rustia = Rustia::for_host_with_settings::<Host>(Profile::DeterministicSim, settings);
+    let mut rustia = rustia::RustiaBuilder::deterministic()
+        .memory_limit_bytes(1_000_000)
+        .build_for_host::<Host>()
+        .unwrap();
     rustia
         .add_effect(
             "emit",
@@ -1803,7 +1835,7 @@ return {
     assert!(
         matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)
         ),
         "unexpected deterministic OOM error: {error:?}"
     );

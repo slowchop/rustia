@@ -506,7 +506,7 @@ impl<Record> EffectJournal<Record> {
 
     fn next_sequence(&mut self) -> Result<u32> {
         if let Some(error) = &self.hard_error {
-            return Err(Error::from(error.clone()));
+            return Err(Error::from_engine(error.clone()));
         }
         let limit = usize::try_from(self.limits.max_records).unwrap_or(usize::MAX);
         if self.records.len() >= limit {
@@ -538,7 +538,7 @@ impl<Record> EffectJournal<Record> {
         let error = VmError::new(VmErrorKind::HostResourceExhausted { resource, limit })
             .without_source_location();
         self.hard_error = Some(error.clone());
-        Error::from(error)
+        Error::from_engine(error)
     }
 
     fn latch_vm_error(&mut self, error: VmError) {
@@ -572,8 +572,7 @@ where
     handler: ContextHandler<C>,
 }
 
-#[doc(hidden)]
-pub struct ContextHostFunction<C>
+pub(crate) struct ContextHostFunction<C>
 where
     C: HostSchema,
 {
@@ -658,8 +657,11 @@ where
     where
         F: crate::IntoHostFunctionDefinition<C, S>,
     {
-        self.functions
-            .push(function.into_definition().into_op(name.into()));
+        self.functions.push(
+            function
+                .into_definition(crate::function::adapter::Token)
+                .into_op(name.into()),
+        );
         self
     }
 
@@ -676,7 +678,7 @@ where
                 name: &function.name,
                 fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                 fuel_cost: function.fuel_cost,
-                capability: function.capability,
+                capability: crate::OpCapability::from_core(function.capability),
                 parameter_count: function.parameter_count,
                 parameter_types: &function.parameter_types,
                 return_types: &function.return_types,
@@ -848,7 +850,7 @@ where
             }
         }
         vm.install_host_module(self.namespace, self.functions)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 }
 
@@ -931,7 +933,7 @@ where
         } = error
         {
             if error.is_transaction_abort() {
-                self.journal.latch_vm_error((**error).clone());
+                self.journal.latch_vm_error((**error).clone().into_core());
             }
         }
     }
@@ -1071,7 +1073,7 @@ where
                     .as_mut()
                     .expect("invocation dispatcher is available")
                     .rollback(checkpoint);
-                Err(Error::from(
+                Err(Error::from_engine(
                     self.dispatcher
                         .as_ref()
                         .expect("invocation dispatcher is available")
@@ -1088,7 +1090,7 @@ where
                 dispatcher.rollback(checkpoint);
                 dispatcher.latch_if_hard(&error);
                 if let Some(hard_error) = dispatcher.hard_error() {
-                    Err(Error::from(hard_error.clone()))
+                    Err(Error::from_engine(hard_error.clone()))
                 } else {
                     Err(error)
                 }
@@ -1108,7 +1110,7 @@ where
             .as_mut()
             .expect("invocation dispatcher is available");
         vm.call_retained_function_in(function, args, execution, dispatcher)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     pub fn install(&mut self, module: &CompiledModule) -> Result<Exports> {
@@ -1126,7 +1128,7 @@ where
                 invocation
                     .vm
                     .begin_guest_transaction()
-                    .map_err(Error::from)?;
+                    .map_err(Error::from_engine)?;
                 invocation.installation_transaction_active = true;
             }
             if let Err(error) = invocation.vm.begin_guest_transaction() {
@@ -1134,7 +1136,7 @@ where
                     invocation.vm.rollback_guest_transaction();
                     invocation.installation_transaction_active = false;
                 }
-                return Err(Error::from(error));
+                return Err(Error::from_engine(error));
             }
             let vm = &mut *invocation.vm;
             let execution = &mut invocation.execution;
@@ -1143,10 +1145,10 @@ where
                 .as_mut()
                 .expect("invocation dispatcher is available");
             let outcome: Result<Exports> = (|| {
-                let module_cohort = vm.create_module_cohort().map_err(Error::from)?;
+                let module_cohort = vm.create_module_cohort().map_err(Error::from_engine)?;
                 let environment = match environment {
                     Some(environment) => environment,
-                    None => vm.create_module_environment().map_err(Error::from)?,
+                    None => vm.create_module_environment().map_err(Error::from_engine)?,
                 };
                 let value = vm
                     .run_installation_in_environment(
@@ -1156,8 +1158,8 @@ where
                         execution,
                         dispatcher,
                     )
-                    .map_err(Error::from)?;
-                let value = vm.retain_value(value).map_err(Error::from)?;
+                    .map_err(Error::from_engine)?;
+                let value = vm.retain_value(value).map_err(Error::from_engine)?;
                 Ok(Exports::new(value, vm.decision_epoch()))
             })();
             match outcome {
@@ -1168,7 +1170,7 @@ where
                             vm.rollback_guest_transaction();
                             invocation.installation_transaction_active = false;
                         }
-                        Err(Error::from(error).installation_rolled_back())
+                        Err(Error::from_engine(error).installation_rolled_back())
                     } else {
                         Ok(exports)
                     }
@@ -1207,7 +1209,7 @@ where
                     .as_mut()
                     .expect("invocation dispatcher is available");
                 vm.run_hardened_leaf_entry_in(&entry.program, execution, dispatcher)
-                    .map_err(Error::from)?
+                    .map_err(Error::from_engine)?
             };
             let value = snapshot_value(invocation.vm, value)?;
             Return::from_rustia(value)
@@ -1374,16 +1376,16 @@ where
                 match raw_environment {
                     Some(environment) => vm
                         .run_in_environment(&module.program, environment, execution, dispatcher)
-                        .map_err(Error::from),
+                        .map_err(Error::from_engine),
                     None => vm
                         .run_in(&module.program, execution, dispatcher)
-                        .map_err(Error::from),
+                        .map_err(Error::from_engine),
                 }?
             };
             convert(invocation, value).map_err(|error| {
                 error.with_result_source(
                     module.program.source_name.as_deref().unwrap_or("chunk"),
-                    invocation.vm.settings().diagnostic_limits,
+                    crate::DiagnosticLimits::from_core(invocation.vm.settings().diagnostic_limits),
                 )
             })
         })
@@ -1404,7 +1406,7 @@ where
             environment,
         } = self;
         if invocation.vm.settings().guest_surface.is_hardened_leaf() {
-            return Err(Error::from(
+            return Err(Error::from_engine(
                 VmError::new(VmErrorKind::HardenedLeafViolation {
                     feature: "dynamic source loading",
                 })
@@ -1416,12 +1418,12 @@ where
             .map(|environment| environment.raw(invocation.vm, "chunk environment handle"))
             .transpose()?;
         source_map.validate(source)?;
-        let limits = invocation.vm.settings().diagnostic_limits;
+        let limits = crate::DiagnosticLimits::from_core(invocation.vm.settings().diagnostic_limits);
         let mut module = crate::Rustia::compile_module_bytes_with_constructor_order(
             source_name.unwrap_or_else(|| "chunk".to_owned()),
             source,
-            invocation.vm.profile() == crate::Profile::Puc51Compat,
-            invocation.vm.settings().diagnostic_limits,
+            invocation.vm.profile() == rustia_vm::Profile::Puc51Compat,
+            crate::DiagnosticLimits::from_core(invocation.vm.settings().diagnostic_limits),
         )
         .map_err(|error| {
             source_map
@@ -1459,67 +1461,141 @@ where
     }
 }
 
-mod sealed {
-    pub trait Input<C, Args, Return> {}
-    pub trait SlotRead<C, Args, Return> {}
-    pub trait Effect<C, Args, Return> {}
-    pub trait SlotWrite<C, Args, Return> {}
-    pub trait External<C, Args, Return> {}
+pub(crate) mod adapter {
+    use super::*;
+    use crate::function::adapter::Token;
+
+    pub(crate) trait Input<C: HostSchema, Args, Return> {
+        fn into_input_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+        ) -> ContextHostFunction<C>;
+    }
+
+    pub(crate) trait SlotRead<C: HostSchema, Args, Return> {
+        fn into_slot_read_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+        ) -> ContextHostFunction<C>;
+    }
+
+    pub(crate) trait Effect<C: HostSchema, Args, Return> {
+        fn into_effect_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+        ) -> ContextHostFunction<C>;
+    }
+
+    pub(crate) trait SlotWrite<C: HostSchema, Args, Return> {
+        fn into_slot_write_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+        ) -> ContextHostFunction<C>;
+    }
+
+    pub(crate) trait External<C: HostSchema, Args, Return> {
+        fn into_external_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+            capability: OpCapability,
+        ) -> ContextHostFunction<C>;
+    }
 }
 
-#[doc(hidden)]
+/// A callback accepted by [`crate::HostFunction::input`].
+///
+/// Implemented automatically for matching closures and function pointers.
+/// This sealed trait can be used as a generic bound.
+#[allow(private_bounds)]
 pub trait IntoInputFunction<C, Args, Return>:
-    sealed::Input<C, Args, Return> + Send + Sync + 'static
+    adapter::Input<C, Args, Return> + Send + Sync + 'static
 where
     C: HostSchema,
 {
-    #[doc(hidden)]
-    fn into_input_function(self, name: String, fuel_cost: u32) -> ContextHostFunction<C>;
 }
 
-#[doc(hidden)]
+impl<C: HostSchema, Args, Return, F> IntoInputFunction<C, Args, Return> for F where
+    F: adapter::Input<C, Args, Return> + Send + Sync + 'static
+{
+}
+
+/// A callback accepted by [`crate::HostFunction::slot_read`].
+///
+/// Implemented automatically for matching closures and function pointers.
+/// This sealed trait can be used as a generic bound.
+#[allow(private_bounds)]
 pub trait IntoSlotReadFunction<C, Args, Return>:
-    sealed::SlotRead<C, Args, Return> + Send + Sync + 'static
+    adapter::SlotRead<C, Args, Return> + Send + Sync + 'static
 where
     C: HostSchema,
 {
-    #[doc(hidden)]
-    fn into_slot_read_function(self, name: String, fuel_cost: u32) -> ContextHostFunction<C>;
 }
 
-#[doc(hidden)]
+impl<C: HostSchema, Args, Return, F> IntoSlotReadFunction<C, Args, Return> for F where
+    F: adapter::SlotRead<C, Args, Return> + Send + Sync + 'static
+{
+}
+
+/// A callback accepted by [`crate::HostFunction::effect`].
+///
+/// Implemented automatically for matching closures and function pointers.
+/// This sealed trait can be used as a generic bound.
+#[allow(private_bounds)]
 pub trait IntoEffectFunction<C, Args, Return>:
-    sealed::Effect<C, Args, Return> + Send + Sync + 'static
+    adapter::Effect<C, Args, Return> + Send + Sync + 'static
 where
     C: HostSchema,
 {
-    #[doc(hidden)]
-    fn into_effect_function(self, name: String, fuel_cost: u32) -> ContextHostFunction<C>;
 }
 
-#[doc(hidden)]
+impl<C: HostSchema, Args, Return, F> IntoEffectFunction<C, Args, Return> for F where
+    F: adapter::Effect<C, Args, Return> + Send + Sync + 'static
+{
+}
+
+/// A callback accepted by [`crate::HostFunction::slot_write`].
+///
+/// Implemented automatically for matching closures and function pointers.
+/// This sealed trait can be used as a generic bound.
+#[allow(private_bounds)]
 pub trait IntoSlotWriteFunction<C, Args, Return>:
-    sealed::SlotWrite<C, Args, Return> + Send + Sync + 'static
+    adapter::SlotWrite<C, Args, Return> + Send + Sync + 'static
 where
     C: HostSchema,
 {
-    #[doc(hidden)]
-    fn into_slot_write_function(self, name: String, fuel_cost: u32) -> ContextHostFunction<C>;
 }
 
-#[doc(hidden)]
+impl<C: HostSchema, Args, Return, F> IntoSlotWriteFunction<C, Args, Return> for F where
+    F: adapter::SlotWrite<C, Args, Return> + Send + Sync + 'static
+{
+}
+
+/// A callback accepted by [`crate::HostFunction::external`] or
+/// [`crate::HostFunction::nondeterministic`].
+///
+/// Implemented automatically for matching closures and function pointers.
+/// This sealed trait can be used as a generic bound.
+#[allow(private_bounds)]
 pub trait IntoExternalFunction<C, Args, Return>:
-    sealed::External<C, Args, Return> + Send + Sync + 'static
+    adapter::External<C, Args, Return> + Send + Sync + 'static
 where
     C: HostSchema,
 {
-    #[doc(hidden)]
-    fn into_external_function(
-        self,
-        name: String,
-        fuel_cost: u32,
-        capability: OpCapability,
-    ) -> ContextHostFunction<C>;
+}
+
+impl<C: HostSchema, Args, Return, F> IntoExternalFunction<C, Args, Return> for F where
+    F: adapter::External<C, Args, Return> + Send + Sync + 'static
+{
 }
 
 trait MakeCapabilityView<C>
@@ -1628,24 +1704,13 @@ macro_rules! context_function {
         $capability:expr,
         $view_factory:ty
     ) => {
-        impl<C, Func, Return> sealed::$sealed_trait<C, (), Return> for Func
-        where
-            C: HostSchema,
-            Func: for<'call> Fn($view<'call, C>) -> Return
-                + Send
-                + Sync
-                + 'static,
-            Return: IntoHostReturn,
-        {
-        }
-
-        impl<C, Func, Return> $trait_name<C, (), Return> for Func
+        impl<C, Func, Return> adapter::$sealed_trait<C, (), Return> for Func
         where
             C: HostSchema,
             Func: for<'call> Fn($view<'call, C>) -> Return + Send + Sync + 'static,
             Return: IntoHostReturn,
         {
-            fn $method_name(self, name: String, fuel_cost: u32) -> ContextHostFunction<C> {
+            fn $method_name(self, _token: crate::function::adapter::Token, name: String, fuel_cost: u32) -> ContextHostFunction<C> {
                 let diagnostic_name = name.clone();
                 ContextHostFunction {
                     name,
@@ -1653,8 +1718,8 @@ macro_rules! context_function {
                     capability: $capability,
                     parameter_count: 0,
                     parameter_types: Vec::new(),
-                    return_types: Return::rustia_type_names(),
-                    fallible: Return::is_fallible(),
+                    return_types: Return::rustia_type_names(crate::function::adapter::Token),
+                    fallible: Return::is_fallible(crate::function::adapter::Token),
                     handler: Box::new(move |vm, context, journal, _args| {
                         let view =
                             <$view_factory as MakeCapabilityView<C>>::make(context, journal);
@@ -1783,20 +1848,7 @@ macro_rules! context_function {
         $parameter_count:expr;
         $($name:ident),+
     ) => {
-        impl<C, Func, Return, $($name),+>
-            sealed::$sealed_trait<C, ($($name,)+), Return> for Func
-        where
-            C: HostSchema,
-            Func: for<'call> Fn($view<'call, C>, $($name),+) -> Return
-                + Send
-                + Sync
-                + 'static,
-            Return: IntoHostReturn,
-            $($name: FromHostArgument,)+
-        {
-        }
-
-        impl<C, Func, Return, $($name),+> $trait_name<C, ($($name,)+), Return> for Func
+        impl<C, Func, Return, $($name),+> adapter::$sealed_trait<C, ($($name,)+), Return> for Func
         where
             C: HostSchema,
             Func: for<'call> Fn($view<'call, C>, $($name),+) -> Return
@@ -1807,7 +1859,7 @@ macro_rules! context_function {
             $($name: FromHostArgument,)+
         {
             #[allow(non_snake_case)]
-            fn $method_name(self, name: String, fuel_cost: u32) -> ContextHostFunction<C> {
+            fn $method_name(self, _token: crate::function::adapter::Token, name: String, fuel_cost: u32) -> ContextHostFunction<C> {
                 let diagnostic_name = name.clone();
                 ContextHostFunction {
                     name,
@@ -1815,8 +1867,8 @@ macro_rules! context_function {
                     capability: $capability,
                     parameter_count: $parameter_count,
                     parameter_types: vec![$(type_name::<$name>()),+],
-                    return_types: Return::rustia_type_names(),
-                    fallible: Return::is_fallible(),
+                    return_types: Return::rustia_type_names(crate::function::adapter::Token),
+                    fallible: Return::is_fallible(crate::function::adapter::Token),
                     handler: Box::new(move |vm, context, journal, args| {
                         let mut index = 0usize;
                         $(
@@ -1870,20 +1922,7 @@ context_function!(
 
 macro_rules! external_function {
     ($parameter_count:expr; $($name:ident),* $(,)?) => {
-        impl<C, Func, Return, $($name),*>
-            sealed::External<C, ($($name,)*), Return> for Func
-        where
-            C: HostSchema,
-            Func: for<'call> Fn(HostMut<'call, C>, $($name),*) -> Return
-                + Send
-                + Sync
-                + 'static,
-            Return: IntoHostReturn,
-            $($name: FromHostArgument,)*
-        {
-        }
-
-        impl<C, Func, Return, $($name),*> IntoExternalFunction<C, ($($name,)*), Return> for Func
+        impl<C, Func, Return, $($name),*> adapter::External<C, ($($name,)*), Return> for Func
         where
             C: HostSchema,
             Func: for<'call> Fn(HostMut<'call, C>, $($name),*) -> Return
@@ -1896,6 +1935,7 @@ macro_rules! external_function {
             #[allow(non_snake_case, unused_mut, unused_variables)]
             fn into_external_function(
                 self,
+                _token: crate::function::adapter::Token,
                 name: String,
                 fuel_cost: u32,
                 capability: OpCapability,
@@ -1907,8 +1947,8 @@ macro_rules! external_function {
                     capability,
                     parameter_count: $parameter_count,
                     parameter_types: vec![$(type_name::<$name>()),*],
-                    return_types: Return::rustia_type_names(),
-                    fallible: Return::is_fallible(),
+                    return_types: Return::rustia_type_names(crate::function::adapter::Token),
+                    fallible: Return::is_fallible(crate::function::adapter::Token),
                     handler: Box::new(move |vm, context, _journal, args| {
                         let mut index = 0usize;
                         $(

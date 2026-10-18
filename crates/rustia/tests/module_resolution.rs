@@ -1,6 +1,6 @@
 use rustia::{
-    GuestSurface, ModuleSource, OwnedTable, Profile, RustiaBuilder, ServiceModuleResolver,
-    VmErrorKind, VmSettings, RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
+    DiagnosticLimits, ModuleSource, OwnedTable, RustiaBuilder, ServiceModuleResolver, VmErrorKind,
+    RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -41,10 +41,9 @@ fn dependency_syntax_error_retains_its_source_and_loading_callers() {
 fn dependency_syntax_error_obeys_zero_snapshot_budget() {
     let resolver =
         ServiceModuleResolver::from_fn(|_, _| Ok(ModuleSource::new("broken", "local = 1")));
-    let mut settings = VmSettings::default();
-    settings.diagnostic_limits.retained_source_bytes = 0;
+    let limits = DiagnosticLimits::default().with_retained_source_bytes(0);
     let mut vm = RustiaBuilder::standard()
-        .settings(settings)
+        .diagnostic_limits(limits)
         .module_resolver(resolver)
         .build()
         .unwrap();
@@ -262,7 +261,7 @@ fn required_values_remain_rooted_and_modules_share_caller_fuel() {
     assert!(matches!(
         error.kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::FuelExhausted { limit: 20 })
+            if matches!(error.kind(), VmErrorKind::FuelExhausted { limit: 20 })
     ));
 }
 
@@ -301,7 +300,7 @@ fn multi_result_modules_fail_without_entering_the_cache() {
 #[test]
 fn module_identity_quota_rejection_is_atomic_and_catchable() {
     let mut baseline_vm = RustiaBuilder::standard().build().expect("baseline VM");
-    let baseline = baseline_vm.memory_stats().live_bytes;
+    let baseline = baseline_vm.memory_stats().live_bytes();
     let oversized_identity = "m".repeat(256 * 1024);
     let resolver = ServiceModuleResolver::from_fn(move |_, _| {
         Ok(ModuleSource::new(
@@ -345,7 +344,7 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::CapabilityRemoved {
                     feature: "non-deterministic module resolver",
                     ..
@@ -364,15 +363,15 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::HardenedLeafViolation {
                     feature: "dynamic-code or conformance-only facilities"
                 }
             )
     ));
 
-    let low_level = VmSettings {
-        guest_surface: GuestSurface::HardenedLeaf,
+    let low_level = rustia_vm::VmSettings {
+        guest_surface: rustia_vm::GuestSurface::HardenedLeaf,
         memory_limit_bytes: Some(256 * 1024),
         module_resolver: Some(rustia_vm::ModuleResolver::new(
             |_, _| {
@@ -382,9 +381,9 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
             },
             true,
         )),
-        ..VmSettings::default()
+        ..rustia_vm::VmSettings::default()
     };
-    let vm = rustia_vm::Vm::with_settings(Profile::DeterministicSim, low_level);
+    let vm = rustia_vm::Vm::with_settings(rustia_vm::Profile::DeterministicSim, low_level);
     assert!(vm.settings().module_resolver.is_none());
 }
 
@@ -408,11 +407,11 @@ fn resolver_panics_poison_until_decision_reset() {
     assert!(matches!(
         first.kind(),
         rustia::ErrorKind::Vm(error)
-            if matches!(error.kind, VmErrorKind::HostPanicked { .. })
+            if matches!(error.kind(), VmErrorKind::HostPanicked { .. })
     ));
     assert!(matches!(
         (vm.eval::<f64>("return 1").unwrap_err()).kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::VmPoisoned)
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::VmPoisoned)
     ));
 
     vm.reset_decision().expect("reset poisoned VM");

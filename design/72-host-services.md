@@ -155,7 +155,11 @@ on `DeterministicSim`; the infallible VM constructors silently drop a nondetermi
 (`.standard().profile(DeterministicSim)`) is caught by the same build error.
 
 **Representation:** shared clock/entropy providers (`Rc<RefCell<dyn FnMut …>>`) with a manual `Debug`, so
-`VmSettings` keeps its load-bearing `Clone + Debug` derives (rustia-cli clones settings; VM tests
+The following representation is internal to the separately versioned VM crate.
+Applications configure providers through `RustiaBuilder` and read facade-owned
+`Settings`; see [75](75-embedded-api.md#application-api-boundary).
+
+`VmSettings` keeps its load-bearing `Clone + Debug` derives (VM callers clone settings; VM tests
 clone). Cloning settings shares providers; documented. `ServiceClock` and any new public enum get
 `#[non_exhaustive]` per facade convention.
 
