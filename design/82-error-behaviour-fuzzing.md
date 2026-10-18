@@ -141,3 +141,62 @@ mismatch. A clean bounded campaign is not proof that no bugs exist.
 
 Out of scope: yieldable require, diagnostic redesign, GC tuning, new platform
 coverage, public publishing and deployment. No local performance measurements.
+
+## Focused builtin error-phase follow-up
+
+The private milestone's later audit found valid builtin calls that specialized
+compiler paths rejected before execution. For example, `'' .. tostring()` failed
+during compilation, although Luau raises its missing-argument error at runtime;
+placing that call in `if false` must leave the chunk executable. Equivalent tail,
+local, and protected forms already used ordinary calls in several cases.
+
+Specialization now declines unsupported argument shapes and unknown library
+fields. Ordinary calls preserve evaluation and runtime failure behavior.
+`pairs`/`ipairs` with extra arguments likewise use ordinary iterator calls.
+Native handlers consume only the oracle-verified prefix below, after argument
+expressions have executed. This is not a blanket change to builtin arity rules:
+Luau still rejects `table.insert({}, 1, 4, 99)` during execution.
+
+| Builtin | Arguments consumed; later arguments ignored |
+|---|---|
+| `tonumber`, `next` | First two |
+| `table.concat` | First four |
+| `table.getn`, `table.maxn` | First one |
+| `table.create`, `table.remove` | First two |
+| `table.find` | First three |
+| `string.sub`, `string.byte` | First three |
+| `string.len`, `string.upper`, `string.lower`, `string.reverse` | First one |
+| `string.find` | First four |
+| `string.split` | First two |
+
+The capture used the existing locked worker with `mlua 0.11.6`, `mlua-sys 0.10.0`,
+and `luau0-src 0.18.3+luau709`. Its archive matches the checksum in the lockfile
+and the target pin; all 226 regular archive files matched the extracted sources.
+The initial 97 bounded programs found 57 mismatches against the unchanged
+facade candidate: 46 premature frontend rejections, seven failures of valid
+runtime calls, and four differing protected-call results. Additional probes
+verified the remaining consumed prefixes above and the rejected insert arity.
+These are correctness observations, not performance evidence.
+
+Capture each fixture by building the documented worker and feeding its source
+to the pinned engine, for example:
+
+```sh
+cargo build --locked --manifest-path fuzz/Cargo.toml --features oracle --bin error-oracle-worker
+fuzz/target/debug/error-oracle-worker luau < conformance/fixtures/regressions/builtin_ignored_extra_arguments.luau
+```
+
+| New fixture | Exact returned string from Luau 0.709 |
+|---|---|
+| `builtin_unreachable_calls.luau` | `ok` |
+| `builtin_ignored_extra_arguments.luau` | `number;number;1;a;1;1;1;4;1;4;ab;3;97;ABC;abc;cba;1;a;number:123` |
+| `iterator_ignored_extra_arguments.luau` | `ipairs=1:4;pairs=1:4;calls=2` |
+
+`builtin_call_phases.rs` covers scalar, local, nested tail, protected, aliased,
+dead-branch, and uncalled forms across all four profiles. It also asserts
+preceding guest effects, ordered/exactly-once evaluation of ignored arguments,
+and thrown extra arguments. Existing syntax/uncalled-`break` regressions retain
+true frontend rejection. The differential generator now includes these call
+shapes rather than only ordinary arithmetic/table failures. Full CI and
+independent review remain pending; broader language parity and yieldable
+`require` remain open.

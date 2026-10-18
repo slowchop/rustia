@@ -2434,7 +2434,7 @@ impl Compiler {
                 span,
             ));
         }
-        let Some((iterator, table_expr)) = self.generic_array_iterator(iter, span)? else {
+        let Some((iterator, table_expr)) = self.generic_array_iterator(iter) else {
             if let [expr] = iter {
                 if !self.expr_can_expand(expr) {
                     return self.compile_generalized_iterator_for(variables, expr, body, span);
@@ -2713,11 +2713,10 @@ impl Compiler {
     fn generic_array_iterator<'a>(
         &self,
         iter: &'a [Expr],
-        span: Span,
-    ) -> Result<Option<(GenericArrayIterator, &'a Expr)>> {
+    ) -> Option<(GenericArrayIterator, &'a Expr)> {
         if let [Expr::Call { callee, args, .. }] = iter {
             let Expr::Name(name, _) = callee.as_ref() else {
-                return Ok(None);
+                return None;
             };
             let iterator = match name.as_str() {
                 "ipairs" if self.builtin_global_is_unmodified("ipairs") => {
@@ -2726,25 +2725,25 @@ impl Compiler {
                 "pairs" if self.builtin_global_is_unmodified("pairs") => {
                     GenericArrayIterator::Pairs
                 }
-                _ => return Ok(None),
+                _ => return None,
             };
             let [table_expr] = args.as_slice() else {
-                return Err(CompileError::at(format!("unsupported {name} arity"), span));
+                return None;
             };
-            return Ok(Some((iterator, table_expr)));
+            return Some((iterator, table_expr));
         }
 
         if let [Expr::Name(name, _), table_expr] = iter {
             if name == "next" && self.builtin_global_is_unmodified("next") {
-                return Ok(Some((GenericArrayIterator::Pairs, table_expr)));
+                return Some((GenericArrayIterator::Pairs, table_expr));
             }
         }
 
         if let [table_expr @ Expr::Table { .. }] = iter {
-            return Ok(Some((GenericArrayIterator::Pairs, table_expr)));
+            return Some((GenericArrayIterator::Pairs, table_expr));
         }
 
-        Ok(None)
+        None
     }
 
     fn patch_jump_to_here(&mut self, instruction_index: usize, span: Span) -> Result<()> {
@@ -2805,6 +2804,9 @@ impl Compiler {
         span: Span,
     ) -> Result<()> {
         self.mark_global_environment_escape_for_call(callee);
+        // Arity guards select an opcode shape, not a language restriction.
+        // Other argument lists and unknown fields must use ordinary calls so
+        // errors remain runtime operations and all arguments are evaluated.
         if let Expr::Field {
             object,
             field,
@@ -2819,8 +2821,10 @@ impl Compiler {
                     return self.compile_value_call_to(callee, args, target, span);
                 }
                 match field.as_str() {
-                    "concat" => return self.compile_table_concat_call(args, target, span),
-                    "getn" => {
+                    "concat" if (1..=4).contains(&args.len()) => {
+                        return self.compile_table_concat_call(args, target, span)
+                    }
+                    "getn" if args.len() == 1 => {
                         return self.compile_table_unary_call(
                             args,
                             target,
@@ -2829,7 +2833,7 @@ impl Compiler {
                             "table.getn",
                         )
                     }
-                    "maxn" => {
+                    "maxn" if args.len() == 1 => {
                         return self.compile_table_unary_call(
                             args,
                             target,
@@ -2838,25 +2842,28 @@ impl Compiler {
                             "table.maxn",
                         )
                     }
-                    "create" => return self.compile_table_create_call(args, target, span),
-                    "find" => return self.compile_table_find_call(args, target, span),
+                    "create" if (1..=2).contains(&args.len()) => {
+                        return self.compile_table_create_call(args, target, span)
+                    }
+                    "find" if (2..=3).contains(&args.len()) => {
+                        return self.compile_table_find_call(args, target, span)
+                    }
                     "clear" | "freeze" | "isfrozen" => {
                         return self.compile_value_call_to(callee, args, target, span);
                     }
-                    "insert" => return self.compile_table_insert_call(args, target, span),
-                    "remove" => return self.compile_table_remove_call(args, target, span),
+                    "insert" if (2..=3).contains(&args.len()) => {
+                        return self.compile_table_insert_call(args, target, span)
+                    }
+                    "remove" if (1..=2).contains(&args.len()) => {
+                        return self.compile_table_remove_call(args, target, span)
+                    }
                     "move" | "sort" | "foreach" | "foreachi" | "clone" => {
                         return self.compile_value_call_to(callee, args, target, span);
                     }
                     "pack" | "unpack" => {
                         return self.compile_value_call_to(callee, args, target, span);
                     }
-                    _ => {
-                        return Err(CompileError::at(
-                            format!("unsupported table.{field} call"),
-                            span,
-                        ))
-                    }
+                    _ => return self.compile_value_call_to(callee, args, target, span),
                 }
             }
             if matches!(object.as_ref(), Expr::Name(name, _) if name == "math")
@@ -3160,12 +3167,7 @@ impl Compiler {
                             ),
                         )
                     }
-                    _ => {
-                        return Err(CompileError::at(
-                            format!("unsupported math.{field} call"),
-                            span,
-                        ))
-                    }
+                    _ => return self.compile_value_call_to(callee, args, target, span),
                 }
             }
             if matches!(object.as_ref(), Expr::Name(name, _) if name == "string")
@@ -3175,10 +3177,16 @@ impl Compiler {
                     return self.compile_value_call_to(callee, args, target, span);
                 }
                 match field.as_str() {
-                    "sub" => return self.compile_string_sub_call(args, target, span),
-                    "len" => return self.compile_string_len_call(args, target, span),
-                    "byte" => return self.compile_string_byte_call(args, target, span),
-                    "upper" => {
+                    "sub" if (2..=3).contains(&args.len()) => {
+                        return self.compile_string_sub_call(args, target, span)
+                    }
+                    "len" if args.len() == 1 => {
+                        return self.compile_string_len_call(args, target, span)
+                    }
+                    "byte" if (1..=3).contains(&args.len()) => {
+                        return self.compile_string_byte_call(args, target, span)
+                    }
+                    "upper" if args.len() == 1 => {
                         return self.compile_string_unary_call(
                             args,
                             target,
@@ -3187,7 +3195,7 @@ impl Compiler {
                             "string.upper",
                         )
                     }
-                    "lower" => {
+                    "lower" if args.len() == 1 => {
                         return self.compile_string_unary_call(
                             args,
                             target,
@@ -3196,7 +3204,7 @@ impl Compiler {
                             "string.lower",
                         )
                     }
-                    "reverse" => {
+                    "reverse" if args.len() == 1 => {
                         return self.compile_string_unary_call(
                             args,
                             target,
@@ -3205,17 +3213,18 @@ impl Compiler {
                             "string.reverse",
                         )
                     }
-                    "rep" => return self.compile_string_rep_call(args, target, span),
-                    "find" => return self.compile_string_find_call(args, target, span),
-                    "split" => return self.compile_string_split_call(args, target, span),
+                    "rep" if args.len() >= 2 => {
+                        return self.compile_string_rep_call(args, target, span)
+                    }
+                    "find" if (2..=4).contains(&args.len()) => {
+                        return self.compile_string_find_call(args, target, span)
+                    }
+                    "split" if (1..=2).contains(&args.len()) => {
+                        return self.compile_string_split_call(args, target, span)
+                    }
                     "char" | "match" | "gsub" | "gmatch" | "format" | "pack" | "unpack"
                     | "packsize" => return self.compile_value_call_to(callee, args, target, span),
-                    _ => {
-                        return Err(CompileError::at(
-                            format!("unsupported string.{field} call"),
-                            span,
-                        ))
-                    }
+                    _ => return self.compile_value_call_to(callee, args, target, span),
                 }
             }
             return self.compile_value_call_to(callee, args, target, span);
@@ -3261,7 +3270,7 @@ impl Compiler {
                             return self.compile_value_call_to(callee, args, target, span);
                         }
                         if args.len() != 1 {
-                            return Err(CompileError::at("unsupported tonumber arity", span));
+                            return self.compile_value_call_to(callee, args, target, span);
                         }
                         self.compile_expr_to(&args[0], target)?;
                         self.emit_source_mapped_instruction(
@@ -3272,7 +3281,7 @@ impl Compiler {
                     }
                     "tostring" => {
                         if args.is_empty() {
-                            return Err(CompileError::at("unsupported tostring arity", span));
+                            return self.compile_value_call_to(callee, args, target, span);
                         }
                         if args.len() == 1 && self.expr_can_expand(&args[0]) {
                             return self.compile_value_call_to(callee, args, target, span);
@@ -3288,17 +3297,21 @@ impl Compiler {
                         );
                         Ok(())
                     }
-                    "type" | "typeof" => self.compile_typeof_call(args, target, span),
+                    "type" | "typeof" if args.len() == 1 => {
+                        self.compile_typeof_call(args, target, span)
+                    }
                     "loadstring"
                         if self.options.builtins == BuiltinEnvironment::LuauConformance =>
                     {
                         self.compile_conformance_loadstring_call(callee, args, target, span)
                     }
                     "rawequal" => self.compile_value_call_to(callee, args, target, span),
-                    "rawget" => self.compile_rawget_call(args, target, span),
-                    "rawset" => self.compile_rawset_call(args, target, span),
-                    "rawlen" => self.compile_rawlen_call(args, target, span),
-                    "next" => self.compile_next_call(args, target, span),
+                    "rawget" if args.len() >= 2 => self.compile_rawget_call(args, target, span),
+                    "rawset" if args.len() >= 3 => self.compile_rawset_call(args, target, span),
+                    "rawlen" if !args.is_empty() => self.compile_rawlen_call(args, target, span),
+                    "next" if (1..=2).contains(&args.len()) => {
+                        self.compile_next_call(args, target, span)
+                    }
                     "concat" if self.options.builtins == BuiltinEnvironment::LuauConformance => {
                         self.compile_conformance_concat_call(args, target, span)
                     }
@@ -7646,16 +7659,20 @@ return type(v) == "vector"
     }
 
     #[test]
-    fn unmodified_unsupported_stdlib_field_calls_remain_compile_errors() {
-        let cases = [
-            ("return math.unreal(1)", "unsupported math.unreal call"),
-            ("return table.forever({})", "unsupported table.forever call"),
-        ];
-
-        for (source, expected) in cases {
-            let chunk = parse_source(source).unwrap();
-            let error = compile(&chunk).unwrap_err();
-            assert!(error.message.contains(expected), "{source}: {error}");
+    fn unknown_stdlib_field_calls_compile_and_fail_at_runtime() {
+        for source in [
+            "return math.unreal(1)",
+            "return table.forever({})",
+            "return string.unreal('abc')",
+        ] {
+            let program = compile(&parse_source(source).unwrap()).unwrap();
+            let error = Vm::new(Profile::ReproducibleStandard)
+                .run(&program)
+                .expect_err("calling a missing field is a runtime error");
+            assert!(
+                matches!(error.kind, ErrorKind::RuntimeError { .. }),
+                "{source}: {error}"
+            );
         }
     }
 
@@ -9601,7 +9618,7 @@ return `x {s}`"#,
 
     #[test]
     fn compile_errors_keep_source_span() {
-        let chunk = parse_source("return table.forever({})").unwrap();
+        let chunk = parse_source("local function unused() break end").unwrap();
         let error = compile(&chunk).unwrap_err();
         assert!(error.span.is_some());
     }

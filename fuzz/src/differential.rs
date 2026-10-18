@@ -17,7 +17,24 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         3 => "local x=false; return x()",
         _ => "local x={}; return x + 1",
     };
-    match byte(0) % 8 {
+    let invalid_builtin = match byte(2) % 7 {
+        0 => "tostring()",
+        1 => "tonumber()",
+        2 => "rawget({})",
+        3 => "table.insert()",
+        4 => "math.unreal()",
+        5 => "table.unreal()",
+        _ => "string.unreal()",
+    };
+    let extra_argument_call = match byte(2) % 6 {
+        0 => "type(1, 99)",
+        1 => "string.len('abc', 99)",
+        2 => "string.upper('abc', 99)",
+        3 => "table.getn({4}, 99)",
+        4 => "next({a=1}, nil, 99)",
+        _ => "tonumber('1', 10, 99)",
+    };
+    match byte(0) % 16 {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -25,7 +42,18 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function(e) return type(e) end); return tostring(ok)..':'..e")),
         5 => body.push_str(&format!("local c=coroutine.create(function() coroutine.yield('pause'); {failure} end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..type(e)")),
         6 => body.push_str(&format!("local f; pcall(function() local x={}; f=function() x=x+1; return x end; {failure} end); return tostring(f())..':'..tostring(f())", byte(3))),
-        _ => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function() error('handler',0) end); return tostring(ok)..':'..e")),
+        7 => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function() error('handler',0) end); return tostring(ok)..':'..e")),
+        8 => body.push_str(&format!("return '' .. {invalid_builtin}")),
+        9 => body.push_str(&format!("if false then local value = '' .. {invalid_builtin} end; return 'ok'")),
+        10 => body.push_str(&format!("return {invalid_builtin}")),
+        11 => body.push_str(&format!("return '' .. {extra_argument_call}")),
+        12 => body.push_str("local function extra(n) observed=observed*10+n; return n end; return type(extra(1),extra(2),extra(3))..':'..observed"),
+        13 => {
+            let iterator = if byte(2) % 2 == 0 { "ipairs" } else { "pairs" };
+            body.push_str(&format!("local function extra() observed=observed+1; return 99 end; local out=''; for k,v in {iterator}({{4}},extra()) do out=out..k..':'..v end; return out..':'..observed"));
+        }
+        14 => body.push_str("local function unused() break end; return 'ok'"),
+        _ => body.push_str(&format!("local function unused() return '' .. {invalid_builtin} end; return 'ok'")),
     }
     body
 }

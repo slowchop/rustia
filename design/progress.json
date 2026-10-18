@@ -14,8 +14,8 @@
     "canonical_facts": {
       "luau_target": "Luau 0.709, standalone surface",
       "conformance": {
-        "fixtures": 712,
-        "refs": 511,
+        "fixtures": 715,
+        "refs": 514,
         "pending": 0
       },
       "benchmark_adapters": {
@@ -163,7 +163,7 @@
       "name": "Full public standalone Luau engine release",
       "complete": 68,
       "confidence": 88,
-      "state": "The Luau 0.709 standalone target and pending-free 511-ref conformance denominator (493 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution with fresh installation cohorts, transactional module installation, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values with snapshot-free serde, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
+      "state": "The Luau 0.709 standalone target and pending-free 514-ref conformance denominator (496 Luau 0.709 plus 18 offline PUC 5.1.5 compatibility refs) are strong. Bounded generation-safe object/program lifetimes, VM-owned live/reserved/peak telemetry, maintained logical-live memory limits and script counters, atomic catchable OOM, host-owned require resolution with fresh installation cohorts, transactional module installation, lifetime-safe typed invocations with transactional records, graph-preserving rooted live values with snapshot-free serde, versioned deterministic reset/module lifecycles, and the shared native/Node-V8 mixed-heap pressure gate are implemented; native Linode plus wasm quota evidence is exact. Release still requires remaining live-object ergonomics, semantic-tail/diagnostic hardening, the full correctness/golden target matrix, and packaging. Analyzer/typechecker, raw C API, Roblox, Lua 5.4, and bytecode compatibility are not runtime-release requirements.",
       "future_plan": "Close the remaining host-boundary gates, harden the semantic tail and cross-target goldens, then package and publish against the pinned target."
     },
     {
@@ -241,7 +241,7 @@
           "name": "Manifest and refs",
           "complete": 90,
           "confidence": 90,
-          "state": "712 fixtures and 511 refs are executable with 0 pending rows.",
+          "state": "715 fixtures and 514 refs are executable with 0 pending rows.",
           "future_plan": "Add focused fixtures for newly found gaps instead of reopening bulk inventory."
         },
         {

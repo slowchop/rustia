@@ -15099,6 +15099,10 @@ impl Vm {
     }
 
     fn native_tonumber(&mut self, args: &[Value]) -> Result<Value> {
+        // Luau ignores trailing arguments here. Their expressions have already
+        // executed; retaining only the consumed prefix also keeps the shared
+        // scalar helpers' argument-count modes correct. See design/82.
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "tonumber argument")?;
         let base = match args.get(1).copied() {
             Some(value) if value.kind() != ValueKind::Nil => Some(self.tonumber_base(value)?),
@@ -16964,6 +16968,7 @@ impl Vm {
     }
 
     fn native_next(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "next arguments")?;
         let table = args[0]
             .as_table()
@@ -17483,6 +17488,7 @@ impl Vm {
     }
 
     fn native_string_sub(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 2, 3, "string.sub arguments")?;
         let registers = native_registers(args)?;
         self.string_sub(
@@ -17492,11 +17498,13 @@ impl Vm {
     }
 
     fn native_string_len(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "string.len argument")?;
         Ok(Value::number(self.value_to_string(args[0])?.len() as f64))
     }
 
     fn native_string_byte(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 1, 3, "string.byte arguments")?;
         let registers = native_registers(args)?;
         let start_register = if args.len() >= 2 { 1 } else { 0 };
@@ -17820,6 +17828,7 @@ impl Vm {
     }
 
     fn native_string_case(&mut self, args: &[Value], case: StringCase) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, case.name())?;
         let mut text = self.value_to_string(args[0])?;
         match case {
@@ -17830,6 +17839,7 @@ impl Vm {
     }
 
     fn native_string_reverse(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "string.reverse argument")?;
         let text = self.value_to_string(args[0])?;
         let reversed = reverse_string_bytes(&text)?;
@@ -17846,6 +17856,7 @@ impl Vm {
     }
 
     fn native_string_find(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(4)];
         validate_native_arity(args, 2, 4, "string.find arguments")?;
         let text = self.value_to_string(args[0])?;
         let pattern = self.value_to_string(args[1])?;
@@ -18260,6 +18271,7 @@ impl Vm {
     }
 
     fn native_string_split(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "string.split arguments")?;
         let registers = native_registers(args)?;
         self.string_split(
@@ -18820,6 +18832,7 @@ impl Vm {
     }
 
     fn native_table_concat(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(4)];
         validate_native_arity(args, 1, 4, "table.concat arguments")?;
         let table = args[0]
             .as_table()
@@ -18904,6 +18917,7 @@ impl Vm {
     }
 
     fn native_table_getn(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "table.getn argument")?;
         let table = args[0]
             .as_table()
@@ -18917,6 +18931,7 @@ impl Vm {
     }
 
     fn native_table_maxn(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "table.maxn argument")?;
         let table = args[0]
             .as_table()
@@ -18930,6 +18945,7 @@ impl Vm {
     }
 
     fn native_table_create(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "table.create arguments")?;
         let registers = native_registers(args)?;
         self.table_create(
@@ -18945,6 +18961,7 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Value> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 2, 3, "table.find arguments")?;
         let registers = native_registers(args)?;
         self.table_find(
@@ -19586,6 +19603,7 @@ impl Vm {
     }
 
     fn native_table_remove(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "table.remove arguments")?;
         let registers = native_registers(args)?;
         self.table_remove(

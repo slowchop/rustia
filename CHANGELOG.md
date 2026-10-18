@@ -546,6 +546,13 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Valid builtin calls now reach execution when a library field is missing or
+  the argument list does not fit a specialized opcode. Dead branches and
+  uncalled functions no longer fail compilation for those runtime operations.
+  Oracle-verified fixed-arity builtins and `pairs`/`ipairs` ignore trailing
+  arguments after evaluating them; invalid `table.insert` arities still fail
+  during execution.
+
 - **The owned-host benchmark lanes queue instead of cancelling a waiting run.**
   The per-commit series, weekly matrix, memory cohort and A/B acceptance share
   one concurrency group, whose comment said they queued. A group keeps one
