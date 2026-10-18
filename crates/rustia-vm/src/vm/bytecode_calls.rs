@@ -186,6 +186,46 @@ impl Vm {
         Ok(())
     }
 
+    pub(super) fn retain_dynamic_program_ref_with_roots(
+        &mut self,
+        program: &Program,
+        roots: Vec<Value>,
+        frames: Vec<CoroutineFrame>,
+    ) -> Result<u32> {
+        // Program admission can collect. Keep uninstalled call targets, results,
+        // and native completion metadata visible until retention finishes.
+        self.call_stack
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        self.mark_control_memory_dirty();
+        self.active_coroutine_frames
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        let environment = self.current_environment()?;
+        self.call_stack.push(CallStackFrame {
+            program: None,
+            function: None,
+            debug_name: None,
+            environment,
+            thread_environment: self.current_thread_environment(),
+            module_cohort: self.current_module_cohort(),
+            call_site: None,
+            roots,
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        });
+        self.active_coroutine_frames.push(frames);
+        self.mark_control_memory_dirty();
+        let retained = self.retain_dynamic_program_ref(program);
+        self.active_coroutine_frames.pop();
+        self.call_stack.pop();
+        self.mark_control_memory_dirty();
+        if self.guest_transactions.is_empty() {
+            self.prune_unreachable_coroutines_if_idle();
+        }
+        retained
+    }
+
     fn enter_deferred_bytecode_call(
         &mut self,
         fallback_program: u32,
@@ -450,4 +490,80 @@ impl Vm {
 
 fn invalid_deferred_call(reason: &'static str) -> Error {
     Error::new(ErrorKind::InvalidProgram { reason })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_xpcall_roots_its_uninstalled_target_and_arguments_during_retention() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut function = Function::new(vec![Instruction::new(Opcode::Return, 0, 1, 0)], 1);
+        function.parameter_count = 1;
+        let program = Program::new(function, Vec::new());
+        let program_id = vm.retain_dynamic_program_ref(&program).unwrap();
+        let handle = vm
+            .heap
+            .alloc_dynamic_main_function_in_cohort(program_id, vm.globals, 0)
+            .unwrap();
+        let argument = vm.empty_table();
+        let handler = vm.get_global_value("tostring").unwrap();
+        let quota = vm.current_live_bytes() + 16 * 1024;
+        let garbage = vm.heap.alloc_buffer(vec![0; 32 * 1024]).unwrap();
+        vm.settings.memory_limit_bytes = Some(quota);
+        let mut state = vm.begin_execution();
+        let mut hosts = RejectHostDispatcher;
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        };
+        let flow = vm.native_xpcall_resumable(
+            &program,
+            &[Value::function(handle), handler, argument],
+            0,
+            None,
+            &mut execution,
+        );
+        assert!(
+            !vm.heap.has_buffer(garbage),
+            "retention must collect the unrooted garbage"
+        );
+        let flow = vm
+            .drive_deferred_bytecode_flow(flow.map(into_return_values_flow), 0, &mut execution)
+            .unwrap();
+        let VmFlow::Return(results) = flow else {
+            panic!("protected bytecode target should complete");
+        };
+        assert_eq!(results[0].as_bool(), Some(true));
+        assert_eq!(results[1].as_table(), argument.as_table());
+        assert!(vm.heap.has_table(argument.as_table().unwrap()));
+        assert!(vm.heap.function_kind(handle).is_some());
+        assert!(vm.call_stack.is_empty());
+        assert!(vm.active_coroutine_frames.is_empty());
+    }
+
+    #[test]
+    fn failed_rooted_retention_restores_its_temporary_control_scopes() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let value = vm.empty_table();
+        let program = Program::new(
+            Function::new(vec![Instruction::new(Opcode::Return, 0, 0, 0)], 1),
+            Vec::new(),
+        );
+        vm.settings.memory_limit_bytes = Some(0);
+        assert!(matches!(
+            vm.retain_dynamic_program_ref_with_roots(
+                &program,
+                vec![value],
+                vec![CoroutineFrame::PCall]
+            )
+            .unwrap_err()
+            .kind,
+            ErrorKind::OutOfMemory,
+        ));
+        assert!(vm.heap.has_table(value.as_table().unwrap()));
+        assert!(vm.call_stack.is_empty());
+        assert!(vm.active_coroutine_frames.is_empty());
+    }
 }

@@ -11387,7 +11387,7 @@ impl Vm {
         program: &Program,
         program_id: Option<u32>,
         _prototype: Option<u32>,
-        function: &Function,
+        _function: &Function,
         callee: Value,
         bytecode_data: Option<(SmallVec<[FunctionCapture; 2]>, u32, u32)>,
         args: &[Value],
@@ -11395,7 +11395,7 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         _fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
-        let (_, environment, module_cohort) = bytecode_data.ok_or_else(|| {
+        bytecode_data.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "bytecode function call data is missing",
             })
@@ -11413,26 +11413,7 @@ impl Vm {
                     .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
                 roots.push(callee);
                 roots.extend_from_slice(&args);
-                self.call_stack
-                    .try_reserve(1)
-                    .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-                self.call_stack.push(CallStackFrame {
-                    program: None,
-                    function: Some(callee),
-                    debug_name: function.debug_name.clone(),
-                    environment,
-                    thread_environment: self.current_thread_environment(),
-                    module_cohort,
-                    call_site: call_site.clone(),
-                    roots,
-                    stackless_roots: Vec::new(),
-                    stackless_debug_frames: Vec::new(),
-                });
-                self.mark_control_memory_dirty();
-                let retained = self.retain_dynamic_program_ref(program);
-                self.call_stack.pop();
-                self.mark_control_memory_dirty();
-                retained?
+                self.retain_dynamic_program_ref_with_roots(program, roots, Vec::new())?
             }
         };
         Ok(VmFlow::Call(DeferredBytecodeCall {
@@ -14532,7 +14513,16 @@ impl Vm {
             fuel,
         ) {
             Ok(VmFlow::Call(mut request)) => {
-                let program_id = match self.retain_dynamic_program_ref(program) {
+                let retained = (|| {
+                    let mut roots = try_copy_vec(&request.args)?;
+                    roots.try_reserve(2).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    roots.extend([request.callee, handler]);
+                    let frames = try_clone_coroutine_frames(&request.callers)?;
+                    self.retain_dynamic_program_ref_with_roots(program, roots, frames)
+                })();
+                let program_id = match retained {
                     Ok(id) => id,
                     Err(error) => {
                         return Err(error);
@@ -14556,7 +14546,16 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                let program_id = match self.retain_dynamic_program_ref(program) {
+                let retained = (|| {
+                    let mut roots = try_copy_vec(&suspension.yielded)?;
+                    roots.try_reserve(1).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    roots.push(handler);
+                    let frames = try_clone_coroutine_frames(&suspension.frames)?;
+                    self.retain_dynamic_program_ref_with_roots(program, roots, frames)
+                })();
+                let program_id = match retained {
                     Ok(program_id) => program_id,
                     Err(error) => {
                         return Err(error);

@@ -294,6 +294,10 @@ evaluating an expanded argument can make a later fixed, variable-result, vararg,
 constructor or prefixed-return call without nesting Rust interpreter frames.
 Existing eligible leaf and self-call shortcuts retain their own paths. Legacy
 positive-aux expanded forms normalize into the shared continuation state.
+Fallible program retention keeps pending targets, arguments, handlers and
+completion frames in temporary VM root scopes. Raw protected-call regressions
+force collection during retention and check that both scopes are restored after
+an out-of-memory failure.
 
 The review also found that the configured `RecursionLimit` had incorrectly
 remained catchable in protected calls. It now follows the documented hard-abort

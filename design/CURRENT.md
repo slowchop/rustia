@@ -59,6 +59,7 @@ repeated coroutine suspension. Variable-length argument chains preserve expansio
 beyond the fixed instruction shapes, and recursive calls resume those chains
 through explicit VM frames across functions, programs and callable receivers.
 Ordinary bytecode fallbacks share those frames after resumption.
+Pending protected-call values stay rooted during fallible program retention.
 Aliases and parenthesized callees keep ordinary
 lookup order. Four-profile failure/recovery and call-shape regressions, eight
 new pinned-Luau fixtures, and expanded bounded differential cases cover this
