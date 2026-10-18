@@ -197,10 +197,9 @@ instead of mirroring them in a label. Settings, budgets, services, dependencies,
 embedder-owned identity inputs. `Rustia::compile_entry` plus `Rustia::invoke_entry_into` execute a host-owned top-level
 decision body without exports-table, retained-closure, or loaded-program setup and reset after success or
 failure. Hardened reset preserves only the checked immutable pre-guest heap prefix and discards all
-decision-local allocations; sealing rejects both prefix holes and pre-seal external roots. The checked-in,
-semantically validated complete-lifecycle ABBA benchmark measured
-the module control at 22.292–23.750 microseconds p95 and the hardened entry at 6.625–6.958 microseconds p95 in
-three local 20,000-decision runs; this is workload-specific development evidence, not a blanket speed claim.
+decision-local allocations; sealing rejects both prefix holes and pre-seal external roots. The checked-in
+complete-lifecycle benchmark validates the compared workloads. Performance evidence must come from
+`ci-bench`; local development timings are not accepted evidence.
 The host services bus from [`72-host-services.md`](72-host-services.md) is now implemented: facade presets
 `standard()`/`deterministic()`/`live()`, a host stdout sink giving `print` its real Luau composition,
 determinism-labeled wall/monotonic clock providers feeding `os.time`/`os.date`/`os.clock`, and a deterministic
