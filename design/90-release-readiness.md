@@ -141,6 +141,14 @@ reviews remain required for this slice; wider semantic-tail work stays open.
 
 ## API Gate
 
+Private acceptance additionally runs `tools/check-external-facade.js`: a clean
+Cargo application with only `rustia` and `serde`, compiled from extracted
+candidate archives, reuses the public contract suites in default/bare modes.
+Its package identities must come from the candidate lock. The shared private
+platform golden and its remaining CI gates are described in
+[84-private-platform-acceptance.md](84-private-platform-acceptance.md); no
+registry installation, public release, or complete platform matrix is implied.
+
 - Public error types, source-span/runtime-location accessors, conversion
   traits, retained handles, extension APIs, and replacement semantics have stable
   names and documented behavior.

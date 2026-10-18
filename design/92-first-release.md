@@ -186,6 +186,12 @@ runtime or embedding requirement above.
 
 ## 3. Verify the platforms we promise
 
+The [private platform checks](84-private-platform-acceptance.md) implement a
+shared exact transcript for Linux x86-64, native macOS arm64 and Node/V8, plus
+clean external archived-facade contracts. Default and bare features are covered.
+Final three-platform CI, independent review and acceptance evidence are pending;
+the broader public matrix below remains open.
+
 - [ ] Complete the native correctness and deterministic-result matrix in
   [00-constraints.md](00-constraints.md), using real execution where promised.
   Cross-compiling alone does not prove runtime behavior.

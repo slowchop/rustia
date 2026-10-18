@@ -60,6 +60,55 @@ jobs:
       - name: Run canonical release preflight
         run: node tools/run-release-preflight.js
 
+      - name: Execute shared private golden on Linux x86-64
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          git rev-parse HEAD
+          bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu
+          bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu
+
+  macos-arm64-runtime:
+    name: Native runtime (macOS arm64)
+    runs-on:
+      group: general-macos
+      labels: [self-hosted, macOS, ARM64, general-macos]
+    timeout-minutes: 20
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      RUSTFLAGS: -D warnings
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          if [ ! -x "$cargo_bin/rustup" ]; then
+            echo "::error::Rustup is missing from this account's Cargo tools directory."
+            exit 1
+          fi
+          export PATH="$cargo_bin:$PATH"
+          echo "$cargo_bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update
+
+      - name: Verify native arm64 execution and run shared correctness suites
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
+          git rev-parse HEAD
+          bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin
+          bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin
+          cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations
+          cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations
+
   portable-engine-build:
     name: Engine build (${{ matrix.target }})
     runs-on:
@@ -147,6 +196,7 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test live_value_contract
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test yieldable_require --test callable_continuations
+          bash tools/run-private-platform-golden.sh wasm bare
 
       - name: Run default web-live adapter tests on Node/V8
         env:
@@ -157,3 +207,4 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test live_value_contract
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test yieldable_require --test callable_continuations
+          bash tools/run-private-platform-golden.sh wasm default

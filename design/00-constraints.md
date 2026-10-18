@@ -36,6 +36,11 @@ Determinism + correctness must ultimately hold across this FULL matrix. Hosted C
 the whole cross-target golden. macOS/Windows remain correctness/build targets, not timing sources, until
 dedicated measurement hosts exist.
 
+The private milestone now implements a bounded shared facade golden for Linux
+x86-64, macOS arm64 and Node/V8 in default and bare feature modes. Its final CI
+execution/review is pending; see [84-private-platform-acceptance.md](84-private-platform-acceptance.md).
+The full matrix below remains the public-release contract.
+
 | native (OS × arch) | browser/wasm engine |
 |---|---|
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
