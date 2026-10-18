@@ -9,6 +9,8 @@ use rustia_vm::{HostFunctionOp, HostObjectTypeDefinition, Value as RawValue};
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;
 
+type Invariant<T> = PhantomData<fn(T) -> T>;
+
 /// A Rust type and the methods scripts may call on it.
 ///
 /// Register the definition once, then create as many objects as needed. Each
@@ -36,7 +38,8 @@ use std::marker::PhantomData;
 pub struct ObjectType<T: 'static, H: HostSchema = ()> {
     name: String,
     pub(crate) methods: Vec<HostFunctionOp>,
-    marker: PhantomData<fn() -> (T, H)>,
+    // Method adapters erase these types after capturing their exact TypeIds.
+    marker: Invariant<(T, H)>,
 }
 
 impl<T: 'static, H: HostSchema> ObjectType<T, H> {
@@ -47,6 +50,35 @@ impl<T: 'static, H: HostSchema> ObjectType<T, H> {
             methods: Vec::new(),
             marker: PhantomData,
         }
+    }
+
+    /// Returns the name used for this definition's registration diagnostics.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the versioned policy used to charge method-call fuel.
+    pub const fn fuel_policy(&self) -> crate::RustiaHostFuelPolicy {
+        crate::RUSTIA_HOST_FUEL_POLICY
+    }
+
+    /// Describes each method before registration, in declaration order.
+    ///
+    /// The first parameter is the object receiver. Borrowed capability views
+    /// are supplied by Rustia and are not counted as guest arguments.
+    pub fn methods(&self) -> impl Iterator<Item = crate::RustiaHostFunctionInfo<'_>> + '_ {
+        self.methods
+            .iter()
+            .map(|method| crate::RustiaHostFunctionInfo {
+                name: &method.name,
+                fuel_abi_version: crate::RUSTIA_HOST_FUEL_ABI_VERSION,
+                fuel_cost: method.fuel_cost,
+                capability: crate::OpCapability::from_core(method.capability),
+                parameter_count: method.parameter_count,
+                parameter_types: &method.parameter_types,
+                return_types: &method.return_types,
+                fallible: method.fallible,
+            })
     }
 
     /// Adds a read-only method with an explicit host-call fuel cost.
@@ -148,7 +180,8 @@ impl<T: 'static, H: HostSchema> ObjectType<T, H> {
 /// the VM's payload ownership even if an old Rust handle is still retained.
 pub struct Object<T: 'static> {
     value: Value,
-    marker: PhantomData<fn() -> T>,
+    // A live handle's Rust brand must remain the exact registered payload type.
+    marker: Invariant<T>,
 }
 
 impl<T: 'static> Clone for Object<T> {

@@ -54,6 +54,8 @@
 //!
 //! [first-release checklist]: https://github.com/slowchop/rustia/blob/main/design/92-first-release.md
 
+#[cfg(doctest)]
+mod brand_contract;
 mod chunk;
 mod diagnostic;
 mod diagnostic_data;

@@ -626,7 +626,8 @@ where
 {
     namespace: String,
     functions: Vec<HostFunctionOp>,
-    schema: PhantomData<fn() -> C>,
+    // The erased handlers retain their exact schema type.
+    schema: PhantomData<fn(C) -> C>,
 }
 
 impl<C> HostModule<C>

@@ -35,6 +35,10 @@ arguments after the receiver and use the existing owned/live conversions,
 fallible results, and panic containment. A callback receives a temporary `&T`
 or `&mut T`; it cannot keep that reference or re-enter the interpreter.
 
+Before registration, `name`, `fuel_policy`, and `methods` expose the definition's
+diagnostic name and versioned method metadata, matching host modules. Parameter
+metadata includes the receiver first; capability views are supplied by Rustia.
+
 `Object<T>` is a live root, not a copy of `T`. Cloning its handle preserves
 identity. `Value::as_object::<T>` checks the Rust payload type and returns `None`
 for a different type. Stale or foreign handles return an error first. Guest
@@ -120,6 +124,12 @@ memory, like callback captures. `T` must be `'static`, but need not be `Clone`,
 closures retain the normal `Send + Sync + 'static` bounds. Payload and capture
 destructors must not panic. The application must avoid hidden Rust ownership
 cycles that would keep its own data alive.
+
+Object definitions and handles keep the exact registered Rust type. Payload and
+schema brands are invariant, including for function-pointer subtypes, so a safe
+Rust coercion cannot change a type after its callback adapters have erased it.
+Compile-only regressions cover these brands without expanding the public API
+reference's examples.
 
 Custom fields/metamethods, borrowed scopes, async methods, and automatic Rust
 payload snapshots remain outside this milestone.

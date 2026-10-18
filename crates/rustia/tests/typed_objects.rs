@@ -18,6 +18,45 @@ fn player_type() -> ObjectType<Player> {
     wasm_bindgen_test::wasm_bindgen_test
 )]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn method_metadata_is_available_before_registration() {
+    let definition =
+        player_type().method_mut("set", 5, |p: &mut Player, score: i64| -> Result<()> {
+            p.score = score;
+            Ok(())
+        });
+    assert_eq!(definition.name(), "Player");
+    assert_eq!(definition.fuel_policy(), rustia::RUSTIA_HOST_FUEL_POLICY);
+    let methods: Vec<_> = definition.methods().collect();
+    assert_eq!(methods.len(), 2);
+    assert_eq!(methods[0].name, "score");
+    assert_eq!(
+        methods[0].fuel_abi_version,
+        rustia::RUSTIA_HOST_FUEL_ABI_VERSION
+    );
+    assert_eq!(methods[0].capability, rustia::OpCapability::Pure);
+    assert_eq!(methods[0].parameter_count, 1);
+    assert_eq!(
+        methods[0].parameter_types,
+        &[std::any::type_name::<Object<Player>>()]
+    );
+    assert_eq!(methods[0].return_types, &[std::any::type_name::<i64>()]);
+    assert!(!methods[0].fallible);
+    assert_eq!(methods[1].name, "set");
+    assert_eq!(methods[1].fuel_cost, 5);
+    assert_eq!(
+        methods[1].capability,
+        rustia::OpCapability::ReadsExternalMutableState
+    );
+    assert_eq!(methods[1].parameter_count, 2);
+    assert!(methods[1].return_types.is_empty());
+    assert!(methods[1].fallible);
+}
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn typed_objects_preserve_identity_and_old_methods_across_replacement() -> Result<()> {
     let mut lua = Rustia::builder().build()?;
     lua.register_object_type(player_type())?;
