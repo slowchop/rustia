@@ -40,7 +40,8 @@ use std::marker::PhantomData;
 pub struct HostFunction<C: HostSchema = ()> {
     build: Box<dyn FnOnce(String, u32) -> HostFunctionOp + Send + Sync>,
     fuel_cost: u32,
-    schema: PhantomData<fn() -> C>,
+    // The erased dispatcher captures this exact schema's TypeId.
+    schema: PhantomData<fn(C) -> C>,
 }
 
 impl<C: HostSchema> HostFunction<C> {

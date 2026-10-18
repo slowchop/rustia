@@ -24,10 +24,11 @@ behind accessors, reports stale/cross-VM live handles through typed VM errors,
 and checks table/function/export receivers before converting inputs or allocating
 guest values. Handle validation uses the core VM's ownership-first, epoch-second
 contract. These changes do not
-close the remaining typed Rust-object design, yieldable `require`,
+close typed-object consumer validation, yieldable `require`,
 language error-phase, real-platform golden, or packaging gates.
 
-**Application API boundary work is in progress:** the facade now owns settings,
+**The application API boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)**
+as `8f8558abf361e939599d2c093614ae0776682d26`. The facade owns settings,
 profiles/capabilities, memory samples, source/compile/runtime errors, and
 source diagnostics. Builder configuration replaces raw VM constructors/settings;
 `Default` matches the standard preset. Callback adapter traits are sealed marker
@@ -35,9 +36,14 @@ bounds, while owned conversions and borrowed typed contexts remain application
 extension points. Settings have opaque versioned identity bytes covering all
 effective options. A captured non-string guest error returned through Rust is
 re-raised as its original text, avoiding stale/foreign raw object IDs; protected
-calls entirely within guest code keep object identity. Focused external error,
-settings, callback, and CLI tests pass; full checks, independent review, and
-active-client rollout remain pending. The CLI now accepts `-V`/`--version`.
+calls entirely within guest code keep object identity. Required CI and independent
+reviews passed for that boundary. WOTS [#7](https://github.com/slowchop/wots/pull/7)
+merged as `97b87889`, and civfun [#51](https://github.com/civfun/civfun/pull/51)
+merged as `6aaa3466`, using exact reviewed Rustia revision `030cb038`.
+Grabby [#1083](https://github.com/slowchop/grabby-next/pull/1083), at `9b5cc21`,
+has clear independent reviews and local correctness checks; its current-head CI
+and merge remain pending. This is the facade rollout, not the later object
+integration. The CLI accepts `-V`/`--version`.
 See [the boundary contract](75-embedded-api.md#application-api-boundary).
 
 The [private delivery order](92-first-release.md#delivery-order) groups the work
@@ -51,12 +57,21 @@ PR #60's stale generated benchmark-progress report was repaired in
 platform/Node-V8, differential smoke, and remote screening checks passed. The
 repair changed no measurement or performance claim.
 
-The accepted, **not yet implemented**, typed-object model uses read-only
-replay-stable input plus staged effects/slot writes for deterministic game logic.
-Standard/live methods may declare immediate mutation of application state;
-external effects remain outside rollback and reset. Deterministic construction
-must reject forbidden method capabilities atomically. Generic mutable-object
-snapshots are deferred. See the [object contract](92-first-release.md#agreed-rust-object-contract).
+**Typed Rust objects are implemented in the current private API change.**
+`ObjectType<T, H>` registers methods and `Object<T>` keeps a VM/epoch-bound live
+instance. Callbacks accept object handles and return existing or fresh objects
+through `NewObject<T>`. Deterministic methods read replay-stable input and stage
+effects/slot writes in the existing journal. Standard/live methods may change
+payloads or external state immediately, outside guest rollback. Complete
+registrations reject forbidden capabilities atomically; wrong/stale/foreign
+receivers fail before argument conversion. Definitions survive reset, while
+instances are released even if stale handles remain. Replacement changes future
+instances. VM metadata/roots are quota-accounted; arbitrary Rust payload
+allocations remain host memory. Public and private tests cover these contracts;
+final checks, independent reviews, and the civfun object integration remain
+pending. See [the object guide](83-rust-objects.md). Wider runtime parity,
+yieldable `require`, private-platform acceptance, and generic mutable-object
+snapshots are not completed by this change; snapshots remain deferred.
 
 **Memory-limit hardening:** memory-limited VMs now avoid batched execution paths
 and use the scalar dispatcher's instruction-boundary quota checks, closing the
@@ -425,8 +440,9 @@ facility is finished. The highest-impact gaps are:
    with environment-handle validation before compilation and exact environment capture by nested functions.
    Hardened leaves reject mutable constructor authorities before allocation and dynamic loading before
    compilation. Snapshot-free serde deserialization now reads rooted `Value`, `Table`, and `Exports` graphs
-   directly into owned Rust types while keeping the eager `OwnedValue` snapshot explicit. Before calling this
-   a complete rich embedding boundary, add a concrete public userdata registration contract.
+   directly into owned Rust types while keeping the eager `OwnedValue` snapshot explicit. Typed Rust-object
+   registration, live handles, and methods are implemented under [83-rust-objects.md](83-rust-objects.md);
+   final object validation and real-consumer use remain pending before this boundary is settled.
    Synchronous function construction now shares typed owned/live conversions, capability/fuel metadata,
    and contextual dispatch with persistent registrations and host modules. Heap functions own callbacks;
    guest aliases survive replacement, collection releases unreachable captures, and reset discards

@@ -1,9 +1,11 @@
 use crate::extension::HostFunctionOp;
+use crate::host_object::HostObjectData;
 use gc_arena::lock::RefLock;
 use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
+use std::rc::Rc;
 
 use crate::bytecode::{stable_bytes_hash, SharedProgramString};
 use crate::number::table_key_number_bits;
@@ -532,11 +534,13 @@ struct UpvalueData {
     value: Value,
 }
 
-#[derive(Clone, Copy, Collect)]
+#[derive(Clone, Collect)]
 #[collect(no_drop)]
 struct UserdataData {
     metatable: Option<u32>,
     payload: UserdataPayload,
+    #[collect(require_static)]
+    host_object: Option<Rc<HostObjectData>>,
 }
 
 #[derive(Clone, Copy, Collect)]
@@ -1139,7 +1143,7 @@ impl VmCell {
                 try_clone_copy_vec(&root.userdatas.free)?,
                 try_clone_copy_vec(&root.buffers.free)?,
                 try_clone_copy_vec(&root.vectors.free)?,
-                try_snapshot_copy_slots(&root.userdatas)?,
+                try_snapshot_userdata_slots(&root.userdatas)?,
                 try_snapshot_buffer_slots(&root.buffers)?,
             ))
         });
@@ -1397,6 +1401,11 @@ impl VmCell {
             for buffer in root.buffers.values() {
                 usage.add_vec(&buffer.bytes);
             }
+            for userdata in root.userdatas.values() {
+                if userdata.host_object.is_some() {
+                    usage.add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
+                }
+            }
         });
         usage.add_vec(&self.transactions);
         for transaction in &self.transactions {
@@ -1427,6 +1436,11 @@ impl VmCell {
             }
             for buffer in root.buffers.values() {
                 usage.add_vec(&buffer.bytes);
+            }
+            for userdata in root.userdatas.values() {
+                if userdata.host_object.is_some() {
+                    usage.add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
+                }
             }
         });
         self.side_usage = usage;
@@ -2234,6 +2248,7 @@ impl VmCell {
             let value = UserdataData {
                 metatable,
                 payload: UserdataPayload::None,
+                host_object: None,
             };
             root.userdatas.insert(value)
         })
@@ -2249,9 +2264,56 @@ impl VmCell {
         }
         self.arena.mutate(|mc, root| {
             let mut root = root.unlock(mc).borrow_mut();
-            let value = UserdataData { metatable, payload };
+            let value = UserdataData {
+                metatable,
+                payload,
+                host_object: None,
+            };
             root.userdatas.insert(value)
         })
+    }
+
+    pub(crate) const fn host_object_live_bytes() -> usize {
+        size_of::<ReusableSlot<UserdataData>>().saturating_add(HostObjectData::live_bytes())
+    }
+
+    pub(crate) fn alloc_host_object(
+        &mut self,
+        metatable: u32,
+        host_object: Rc<HostObjectData>,
+    ) -> Option<u32> {
+        self.tables.get(metatable)?;
+        let handle = self.arena.mutate(|mc, root| {
+            root.unlock(mc).borrow_mut().userdatas.insert(UserdataData {
+                metatable: Some(metatable),
+                payload: UserdataPayload::None,
+                host_object: Some(host_object),
+            })
+        })?;
+        self.side_usage
+            .add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
+        Some(handle)
+    }
+
+    pub(crate) fn host_object(&mut self, userdata: u32) -> Option<Rc<HostObjectData>> {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow()
+                .userdatas
+                .get(userdata)?
+                .host_object
+                .clone()
+        })
+    }
+
+    pub(crate) fn discard_host_object(&mut self, userdata: u32) {
+        self.arena.mutate(|mc, root| {
+            root.unlock(mc)
+                .borrow_mut()
+                .userdatas
+                .retain_handles(|candidate| candidate != userdata);
+        });
+        self.recompute_side_usage();
     }
 
     pub fn alloc_buffer(&mut self, bytes: Vec<u8>) -> Option<u32> {
@@ -3764,6 +3826,22 @@ fn try_snapshot_copy_slots<T: Copy>(slots: &ReusableSlots<T>) -> Result<Vec<(u32
         .map_err(|_| ())?;
     for handle in slots.handles() {
         snapshot.push((handle, *slots.get(handle).expect("live slot handle")));
+    }
+    Ok(snapshot)
+}
+
+fn try_snapshot_userdata_slots(
+    slots: &ReusableSlots<UserdataData>,
+) -> Result<Vec<(u32, UserdataData)>, ()> {
+    let mut snapshot = Vec::new();
+    snapshot
+        .try_reserve_exact(slots.occupied_len())
+        .map_err(|_| ())?;
+    for handle in slots.handles() {
+        snapshot.push((
+            handle,
+            slots.get(handle).expect("live userdata handle").clone(),
+        ));
     }
     Ok(snapshot)
 }

@@ -9,7 +9,7 @@ compiler, VM, stateful embedding, and differential execution.
 | `parser` | 32 KiB | raw bytes through `parse_source_bytes` |
 | `compiler` | 16 KiB | only successfully parsed chunks reach `compile` |
 | `vm` | 2 KiB | 256 decoded instructions, 16 registers, fixed small constants, one prototype, recursion depth 32, and 4,096 fuel |
-| `stateful` | 128 bytes | bounded API sequences, 2 MiB guest quota, 4,096 fuel per execution |
+| `stateful` | 128 bytes | bounded API sequences, object replacement/aliases/fresh results/reset, 2 MiB guest quota, 4,096 fuel per execution |
 | `differential` | 64 bytes | generated loop-free source, 8 MiB guest quotas, 100,000 Rustia fuel, isolated five-second oracle worker |
 
 The VM decoder covers every production opcode with a 512 KiB logical-live quota.

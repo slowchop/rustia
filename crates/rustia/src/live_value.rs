@@ -1,6 +1,6 @@
 use crate::function::Function;
 use crate::serde_value::from_live;
-use crate::value::{load_owned_value, snapshot_value};
+use crate::value::{load_owned_arguments, load_owned_value, snapshot_value};
 use crate::{Error, HostSchema, IntoRustia, OwnedValue, Result, Rustia};
 use rustia_vm::{RetainedValue, Value as RawValue, ValueKind, Vm};
 use std::fmt;
@@ -378,11 +378,10 @@ impl Table {
         let table = self.value.raw(rustia.vm(), "table handle")?;
         let key = key.into_rustia()?;
         let value = value.into_rustia()?;
-        let key = load_owned_value(rustia.vm_mut(), &key)?;
-        let value = load_owned_value(rustia.vm_mut(), &value)?;
+        let (values, _argument_roots) = load_owned_arguments(rustia.vm_mut(), &[key, value])?;
         rustia
             .vm_mut()
-            .raw_table_set_value(table, key, value)
+            .raw_table_set_value(table, values[0], values[1])
             .map_err(Error::from_engine)
     }
 

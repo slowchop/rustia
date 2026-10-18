@@ -1,6 +1,8 @@
 # Synchronous host functions
 
 Status: synchronous API and controlled-client integrations implemented and verified (2026-09-08).
+Typed object methods are implemented in the current private API change; their final validation and
+consumer rollout remain pending (2026-10-18).
 
 The authorized rollout completes synchronous function construction and migrates the controlled
 civfun, WOTS, and Grabby clients. A callback has one definition and one set of conversion,
@@ -43,16 +45,19 @@ changes cannot escape an enclosing guest rollback. `create_named_function` sets 
 
 All ordinary profiles share the API. Capability checks preserve each selected environment contract.
 Hardened leaves continue using pre-registered configuration and reject disposable construction
-before allocation. Typed Rust-object methods are required, planned work for the
-[API and consumer-readiness milestone](92-first-release.md); the synchronous function API does not yet
-provide object registration. Async callbacks and borrowed callback scopes remain later work.
+before allocation. Typed Rust-object methods now share these callback rules through
+`ObjectType<T, H>` and `Object<T>`, as described below. Async callbacks and borrowed callback scopes
+remain later work.
 
-## Planned object-method integration
+## Object-method integration
 
-The minimum typed Rust-object API must reuse these synchronous callback contracts: typed conversions,
+The typed Rust-object API reuses these synchronous callback contracts: typed conversions,
 capability/fuel metadata, panic containment, capture bounds, collection ownership, and the distinction
-between persistent configuration and disposable live values. Existing userdata identity in live handles
-does not implement arbitrary host-created typed objects or methods.
+between persistent configuration and disposable live values. `ObjectType<T, H>` defines methods,
+`register_object_type` publishes the complete definition, and `create_object` returns a rooted `Object<T>`.
+Methods accept the same typed arguments and results; callbacks may return an existing `Object<T>` or
+a fresh `NewObject<T>`. Every fresh registration and live return handle is checked before guest-result
+allocation. The [object guide](83-rust-objects.md) covers the public shape and lifetime rules.
 
 Deterministic applications expose read-only replay-stable input and stage authoritative changes through
 the existing typed effects/slot-write journal. Method callbacks use the matching typed capability views
@@ -60,14 +65,19 @@ to stage changes, without a second queue. Standard/live applications may explici
 that mutate Rust-owned state or perform external work. External application changes and I/O are outside
 invocation and installation rollback and are not undone by reset. Reset still releases disposable instance
 payloads and invalidates their handles. Capability validation must reject a forbidden method definition
-atomically rather than silently installing a profile-dependent subset. Hardened leaves reject object
+atomically rather than silently installing a profile-dependent subset. A failing method discards its
+staged suffix; earlier completed requests remain when guest `pcall` catches the error. Hardened leaves reject object
 construction before guest allocation.
 
+Definitions survive reset; instances and their handles do not. Replacement affects future instances,
+while old instances and detached methods keep their original definitions. Reset releases payloads even
+when stale Rust handles remain. Payload references cannot escape a callback or re-enter guest execution.
 Rust payload allocations retain the callback-capture host-memory boundary; VM-owned storage and roots
-need atomic quota admission. Captures remain a semantic trust boundary, and destructors must not panic.
+receive atomic quota admission. Captures remain a semantic trust boundary, and destructors must not panic.
 VM-owned mutable-object snapshot/rollback, custom fields/metamethods, borrowed scopes, and async methods
-are outside this milestone. See the [object contract](75-embedded-api.md#planned-typed-rust-object-methods)
-for the full intent; none of these planned methods changes runtime behavior yet.
+are outside this milestone. See the [object contract](75-embedded-api.md#typed-rust-object-methods).
+Object unit/integration tests are present; final CI, independent review, and a real civfun object integration
+still gate the private milestone.
 
 ## Verification and rollout
 
@@ -100,6 +110,6 @@ Each client PR records its own required delivery checks and merge state. The rol
 any client repository's merge gate or include production deployment.
 
 No runtime performance improvement is claimed by this rollout. Async callbacks, borrowed scopes,
-and a full userdata object system remain separate follow-on work. Minimal typed Rust-object methods
-are instead required planned work under the [current milestone](92-first-release.md); the completed
-synchronous-function rollout above does not satisfy that requirement.
+and custom fields/metamethods remain separate follow-on work. The object implementation described above
+is a later change under the [current milestone](92-first-release.md), with its own consumer, review,
+and CI gates; the historical synchronous-function rollout does not close those gates.

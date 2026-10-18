@@ -11,6 +11,7 @@ pub mod error;
 mod executor_census;
 pub mod extension;
 mod heap;
+mod host_object;
 mod hot_ir;
 pub mod instruction_facts;
 pub mod liveness;
@@ -30,6 +31,7 @@ pub use extension::{
 };
 #[cfg(any(test, feature = "table-write-diagnostics"))]
 pub use heap::NumericArraySlotWriteCounts;
+pub use host_object::{HostObjectData, HostObjectTypeDefinition};
 pub use profile::{GuestSurface, Profile};
 pub use value::{Value, ValueKind};
 pub use vm::{

@@ -23,6 +23,7 @@
 //! | Call Rust from Luau | [`Rustia::add_fn`], [`HostFunction`] |
 //! | Call Luau from Rust | [`Chunk::install`], [`Exports::function`], [`Function::call`] |
 //! | Work with live script objects | [`Value`], [`Table`], [`Chunk::eval_live`] |
+//! | Give Rust objects script methods | [`ObjectType`], [`Rustia::create_object`] |
 //! | Read structured data with Serde | [`Chunk::eval_serde`] |
 //! | Show a script error | [`Error::report`] |
 //! | Set execution and memory limits | [`RustiaBuilder::fuel`], [`RustiaBuilder::memory_limit_bytes`] |
@@ -53,6 +54,8 @@
 //!
 //! [first-release checklist]: https://github.com/slowchop/rustia/blob/main/design/92-first-release.md
 
+#[cfg(doctest)]
+mod brand_contract;
 mod chunk;
 mod diagnostic;
 mod diagnostic_data;
@@ -65,6 +68,10 @@ mod host_function;
 mod invocation;
 mod live_value;
 mod macros;
+mod object;
+mod object_context;
+mod object_conversion;
+mod object_method;
 mod profile;
 mod runtime_error;
 mod serde_value;
@@ -104,6 +111,12 @@ pub use invocation::{
     InvocationUsage, SlotWrites, Slots,
 };
 pub use live_value::{Table, Value, ValueType};
+pub use object::{NewObject, Object, ObjectType};
+pub use object_context::{
+    IntoEffectObjectMethod, IntoExternalMutObjectMethod, IntoExternalObjectMethod,
+    IntoInputObjectMethod, IntoSlotReadObjectMethod, IntoSlotWriteObjectMethod,
+};
+pub use object_method::{IntoMutObjectMethod, IntoObjectMethod};
 pub use profile::{GuestSurface, OpCapability, Profile};
 pub use runtime_error::{VmError, VmErrorKind, VmErrorMessage};
 /// Version of the decision-reset lifecycle contract.

@@ -6,7 +6,26 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Object and callback definitions keep their exact Rust payload and host-schema
+  types. Automatic function-pointer conversions cannot create a mismatched
+  registration or live handle.
+- Owned conversion keeps partial tables, table keys, and earlier call arguments
+  alive while later values allocate. Quota collection can no longer discard a
+  value that is still being stored or passed to a function or object method.
+
 ### Added
+
+- Typed Rust objects through `ObjectType<T, H>`, `register_object_type`, and
+  `create_object`. Scripts call methods with `object:method(...)`; Rust keeps
+  type-checked live handles and can return fresh objects with `NewObject`.
+  Deterministic methods read replay-stable data and stage requests in the
+  existing invocation journal. Standard/live methods may mutate immediately,
+  outside script rollback. Definitions survive reset; instances do not.
+  Complete capability validation, receiver checks, quota admission, and callback
+  result validation preserve the existing host-call safety rules. Final object
+  integration, CI, and independent reviews remain pending.
 
 - Pre-release embedding API cleanup: use builder presets and individual limit
   methods instead of raw VM constructors/settings. `Rustia::default()` now

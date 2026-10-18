@@ -34,7 +34,7 @@ and independent reviews must pass before merge; use merge commits.
 | 1. Restore the baseline | Land the generated benchmark-progress repair in PR #61. | The reviewed revision passes full preflight and remote screening; this repair merged after its checks passed. |
 | 2. Separate application APIs from engine controls | Inventory the entire reachable facade, including error payloads, trait bounds, conversion impls, and re-exports. Replace accidental VM/compiler/parser exposure with facade-owned types and deliberately implementable or sealed extension points. | Independent API review accepts the inventory; facade consumers do not need lower-level engine types. |
 | 3. Settle construction and failure contracts | Make builder presets canonical; provide deliberate limits and settings readback. Preserve standard/live capability freedom. Make evolving classifications extensible and document conversion, ownership, reset, concurrency, and failure behavior. | External consumer tests cover defaults, error matching, data conversion, callbacks, module replacement, and rejected receivers without relying on implementation controls. |
-| 4. Add typed Rust objects and methods | Implement the accepted object contract below through the existing callback conversions, capabilities, fuel, and panic rules. Migrate real consumers alongside the API. | A real application uses read-only deterministic objects with staged writes, and a separate standard/live example uses immediate mutable methods. Collection, reset, rejection, and failure tests pass. |
+| 4. Add typed Rust objects and methods | Implement the accepted object contract below through the existing callback conversions, capabilities, fuel, and panic rules. Migrate real consumers alongside the API. | The runnable game-turn example uses read-only deterministic objects with staged writes; civfun exercises real immediate mutation. Both examples and the application integration pass against the exact candidate. Collection, reset, rejection, and failure tests pass. |
 | 5. Close runtime gaps | Finish yieldable `require`, audit compile-time versus runtime error parity, and repeat bounded fuzz and memory/reset coverage. Extend lifecycle tests for the new object and suspended-module state. | Pinned Luau fixtures and regression tests pass; no known private-milestone semantic blocker remains. Retain GC settings unless remote measurements justify a change. |
 | 6. Verify the private platform baseline | Execute a shared correctness/golden corpus on Linux x86-64, macOS arm64, and Node/V8 Wasm, and retain the existing eight-target build matrix. | Exact revisions produce matching deterministic results on those executed targets; reports distinguish build coverage from execution. |
 | 7. Accept a private candidate | Use one immutable Git revision in WOTS, civfun, and Grabby; verify packages, examples, CLI, feature combinations, recovery, and remote benchmark evidence. | Full CI, independent reviews, clean external integration, active-client runtime tests, and private-platform results pass. Record the API inventory, consumer revisions, test results, and remaining public-release gates. |
@@ -58,20 +58,24 @@ benchmark-project extraction are outside the private milestone.
 
 ## Agreed Rust-object contract
 
-Typed Rust-object construction and method dispatch are **planned, not built**.
-Existing live userdata identity and synchronous callback support are foundations,
-not evidence that this API is complete.
+Typed Rust-object construction and method dispatch are **implemented in the
+current private API change** through `ObjectType<T, H>`, `Object<T>`, and
+`NewObject<T>`. Final CI, independent reviews, and real civfun object use remain
+pending. The [object guide](83-rust-objects.md) documents the implemented API and
+test coverage; this status does not close private acceptance.
 
 - Provide typed object registration and VM/epoch-bound live handles, ordinary
   `object:method(...)` calls, safe Rust type checks, and reuse of existing typed
   callback arguments/results. Method definitions persist across reset; instances
-  and their handles do not.
+  and their handles do not. Replacement changes future instances, while existing
+  instances and detached methods keep their original definitions.
 - Deterministic game logic reads replay-stable object input. Authoritative writes
   use the existing typed effect/slot-write journal, including method callbacks
   that receive the matching typed capability view. An invocation returns its
   ordered requests only on success; the application decides when to apply them.
-  An error caught by script `pcall` follows the existing journal semantics and
-  does not automatically cancel the complete invocation.
+  A failing method discards its staged suffix. An error caught by script
+  `pcall` follows the existing journal semantics: earlier completed requests
+  remain and the complete invocation is not automatically cancelled.
 - Standard/live methods may mutate application state immediately when declared
   with the corresponding capability. External application changes and I/O are
   outside installation/invocation rollback and are not undone by reset.
@@ -87,6 +91,9 @@ not evidence that this API is complete.
   Hardened leaves reject object construction before guest allocation.
 - Admit VM-owned metadata and roots under the existing logical-live quota;
   arbitrary Rust payload allocations remain host memory, like callback captures.
+  Validate all fresh-object registrations and live callback results before
+  allocating guest return values. Reset releases payloads even when stale Rust
+  handles remain.
   Cover aliases, collection, replacement, reset, panic containment, and single
   payload destruction. Destructors must not panic. Hidden ownership cycles in
   Rust captures/payloads remain the host's responsibility.
@@ -96,6 +103,12 @@ transaction or effect queue. Generic Rust-object snapshot/rollback is deferred.
 The same Luau method syntax may stage a request or mutate immediately; the
 registered Rust implementation and its capability declaration determine the
 behavior, not the method's spelling.
+
+The user accepted this validation split on 2026-10-18: a runnable game-turn
+example for deterministic staged object changes, plus civfun for real immediate
+mutation. Existing WOTS and console writes must keep their error semantics;
+Grabby's hardened production leaf must continue rejecting objects. A new
+production staged-object caller is outside this milestone.
 
 ## Private acceptance evidence
 
@@ -136,12 +149,12 @@ separate publication decision.
 | Requirement | Current status | Evidence needed to close it |
 |---|---|---|
 | Evaluate scripts, exchange typed values, register Rust callbacks, call script functions, and reload modules through one coherent API | Implemented; being reviewed | Runnable README examples, ordinary and typed-host consumer tests, and independent API review |
-| Explain construction and defaults consistently | Review open | Document the difference between service-free constructors and builder presets; choose the final 1.0 contract and test it |
+| Explain construction and defaults consistently | Canonical builder contract implemented | Preserve tested presets, individual limits and immutable settings; final 1.0 acceptance remains open |
 | Leave room to add error categories | Implemented in this change | Non-exhaustive facade errors, private classification storage, and typed handle-error regressions |
 | Validate invalid handles before converting inputs or allocating guest values | Implemented in this change | Stale-handle and cross-VM tests, including conversion side effects and memory accounting |
-| Separate stable settings from engine implementation details | Implemented; independent review and consumer rollout pending | Immutable facade `Settings`, builder configuration, owned profiles/errors/diagnostics, sealed callback adapters, and preserved private engine-control regressions |
+| Separate stable settings from engine implementation details | Merged in PR #63; Grabby CI/merge pending | Immutable facade `Settings`, builder configuration, owned profiles/errors/diagnostics, sealed callback adapters, and preserved private engine-control regressions; WOTS #7 and civfun #51 merged |
 | Allow public classifications and metadata to evolve | Review open | Audit re-exported VM errors, profiles, capabilities, diagnostic types, and owned value/key enums; document exhaustive contracts or make them extensible before 1.0 |
-| Provide typed Rust objects with methods | Planned; required for private readiness | Read-only deterministic input plus staged actions; capability-declared mutable standard/live methods; ownership, collection/reset, quota, and failure tests in a real consumer |
+| Provide typed Rust objects with methods | Implemented; final checks/reviews and civfun object use pending | Read-only deterministic input plus staged actions; capability-declared mutable standard/live methods; ownership, collection/reset, quota, and failure tests in a real consumer |
 | Complete host value construction and conversion ergonomics | Review open | Exercise binary strings, buffers, vectors, shared/cyclic tables, tuples, serde, live callbacks, and meaningful conversion errors from an external consumer |
 | Specify conversion, concurrency, and failure contracts | Review open | Document missing results, sparse sequences, integer conversion, VM thread affinity, callback sharing, and validation precedence with consumer tests |
 | Make callback and module lifetimes easy to understand | Implemented; review open | Document which values survive replacement/reset, callback capture responsibilities, and exact installation rollback limits |
