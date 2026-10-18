@@ -6,10 +6,6 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
-- Charge repeated-string output work before allocation in specialized calls, matching ordinary builtin calls when fuel and memory limits overlap.
-
-- Keep ordinary callable receivers on VM continuations through recursion and suspension; reject non-function `__call` values as Luau 0.709 does.
-
 ### Changed
 
 - Required modules can yield and resume inside guest coroutines. Results enter
@@ -17,10 +13,15 @@ Current unpublished workspace version: `0.0.1`.
   Ordinary module failures keep completed writes and caught typed records,
   matching ordinary function calls. An enclosing failed installation still
   restores guest state and provisional records. Module-resolution ABI is now 3.
-  Final correctness review and CI remain pending.
+  The [private acceptance record](design/93-private-api-acceptance.md) tracks the
+  exact candidate, reviews, CI and application rollout gates.
 
 ### Fixed
 
+- Charge repeated-string output work before allocation in specialized calls,
+  matching ordinary builtin calls when fuel and memory limits overlap.
+- Keep ordinary callable receivers on VM continuations through recursion and
+  suspension; reject non-function `__call` values as Luau 0.709 does.
 - Object and callback definitions keep their exact Rust payload and host-schema
   types. Automatic function-pointer conversions cannot create a mismatched
   registration or live handle.
@@ -33,8 +34,8 @@ Current unpublished workspace version: `0.0.1`.
 - Private acceptance checks execute one shared deterministic transcript on
   Linux x86-64, macOS arm64 and Node/V8, alongside the existing eight-target
   build matrix. A clean Cargo application reuses public facade contracts
-  against extracted runtime archives in default/bare modes. Final CI,
-  independent review and candidate acceptance remain pending.
+  against extracted runtime archives in default/bare modes. The private
+  acceptance record tracks final CI, reviews and merge gates.
 
 - Typed Rust objects through `ObjectType<T, H>`, `register_object_type`, and
   `create_object`. Scripts call methods with `object:method(...)`; Rust keeps
@@ -43,8 +44,9 @@ Current unpublished workspace version: `0.0.1`.
   existing invocation journal. Standard/live methods may mutate immediately,
   outside script rollback. Definitions survive reset; instances do not.
   Complete capability validation, receiver checks, quota admission, and callback
-  result validation preserve the existing host-call safety rules. Final object
-  integration, CI, and independent reviews remain pending.
+  result validation preserve the existing host-call safety rules. Object support
+  and civfun's Player integration have merged; the acceptance record tracks the
+  final common candidate used by all three applications.
 
 - Pre-release embedding API cleanup: use builder presets and individual limit
   methods instead of raw VM constructors/settings. `Rustia::default()` now
