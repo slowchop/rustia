@@ -34,6 +34,30 @@ fn profiles() -> [Profile; 4] {
 }
 
 #[test]
+fn configured_recursion_exhaustion_escapes_protected_calls() {
+    use rustia::VmErrorKind;
+    for profile in profiles() {
+        for body in [
+            "local function recur() return 1+recur() end; pcall(recur)",
+            "local function recur() return string.len('abc',recur()) end; pcall(recur)",
+            "local function recur() return string.len('abc',recur()) end; xpcall(recur,function() observed=3 end)",
+        ] {
+            let mut vm = RustiaBuilder::standard().profile(profile).recursion_limit(8)
+                .fuel(100_000).build().unwrap();
+            vm.insert_global("observed", 0).unwrap();
+            let source = format!("observed=1; {body}; observed=2; return 'caught'");
+            let error = vm.eval::<String>(&source).unwrap_err();
+            assert!(matches!(error.kind(), ErrorKind::Vm(error)
+                if matches!(error.kind(), VmErrorKind::RecursionLimit { limit: 8 })),
+                "{profile:?}: {source}: {error}");
+            assert_eq!(vm.eval::<i32>("return observed").unwrap(), 1);
+            vm.reset_decision().unwrap();
+            assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+        }
+    }
+}
+
+#[test]
 fn optimized_protected_failure_and_recovery_match_unoptimized_execution() {
     use rustia_compiler::{compile_with_options, CompileOptions, ExperimentalO2Options};
     let source = r#"

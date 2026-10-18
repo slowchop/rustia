@@ -1,8 +1,12 @@
 #![allow(clippy::too_many_arguments)]
 
+mod bytecode_calls;
+mod expanded_calls;
 mod host_functions;
 mod host_objects;
 use host_objects::HostObjectTypeBinding;
+
+use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
@@ -2163,6 +2167,8 @@ struct CoroutineDebugSnapshot {
 enum VmFlow<T> {
     Return(T),
     Yield(CoroutineYield),
+    /// Internal bytecode transfer, consumed by the `run_function` trampoline.
+    Call(DeferredBytecodeCall),
 }
 
 type VmFlowResult<T> = std::result::Result<VmFlow<T>, Error>;
@@ -2229,6 +2235,17 @@ struct Execution<'a> {
 struct CoroutineYield {
     yielded: Vec<Value>,
     frames: Vec<CoroutineFrame>,
+}
+
+#[derive(Clone)]
+struct DeferredBytecodeCall {
+    callee: Value,
+    args: Vec<Value>,
+    depth: usize,
+    call_site: Option<ErrorLocation>,
+    fallback_program: u32,
+    // Completion frames, innermost first, as for a coroutine suspension.
+    callers: Vec<CoroutineFrame>,
 }
 
 #[derive(Clone)]
@@ -2317,6 +2334,7 @@ struct ResumedFunctionState {
     pending_return_prefixes: Vec<Value>,
     continuation: BytecodeContinuation,
     resume_results: Vec<Value>,
+    resume_error: Option<Error>,
     stackless_self_calls: Vec<StacklessSelfCallFrame>,
     tail_call_count: usize,
 }
@@ -2337,6 +2355,7 @@ struct StacklessSelfCallFrame {
 
 #[derive(Clone)]
 enum BytecodeContinuation {
+    ExpandedCalls(ExpandedCallState),
     WriteFirst {
         register: u8,
     },
@@ -2347,14 +2366,6 @@ enum BytecodeContinuation {
     PCallWriteFixed {
         base: usize,
         count: usize,
-    },
-    CallExpandAfterTrailing {
-        outer_callee: Value,
-        args: Vec<Value>,
-        base: usize,
-        count: usize,
-        depth: usize,
-        call_site: Option<ErrorLocation>,
     },
     ReturnWithPrefix {
         prefix: Vec<Value>,
@@ -3977,7 +3988,7 @@ impl Vm {
         self.collect_heap_weak_tables(&roots);
         let transaction_active = !self.guest_transactions.is_empty();
         if !transaction_active {
-            self.prune_unreachable_coroutines();
+            self.prune_unreachable_coroutines_if_idle();
             self.prune_unreachable_module_cohorts(&roots);
             self.reclaim_unreferenced_programs();
         }
@@ -4027,7 +4038,7 @@ impl Vm {
         });
     }
 
-    fn run_function(
+    fn run_function_step(
         &mut self,
         program: &Program,
         program_id: Option<u32>,
@@ -4087,6 +4098,8 @@ impl Vm {
                 program.logical_units_for(context.prototype.map(|index| index as usize));
 
             let allow_stackless_self_calls = resumed.is_none();
+            let mut resumed = resumed;
+            let mut resumed_error = resumed.as_mut().and_then(|state| state.resume_error.take());
             let stackless_recursion_limit = self.stackless_recursion_limit();
             let mut stackless_self_calls;
             let mut tail_call_count;
@@ -4136,6 +4149,10 @@ impl Vm {
                 self.validate_conformance_native_parameter_types(function, &registers)?;
                 (registers, register_cells, varargs, 0usize, Vec::new(), None)
             };
+            // A completed child may have changed shared local cells while the
+            // caller's registers were saved. Read them before applying results,
+            // matching the ordinary inline call return order.
+            self.sync_register_cells(&mut registers, &register_cells)?;
             self.rebuild_stackless_self_call_roots(&mut stackless_self_calls);
 
             macro_rules! unwind_stackless_return {
@@ -4170,15 +4187,18 @@ impl Vm {
                             &varargs,
                             &pending_return_prefixes,
                         );
+                        if matches!(continuation, BytecodeContinuation::ExpandedCalls(_)) {
+                            self.truncate_stackless_self_call_roots(root_mark);
+                            resumed_continuation = Some((continuation, returned.into_vec()));
+                            break;
+                        }
                         let continuation_result = self.apply_bytecode_continuation(
-                            program,
                             &mut pc,
                             &mut registers,
                             &mut register_cells,
                             &mut pending_return_prefixes,
                             continuation,
                             returned.into_vec(),
-                            fuel,
                         );
                         self.truncate_stackless_self_call_roots(root_mark);
                         if let Some(next_returned) = continuation_result? {
@@ -4262,6 +4282,10 @@ impl Vm {
             }
 
             'run_function_loop: loop {
+                if let Some(error) = resumed_error.take() {
+                    resumed_continuation = None;
+                    unwind_stackless_error!(error);
+                }
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
                     self.update_current_gc_roots(
                         &registers,
@@ -4269,17 +4293,106 @@ impl Vm {
                         &varargs,
                         &pending_return_prefixes,
                     );
+                    let (continuation, resume_results) = match continuation {
+                        BytecodeContinuation::ExpandedCalls(mut state) => {
+                            let outcome = self
+                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
+                                .map_err(|e| {
+                                    attach_instruction_source(
+                                        program,
+                                        function,
+                                        pc.saturating_sub(1),
+                                        e,
+                                    )
+                                });
+                            match outcome {
+                                Ok(ExpandedCallFlow::Call { callee, args }) => {
+                                    return self.defer_expanded_bytecode_call(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        state,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        callee,
+                                        args,
+                                    );
+                                }
+                                Ok(ExpandedCallFlow::Transfer(request)) => {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
+                                Ok(ExpandedCallFlow::Yield(suspension)) => {
+                                    return self.suspend_bytecode_frame(
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        suspension,
+                                    );
+                                }
+                                Ok(ExpandedCallFlow::Return(results)) => {
+                                    match state.finish(
+                                        &mut registers,
+                                        &mut pending_return_prefixes,
+                                        results,
+                                        self,
+                                    ) {
+                                        Ok(Some(results)) => {
+                                            unwind_stackless_return!(results);
+                                        }
+                                        Ok(None) => {
+                                            self.sync_register_cells(
+                                                &mut registers,
+                                                &register_cells,
+                                            )?;
+                                        }
+                                        Err(error) => {
+                                            unwind_stackless_error!(error);
+                                        }
+                                    }
+                                    continue 'run_function_loop;
+                                }
+                                Err(error) => {
+                                    unwind_stackless_error!(error);
+                                    continue 'run_function_loop;
+                                }
+                            }
+                        }
+                        other => (other, resume_results),
+                    };
                     let continuation_root_mark =
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
-                        program,
                         &mut pc,
                         &mut registers,
                         &mut register_cells,
                         &mut pending_return_prefixes,
                         continuation,
                         resume_results,
-                        fuel,
                     );
                     self.truncate_stackless_self_call_roots(continuation_root_mark);
                     match continuation_result {
@@ -4487,6 +4600,83 @@ impl Vm {
                         }
 
                         pc += 1;
+                        if crate::bytecode::supports_call_descriptor(instruction.op) {
+                            let call_site = instruction_source_location(program, function, pc - 1);
+                            let mut state = ExpandedCallState::new(
+                                program,
+                                instruction,
+                                &registers,
+                                &varargs,
+                                context.depth.saturating_add(stackless_self_calls.len()),
+                                call_site,
+                            )
+                            .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
+                            let results = match self
+                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })? {
+                                ExpandedCallFlow::Return(results) => results,
+                                ExpandedCallFlow::Call { callee, args } => {
+                                    return self.defer_expanded_bytecode_call(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        state,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        callee,
+                                        args,
+                                    );
+                                }
+                                ExpandedCallFlow::Transfer(request) => {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
+                                ExpandedCallFlow::Yield(suspension) => {
+                                    return self.suspend_bytecode_frame(
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        suspension,
+                                    );
+                                }
+                            };
+                            if let Some(results) = state.finish(
+                                &mut registers,
+                                &mut pending_return_prefixes,
+                                results,
+                                self,
+                            )? {
+                                return Ok(VmFlow::Return(results.into()));
+                            }
+                            self.sync_register_cells(&mut registers, &register_cells)?;
+                            continue;
+                        }
                         match instruction.op {
                             Opcode::Halt => {
                                 return Ok(VmFlow::Return(finish_function_results(
@@ -4808,8 +4998,7 @@ impl Vm {
                                     &mut pending_return_prefixes,
                                     ReturnValues::from_slice(&registers[first..end]),
                                 );
-                                unwind_stackless_return!(returned);
-                                continue;
+                                return Ok(VmFlow::Return(returned));
                             }
                             Opcode::ReturnCall => {
                                 let prefix_count = usize::from(instruction.b);
@@ -4880,10 +5069,11 @@ impl Vm {
                                         program,
                                         function,
                                         pc - 1,
-                                        Error::new(ErrorKind::RecursionLimit {
-                                            limit: stackless_recursion_limit,
-                                        }),
+                                        self.recursion_limit_error(),
                                     );
+                                    if error_is_uncatchable(&error, fuel) {
+                                        return Err(error);
+                                    }
                                     let error = self.error_object(error);
                                     results.push(error);
                                     return Ok(VmFlow::Return(finish_function_results(
@@ -4902,9 +5092,7 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         ));
                                     }
                                     if prefix_count > 0 {
@@ -4953,6 +5141,25 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        let continuation = BytecodeContinuation::ReturnWithPrefix {
+                                            prefix: registers[prefix_first..prefix_end].to_vec(),
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::ReturnWithPrefix {
@@ -5246,6 +5453,33 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc - 1))?;
                                     }
                                     CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Call(request) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     CallIteratorStep::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::IteratorStep {
                                             window: CallIteratorRegisters::generic(
@@ -5291,6 +5525,33 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc - 1))?;
                                     }
                                     CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Call(request) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: CallIteratorRegisters::generic(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     CallIteratorStep::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::IteratorStep {
                                             window: CallIteratorRegisters::generic(
@@ -5336,6 +5597,34 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc - 1))?;
                                     }
                                     CallIteratorStep::Complete(true) => {}
+                                    CallIteratorStep::Call(request) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: false,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     CallIteratorStep::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::IteratorStep {
                                             window: GeneralizedIteratorRegisters::new(
@@ -5382,6 +5671,34 @@ impl Vm {
                                             .map_err(|e| e.at_pc(pc - 1))?;
                                     }
                                     CallIteratorStep::Complete(false) => {}
+                                    CallIteratorStep::Call(request) => {
+                                        let continuation = BytecodeContinuation::IteratorStep {
+                                            window: GeneralizedIteratorRegisters::new(
+                                                instruction.a,
+                                                instruction.c,
+                                            )
+                                            .map_err(|e| e.at_pc(pc - 1))?
+                                            .call,
+                                            jump_target: checked_jump(instruction.aux)
+                                                .map_err(|e| e.at_pc(pc - 1))?,
+                                            jump_if_advanced: true,
+                                            error_pc: pc - 1,
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     CallIteratorStep::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::IteratorStep {
                                             window: GeneralizedIteratorRegisters::new(
@@ -5947,9 +6264,7 @@ impl Vm {
                                                 program,
                                                 function,
                                                 pc - 1,
-                                                Error::new(ErrorKind::RecursionLimit {
-                                                    limit: stackless_recursion_limit,
-                                                }),
+                                                self.recursion_limit_error(),
                                             ));
                                         }
                                         if instruction.aux < 0
@@ -6034,9 +6349,7 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         ));
                                     }
                                     let call_args = registers[args_start..args_end].to_vec();
@@ -6184,6 +6497,24 @@ impl Vm {
                                 let results = match call.map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {
+                                    VmFlow::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6265,10 +6596,11 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         );
+                                        if error_is_uncatchable(&error, fuel) {
+                                            return Err(error);
+                                        }
                                         let error = self.error_object(error);
                                         write_call_results(
                                             &mut registers,
@@ -6361,6 +6693,25 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFixed {
+                                                base: usize::from(instruction.a),
+                                                count: usize::from(instruction.c),
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(()) => {}
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6384,159 +6735,18 @@ impl Vm {
                                 self.sync_register_cells(&mut registers, &register_cells)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::CallExpand => {
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
-                                    return Err(Error::new(ErrorKind::InvalidProgram {
-                                        reason: "invalid expanded function result count",
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let base = usize::from(instruction.a);
-                                let prefix_count = usize::from(instruction.b);
-                                let trailing_argc = usize::from(instruction.c);
-                                let result_count =
-                                    usize::try_from(instruction.aux).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "invalid expanded function result count",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let prefix_start = base.checked_add(1).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "expanded function argument window overflow",
-                                    })
-                                    .at_pc(pc - 1)
-                                })?;
-                                let trailing_callee_index =
-                                    prefix_start.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded function argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_start =
-                                    trailing_callee_index.checked_add(1).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded function argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_end = trailing_args_start
-                                    .checked_add(trailing_argc)
-                                    .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded function argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let results_end =
-                                    base.checked_add(result_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded function result window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if trailing_args_end.max(results_end) > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: trailing_args_end.max(results_end),
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-
-                                let outer_callee = get_register(&registers, instruction.a)
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                let trailing_callee = get_register(
-                                    &registers,
-                                    u8::try_from(trailing_callee_index).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded function callee register overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                let mut args =
-                                    registers[prefix_start..trailing_callee_index].to_vec();
-                                let trailing_args =
-                                    registers[trailing_args_start..trailing_args_end].to_vec();
-                                let trailing_results = match self
-                                    .call_value_with_site_resumable(
-                                        program,
-                                        trailing_callee,
-                                        &trailing_args,
-                                        context.depth,
-                                        call_site.clone(),
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })? {
-                                    VmFlow::Return(results) => results,
-                                    VmFlow::Yield(suspension) => {
-                                        return self.suspend_bytecode_frame(
-                                            program_id,
-                                            &context,
-                                            pc,
-                                            std::mem::take(&mut registers),
-                                            std::mem::take(&mut register_cells),
-                                            std::mem::take(&mut varargs),
-                                            std::mem::take(&mut pending_return_prefixes),
-                                            BytecodeContinuation::CallExpandAfterTrailing {
-                                                outer_callee,
-                                                args,
-                                                base,
-                                                count: result_count,
-                                                depth: context.depth,
-                                                call_site,
-                                            },
-                                            std::mem::take(&mut stackless_self_calls),
-                                            tail_call_count,
-                                            suspension,
-                                        );
-                                    }
-                                };
-                                args.extend(trailing_results);
-                                let results = match self
-                                    .call_value_with_site_resumable(
-                                        program,
-                                        outer_callee,
-                                        &args,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })? {
-                                    VmFlow::Return(results) => results,
-                                    VmFlow::Yield(suspension) => {
-                                        return self.suspend_bytecode_frame(
-                                            program_id,
-                                            &context,
-                                            pc,
-                                            std::mem::take(&mut registers),
-                                            std::mem::take(&mut register_cells),
-                                            std::mem::take(&mut varargs),
-                                            std::mem::take(&mut pending_return_prefixes),
-                                            BytecodeContinuation::WriteFixed {
-                                                base,
-                                                count: result_count,
-                                            },
-                                            std::mem::take(&mut stackless_self_calls),
-                                            tail_call_count,
-                                            suspension,
-                                        );
-                                    }
-                                };
-                                write_call_results(&mut registers, base, result_count, &results)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                            Opcode::CallExpand
+                            | Opcode::CallExpand2
+                            | Opcode::CallExpand3
+                            | Opcode::CallExpandVarargs
+                            | Opcode::ReturnCallExpand
+                            | Opcode::ReturnCallExpand2
+                            | Opcode::ReturnCallExpandVarargs
+                            | Opcode::ReturnCallExpand2Varargs
+                            | Opcode::AppendCallExpand => {
+                                return Err(Error::new(ErrorKind::InvalidProgram {
+                                    reason: "expanded call bypassed resumable dispatch",
+                                }));
                             }
                             Opcode::LoadVarargs => {
                                 let first = usize::from(instruction.a);
@@ -6607,6 +6817,25 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFixed {
+                                                base: usize::from(instruction.a),
+                                                count: usize::from(instruction.c),
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(()) => {}
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6630,58 +6859,7 @@ impl Vm {
                                 self.sync_register_cells(&mut registers, &register_cells)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::CallExpand2 => {
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                self.call_function_expand2(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    context.depth,
-                                    call_site,
-                                    fuel,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::CallExpand3 => {
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                self.call_function_expand3(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    context.depth,
-                                    call_site,
-                                    fuel,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::CallExpandVarargs => {
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                self.call_function_expand_varargs(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    &varargs,
-                                    context.depth,
-                                    call_site,
-                                    fuel,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })?;
-                                self.sync_register_cells(&mut registers, &register_cells)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
+
                             Opcode::ReturnCallVarargs => {
                                 let prefix_count = usize::from(instruction.b);
                                 let prefix_first = usize::from(instruction.a);
@@ -6733,6 +6911,25 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        let continuation = BytecodeContinuation::ReturnWithPrefix {
+                                            prefix: registers[prefix_first..prefix_end].to_vec(),
+                                        };
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            continuation,
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::ReturnWithPrefix {
@@ -6759,262 +6956,7 @@ impl Vm {
                                     results,
                                 )));
                             }
-                            Opcode::ReturnCallExpand2 => {
-                                let prefix_count = usize::from(instruction.b);
-                                let prefix_first = usize::from(instruction.a);
-                                let prefix_end =
-                                    prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if prefix_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: prefix_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let mut results = registers[prefix_first..prefix_end].to_vec();
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let call_results = self
-                                    .nested_expand_results(
-                                        program,
-                                        &registers,
-                                        usize::from(instruction.c),
-                                        instruction.aux,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                results.extend(call_results);
-                                return Ok(VmFlow::Return(finish_function_results(
-                                    &mut pending_return_prefixes,
-                                    results,
-                                )));
-                            }
-                            Opcode::ReturnCallExpand2Varargs => {
-                                let prefix_count = usize::from(instruction.b);
-                                let prefix_first = usize::from(instruction.a);
-                                let prefix_end =
-                                    prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if prefix_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: prefix_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let mut results = registers[prefix_first..prefix_end].to_vec();
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let call_results = self
-                                    .nested_expand2_varargs_results(
-                                        program,
-                                        &registers,
-                                        NestedVarargSpec {
-                                            base: usize::from(instruction.c),
-                                            aux: instruction.aux,
-                                        },
-                                        &varargs,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                results.extend(call_results);
-                                return Ok(VmFlow::Return(finish_function_results(
-                                    &mut pending_return_prefixes,
-                                    results,
-                                )));
-                            }
-                            Opcode::ReturnCallExpandVarargs => {
-                                let prefix_count = usize::from(instruction.b);
-                                let prefix_first = usize::from(instruction.a);
-                                let prefix_end =
-                                    prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if prefix_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: prefix_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let mut results = registers[prefix_first..prefix_end].to_vec();
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let call_results = self
-                                    .nested_expand_varargs_results(
-                                        program,
-                                        &registers,
-                                        NestedVarargSpec {
-                                            base: usize::from(instruction.c),
-                                            aux: instruction.aux,
-                                        },
-                                        &varargs,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                results.extend(call_results);
-                                return Ok(VmFlow::Return(finish_function_results(
-                                    &mut pending_return_prefixes,
-                                    results,
-                                )));
-                            }
-                            Opcode::ReturnCallExpand => {
-                                let return_prefix_count = usize::from(instruction.b);
-                                let return_prefix_first = usize::from(instruction.a);
-                                let return_prefix_end = return_prefix_first
-                                    .checked_add(return_prefix_count)
-                                    .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if return_prefix_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: return_prefix_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let call_base = usize::from(instruction.c);
-                                let (arg_prefix_count, trailing_argc) =
-                                    unpack_expand_aux(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
-                                let arg_prefix_count = usize::from(arg_prefix_count);
-                                let trailing_argc = usize::from(trailing_argc);
-                                let prefix_start = call_base.checked_add(1).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "expanded return call argument window overflow",
-                                    })
-                                    .at_pc(pc - 1)
-                                })?;
-                                let trailing_callee_index = prefix_start
-                                    .checked_add(arg_prefix_count)
-                                    .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded return call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_start =
-                                    trailing_callee_index.checked_add(1).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded return call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_end = trailing_args_start
-                                    .checked_add(trailing_argc)
-                                    .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded return call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if trailing_args_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: trailing_args_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let outer_callee = get_register(&registers, instruction.c)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let trailing_callee = get_register(
-                                    &registers,
-                                    u8::try_from(trailing_callee_index).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "expanded return call callee register overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                let mut args =
-                                    registers[prefix_start..trailing_callee_index].to_vec();
-                                let trailing_args =
-                                    registers[trailing_args_start..trailing_args_end].to_vec();
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let mut expanded_args = self
-                                    .call_value_with_site(
-                                        program,
-                                        trailing_callee,
-                                        &trailing_args,
-                                        context.depth,
-                                        call_site.clone(),
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                args.append(&mut expanded_args);
-                                let mut results =
-                                    registers[return_prefix_first..return_prefix_end].to_vec();
-                                let call_results = match self
-                                    .call_value_with_site_resumable(
-                                        program,
-                                        outer_callee,
-                                        &args,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })? {
-                                    VmFlow::Return(results) => results,
-                                    VmFlow::Yield(suspension) => {
-                                        let continuation = BytecodeContinuation::ReturnWithPrefix {
-                                            prefix: registers
-                                                [return_prefix_first..return_prefix_end]
-                                                .to_vec(),
-                                        };
-                                        return self.suspend_bytecode_frame(
-                                            program_id,
-                                            &context,
-                                            pc,
-                                            std::mem::take(&mut registers),
-                                            std::mem::take(&mut register_cells),
-                                            std::mem::take(&mut varargs),
-                                            std::mem::take(&mut pending_return_prefixes),
-                                            continuation,
-                                            std::mem::take(&mut stackless_self_calls),
-                                            tail_call_count,
-                                            suspension,
-                                        );
-                                    }
-                                };
-                                results.extend(call_results);
-                                return Ok(VmFlow::Return(finish_function_results(
-                                    &mut pending_return_prefixes,
-                                    results,
-                                )));
-                            }
+
                             Opcode::AppendVarargs => {
                                 if instruction.aux <= 0 {
                                     return Err(Error::new(ErrorKind::InvalidProgram {
@@ -7109,6 +7051,32 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::AppendToTable {
+                                                table,
+                                                start_index: usize::try_from(instruction.aux)
+                                                    .map_err(|_| {
+                                                        Error::new(ErrorKind::InvalidProgram {
+                                                            reason:
+                                                                "table call append index overflow",
+                                                        })
+                                                        .at_pc(pc - 1)
+                                                    })?,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -7219,6 +7187,32 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::AppendToTable {
+                                                table,
+                                                start_index: usize::try_from(instruction.aux)
+                                                    .map_err(|_| {
+                                                        Error::new(ErrorKind::InvalidProgram {
+                                                    reason:
+                                                        "table vararg call append index overflow",
+                                                })
+                                                .at_pc(pc - 1)
+                                                    })?,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -7277,155 +7271,7 @@ impl Vm {
                                         .map_err(|e| e.at_pc(pc - 1))?;
                                 }
                             }
-                            Opcode::AppendCallExpand => {
-                                let (start_index, trailing_argc) =
-                                    unpack_append_call_expand_aux(instruction.aux)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
-                                let table_value = get_register(&registers, instruction.a)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let table = table_value.as_table().ok_or_else(|| {
-                                    Error::new(ErrorKind::TypeError { expected: "table" })
-                                        .at_pc(pc - 1)
-                                })?;
-                                let base = usize::from(instruction.b);
-                                let prefix_count = usize::from(instruction.c);
-                                let prefix_start = base.checked_add(1).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "table expanded call argument window overflow",
-                                    })
-                                    .at_pc(pc - 1)
-                                })?;
-                                let trailing_callee_index =
-                                    prefix_start.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_start =
-                                    trailing_callee_index.checked_add(1).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                let trailing_args_end = trailing_args_start
-                                    .checked_add(usize::from(trailing_argc))
-                                    .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                if trailing_args_end > registers.len() {
-                                    return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                                        register: trailing_args_end,
-                                        max: registers.len(),
-                                    })
-                                    .at_pc(pc - 1));
-                                }
-                                let outer_callee = get_register(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let trailing_callee = get_register(
-                                    &registers,
-                                    u8::try_from(trailing_callee_index).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call callee register overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                let mut args =
-                                    registers[prefix_start..trailing_callee_index].to_vec();
-                                let trailing_args =
-                                    registers[trailing_args_start..trailing_args_end].to_vec();
-                                let call_site =
-                                    instruction_source_location(program, function, pc - 1);
-                                let mut expanded_args = self
-                                    .call_value_with_site(
-                                        program,
-                                        trailing_callee,
-                                        &trailing_args,
-                                        context.depth,
-                                        call_site.clone(),
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })?;
-                                args.append(&mut expanded_args);
-                                let results = match self
-                                    .call_value_with_site_resumable(
-                                        program,
-                                        outer_callee,
-                                        &args,
-                                        context.depth,
-                                        call_site,
-                                        fuel,
-                                    )
-                                    .map_err(|e| {
-                                        attach_instruction_source(program, function, pc - 1, e)
-                                    })? {
-                                    VmFlow::Return(results) => results,
-                                    VmFlow::Yield(suspension) => {
-                                        return self.suspend_bytecode_frame(
-                                            program_id,
-                                            &context,
-                                            pc,
-                                            std::mem::take(&mut registers),
-                                            std::mem::take(&mut register_cells),
-                                            std::mem::take(&mut varargs),
-                                            std::mem::take(&mut pending_return_prefixes),
-                                            BytecodeContinuation::AppendToTable {
-                                                table,
-                                                start_index: usize::try_from(start_index).map_err(
-                                                    |_| {
-                                                        Error::new(ErrorKind::InvalidProgram {
-                                                    reason:
-                                                        "table expanded call append index overflow",
-                                                })
-                                                .at_pc(pc - 1)
-                                                    },
-                                                )?,
-                                            },
-                                            std::mem::take(&mut stackless_self_calls),
-                                            tail_call_count,
-                                            suspension,
-                                        );
-                                    }
-                                };
-                                self.ensure_puc_table_append_presized(
-                                    table,
-                                    usize::try_from(start_index).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call append index overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?,
-                                    results.len(),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                for (offset, value) in results.iter().copied().enumerate() {
-                                    let offset = u32::try_from(offset).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table expanded call append index overflow",
-                                        })
-                                        .at_pc(pc - 1)
-                                    })?;
-                                    let index = usize::try_from(start_index)
-                                        .ok()
-                                        .and_then(|start| start.checked_add(offset as usize))
-                                        .ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "table expanded call append index overflow",
-                                            })
-                                            .at_pc(pc - 1)
-                                        })?;
-                                    self.set_table_array_slot(table, index, value)
-                                        .map_err(|e| e.at_pc(pc - 1))?;
-                                }
-                            }
+
                             Opcode::RawLen => {
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -7662,6 +7508,7 @@ impl Vm {
                         unwind_stackless_return!(results);
                         continue 'run_function_loop;
                     }
+                    Ok(VmFlow::Call(request)) => return Ok(VmFlow::Call(request)),
                     Ok(VmFlow::Yield(suspension)) => return Ok(VmFlow::Yield(suspension)),
                     Err(error) => {
                         unwind_stackless_error!(error);
@@ -7679,7 +7526,9 @@ impl Vm {
             self.mark_control_memory_dirty();
             self.record_running_coroutine_error_snapshot(error.location.clone());
         }
-        self.call_stack.pop();
+        if !matches!(result, Ok(VmFlow::Call(_))) {
+            self.call_stack.pop();
+        }
         self.mark_control_memory_dirty();
         result
     }
@@ -7699,51 +7548,57 @@ impl Vm {
         tail_call_count: usize,
         mut suspension: CoroutineYield,
     ) -> VmFlowResult<ReturnValues> {
-        self.sync_register_cells(&mut registers, &register_cells)?;
-        let program_id = program_id.ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "suspended coroutine frame is missing its program handle",
-            })
-        })?;
-        let frame = SuspendedBytecodeFrameStorage::try_new(SuspendedBytecodeFrame {
-            program_id,
-            prototype: context.prototype,
-            current_function: context.current_function,
-            captures: context.captures.to_vec(),
-            depth: context.depth,
-            environment: context.environment,
-            thread_environment: self.current_thread_environment(),
-            module_cohort: context.module_cohort,
-            call_site: context.call_site.clone(),
-            pc,
-            registers,
-            register_cells,
-            varargs,
-            pending_return_prefixes,
-            continuation,
-            stackless_self_calls,
-            tail_call_count,
-        })?;
-        suspension
-            .frames
-            .try_reserve(1)
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        suspension.frames.push(CoroutineFrame::Bytecode(frame));
+        let prepared = (|| {
+            self.sync_register_cells(&mut registers, &register_cells)?;
+            let program_id = program_id.ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "suspended coroutine frame is missing its program handle",
+                })
+            })?;
+            let frame = SuspendedBytecodeFrameStorage::try_new(SuspendedBytecodeFrame {
+                program_id,
+                prototype: context.prototype,
+                current_function: context.current_function,
+                captures: try_copy_vec(context.captures)?,
+                depth: context.depth,
+                environment: context.environment,
+                thread_environment: self.current_thread_environment(),
+                module_cohort: context.module_cohort,
+                call_site: context.call_site.clone(),
+                pc,
+                registers,
+                register_cells,
+                varargs,
+                pending_return_prefixes,
+                continuation,
+                stackless_self_calls,
+                tail_call_count,
+            })?;
+            Ok(frame)
+        })();
+        let frame = match prepared {
+            Ok(frame) => frame,
+            Err(error) => {
+                return Err(error);
+            }
+        };
+        self.push_coroutine_frame(&mut suspension, CoroutineFrame::Bytecode(frame))?;
         Ok(VmFlow::Yield(suspension))
     }
 
     fn apply_bytecode_continuation(
         &mut self,
-        program: &Program,
         pc: &mut usize,
         registers: &mut [Value],
         register_cells: &mut [Option<u32>],
         pending_return_prefixes: &mut Vec<Value>,
         continuation: BytecodeContinuation,
         mut results: Vec<Value>,
-        fuel: &mut Execution<'_>,
     ) -> Result<Option<Vec<Value>>> {
         match continuation {
+            BytecodeContinuation::ExpandedCalls(_) => Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "expanded calls require resumable continuation handling",
+            })),
             BytecodeContinuation::WriteFirst { register } => {
                 let value = first_result_or_nil(results);
                 set_register(registers, register, value)?;
@@ -7758,26 +7613,6 @@ impl Vm {
                 protected_results.push(Value::boolean(true));
                 protected_results.append(&mut results);
                 write_call_results(registers, base, count, &protected_results)?;
-                Ok(None)
-            }
-            BytecodeContinuation::CallExpandAfterTrailing {
-                outer_callee,
-                mut args,
-                base,
-                count,
-                depth,
-                call_site,
-            } => {
-                args.append(&mut results);
-                let results = self.call_value_with_site(
-                    program,
-                    outer_callee,
-                    &args,
-                    depth,
-                    call_site,
-                    fuel,
-                )?;
-                write_call_results(registers, base, count, &results)?;
                 Ok(None)
             }
             BytecodeContinuation::ReturnWithPrefix { mut prefix } => {
@@ -7922,7 +7757,7 @@ impl Vm {
                     )
                 }
             }
-            Constant::Import(_) => {
+            Constant::Import(_) | Constant::CallDescriptor(_) => {
                 return Err(Error::new(ErrorKind::InvalidProgram {
                     reason: "import descriptors cannot be loaded as values",
                 }));
@@ -10868,7 +10703,10 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
-        match self.call_value_with_site_resumable(program, callee, args, depth, None, fuel)? {
+        let stack_base = self.call_stack.len();
+        let flow = self.call_value_with_site_resumable(program, callee, args, depth, None, fuel);
+        match self.drive_deferred_bytecode_flow(flow, stack_base, fuel)? {
+            VmFlow::Call(_) => Err(escaped_deferred_call()),
             VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
@@ -10883,7 +10721,11 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
-        match self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)? {
+        let stack_base = self.call_stack.len();
+        let flow =
+            self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel);
+        match self.drive_deferred_bytecode_flow(flow, stack_base, fuel)? {
+            VmFlow::Call(_) => Err(escaped_deferred_call()),
             VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
@@ -11544,45 +11386,44 @@ impl Vm {
         &mut self,
         program: &Program,
         program_id: Option<u32>,
-        prototype: Option<u32>,
-        function: &Function,
+        _prototype: Option<u32>,
+        _function: &Function,
         callee: Value,
         bytecode_data: Option<(SmallVec<[FunctionCapture; 2]>, u32, u32)>,
         args: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
+        _fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
-        let (captures, environment, module_cohort) = bytecode_data.ok_or_else(|| {
+        bytecode_data.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "bytecode function call data is missing",
             })
         })?;
-        let thread_environment = if self.call_stack.is_empty() && self.running_coroutines.is_empty()
-        {
-            environment
-        } else {
-            self.current_thread_environment()
+        let args = try_copy_vec(args)?;
+        let program_id = match program_id {
+            Some(id) => id,
+            None => {
+                // A raw lower-engine function can refer to its supplied program
+                // rather than a retained artifact. Retention may collect, so the
+                // selected function and arguments need a temporary VM-owned root.
+                let mut roots = Vec::new();
+                roots
+                    .try_reserve_exact(args.len() + 1)
+                    .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+                roots.push(callee);
+                roots.extend_from_slice(&args);
+                self.retain_dynamic_program_ref_with_roots(program, roots, Vec::new())?
+            }
         };
-        self.run_function(
-            program,
-            program_id,
-            function,
+        Ok(VmFlow::Call(DeferredBytecodeCall {
+            callee,
             args,
-            FunctionCallContext {
-                current_function: Some(callee),
-                captures: &captures,
-                depth: depth + 1,
-                environment,
-                thread_environment,
-                module_cohort,
-                call_site,
-                prototype,
-            },
-            None,
-            fuel,
-        )
-        .map_err(|error| attach_existing_instruction_source(program, function, error))
+            depth,
+            call_site,
+            fallback_program: program_id,
+            callers: Vec::new(),
+        }))
     }
 
     fn try_leaf_bytecode_handle(
@@ -11971,6 +11812,7 @@ impl Vm {
             call_site,
             fuel,
         )? {
+            VmFlow::Call(request) => return Ok(VmFlow::Call(request)),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(VmFlow::Yield(suspension)),
         };
@@ -12028,6 +11870,7 @@ impl Vm {
         let results = match self
             .call_value_with_site_resumable(program, callee, &args, depth, call_site, fuel)?
         {
+            VmFlow::Call(request) => return Ok(VmFlow::Call(request)),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(VmFlow::Yield(suspension)),
         };
@@ -12041,324 +11884,6 @@ impl Vm {
             set_register(registers, register, value)?;
         }
         Ok(VmFlow::Return(()))
-    }
-
-    fn call_function_expand2(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let result_count = usize::from(instruction.c);
-        let results = self.nested_expand_results(
-            program,
-            registers,
-            usize::from(instruction.a),
-            instruction.aux,
-            depth,
-            call_site,
-            fuel,
-        )?;
-        write_call_results(
-            registers,
-            usize::from(instruction.a),
-            result_count,
-            &results,
-        )
-    }
-
-    fn call_function_expand3(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let result_count = usize::from(instruction.b);
-        let leaf_argc = usize::from(instruction.c);
-        let results = self.nested_expand3_results(
-            program,
-            registers,
-            usize::from(instruction.a),
-            instruction.aux,
-            leaf_argc,
-            depth,
-            call_site,
-            fuel,
-        )?;
-        write_call_results(
-            registers,
-            usize::from(instruction.a),
-            result_count,
-            &results,
-        )
-    }
-
-    fn call_function_expand_varargs(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        varargs: &[Value],
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let result_count = usize::from(instruction.c);
-        let results = self.nested_expand_varargs_results(
-            program,
-            registers,
-            NestedVarargSpec {
-                base: usize::from(instruction.a),
-                aux: instruction.aux,
-            },
-            varargs,
-            depth,
-            call_site,
-            fuel,
-        )?;
-        write_call_results(
-            registers,
-            usize::from(instruction.a),
-            result_count,
-            &results,
-        )
-    }
-
-    fn nested_expand_results(
-        &mut self,
-        program: &Program,
-        registers: &[Value],
-        base: usize,
-        aux: i32,
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Vec<Value>> {
-        let (outer_prefix_count, middle_prefix_count, inner_argc) = unpack_nested_expand_aux(aux)?;
-        let outer_prefix_count = usize::from(outer_prefix_count);
-        let middle_prefix_count = usize::from(middle_prefix_count);
-        let inner_argc = usize::from(inner_argc);
-        let window =
-            NestedExpandWindow::new(base, outer_prefix_count, middle_prefix_count, inner_argc)?;
-        window.validate(registers.len())?;
-
-        let outer_callee = get_register(
-            registers,
-            u8::try_from(base).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested outer callee register overflow",
-                })
-            })?,
-        )?;
-        let middle_callee = get_register(registers, window.middle_callee_register()?)?;
-        let inner_callee = get_register(registers, window.inner_callee_register()?)?;
-
-        let mut middle_args = registers[window.middle_prefix_start..window.inner_callee].to_vec();
-        let inner_args = registers[window.inner_args_start..window.inner_args_end].to_vec();
-        let mut inner_results = self.call_value_with_site(
-            program,
-            inner_callee,
-            &inner_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-        middle_args.append(&mut inner_results);
-
-        let mut outer_args = registers[window.outer_prefix_start..window.middle_callee].to_vec();
-        let mut middle_results = self.call_value_with_site(
-            program,
-            middle_callee,
-            &middle_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-        outer_args.append(&mut middle_results);
-        self.call_value_with_site(program, outer_callee, &outer_args, depth, call_site, fuel)
-    }
-
-    fn nested_expand3_results(
-        &mut self,
-        program: &Program,
-        registers: &[Value],
-        base: usize,
-        aux: i32,
-        leaf_argc: usize,
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Vec<Value>> {
-        let (outer_prefix_count, middle_prefix_count, inner_prefix_count) =
-            unpack_nested_expand_aux(aux)?;
-        let outer_prefix_count = usize::from(outer_prefix_count);
-        let middle_prefix_count = usize::from(middle_prefix_count);
-        let inner_prefix_count = usize::from(inner_prefix_count);
-        let window = NestedExpand3Window::new(
-            base,
-            outer_prefix_count,
-            middle_prefix_count,
-            inner_prefix_count,
-            leaf_argc,
-        )?;
-        window.validate(registers.len())?;
-
-        let outer_callee = get_register(
-            registers,
-            u8::try_from(base).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested outer callee register overflow",
-                })
-            })?,
-        )?;
-        let middle_callee = get_register(registers, window.middle_callee_register()?)?;
-        let inner_callee = get_register(registers, window.inner_callee_register()?)?;
-        let leaf_callee = get_register(registers, window.leaf_callee_register()?)?;
-
-        let leaf_args = registers[window.leaf_args_start..window.leaf_args_end].to_vec();
-        let mut leaf_results = self.call_value_with_site(
-            program,
-            leaf_callee,
-            &leaf_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-
-        let mut inner_args = registers[window.inner_prefix_start..window.leaf_callee].to_vec();
-        inner_args.append(&mut leaf_results);
-        let mut inner_results = self.call_value_with_site(
-            program,
-            inner_callee,
-            &inner_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-
-        let mut middle_args = registers[window.middle_prefix_start..window.inner_callee].to_vec();
-        middle_args.append(&mut inner_results);
-        let mut middle_results = self.call_value_with_site(
-            program,
-            middle_callee,
-            &middle_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-
-        let mut outer_args = registers[window.outer_prefix_start..window.middle_callee].to_vec();
-        outer_args.append(&mut middle_results);
-        self.call_value_with_site(program, outer_callee, &outer_args, depth, call_site, fuel)
-    }
-
-    fn nested_expand_varargs_results(
-        &mut self,
-        program: &Program,
-        registers: &[Value],
-        spec: NestedVarargSpec,
-        varargs: &[Value],
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Vec<Value>> {
-        let (outer_prefix_count, middle_prefix_count) = unpack_expand_varargs_aux(spec.aux)?;
-        let outer_prefix_count = usize::from(outer_prefix_count);
-        let middle_prefix_count = usize::from(middle_prefix_count);
-        let window = NestedVarargWindow::new(spec.base, outer_prefix_count, middle_prefix_count)?;
-        window.validate(registers.len())?;
-
-        let outer_callee = get_register(
-            registers,
-            u8::try_from(spec.base).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested outer callee register overflow",
-                })
-            })?,
-        )?;
-        let middle_callee = get_register(registers, window.middle_callee_register()?)?;
-
-        let mut middle_args = registers[window.middle_prefix_start..window.end].to_vec();
-        middle_args.extend(varargs.iter().copied());
-
-        let mut outer_args = registers[window.outer_prefix_start..window.middle_callee].to_vec();
-        let mut middle_results = self.call_value_with_site(
-            program,
-            middle_callee,
-            &middle_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-        outer_args.append(&mut middle_results);
-        self.call_value_with_site(program, outer_callee, &outer_args, depth, call_site, fuel)
-    }
-
-    fn nested_expand2_varargs_results(
-        &mut self,
-        program: &Program,
-        registers: &[Value],
-        spec: NestedVarargSpec,
-        varargs: &[Value],
-        depth: usize,
-        call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Vec<Value>> {
-        let (outer_prefix_count, middle_prefix_count, inner_prefix_count) =
-            unpack_nested_expand_aux(spec.aux)?;
-        let outer_prefix_count = usize::from(outer_prefix_count);
-        let middle_prefix_count = usize::from(middle_prefix_count);
-        let inner_prefix_count = usize::from(inner_prefix_count);
-        let window = NestedExpand2VarargWindow::new(
-            spec.base,
-            outer_prefix_count,
-            middle_prefix_count,
-            inner_prefix_count,
-        )?;
-        window.validate(registers.len())?;
-
-        let outer_callee = get_register(
-            registers,
-            u8::try_from(spec.base).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested outer callee register overflow",
-                })
-            })?,
-        )?;
-        let middle_callee = get_register(registers, window.middle_callee_register()?)?;
-        let inner_callee = get_register(registers, window.inner_callee_register()?)?;
-
-        let mut inner_args = registers[window.inner_prefix_start..window.end].to_vec();
-        inner_args.extend(varargs.iter().copied());
-        let mut inner_results = self.call_value_with_site(
-            program,
-            inner_callee,
-            &inner_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-
-        let mut middle_args = registers[window.middle_prefix_start..window.inner_callee].to_vec();
-        middle_args.append(&mut inner_results);
-        let mut middle_results = self.call_value_with_site(
-            program,
-            middle_callee,
-            &middle_args,
-            depth,
-            call_site.clone(),
-            fuel,
-        )?;
-
-        let mut outer_args = registers[window.outer_prefix_start..window.middle_callee].to_vec();
-        outer_args.append(&mut middle_results);
-        self.call_value_with_site(program, outer_callee, &outer_args, depth, call_site, fuel)
     }
 
     fn call_native_function_resumable(
@@ -12540,11 +12065,23 @@ impl Vm {
 
     fn check_recursion_depth(&self, depth: usize) -> Result<()> {
         if self.recursion_depth_exceeded(depth) {
-            return Err(Error::new(ErrorKind::RecursionLimit {
-                limit: self.stackless_recursion_limit(),
-            }));
+            return Err(self.recursion_limit_error());
         }
         Ok(())
+    }
+
+    fn recursion_limit_error(&self) -> Error {
+        if self.settings.enable_conformance_luau_call_limit {
+            // Luau's own compatibility call limit is a catchable guest error;
+            // application-configured resource limits always abort the host call.
+            Error::new(ErrorKind::RuntimeError {
+                message: "stack overflow".to_owned(),
+            })
+        } else {
+            Error::new(ErrorKind::RecursionLimit {
+                limit: self.settings.recursion_limit,
+            })
+        }
     }
 
     fn recursion_depth_exceeded(&self, depth: usize) -> bool {
@@ -14374,6 +13911,7 @@ impl Vm {
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
         self.mark_control_memory_dirty();
+        let driver_stack_base = self.call_stack.len();
         let flow = self.call_value_with_site_resumable(
             program,
             callee,
@@ -14382,6 +13920,7 @@ impl Vm {
             None,
             fuel,
         );
+        let flow = self.drive_deferred_bytecode_flow(flow, driver_stack_base, fuel);
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
         let running = self.running_coroutines.pop();
@@ -14471,6 +14010,7 @@ impl Vm {
                 Err(error) => return self.propagate_coroutine_error(frames, error, fuel),
             };
             match flow {
+                VmFlow::Call(_) => return Err(escaped_deferred_call()),
                 VmFlow::Return(returned) => {
                     results = returned;
                 }
@@ -14581,6 +14121,7 @@ impl Vm {
                 pending_return_prefixes: frame.pending_return_prefixes,
                 continuation: frame.continuation,
                 resume_results,
+                resume_error: None,
                 stackless_self_calls: frame.stackless_self_calls,
                 tail_call_count: frame.tail_call_count,
             }),
@@ -14624,6 +14165,7 @@ impl Vm {
             self.resume_coroutine_frames(coroutine, frames, args[1..].to_vec(), fuel)
         };
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -14681,6 +14223,7 @@ impl Vm {
         let error = self.guest_error_from_value(args[1])?;
         let flow = self.resume_coroutine_error(coroutine, frames, error, fuel);
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(_)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -14741,6 +14284,7 @@ impl Vm {
             )
         };
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -14871,6 +14415,10 @@ impl Vm {
             protected_call_site,
             fuel,
         ) {
+            Ok(VmFlow::Call(mut request)) => {
+                self.push_deferred_caller(&mut request, CoroutineFrame::PCall)?;
+                Ok(VmFlow::Call(request))
+            }
             Ok(VmFlow::Return(results)) => {
                 let mut protected_results = Vec::with_capacity(results.len() + 1);
                 protected_results.push(Value::boolean(true));
@@ -14878,7 +14426,7 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                suspension.frames.push(CoroutineFrame::PCall);
+                self.push_coroutine_frame(&mut suspension, CoroutineFrame::PCall)?;
                 Ok(VmFlow::Yield(suspension))
             }
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
@@ -14964,6 +14512,33 @@ impl Vm {
             protected_call_site,
             fuel,
         ) {
+            Ok(VmFlow::Call(mut request)) => {
+                let retained = (|| {
+                    let mut roots = try_copy_vec(&request.args)?;
+                    roots.try_reserve(2).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    roots.extend([request.callee, handler]);
+                    let frames = try_clone_coroutine_frames(&request.callers)?;
+                    self.retain_dynamic_program_ref_with_roots(program, roots, frames)
+                })();
+                let program_id = match retained {
+                    Ok(id) => id,
+                    Err(error) => {
+                        return Err(error);
+                    }
+                };
+                self.push_deferred_caller(
+                    &mut request,
+                    CoroutineFrame::XPCall(SuspendedXPCallFrame {
+                        program_id,
+                        handler,
+                        depth,
+                        traceback_base,
+                    }),
+                )?;
+                Ok(VmFlow::Call(request))
+            }
             Ok(VmFlow::Return(results)) => {
                 let mut protected_results = Vec::with_capacity(results.len() + 1);
                 protected_results.push(Value::boolean(true));
@@ -14971,15 +14546,30 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                let program_id = self.retain_dynamic_program_ref(program)?;
-                suspension
-                    .frames
-                    .push(CoroutineFrame::XPCall(SuspendedXPCallFrame {
+                let retained = (|| {
+                    let mut roots = try_copy_vec(&suspension.yielded)?;
+                    roots.try_reserve(1).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    roots.push(handler);
+                    let frames = try_clone_coroutine_frames(&suspension.frames)?;
+                    self.retain_dynamic_program_ref_with_roots(program, roots, frames)
+                })();
+                let program_id = match retained {
+                    Ok(program_id) => program_id,
+                    Err(error) => {
+                        return Err(error);
+                    }
+                };
+                self.push_coroutine_frame(
+                    &mut suspension,
+                    CoroutineFrame::XPCall(SuspendedXPCallFrame {
                         program_id,
                         handler,
                         depth,
                         traceback_base: 0,
-                    }));
+                    }),
+                )?;
                 Ok(VmFlow::Yield(suspension))
             }
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
@@ -15104,6 +14694,10 @@ impl Vm {
     }
 
     fn native_tonumber(&mut self, args: &[Value]) -> Result<Value> {
+        // Luau ignores trailing arguments here. Their expressions have already
+        // executed; retaining only the consumed prefix also keeps the shared
+        // scalar helpers' argument-count modes correct. See design/82.
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "tonumber argument")?;
         let base = match args.get(1).copied() {
             Some(value) if value.kind() != ValueKind::Nil => Some(self.tonumber_base(value)?),
@@ -16975,6 +16569,7 @@ impl Vm {
     }
 
     fn native_next(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "next arguments")?;
         let table = args[0]
             .as_table()
@@ -17494,6 +17089,7 @@ impl Vm {
     }
 
     fn native_string_sub(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 2, 3, "string.sub arguments")?;
         let registers = native_registers(args)?;
         self.string_sub(
@@ -17503,11 +17099,13 @@ impl Vm {
     }
 
     fn native_string_len(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "string.len argument")?;
         Ok(Value::number(self.value_to_string(args[0])?.len() as f64))
     }
 
     fn native_string_byte(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 1, 3, "string.byte arguments")?;
         let registers = native_registers(args)?;
         let start_register = if args.len() >= 2 { 1 } else { 0 };
@@ -17831,6 +17429,7 @@ impl Vm {
     }
 
     fn native_string_case(&mut self, args: &[Value], case: StringCase) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, case.name())?;
         let mut text = self.value_to_string(args[0])?;
         match case {
@@ -17841,6 +17440,7 @@ impl Vm {
     }
 
     fn native_string_reverse(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "string.reverse argument")?;
         let text = self.value_to_string(args[0])?;
         let reversed = reverse_string_bytes(&text)?;
@@ -17857,6 +17457,7 @@ impl Vm {
     }
 
     fn native_string_find(&mut self, args: &[Value]) -> Result<Vec<Value>> {
+        let args = &args[..args.len().min(4)];
         validate_native_arity(args, 2, 4, "string.find arguments")?;
         let text = self.value_to_string(args[0])?;
         let pattern = self.value_to_string(args[1])?;
@@ -18271,6 +17872,7 @@ impl Vm {
     }
 
     fn native_string_split(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "string.split arguments")?;
         let registers = native_registers(args)?;
         self.string_split(
@@ -18831,6 +18433,7 @@ impl Vm {
     }
 
     fn native_table_concat(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(4)];
         validate_native_arity(args, 1, 4, "table.concat arguments")?;
         let table = args[0]
             .as_table()
@@ -18915,6 +18518,7 @@ impl Vm {
     }
 
     fn native_table_getn(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "table.getn argument")?;
         let table = args[0]
             .as_table()
@@ -18928,6 +18532,7 @@ impl Vm {
     }
 
     fn native_table_maxn(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(1)];
         validate_native_arity(args, 1, 1, "table.maxn argument")?;
         let table = args[0]
             .as_table()
@@ -18941,6 +18546,7 @@ impl Vm {
     }
 
     fn native_table_create(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "table.create arguments")?;
         let registers = native_registers(args)?;
         self.table_create(
@@ -18956,6 +18562,7 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Value> {
+        let args = &args[..args.len().min(3)];
         validate_native_arity(args, 2, 3, "table.find arguments")?;
         let registers = native_registers(args)?;
         self.table_find(
@@ -19597,6 +19204,7 @@ impl Vm {
     }
 
     fn native_table_remove(&mut self, args: &[Value]) -> Result<Value> {
+        let args = &args[..args.len().min(2)];
         validate_native_arity(args, 1, 2, "table.remove arguments")?;
         let registers = native_registers(args)?;
         self.table_remove(
@@ -20294,6 +19902,7 @@ impl Vm {
             None,
             fuel,
         )? {
+            VmFlow::Call(request) => return Ok(CallIteratorStep::Call(request)),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
         };
@@ -20697,6 +20306,10 @@ fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
             ));
         }
         for (pc, instruction) in function.code.iter().enumerate() {
+            if instruction.aux < 0 && crate::bytecode::supports_call_descriptor(instruction.op) {
+                expanded_calls::descriptor(program, *instruction)
+                    .map_err(|e| attach_instruction_source(program, function, pc, e))?;
+            }
             let feature = match instruction.op {
                 Opcode::SetGlobal => Some("global mutation"),
                 Opcode::SetUpvalue => Some("captured upvalue mutation"),
@@ -23425,6 +23038,7 @@ fn into_return_values_flow(flow: VmFlow<Vec<Value>>) -> VmFlow<ReturnValues> {
     match flow {
         VmFlow::Return(results) => VmFlow::Return(ReturnValues::from_vec(results)),
         VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        VmFlow::Call(request) => VmFlow::Call(request),
     }
 }
 
@@ -23432,6 +23046,7 @@ fn into_vec_flow(flow: VmFlow<ReturnValues>) -> VmFlow<Vec<Value>> {
     match flow {
         VmFlow::Return(results) => VmFlow::Return(results.into_vec()),
         VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        VmFlow::Call(request) => VmFlow::Call(request),
     }
 }
 
@@ -23461,7 +23076,7 @@ fn shrink_call_stack_frame_capacity(frame: &mut CallStackFrame) {
 
 fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation) {
     match continuation {
-        BytecodeContinuation::CallExpandAfterTrailing { args, .. } => args.shrink_to_fit(),
+        BytecodeContinuation::ExpandedCalls(state) => state.shrink(),
         BytecodeContinuation::ReturnWithPrefix { prefix } => prefix.shrink_to_fit(),
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
@@ -23848,6 +23463,9 @@ fn try_clone_bytecode_continuation(
     continuation: &BytecodeContinuation,
 ) -> Result<BytecodeContinuation> {
     Ok(match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => {
+            BytecodeContinuation::ExpandedCalls(state.try_clone()?)
+        }
         BytecodeContinuation::WriteFirst { register } => BytecodeContinuation::WriteFirst {
             register: *register,
         },
@@ -23861,21 +23479,6 @@ fn try_clone_bytecode_continuation(
                 count: *count,
             }
         }
-        BytecodeContinuation::CallExpandAfterTrailing {
-            outer_callee,
-            args,
-            base,
-            count,
-            depth,
-            call_site,
-        } => BytecodeContinuation::CallExpandAfterTrailing {
-            outer_callee: *outer_callee,
-            args: try_copy_vec(args)?,
-            base: *base,
-            count: *count,
-            depth: *depth,
-            call_site: call_site.clone(),
-        },
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
             BytecodeContinuation::ReturnWithPrefix {
                 prefix: try_copy_vec(prefix)?,
@@ -24182,12 +23785,7 @@ fn add_register_cells_memory(values: &RegisterCells, usage: &mut MemoryUsage) {
 
 fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut MemoryUsage) {
     match continuation {
-        BytecodeContinuation::CallExpandAfterTrailing {
-            args, call_site, ..
-        } => {
-            usage.add_vec(args);
-            add_error_location_memory(call_site.as_ref(), usage);
-        }
+        BytecodeContinuation::ExpandedCalls(state) => state.memory(usage),
         BytecodeContinuation::ReturnWithPrefix { prefix } => usage.add_vec(prefix),
         BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
@@ -24776,360 +24374,6 @@ fn upvalue_index(index: i32) -> Result<usize> {
     })
 }
 
-struct NestedExpandWindow {
-    outer_prefix_start: usize,
-    middle_callee: usize,
-    middle_prefix_start: usize,
-    inner_callee: usize,
-    inner_args_start: usize,
-    inner_args_end: usize,
-}
-
-impl NestedExpandWindow {
-    fn new(
-        base: usize,
-        outer_prefix_count: usize,
-        middle_prefix_count: usize,
-        inner_argc: usize,
-    ) -> Result<Self> {
-        let outer_prefix_start = base.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let middle_callee = outer_prefix_start
-            .checked_add(outer_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested expanded call window overflow",
-                })
-            })?;
-        let middle_prefix_start = middle_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let inner_callee = middle_prefix_start
-            .checked_add(middle_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested expanded call window overflow",
-                })
-            })?;
-        let inner_args_start = inner_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let inner_args_end = inner_args_start.checked_add(inner_argc).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        Ok(Self {
-            outer_prefix_start,
-            middle_callee,
-            middle_prefix_start,
-            inner_callee,
-            inner_args_start,
-            inner_args_end,
-        })
-    }
-
-    fn validate(&self, register_count: usize) -> Result<()> {
-        if self.inner_args_end > register_count {
-            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                register: self.inner_args_end,
-                max: register_count,
-            }));
-        }
-        Ok(())
-    }
-
-    fn middle_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.middle_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested middle callee register overflow",
-            })
-        })
-    }
-
-    fn inner_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.inner_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested inner callee register overflow",
-            })
-        })
-    }
-}
-
-struct NestedVarargWindow {
-    outer_prefix_start: usize,
-    middle_callee: usize,
-    middle_prefix_start: usize,
-    end: usize,
-}
-
-#[derive(Clone, Copy)]
-struct NestedVarargSpec {
-    base: usize,
-    aux: i32,
-}
-
-struct NestedExpand2VarargWindow {
-    outer_prefix_start: usize,
-    middle_callee: usize,
-    middle_prefix_start: usize,
-    inner_callee: usize,
-    inner_prefix_start: usize,
-    end: usize,
-}
-
-struct NestedExpand3Window {
-    outer_prefix_start: usize,
-    middle_callee: usize,
-    middle_prefix_start: usize,
-    inner_callee: usize,
-    inner_prefix_start: usize,
-    leaf_callee: usize,
-    leaf_args_start: usize,
-    leaf_args_end: usize,
-}
-
-impl NestedExpand2VarargWindow {
-    fn new(
-        base: usize,
-        outer_prefix_count: usize,
-        middle_prefix_count: usize,
-        inner_prefix_count: usize,
-    ) -> Result<Self> {
-        let outer_prefix_start = base.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested vararg call window overflow",
-            })
-        })?;
-        let middle_callee = outer_prefix_start
-            .checked_add(outer_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested vararg call window overflow",
-                })
-            })?;
-        let middle_prefix_start = middle_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested vararg call window overflow",
-            })
-        })?;
-        let inner_callee = middle_prefix_start
-            .checked_add(middle_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested vararg call window overflow",
-                })
-            })?;
-        let inner_prefix_start = inner_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested vararg call window overflow",
-            })
-        })?;
-        let end = inner_prefix_start
-            .checked_add(inner_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested vararg call window overflow",
-                })
-            })?;
-        Ok(Self {
-            outer_prefix_start,
-            middle_callee,
-            middle_prefix_start,
-            inner_callee,
-            inner_prefix_start,
-            end,
-        })
-    }
-
-    fn validate(&self, register_count: usize) -> Result<()> {
-        if self.end > register_count {
-            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                register: self.end,
-                max: register_count,
-            }));
-        }
-        Ok(())
-    }
-
-    fn middle_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.middle_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested middle callee register overflow",
-            })
-        })
-    }
-
-    fn inner_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.inner_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested inner callee register overflow",
-            })
-        })
-    }
-}
-
-impl NestedExpand3Window {
-    fn new(
-        base: usize,
-        outer_prefix_count: usize,
-        middle_prefix_count: usize,
-        inner_prefix_count: usize,
-        leaf_argc: usize,
-    ) -> Result<Self> {
-        let outer_prefix_start = base.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let middle_callee = outer_prefix_start
-            .checked_add(outer_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested expanded call window overflow",
-                })
-            })?;
-        let middle_prefix_start = middle_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let inner_callee = middle_prefix_start
-            .checked_add(middle_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested expanded call window overflow",
-                })
-            })?;
-        let inner_prefix_start = inner_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let leaf_callee = inner_prefix_start
-            .checked_add(inner_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested expanded call window overflow",
-                })
-            })?;
-        let leaf_args_start = leaf_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        let leaf_args_end = leaf_args_start.checked_add(leaf_argc).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested expanded call window overflow",
-            })
-        })?;
-        Ok(Self {
-            outer_prefix_start,
-            middle_callee,
-            middle_prefix_start,
-            inner_callee,
-            inner_prefix_start,
-            leaf_callee,
-            leaf_args_start,
-            leaf_args_end,
-        })
-    }
-
-    fn validate(&self, register_count: usize) -> Result<()> {
-        if self.leaf_args_end > register_count {
-            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                register: self.leaf_args_end,
-                max: register_count,
-            }));
-        }
-        Ok(())
-    }
-
-    fn middle_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.middle_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested middle callee register overflow",
-            })
-        })
-    }
-
-    fn inner_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.inner_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested inner callee register overflow",
-            })
-        })
-    }
-
-    fn leaf_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.leaf_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested leaf callee register overflow",
-            })
-        })
-    }
-}
-
-impl NestedVarargWindow {
-    fn new(base: usize, outer_prefix_count: usize, middle_prefix_count: usize) -> Result<Self> {
-        let outer_prefix_start = base.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested vararg call window overflow",
-            })
-        })?;
-        let middle_callee = outer_prefix_start
-            .checked_add(outer_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested vararg call window overflow",
-                })
-            })?;
-        let middle_prefix_start = middle_callee.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested vararg call window overflow",
-            })
-        })?;
-        let end = middle_prefix_start
-            .checked_add(middle_prefix_count)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "nested vararg call window overflow",
-                })
-            })?;
-        Ok(Self {
-            outer_prefix_start,
-            middle_callee,
-            middle_prefix_start,
-            end,
-        })
-    }
-
-    fn validate(&self, register_count: usize) -> Result<()> {
-        if self.end > register_count {
-            return Err(Error::new(ErrorKind::RegisterOutOfBounds {
-                register: self.end,
-                max: register_count,
-            }));
-        }
-        Ok(())
-    }
-
-    fn middle_callee_register(&self) -> Result<u8> {
-        u8::try_from(self.middle_callee).map_err(|_| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "nested middle callee register overflow",
-            })
-        })
-    }
-}
-
 struct NumericForRegisters {
     index: u8,
     limit: u8,
@@ -25206,6 +24450,7 @@ enum InvalidIteratorCallee {
 }
 
 enum CallIteratorStep {
+    Call(DeferredBytecodeCall),
     Complete(bool),
     Yield(CoroutineYield),
 }
@@ -25890,12 +25135,7 @@ fn extend_capture_cell_roots(roots: &mut Vec<Value>, cells: &[Option<u32>]) {
 
 fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &BytecodeContinuation) {
     match continuation {
-        BytecodeContinuation::CallExpandAfterTrailing {
-            outer_callee, args, ..
-        } => {
-            roots.push(*outer_callee);
-            roots.extend_from_slice(args);
-        }
+        BytecodeContinuation::ExpandedCalls(state) => state.roots(roots),
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
             roots.extend_from_slice(prefix);
         }
@@ -25912,12 +25152,7 @@ fn extend_bytecode_continuation_heap_roots(
     continuation: &BytecodeContinuation,
 ) {
     match continuation {
-        BytecodeContinuation::CallExpandAfterTrailing {
-            outer_callee, args, ..
-        } => {
-            extend_heap_backed_roots(roots, &[*outer_callee]);
-            extend_heap_backed_roots(roots, args);
-        }
+        BytecodeContinuation::ExpandedCalls(state) => state.heap_roots(roots),
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
             extend_heap_backed_roots(roots, prefix);
         }
@@ -33845,4 +33080,10 @@ mod inline_cache_tests {
         );
         assert!(retained.value(&vm).is_ok());
     }
+}
+
+fn escaped_deferred_call() -> Error {
+    Error::new(ErrorKind::InvalidProgram {
+        reason: "internal bytecode call escaped its trampoline",
+    })
 }

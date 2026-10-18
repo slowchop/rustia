@@ -408,7 +408,7 @@ including a guest failure or Rust result-conversion failure. Guest protection fo
 a completed host call survives a later guest error caught by `pcall`; a failing handler's own partial suffix
 does not.
 
-Fuel exhaustion, OOM, record-count or record-byte overflow, an invalid boundary yield, a missing typed-host
+Fuel exhaustion, configured recursion-limit exhaustion, OOM, record-count or record-byte overflow, an invalid boundary yield, a missing typed-host
 dispatcher, and host panic are hard transaction aborts: guest `pcall` and callbacks cannot turn them into a
 successful publication. The extra hard OOM/yield treatment is local to typed transactional execution, rather
 than a global change to ordinary legacy execution. Host panics are caught at the VM host-call boundary; records

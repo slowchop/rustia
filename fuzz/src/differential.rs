@@ -17,7 +17,24 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         3 => "local x=false; return x()",
         _ => "local x={}; return x + 1",
     };
-    match byte(0) % 8 {
+    let invalid_builtin = match byte(2) % 7 {
+        0 => "tostring()",
+        1 => "tonumber()",
+        2 => "rawget({})",
+        3 => "table.insert()",
+        4 => "math.unreal()",
+        5 => "table.unreal()",
+        _ => "string.unreal()",
+    };
+    let extra_argument_call = match byte(2) % 6 {
+        0 => "type(1, 99)",
+        1 => "string.len('abc', 99)",
+        2 => "string.upper('abc', 99)",
+        3 => "table.getn({4}, 99)",
+        4 => "next({a=1}, nil, 99)",
+        _ => "tonumber('1', 10, 99)",
+    };
+    match byte(0) % 32 {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -25,7 +42,34 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function(e) return type(e) end); return tostring(ok)..':'..e")),
         5 => body.push_str(&format!("local c=coroutine.create(function() coroutine.yield('pause'); {failure} end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..type(e)")),
         6 => body.push_str(&format!("local f; pcall(function() local x={}; f=function() x=x+1; return x end; {failure} end); return tostring(f())..':'..tostring(f())", byte(3))),
-        _ => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function() error('handler',0) end); return tostring(ok)..':'..e")),
+        7 => body.push_str(&format!("local ok,e=xpcall(function() {failure} end,function() error('handler',0) end); return tostring(ok)..':'..e")),
+        8 => body.push_str(&format!("return '' .. {invalid_builtin}")),
+        9 => body.push_str(&format!("if false then local value = '' .. {invalid_builtin} end; return 'ok'")),
+        10 => body.push_str(&format!("return {invalid_builtin}")),
+        11 => body.push_str(&format!("return '' .. {extra_argument_call}")),
+        12 => body.push_str("local function extra(n) observed=observed*10+n; return n end; return type(extra(1),extra(2),extra(3))..':'..observed"),
+        13 => {
+            let iterator = if byte(2) % 2 == 0 { "ipairs" } else { "pairs" };
+            body.push_str(&format!("local function extra() observed=observed+1; return 99 end; local out=''; for k,v in {iterator}({{4}},extra()) do out=out..k..':'..v end; return out..':'..observed"));
+        }
+        14 => body.push_str("local function unused() break end; return 'ok'"),
+        15 => body.push_str(&format!("local function unused() return '' .. {invalid_builtin} end; return 'ok'")),
+        16 => body.push_str("local t={}; local function many() return 4,99 end; table.insert(t,1,many()); return 'wrong'"),
+        17 => body.push_str("local function empty() end; return 'x'..type(empty())"),
+        18 => body.push_str("local function empty() end; return 'x'..type((empty()))"),
+        19 => body.push_str("local function extra() string.len=function() return 100 end; return 99 end; return ''..string.len('abc',extra())"),
+        20 => body.push_str("local function extra() string.len=function() return 100 end; return 99 end; return ''..(string.len)('abc',extra())"),
+        21 => body.push_str("local len=string.len; local function extra() string.len=function() return 100 end; return 99 end; return ''..len('abc',extra())"),
+        22 => body.push_str("local function argument() coroutine.yield('argument'); string.len=function(...) coroutine.yield('callee'); return select('#',...) end; return 99,88 end; local thread=coroutine.create(function() return 0+string.len('abc',argument()) end); local a,b=coroutine.resume(thread); local c,d=coroutine.resume(thread); local e,f=coroutine.resume(thread); return tostring(a)..':'..tostring(b)..':'..tostring(c)..':'..tostring(d)..':'..tostring(e)..':'..tostring(f)"),
+        23 => body.push_str("local object={pass=function(self,...) return ... end}; local function argument() string.len=function(...) return select('#',...) end; return 99,88 end; return ''..object:pass(string.len('abc',argument()))"),
+        24 => body.push_str("local function empty() end; for k,v in ipairs(empty()) do end; return 'wrong'"),
+        25 => body.push_str("local function pass(...) return ... end; local function empty() end; local t={type(pass(pass(pass(empty()))))}; return tostring(t[1])"),
+        26 => body.push_str("local function pass(...) return ... end; local function run(...) return 0+select('#',pass(pass(pass(...)))) end; return tostring(run(4,5))"),
+        27 => body.push_str("local function run(n) if n==0 then return 4,5 end; return string.len('abc',run(n-1)) end; string.len=function(...) return select('#',...),7 end; return tostring(run(20))"),
+        28 => body.push_str("local function pass(...) return ... end; local function many() return 4,5 end; local t={select('#',pass(pass(pass(pass(many())))))}; return tostring(t[1])"),
+        29 => body.push_str("local a,b; a=function(n) if n==0 then return 4,5 end; return string.len('abc',b(n-1)) end; b=function(n) if n==0 then return 4,5 end; return string.len('abc',a(n-1)) end; string.len=function(...) return select('#',...),7 end; return tostring(a(20))"),
+        30 => body.push_str("local a,b={},{}; setmetatable(a,{__call=function(self,n) if n==0 then return 4,5 end; return string.len('abc',b(n-1)) end}); setmetatable(b,{__call=function(self,n) if n==0 then return 4,5 end; return string.len('abc',a(n-1)) end}); string.len=function(...) return select('#',...),7 end; return tostring(a(20))"),
+        _ => body.push_str("local function argument() observed=observed+1; return 'abc' end; local function run(n) local unused=string.len(argument()); if n==0 then return 0 end; return 1+run(n-1) end; return tostring(run(20))"),
     }
     body
 }

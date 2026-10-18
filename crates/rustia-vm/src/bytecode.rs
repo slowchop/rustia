@@ -162,6 +162,43 @@ pub enum Constant {
     String(Vec<u8>),
     /// A one-to-three component import path whose entries index string constants.
     Import(Vec<u32>),
+    /// Argument windows and deferred import lookups for an expanded call.
+    /// A supported call instruction references this with `aux = !index`.
+    CallDescriptor(Box<CallDescriptor>),
+}
+
+/// Argument windows and callee lookup order for an expanded call, outermost first.
+/// Each window contains a callee followed by its fixed arguments. The innermost
+/// window may additionally consume the current function's varargs.
+#[derive(Clone, Debug)]
+pub struct CallDescriptor {
+    /// Terminal data: result count for `CallExpand`, append index shifted left
+    /// eight bits for `AppendCallExpand`, and zero for other call forms.
+    pub aux: i32,
+    pub calls: Vec<CallDescriptorCall>,
+    pub append_varargs: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct CallDescriptorCall {
+    pub fixed_args: u8,
+    /// Import constant resolved after this level's arguments have completed.
+    pub deferred_import: Option<u32>,
+}
+
+pub(crate) fn supports_call_descriptor(op: Opcode) -> bool {
+    matches!(
+        op,
+        Opcode::CallExpand
+            | Opcode::CallExpandVarargs
+            | Opcode::ReturnCallExpand
+            | Opcode::ReturnCallExpandVarargs
+            | Opcode::AppendCallExpand
+            | Opcode::CallExpand2
+            | Opcode::ReturnCallExpand2
+            | Opcode::ReturnCallExpand2Varargs
+            | Opcode::CallExpand3
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -651,6 +688,24 @@ impl Program {
                         live = live.saturating_add(path.len().saturating_mul(size_of::<u32>()));
                         reserved = reserved
                             .saturating_add(path.capacity().saturating_mul(size_of::<u32>()));
+                    }
+                    Constant::CallDescriptor(descriptor) => {
+                        live = live
+                            .saturating_add(size_of::<CallDescriptor>())
+                            .saturating_add(
+                                descriptor
+                                    .calls
+                                    .len()
+                                    .saturating_mul(size_of::<CallDescriptorCall>()),
+                            );
+                        reserved = reserved
+                            .saturating_add(size_of::<CallDescriptor>())
+                            .saturating_add(
+                                descriptor
+                                    .calls
+                                    .capacity()
+                                    .saturating_mul(size_of::<CallDescriptorCall>()),
+                            );
                     }
                     Constant::Nil | Constant::Boolean(_) | Constant::Number(_) => {}
                 }

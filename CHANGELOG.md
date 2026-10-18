@@ -565,6 +565,24 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Valid builtin calls now reach execution when a library field is missing or
+  the argument list does not fit a specialized opcode. Dead branches and
+  uncalled functions no longer fail compilation for those runtime operations.
+  Oracle-verified fixed-arity builtins and `pairs`/`ipairs` ignore trailing
+  arguments after evaluating them; invalid `table.insert` arities still fail
+  during execution.
+  Trailing calls and varargs also retain zero or multiple results; parentheses
+  select one. Recognized direct builtin callees resolve after arguments, even
+  across coroutine suspension, while aliases and parenthesized callees keep
+  their ordinary lookup order.
+  Nested calls retain complete result lists beyond the fixed fused instruction
+  shapes, including constructors and method receivers. Recursive expanded
+  calls use explicit VM frames across functions/programs and callable receivers,
+  and can resume a suspended base case or continue with ordinary bytecode calls.
+  Pending protected calls keep their target and arguments alive during program retention.
+  The configured recursion limit now aborts protected calls and typed invocations
+  as documented; Luau's opt-in compatibility stack limit remains catchable.
+
 - **The owned-host benchmark lanes queue instead of cancelling a waiting run.**
   The per-commit series, weekly matrix, memory cohort and A/B acceptance share
   one concurrency group, whose comment said they queued. A group keeps one

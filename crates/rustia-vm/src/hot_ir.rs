@@ -558,7 +558,7 @@ fn hot_ir_constant(constant: &Constant) -> Option<HotIrValue> {
         Constant::Nil => Some(HotIrValue::Nil),
         Constant::Boolean(value) => Some(HotIrValue::Boolean(*value)),
         Constant::Number(value) => Some(HotIrValue::Number(HotIrNumber::Constant(*value))),
-        Constant::String(_) | Constant::Import(_) => None,
+        Constant::String(_) | Constant::Import(_) | Constant::CallDescriptor(_) => None,
     }
 }
 

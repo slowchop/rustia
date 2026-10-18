@@ -173,12 +173,12 @@ Do not add a required method to a public extension trait during 1.x.
 | Requirement | Current status | Evidence needed to close it |
 |---|---|---|
 | Enforce memory limits consistently on optimized execution paths | Implemented; final CI pending | Memory-limited VMs use scalar instruction boundaries for batched paths; cross-profile quota tests and execution counters cover the [former unchecked window](58-vm-core2.md) |
-| Match Luau's compile-time versus runtime error behavior | In progress | Focused Luau 0.709 oracle fixtures and differential campaigns; valid runtime failures must remain catchable at runtime |
+| Match Luau's compile-time versus runtime error behavior | Focused builtin fixes implemented; wider audit open | Eight new Luau 0.709 fixtures plus call-shape, expansion, argument-effect and repeated-suspension tests cover specialization fallback and builtin lookup order; final CI and review remain pending |
 | Allow a required module to yield where the pinned Luau contract permits it | Open | A resumable loading continuation with cache commit on completion, cycle/error cleanup, and shared fuel tests |
 | Confirm collection settings suit long-running applications | Correctness coverage exists; tuning open | Preserve the deterministic scheduling contract; use remote measurements for any tuning or performance claim |
 | Retain clear source diagnostics and recovery behavior | Implemented | Keep the diagnostics and error/fuzz regressions green; add fixtures for newly found gaps |
 
-The current corpus has 712 fixtures covering 511 named behaviors with zero pending
+The current corpus has 720 fixtures covering 517 named behaviors with zero pending
 cases. This describes the tested inventory, not universal compatibility. Roblox
 APIs, a Luau typechecker, raw Luau C API compatibility, async Rust callbacks, and a
 JIT are outside this first release. These exclusions do not waive any existing
