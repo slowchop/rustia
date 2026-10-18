@@ -323,3 +323,16 @@ error identity, protected saved-caller unwinding, configured exhaustion, and cal
 between independently loaded programs with distinct captures, `setfenv`
 environments and module cohorts across suspension. These address the
 mutual-recursion native-stack abort found during independent review.
+
+### Overlapping builtin resource limits
+
+`string.rep` variable-work fuel is charged before the output allocation,
+including its specialized opcode. This closes a gap where unary-result lowering
+could omit the output-byte charge while an ordinary call charged it. A request
+that exceeds both budgets reports fuel exhaustion first. Resource tests must
+exercise each budget separately: `string.rep('x', 600000)` with a 512 KiB heap
+and 2,048 fuel fails with `FuelExhausted`; with 1,000,000 fuel it reaches the
+allocation check and fails with `OutOfMemory`. The public regression
+`builtin_output_work_checks_fuel_before_allocation_across_call_shapes` checks
+direct, aliased and parenthesized calls in all four profiles, plus reset/recovery.
+These are embedding-policy tests, not standalone Luau oracle expectations.

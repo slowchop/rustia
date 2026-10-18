@@ -216,3 +216,38 @@ fn iterator_extra_arguments_preserve_results_and_side_effects() {
         }
     }
 }
+
+#[test]
+fn builtin_output_work_checks_fuel_before_allocation_across_call_shapes() {
+    for profile in profiles() {
+        for source in [
+            "return #string.rep('x', 600000)",
+            "local repeat_string = string.rep; return #repeat_string('x', 600000)",
+            "return #(string.rep)('x', 600000)",
+        ] {
+            for (budget, expect_fuel) in [(2_048, true), (1_000_000, false)] {
+                let mut vm = RustiaBuilder::standard()
+                    .profile(profile)
+                    .fuel(budget)
+                    .memory_limit_bytes(512 * 1024)
+                    .build()
+                    .unwrap();
+                let error = vm.load(source).exec().unwrap_err();
+                let kind = error.as_vm_error().unwrap().kind();
+                if expect_fuel {
+                    assert!(
+                        matches!(kind, rustia::VmErrorKind::FuelExhausted { .. }),
+                        "{profile:?}: {source}: {error}"
+                    );
+                } else {
+                    assert!(
+                        matches!(kind, rustia::VmErrorKind::OutOfMemory),
+                        "{profile:?}: {source}: {error}"
+                    );
+                }
+                vm.reset_decision().unwrap();
+                assert_eq!(vm.load("return 42").eval::<i64>().unwrap(), 42);
+            }
+        }
+    }
+}

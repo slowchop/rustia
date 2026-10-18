@@ -6134,6 +6134,19 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::StringRep => {
+                                let args = [
+                                    get_register(&registers, instruction.b)
+                                        .map_err(|e| e.at_pc(pc - 1))?,
+                                    get_register(&registers, instruction.c)
+                                        .map_err(|e| e.at_pc(pc - 1))?,
+                                ];
+                                let extra_fuel = self.native_string_rep_fuel(&args);
+                                charge_fuel(
+                                    &mut fuel.state.fuel,
+                                    fuel.state.fuel_limit,
+                                    extra_fuel,
+                                )
+                                .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self
                                     .string_rep(&registers, instruction)
                                     .map_err(|e| e.at_pc(pc - 1))?;

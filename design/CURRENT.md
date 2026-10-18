@@ -59,6 +59,8 @@ repeated coroutine suspension. Variable-length argument chains preserve expansio
 beyond the fixed instruction shapes, and recursive calls resume those chains
 through explicit VM frames across functions, programs and callable receivers.
 Ordinary bytecode fallbacks share those frames after resumption.
+Repeated-string output work now charges the same variable fuel before allocation
+in specialized and ordinary calls; four-profile overlap/recovery tests cover both limits.
 Pending protected-call values stay rooted during fallible program retention.
 Aliases and parenthesized callees keep ordinary
 lookup order. Four-profile failure/recovery and call-shape regressions, eight

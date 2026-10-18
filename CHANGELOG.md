@@ -6,6 +6,8 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+- Charge repeated-string output work before allocation in specialized calls, matching ordinary builtin calls when fuel and memory limits overlap.
+
 - Keep ordinary callable receivers on VM continuations through recursion and suspension; reject non-function `__call` values as Luau 0.709 does.
 
 ### Changed
