@@ -67,7 +67,7 @@ try {
   fs.writeFileSync(path.join(application, "src", "lib.rs"), "// Clean external application; behavior comes from canonical contract tests.\n");
   const manifest = [
     "[package]", 'name = "rustia-private-consumer"', 'version = "0.0.0"', 'edition = "2021"', "publish = false", "",
-    "[workspace]", "", "[features]", 'default = ["rustia/default"]', "", "[dependencies]",
+    "[workspace]", "", "[features]", 'default = ["web-live"]', 'web-live = ["rustia/web-live"]', "", "[dependencies]",
     `rustia = { path = ${JSON.stringify(packaged.get("rustia"))}, default-features = false }`,
     `serde = { version = "=${serde}", features = ["derive"] }`, "", "[patch.crates-io]",
     ...crates.map((name) => `${name} = { path = ${JSON.stringify(packaged.get(name))} }`), "",

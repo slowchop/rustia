@@ -441,6 +441,9 @@ function checkCi(text) {
   if (!macosJob) fail(`${label} must execute macOS arm64 correctness, separately from cross-compilation`);
   requireIncludes(macosJob, RUNNER_CLASSES.get("general-macos").block, `${label} macos job`);
   for (const check of [
+    `RUSTUP_TOOLCHAIN: ${rustChannel}`,
+    "RUSTFLAGS: -D warnings",
+    `run: rustup toolchain install ${rustChannel} --profile minimal --target aarch64-apple-darwin --no-self-update`,
     'test "$(uname -s)" = Darwin',
     'test "$(uname -m)" = arm64',
     'test "$(rustc -vV | sed -n \'s/^host: //p\')" = aarch64-apple-darwin',
@@ -449,6 +452,9 @@ function checkCi(text) {
     "cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract",
     "cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract",
   ]) requireIncludes(macosJob, check, `${label} macos job`);
+  for (const forbidden of ["uses: actions-rust-lang/setup-rust-toolchain@", "brew ", "sudo ", "chmod ", "chown "]) {
+    forbidIncludes(macosJob, forbidden, `${label} macos job`);
+  }
   for (const command of [
     "bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu",
     "bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu",
@@ -1233,6 +1239,8 @@ if (process.argv.includes("--self-test")) {
       ["Linux job in Mac pool", canonical.replace(linuxBlock, macosBlock), /job release-preflight.*general-linux/],
       ["unregistered Mac job", canonical.replace("  macos-arm64-runtime:", "  another-macos-job:"), /job another-macos-job.*general-linux/],
       ["missing architecture check", canonical.replace('test "$(uname -m)" = arm64', "true"), /must include.*uname/],
+      ["unpinned Mac toolchain", canonical.replace(`RUSTUP_TOOLCHAIN: ${pinnedRustChannel()}`, "RUSTUP_TOOLCHAIN: stable"), /must include.*RUSTUP_TOOLCHAIN/],
+      ["Mac package manager mutation", canonical.replace("      - name: Verify native arm64", "      - run: brew install bash\n      - name: Verify native arm64"), /must not include.*brew/],
       ["missing Mac golden target", canonical.replace("native default aarch64-apple-darwin", "native default"), /must include.*aarch64-apple-darwin/],
       ["missing Mac suite target", canonical.replace("--target aarch64-apple-darwin --test host_functions", "--test host_functions"), /must include.*aarch64-apple-darwin/],
       ["missing Linux golden target", canonical.replace("native default x86_64-unknown-linux-gnu", "native default"), /must include.*x86_64-unknown-linux-gnu/],
@@ -1266,7 +1274,7 @@ if (process.argv.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, nine policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, eleven policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

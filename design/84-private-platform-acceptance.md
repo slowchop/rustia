@@ -19,6 +19,8 @@ used as performance evidence.
 The native jobs verify the actual OS and architecture and pass their target
 triples explicitly to Cargo. The Mac job also checks the compiler host triple;
 runner configuration cannot silently substitute Intel execution for arm64.
+The Mac job installs the pinned toolchain with rustup in the runner account,
+without system package changes, and treats compiler warnings as errors.
 CI logs the tested checkout and the exact golden transcript.
 The shared runner requires exactly one transcript sentinel, rejecting empty
 test runs as well as failed execution. Policy self-tests exercise wrong runner
@@ -74,7 +76,8 @@ The candidate's lock seeds offline resolution. The harness permits no package
 version/source/checksum absent from that lock, apart from its own application
 root. The application uses the repository's pinned Rust toolchain. It then runs
 all contracts with `--locked --offline` in default and bare
-feature modes. This tests the actual private archives without relying on a
+feature modes, forwarding the facade's `web-live` feature to the copied tests.
+This tests the actual private archives without relying on a
 registry placeholder or allowing a moving dependency update. It establishes
 neither registry installation nor docs.rs publication.
 
