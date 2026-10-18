@@ -1,4 +1,4 @@
-//! Explicit transfers between bytecode functions used by expanded arguments.
+//! Explicit transfers between bytecode functions without native recursion.
 //! A saved caller carries the same complete state as a suspended coroutine.
 use super::*;
 
@@ -45,6 +45,9 @@ impl Vm {
         debug_assert!(pending.is_some());
         debug_assert_eq!(self.active_coroutine_frames.len(), pending_slot);
         self.mark_control_memory_dirty();
+        if self.guest_transactions.is_empty() {
+            self.prune_unreachable_coroutines_if_idle();
+        }
         result
     }
 
@@ -65,11 +68,12 @@ impl Vm {
                         fallback_program,
                         callers,
                     } = request;
-                    self.active_coroutine_frames[pending_slot]
+                    if self.active_coroutine_frames[pending_slot]
                         .try_reserve(callers.len())
-                        .map_err(|_| {
-                            Error::new(ErrorKind::OutOfMemory).without_source_location()
-                        })?;
+                        .is_err()
+                    {
+                        return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                    }
                     self.active_coroutine_frames[pending_slot].extend(callers.into_iter().rev());
                     self.mark_control_memory_dirty();
                     flow = self.enter_deferred_bytecode_call(
@@ -86,25 +90,41 @@ impl Vm {
                         return Ok(VmFlow::Return(results));
                     };
                     self.mark_control_memory_dirty();
-                    let CoroutineFrame::Bytecode(frame) = frame else {
-                        return Err(invalid_deferred_call("non-bytecode pending caller"));
+                    flow = match frame {
+                        CoroutineFrame::Bytecode(frame) => {
+                            // Only a bytecode continuation owns a saved call header.
+                            self.call_stack.pop();
+                            self.resume_deferred_bytecode_frame(
+                                frame.into_inner(),
+                                results.into_vec(),
+                                None,
+                                fuel,
+                            )
+                        }
+                        CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => {
+                            let mut protected = Vec::new();
+                            protected
+                                .try_reserve_exact(results.len() + 1)
+                                .map_err(|_| {
+                                    Error::new(ErrorKind::OutOfMemory).without_source_location()
+                                })?;
+                            protected.push(Value::boolean(true));
+                            protected.extend(results);
+                            Ok(VmFlow::Return(protected.into()))
+                        }
                     };
-                    // The suspended caller kept its call-stack entry while the
-                    // callee ran. The resumed step installs that entry afresh.
-                    self.call_stack.pop();
-                    flow = self.resume_deferred_bytecode_frame(
-                        frame.into_inner(),
-                        results.into_vec(),
-                        None,
-                        fuel,
-                    );
                 }
                 Ok(VmFlow::Yield(mut suspension)) => {
                     let pending = &mut self.active_coroutine_frames[pending_slot];
-                    suspension.frames.try_reserve(pending.len()).map_err(|_| {
-                        Error::new(ErrorKind::OutOfMemory).without_source_location()
-                    })?;
-                    while let Some(frame) = pending.pop() {
+                    if suspension.frames.try_reserve(pending.len()).is_err() {
+                        return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                    }
+                    while let Some(mut frame) = pending.pop() {
+                        // A real suspension discards the active call headers.
+                        // The handler will resume in a fresh coroutine stack.
+                        if let CoroutineFrame::XPCall(frame) = &mut frame {
+                            frame.traceback_base = 0;
+                        }
                         suspension.frames.push(frame);
                     }
                     return Ok(VmFlow::Yield(suspension));
@@ -117,19 +137,53 @@ impl Vm {
                         return Err(error);
                     };
                     self.mark_control_memory_dirty();
-                    let CoroutineFrame::Bytecode(frame) = frame else {
-                        return Err(invalid_deferred_call("non-bytecode pending caller"));
+                    flow = match frame {
+                        CoroutineFrame::Bytecode(frame) => {
+                            self.call_stack.pop();
+                            self.resume_deferred_bytecode_frame(
+                                frame.into_inner(),
+                                Vec::new(),
+                                Some(error),
+                                fuel,
+                            )
+                        }
+                        CoroutineFrame::PCall => {
+                            self.last_error_traceback = None;
+                            self.mark_control_memory_dirty();
+                            let error = self.error_object(error);
+                            Ok(VmFlow::Return(vec![Value::boolean(false), error].into()))
+                        }
+                        CoroutineFrame::XPCall(frame) => self
+                            .resume_xpcall_error_handler(frame, error, fuel)
+                            .map(|results| VmFlow::Return(results.into())),
                     };
-                    self.call_stack.pop();
-                    flow = self.resume_deferred_bytecode_frame(
-                        frame.into_inner(),
-                        Vec::new(),
-                        Some(error),
-                        fuel,
-                    );
                 }
             }
         }
+    }
+
+    pub(super) fn push_coroutine_frame(
+        &mut self,
+        suspension: &mut CoroutineYield,
+        frame: CoroutineFrame,
+    ) -> Result<()> {
+        if suspension.frames.try_reserve(1).is_err() {
+            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+        }
+        suspension.frames.push(frame);
+        Ok(())
+    }
+
+    pub(super) fn push_deferred_caller(
+        &mut self,
+        request: &mut DeferredBytecodeCall,
+        frame: CoroutineFrame,
+    ) -> Result<()> {
+        if request.callers.try_reserve(1).is_err() {
+            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+        }
+        request.callers.push(frame);
+        Ok(())
     }
 
     fn enter_deferred_bytecode_call(
@@ -198,7 +252,12 @@ impl Vm {
         };
         let (captures, environment, module_cohort) =
             data.ok_or_else(|| invalid_deferred_call("bytecode function call data is missing"))?;
-        let thread_environment = self.current_thread_environment();
+        let thread_environment = if self.call_stack.is_empty() && self.running_coroutines.is_empty()
+        {
+            environment
+        } else {
+            self.current_thread_environment()
+        };
         self.run_function_step(
             &program,
             Some(program_id),
@@ -264,6 +323,63 @@ impl Vm {
             }),
             fuel,
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn defer_bytecode_frame(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        context: &FunctionCallContext<'_>,
+        pc: usize,
+        registers: RegisterValues,
+        register_cells: RegisterCells,
+        varargs: Vec<Value>,
+        pending_return_prefixes: Vec<Value>,
+        continuation: BytecodeContinuation,
+        stackless_self_calls: Vec<StacklessSelfCallFrame>,
+        tail_call_count: usize,
+        mut request: DeferredBytecodeCall,
+    ) -> VmFlowResult<ReturnValues> {
+        self.mutate_last_call_stack_frame(|frame| {
+            extend_heap_backed_roots(&mut frame.stackless_roots, &[request.callee]);
+            extend_heap_backed_roots(&mut frame.stackless_roots, &request.args);
+            extend_bytecode_continuation_heap_roots(&mut frame.stackless_roots, &continuation);
+        });
+        let program_id = match program_id {
+            Some(id) => id,
+            None => match self.retain_dynamic_program_ref(program) {
+                Ok(id) => id,
+                Err(error) => {
+                    return Err(error);
+                }
+            },
+        };
+        // Internal transfers save exactly the same complete caller state as a
+        // genuine guest yield, but the dispatcher consumes them immediately.
+        let saved = self.suspend_bytecode_frame(
+            Some(program_id),
+            context,
+            pc,
+            registers,
+            register_cells,
+            varargs,
+            pending_return_prefixes,
+            continuation,
+            stackless_self_calls,
+            tail_call_count,
+            CoroutineYield {
+                yielded: Vec::new(),
+                frames: std::mem::take(&mut request.callers),
+            },
+        )?;
+        let VmFlow::Yield(saved) = saved else {
+            return Err(invalid_deferred_call(
+                "saving a caller did not produce frames",
+            ));
+        };
+        request.callers = saved.frames;
+        Ok(VmFlow::Call(request))
     }
 
     #[allow(clippy::too_many_arguments)]

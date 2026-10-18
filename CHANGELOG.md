@@ -578,7 +578,7 @@ Current unpublished workspace version: `0.0.1`.
   Nested calls retain complete result lists beyond the fixed fused instruction
   shapes, including constructors and method receivers. Recursive expanded
   calls use explicit VM frames across functions/programs and callable receivers,
-  and can resume a suspended base case.
+  and can resume a suspended base case or continue with ordinary bytecode calls.
   The configured recursion limit now aborts protected calls and typed invocations
   as documented; Luau's opt-in compatibility stack limit remains catchable.
 

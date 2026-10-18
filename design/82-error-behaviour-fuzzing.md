@@ -289,6 +289,11 @@ iteratively before dispatch, with the existing receiver order and recursion
 charges. Their bytecode targets use the same saved frames; native and host
 targets keep ordinary dispatch. Pinned controls cover recursive callable tables,
 their suspension and guest error identity, and native receiver arguments.
+Ordinary bytecode fallbacks use that driver too: a function resumed after
+evaluating an expanded argument can make a later fixed, variable-result, vararg,
+constructor or prefixed-return call without nesting Rust interpreter frames.
+Existing eligible leaf and self-call shortcuts retain their own paths. Legacy
+positive-aux expanded forms normalize into the shared continuation state.
 
 The review also found that the configured `RecursionLimit` had incorrectly
 remained catchable in protected calls. It now follows the documented hard-abort
@@ -301,7 +306,8 @@ runtime error. Ordinary recovery and typed rollback tests cover this distinction
 16, zero and multiple results, parentheses, constructors, method receivers,
 varargs, repeated suspension, and recursive depth 20/100 including a suspended
 base case. Two additional corpus fixtures record `2:3:false:false:2` for nested
-result counts and `3:3:3` for self, mutual and callable recursive calls. Four-profile ordering
+result counts and `3:3:3:20` for self, mutual, callable and later ordinary recursive
+calls. Four-profile ordering
 controls also pin the shared Luau call semantics; `Puc51Compat` continues to select its
 documented table/sort/format behavior rather than a second language compiler.
 The combined typed-object candidate also keeps a fresh object alive in an

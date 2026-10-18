@@ -275,3 +275,60 @@ fn callable_receivers_use_the_same_expanded_call_driver() {
     assert!(matches!(error.kind(), ErrorKind::Vm(error)
         if matches!(error.kind(), rustia::VmErrorKind::RecursionLimit { limit: 8 })));
 }
+
+#[test]
+fn ordinary_calls_after_expansion_preserve_their_continuations() {
+    for depth in [20, 100] {
+        let cases = [
+            ("local value=run(n-1); return value+1,7", depth, 2),
+            ("local a,b=run(n-1); return a+1,b", depth, 2),
+            ("local t={run(n-1)}; return t[1]+1,t[2]", depth, 2),
+            ("local a,b=run(n-1,...); return a+1,b", depth, 2),
+            ("return run(n-1,...)", 0, 2),
+            ("return 1,run(n-1)", 1, depth + 2),
+        ];
+        for (body, first, count) in cases {
+            let source = format!(
+                "local seen=0; local function argument() seen=seen+1; return 'abc' end; \
+                 local function run(n,...) local unused=string.len(argument()); \
+                     if n==0 then return 0,7 end; {body} end; \
+                 local values={{run({depth},8,9)}}; \
+                 return tostring(values[1])..':'..tostring(#values)..':'..tostring(seen)"
+            );
+            let mut vm = RustiaBuilder::standard()
+                .memory_limit_bytes(2 * 1024 * 1024)
+                .build()
+                .unwrap();
+            assert_eq!(
+                vm.eval::<String>(&source).unwrap(),
+                format!("{first}:{count}:{}", depth + 1),
+                "{source}"
+            );
+        }
+    }
+    let source = "local seen=0; local function argument() seen=seen+1; \
+        if seen==1 then coroutine.yield('argument') end; return 'abc' end; \
+        local function run(n) local unused=string.len(argument()); \
+            if n==0 then return 0 end; return 1+run(n-1) end; \
+        local co=coroutine.create(function() return run(20) end); \
+        local a,b=coroutine.resume(co); local c,d=coroutine.resume(co); \
+        return tostring(a)..':'..tostring(b)..':'..tostring(c)..':'..tostring(d)..':'..seen";
+    let mut vm = RustiaBuilder::standard().build().unwrap();
+    assert_eq!(
+        vm.eval::<String>(source).unwrap(),
+        "true:argument:true:20:21"
+    );
+
+    let source = "local token={}; local function argument() token.seen=true; return 'abc' end; \
+        local function run(n) local unused=string.len(argument()); \
+            if n==0 then error(token) end; return 1+run(n-1) end; \
+        local ok,value=pcall(run,20); return tostring(ok)..':'..tostring(rawequal(value,token))";
+    assert_eq!(vm.eval::<String>(source).unwrap(), "false:true");
+    let mut limited = RustiaBuilder::standard()
+        .recursion_limit(8)
+        .build()
+        .unwrap();
+    let error = limited.eval::<String>(source).unwrap_err();
+    assert!(matches!(error.kind(), ErrorKind::Vm(error)
+        if matches!(error.kind(), rustia::VmErrorKind::RecursionLimit { limit: 8 })));
+}

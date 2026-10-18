@@ -1,9 +1,7 @@
-//! Resumable expanded calls whose recognized builtin callees are looked up
-//! after argument evaluation (Luau 0.709 `compileExprCall` ordering).
+//! Resumable trailing-argument expansion, with late imports for recognized
+//! builtin calls (Luau 0.709 `compileExprCall` ordering).
 use super::*;
-#[cfg(test)]
-use crate::bytecode::CallDescriptorCall;
-use crate::bytecode::{supports_call_descriptor, CallDescriptor};
+use crate::bytecode::{supports_call_descriptor, CallDescriptor, CallDescriptorCall};
 
 #[derive(Clone)]
 enum ExpandedCallee {
@@ -34,6 +32,7 @@ pub(super) struct ExpandedCallState {
 }
 
 pub(super) enum ExpandedCallFlow {
+    Transfer(DeferredBytecodeCall),
     Return(Vec<Value>),
     Yield(CoroutineYield),
     Call { callee: Value, args: Vec<Value> },
@@ -116,6 +115,64 @@ pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<
     Ok(descriptor)
 }
 
+/// Decode the original compact forms into the same resumable call windows as
+/// descriptor-bearing calls. These at-most-four entries stay on the stack.
+fn legacy_descriptor(
+    instruction: Instruction,
+) -> Result<(i32, SmallVec<[CallDescriptorCall; 4]>, bool)> {
+    let (counts, count, aux, append_varargs) = match instruction.op {
+        Opcode::CallExpand => {
+            if !(0..=i32::from(u8::MAX)).contains(&instruction.aux) {
+                return Err(invalid("invalid expanded function result count"));
+            }
+            (
+                [instruction.b, instruction.c, 0, 0],
+                2,
+                instruction.aux,
+                false,
+            )
+        }
+        Opcode::CallExpand2 | Opcode::ReturnCallExpand2 => {
+            let (outer, middle, inner) = unpack_nested_expand_aux(instruction.aux)?;
+            ([outer, middle, inner, 0], 3, 0, false)
+        }
+        Opcode::CallExpand3 => {
+            let (outer, middle, inner) = unpack_nested_expand_aux(instruction.aux)?;
+            ([outer, middle, inner, instruction.c], 4, 0, false)
+        }
+        Opcode::CallExpandVarargs | Opcode::ReturnCallExpandVarargs => {
+            let (outer, middle) = unpack_expand_varargs_aux(instruction.aux)?;
+            ([outer, middle, 0, 0], 2, 0, true)
+        }
+        Opcode::ReturnCallExpand2Varargs => {
+            let (outer, middle, inner) = unpack_nested_expand_aux(instruction.aux)?;
+            ([outer, middle, inner, 0], 3, 0, true)
+        }
+        Opcode::ReturnCallExpand => {
+            let (outer, inner) = unpack_expand_aux(instruction.aux)?;
+            ([outer, inner, 0, 0], 2, 0, false)
+        }
+        Opcode::AppendCallExpand => {
+            let (_, inner) = unpack_append_call_expand_aux(instruction.aux)?;
+            (
+                [instruction.c, inner, 0, 0],
+                2,
+                instruction.aux & !255,
+                false,
+            )
+        }
+        _ => return Err(invalid("instruction does not support expanded calls")),
+    };
+    let calls = counts[..count]
+        .iter()
+        .map(|fixed_args| CallDescriptorCall {
+            fixed_args: *fixed_args,
+            deferred_import: None,
+        })
+        .collect();
+    Ok((aux, calls, append_varargs))
+}
+
 impl ExpandedCallState {
     pub(super) fn new(
         program: &Program,
@@ -125,8 +182,18 @@ impl ExpandedCallState {
         depth: usize,
         call_site: Option<ErrorLocation>,
     ) -> Result<Self> {
-        let descriptor = descriptor(program, instruction)?;
-        let aux = descriptor.aux;
+        let legacy;
+        let (aux, call_windows, append_varargs) = if instruction.aux < 0 {
+            let descriptor = descriptor(program, instruction)?;
+            (
+                descriptor.aux,
+                descriptor.calls.as_slice(),
+                descriptor.append_varargs,
+            )
+        } else {
+            legacy = legacy_descriptor(instruction)?;
+            (legacy.0, legacy.1.as_slice(), legacy.2)
+        };
         let returning = matches!(
             instruction.op,
             Opcode::ReturnCallExpand
@@ -141,7 +208,7 @@ impl ExpandedCallState {
         } else {
             instruction.a
         });
-        let count = descriptor.calls.len();
+        let count = call_windows.len();
         let finish = if returning {
             let first = usize::from(instruction.a);
             let end = first + usize::from(instruction.b);
@@ -182,7 +249,7 @@ impl ExpandedCallState {
             .try_reserve_exact(count)
             .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         let mut cursor = base;
-        for (level, call) in descriptor.calls.iter().enumerate() {
+        for (level, call) in call_windows.iter().enumerate() {
             let end = cursor + 1 + usize::from(call.fixed_args);
             let values = registers.get(cursor..end).ok_or_else(|| {
                 Error::new(ErrorKind::RegisterOutOfBounds {
@@ -195,7 +262,7 @@ impl ExpandedCallState {
                 None => ExpandedCallee::Early(values[0]),
             };
             let mut args = try_copy_vec(&values[1..])?;
-            if descriptor.append_varargs && level + 1 == count {
+            if append_varargs && level + 1 == count {
                 args.try_reserve(varargs.len())
                     .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
                 args.extend_from_slice(varargs);
@@ -419,7 +486,7 @@ impl Vm {
                 match flow {
                     VmFlow::Return(results) => Ok(ExpandedCallFlow::Return(results.into_vec())),
                     VmFlow::Yield(suspension) => Ok(ExpandedCallFlow::Yield(suspension)),
-                    VmFlow::Call(_) => Err(escaped_deferred_call()),
+                    VmFlow::Call(request) => Ok(ExpandedCallFlow::Transfer(request)),
                 }
             })();
             self.truncate_stackless_self_call_roots(root_mark);

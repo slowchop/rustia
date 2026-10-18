@@ -19,4 +19,16 @@ local callable = setmetatable({}, {
         return string.len('abc', receiver(n - 1))
     end,
 })
-return self .. ':' .. tostring(left(20)) .. ':' .. tostring(callable(20))
+local seen = 0
+local function argument()
+    seen = seen + 1
+    return 'abc'
+end
+local function ordinary(n)
+    local unused = string.len(argument())
+    if n == 0 then return 0 end
+    return 1 + ordinary(n - 1)
+end
+local after_expansion = ordinary(20)
+assert(seen == 21)
+return self .. ':' .. tostring(left(20)) .. ':' .. tostring(callable(20)) .. ':' .. after_expansion
