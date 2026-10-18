@@ -14,6 +14,39 @@ records what is built; [90-release-readiness.md](90-release-readiness.md) holds
 the detailed validation and packaging requirements. A passing preflight alone
 does not complete this milestone.
 
+## Delivery order
+
+Use these batches to turn the acceptance checklist below into small, reviewable
+changes. Each batch may take several PRs; close it with recorded evidence rather
+than a percentage or a deadline. API changes include examples, documentation,
+tests, and active-client migration in the same rollout.
+
+| Batch | Work | Done when |
+|---|---|---|
+| 1. Establish a green baseline | Resolve the stale generated benchmark-progress report found by PR #60's full preflight; confirm current main's checks. Required checks and independent reviews must pass before merge. | The reviewed revision passes complete preflight and required checks; no blocking independent-review findings remain. |
+| 2. Decide the 1.0 API boundary | Inventory every public type, function, trait, and reachable dependency type. Settle constructors/defaults, settings, profiles, errors, metadata, extension traits, and which crates need stable versions. Remove accidental engine controls from the facade. | Independent API review accepts the proposed surface, documented defaults have consumer tests, and every intended extension point can grow compatibly. |
+| 3. Finish embedding workflows | Define the minimum useful opaque Rust-object API. Exercise conversions, live values, callbacks, reset, failure precedence, and module replacement from an external application. Migrate active clients with any necessary API changes. | A real consumer demonstrates each supported workflow without engine internals or workaround code; focused tests cover its failure and lifetime contracts. |
+| 4. Close runtime gaps | Finish yieldable `require` and compile-time versus runtime error parity; repeat bounded fuzz and long-running memory/reset tests. Review collection scheduling against the existing contract and remote evidence. | Pinned Luau fixtures and regression tests pass, no known release-blocking semantic gaps remain, and any tuning is supported by `ci-bench`. |
+| 5. Verify supported platforms | Execute the promised native and browser correctness/golden matrix, including real Firefox and Safari. | Exact candidate revisions and results cover the platform promises in `00-constraints.md`; build-only checks are not recorded as runtime proof. |
+| 6. Exercise a release candidate | Propose the API freeze, record its public API baseline, finish docs/package audits, and use the exact candidate in the active applications. Verify minimum Rust, feature combinations, recovery, and remote benchmark evidence. | Clean external installations and active consumers pass; independent review, complete preflight, platform tests, and candidate evidence are green. No known API redesign remains. |
+| 7. Publish and verify | Publish dependencies in order, then the embedding crate and CLI; tag the source and publish release notes. | Registry installation and documentation work, licenses and support statements agree, and the released API baseline is ready to check future 1.x changes. |
+
+The main dependency is **1 → 2 → 3 → 6 → 7**. Runtime hardening and platform
+validation (4 and 5) can proceed alongside API work, but both must finish before
+the candidate is accepted. Package audits and documentation checks can start
+early; final verification always uses the candidate revision.
+
+Start batch 2 with two focused reviews: **public settings and exports**, then
+**construction, extensible types, and errors**. Follow with a separate opaque
+Rust-object design and implementation. Keep these decisions small enough to
+review and exercise in a consumer before moving to the next one.
+
+Use README + rustdoc for the first release. A documentation site, async Rust
+callbacks, scoped callbacks, a JIT, a full mlua-style object system, and a
+standalone benchmark project are outside this release unless an existing
+acceptance requirement depends on them. The opaque-object requirement above
+remains part of the release; deferring a larger object system does not waive it.
+
 ## 1. Settle the public API
 
 | Requirement | Current status | Evidence needed to close it |

@@ -24,6 +24,15 @@ contract. These changes do not
 close the remaining public settings/userdata design, yieldable `require`,
 language error-phase, real-platform golden, or packaging gates.
 
+The [release delivery order](92-first-release.md#delivery-order) now groups the
+remaining work into a green baseline, API boundary decisions, embedding
+completeness, runtime correctness, platform validation, a consumer-tested
+candidate, and publication. API work leads; runtime and platform work can run
+alongside it. PR #60's full preflight found a stale generated benchmark-progress
+report after the rustdoc commit; refreshing that report changes no measurement
+or performance claim. Its follow-up still needs final CI before the baseline
+batch closes.
+
 **Memory-limit hardening:** memory-limited VMs now avoid batched execution paths
 and use the scalar dispatcher's instruction-boundary quota checks, closing the
 former HotIR/tape collection-window gap. Cross-profile, cross-interval regressions
