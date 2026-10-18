@@ -26,7 +26,9 @@ jobs:
     runs-on:
       group: general-linux
       labels: [self-hosted, Linux, X64, general-linux]
-    timeout-minutes: 30
+    # Packaged and workspace conformance both run here; keep the complete gate
+    # within one job without cutting correctness coverage when the corpus grows.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
