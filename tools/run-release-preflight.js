@@ -111,6 +111,7 @@ run("cargo", [
 node("tools/check-release-notes.js");
 node("tools/check-crate-metadata.js", "--check");
 node("tools/check-workflows.js");
+node("tools/check-workflows.js", "--self-test");
 node("tools/check-package-files.js", "--check");
 node("tools/check-publishability.js", "--check");
 node("tools/check-package-dry-runs.js");
@@ -119,6 +120,7 @@ node("design/render-progress.js", "--check");
 node("tools/check-project-status.js");
 node("tools/check-readme-examples.js");
 node("tools/check-facade-api.js");
+node("tools/check-external-facade.js");
 node("tools/check-readme-comparisons.js");
 run("cargo", ["doc", "--locked", "--workspace", "--lib", "--no-deps"], {
   RUSTDOCFLAGS: [process.env.RUSTDOCFLAGS, "-D warnings"].filter(Boolean).join(" "),

@@ -154,6 +154,17 @@ const RUNNER_CLASSES = new Map([
     },
   ],
   [
+    "general-macos",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-macos",
+        "      labels: [self-hosted, macOS, ARM64, general-macos]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+  [
     // The owned benchmark host's runner group. Targeted by group alone: the
     // group has exactly one runner, so naming labels as well would add a
     // second thing to keep in sync with the machine for no extra guarantee.
@@ -178,6 +189,9 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["acceptance-bench.yml", "bench-solo"],
   ["rustia-memory.yml", "bench-solo"],
 ]);
+
+// Only this native correctness job may leave CI's ordinary Linux pool.
+const JOB_RUNNER_CLASS = new Map([["ci.yml:macos-arm64-runtime", "general-macos"]]);
 
 // Commands that take a timing. Until now only the first three were forbidden,
 // and the four on-host runners were forbidden nowhere -- a workflow on the
@@ -233,7 +247,11 @@ function checkRunnerLabels(files) {
     checkActionPins(text, label);
 
     const lines = text.split(/\r?\n/);
+    let job = "";
+    let allowedMentions = 0;
     for (let index = 0; index < lines.length; index += 1) {
+      const jobHeader = lines[index].match(/^  ([a-zA-Z0-9_-]+):$/);
+      if (jobHeader) job = jobHeader[1];
       const inline = lines[index].match(RUNS_ON_PATTERN);
       if (!inline) continue;
       const value = inline[1].trim();
@@ -241,14 +259,17 @@ function checkRunnerLabels(files) {
         fail(`${label} must use expanded runs-on form so runner labels are reviewable`);
       }
       if (value === "") {
-        if (runnerClass === null) {
+        const jobClassName = JOB_RUNNER_CLASS.get(`${file}:${job}`) ?? className;
+        const jobClass = jobClassName === null ? null : RUNNER_CLASSES.get(jobClassName);
+        if (jobClass === null) {
           fail(`${label} may only use GitHub-hosted runners, but declares an expanded runs-on block`);
         }
-        const blockLines = runnerClass.block.split("\n").length;
+        const blockLines = jobClass.block.split("\n").length;
         const runnerBlock = lines.slice(index, index + blockLines).join("\n");
-        if (runnerBlock !== runnerClass.block) {
-          fail(`${label} expanded runs-on block must match the reviewed ${className} class exactly`);
+        if (runnerBlock !== jobClass.block) {
+          fail(`${label} job ${job} expanded runs-on block must match the reviewed ${jobClassName} class exactly`);
         }
+        allowedMentions += runnerBlock.split("self-hosted").length - 1;
         continue;
       }
       if (!hostedRunners.has(value)) {
@@ -263,9 +284,6 @@ function checkRunnerLabels(files) {
     // runner block accounts for. A group-only block contains none, so the
     // permitted count is zero rather than one per block.
     const selfHostedMentions = text.split("self-hosted").length - 1;
-    const perBlock = runnerClass === null ? 0 : runnerClass.block.split("self-hosted").length - 1;
-    const blockOccurrences = runnerClass === null ? 0 : text.split(runnerClass.block).length - 1;
-    const allowedMentions = perBlock * blockOccurrences;
     if (selfHostedMentions !== allowedMentions) {
       fail(
         `${label} mentions "self-hosted" ${selfHostedMentions} time(s); its ${className ?? "hosted-only"} ` +
@@ -349,7 +367,7 @@ function checkBenchHostQueue(files) {
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
-  const releasePreflightJob = text.split("\n  portable-engine-build:\n", 1)[0];
+  const releasePreflightJob = text.split("\n  macos-arm64-runtime:\n", 1)[0];
   requireIncludes(text, "name: CI\n", label);
   // workflow_dispatch is how the weekly matrix gets CI onto main's tip after a
   // landing. Its app-token merge does start push workflows, so the dispatch may
@@ -419,6 +437,26 @@ function checkCi(text) {
     label,
   );
   requireIncludes(text, "wasm-node-runtime:\n", label);
+  const macosJob = text.split("\n  macos-arm64-runtime:\n")[1]?.split("\n  portable-engine-build:\n")[0];
+  if (!macosJob) fail(`${label} must execute macOS arm64 correctness, separately from cross-compilation`);
+  requireIncludes(macosJob, RUNNER_CLASSES.get("general-macos").block, `${label} macos job`);
+  for (const check of [
+    'test "$(uname -s)" = Darwin',
+    'test "$(uname -m)" = arm64',
+    'test "$(rustc -vV | sed -n \'s/^host: //p\')" = aarch64-apple-darwin',
+    "bash tools/run-private-platform-golden.sh native default",
+    "bash tools/run-private-platform-golden.sh native bare",
+    "cargo test --locked -p rustia --test host_functions --test typed_objects --test live_value_contract",
+    "cargo test --locked -p rustia --no-default-features --test host_functions --test typed_objects --test live_value_contract",
+  ]) requireIncludes(macosJob, check, `${label} macos job`);
+  for (const command of [
+    "bash tools/run-private-platform-golden.sh native default",
+    "bash tools/run-private-platform-golden.sh native bare",
+  ]) requireIncludes(releasePreflightJob, command, `${label} Linux golden job`);
+  for (const command of [
+    "bash tools/run-private-platform-golden.sh wasm bare",
+    "bash tools/run-private-platform-golden.sh wasm default",
+  ]) requireIncludes(text, command, label);
   requireIncludes(text, "name: Wasm runtime (Node/V8)", label);
   requireIncludes(
     text,
@@ -524,6 +562,7 @@ function checkPrBench(text) {
 }
 
 function checkReleasePreflight(text) {
+  requireIncludes(text, 'node("tools/check-external-facade.js");', "release preflight");
   const label = "tools/run-release-preflight.js";
   for (const needle of [
     '"git", ["diff", "--quiet", "--", "Cargo.lock"]',
@@ -1167,6 +1206,67 @@ function checkBenchmarkPublication(text) {
   // them from the checkout, so they must be installed before it runs.
   requireIncludes(text, "install -m 644 \"$data_dir/bench/history/series/ci-bench-main.jsonl\"", label);
 
+}
+
+if (process.argv.includes("--self-test")) {
+  const os = require("node:os");
+  const assert = require("node:assert/strict");
+  const { spawnSync } = require("node:child_process");
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-workflow-policy-"));
+  try {
+    fs.cpSync(path.join(root, "tools"), path.join(temporary, "tools"), { recursive: true });
+    fs.cpSync(workflowDir, path.join(temporary, ".github", "workflows"), { recursive: true });
+    fs.mkdirSync(path.join(temporary, "bench"));
+    fs.copyFileSync(path.join(root, "bench/analyze-memory-samples.js"), path.join(temporary, "bench/analyze-memory-samples.js"));
+    fs.copyFileSync(rustToolchainPath, path.join(temporary, "rust-toolchain.toml"));
+    const canonical = readWorkflow(ciPath);
+    const macosBlock = RUNNER_CLASSES.get("general-macos").block;
+    const linuxBlock = RUNNER_CLASSES.get("general-linux").block;
+    const run = (text) => {
+      fs.writeFileSync(path.join(temporary, ".github/workflows/ci.yml"), text);
+      return spawnSync(process.execPath, [path.join(temporary, "tools/check-workflows.js")], { encoding: "utf8" });
+    };
+    const baseline = run(canonical);
+    assert.equal(baseline.status, 0, baseline.stderr);
+    for (const [label, changed, message] of [
+      ["Mac job in Linux pool", canonical.replace(macosBlock, linuxBlock), /job macos-arm64-runtime.*general-macos/],
+      ["Linux job in Mac pool", canonical.replace(linuxBlock, macosBlock), /job release-preflight.*general-linux/],
+      ["unregistered Mac job", canonical.replace("  macos-arm64-runtime:", "  another-macos-job:"), /job another-macos-job.*general-linux/],
+      ["missing architecture check", canonical.replace('test "$(uname -m)" = arm64', "true"), /must include.*uname/],
+      ["missing shared Wasm golden", canonical.replace("bash tools/run-private-platform-golden.sh wasm default", "true"), /must include.*private-platform-golden/],
+      ["timing on shared executor", canonical + "\n# node tools/run-dedicated-benchmark.js\n", /must not include.*run-dedicated-benchmark/],
+    ]) {
+      assert.notEqual(changed, canonical, `${label}: mutation did not apply`);
+      const result = run(changed);
+      assert.notEqual(result.status, 0, `${label}: invalid workflow passed`);
+      assert.match(result.stderr, message, `${label}: failed for the wrong reason`);
+    }
+    const fakeBin = path.join(temporary, "fake-bin");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(fakeBin, "cargo"), [
+      "#!/usr/bin/env bash",
+      'case "$RUSTIA_GOLDEN_TEST_CASE" in',
+      "  zero) exit 0 ;;",
+      "  failure) exit 19 ;;",
+      "esac",
+      "echo 'RUSTIA_PRIVATE_PLATFORM_GOLDEN fixture'",
+      'if [[ "$RUSTIA_GOLDEN_TEST_CASE" = duplicate ]]; then',
+      "  echo 'RUSTIA_PRIVATE_PLATFORM_GOLDEN fixture'",
+      "fi", "",
+    ].join("\n"), { mode: 0o755 });
+    for (const scenario of ["one", "zero", "duplicate", "failure"]) {
+      const result = spawnSync("bash", [path.join(temporary, "tools/run-private-platform-golden.sh"), "native", "default"], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, RUSTIA_GOLDEN_TEST_CASE: scenario },
+      });
+      if (scenario === "one") assert.equal(result.status, 0, result.stderr);
+      else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
+    }
+    console.log("workflow policy self-tests: canonical, six policy rejections, and four golden-execution cases pass");
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+  process.exit(0);
 }
 
 const files = workflowFiles();

@@ -17,6 +17,12 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- Private acceptance checks execute one shared deterministic transcript on
+  Linux x86-64, macOS arm64 and Node/V8, alongside the existing eight-target
+  build matrix. A clean Cargo application reuses public facade contracts
+  against extracted runtime archives in default/bare modes. Final CI,
+  independent review and candidate acceptance remain pending.
+
 - Typed Rust objects through `ObjectType<T, H>`, `register_object_type`, and
   `create_object`. Scripts call methods with `object:method(...)`; Rust keeps
   type-checked live handles and can return fresh objects with `NewObject`.

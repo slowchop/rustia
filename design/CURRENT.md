@@ -52,6 +52,13 @@ Rust objects, runtime gaps, Linux/macOS-arm64/Node-V8 correctness, and an exact
 candidate used by WOTS/civfun/Grabby. Runtime and platform work can run alongside
 API work. The full native/mobile/Firefox/Safari runtime matrix remains required
 before public release, but does not block this private milestone.
+The [private platform checks](84-private-platform-acceptance.md) now add one
+shared exact transcript on Linux x86-64, native macOS arm64, and Node/V8 in
+default and bare modes. The Mac job verifies the actual OS, architecture and
+compiler host. A clean external Cargo application reuses public contract tests
+against the five extracted runtime archives with only facade/Serde dependencies
+and candidate-lock package identities. These checks are implemented; final
+three-platform CI, independent review, and candidate acceptance remain pending.
 PR #60's stale generated benchmark-progress report was repaired in
 [PR #61](https://github.com/slowchop/rustia/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The

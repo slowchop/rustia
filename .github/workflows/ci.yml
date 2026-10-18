@@ -60,6 +60,46 @@ jobs:
       - name: Run canonical release preflight
         run: node tools/run-release-preflight.js
 
+      - name: Execute shared private golden on Linux x86-64
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          git rev-parse HEAD
+          bash tools/run-private-platform-golden.sh native default
+          bash tools/run-private-platform-golden.sh native bare
+
+  macos-arm64-runtime:
+    name: Native runtime (macOS arm64)
+    runs-on:
+      group: general-macos
+      labels: [self-hosted, macOS, ARM64, general-macos]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          cache: false
+
+      - name: Verify native arm64 execution and run shared correctness suites
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
+          git rev-parse HEAD
+          bash tools/run-private-platform-golden.sh native default
+          bash tools/run-private-platform-golden.sh native bare
+          cargo test --locked -p rustia --test host_functions --test typed_objects --test live_value_contract
+          cargo test --locked -p rustia --no-default-features --test host_functions --test typed_objects --test live_value_contract
+
   portable-engine-build:
     name: Engine build (${{ matrix.target }})
     runs-on:
@@ -146,6 +186,7 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test live_value_contract
+          bash tools/run-private-platform-golden.sh wasm bare
 
       - name: Run default web-live adapter tests on Node/V8
         env:
@@ -155,3 +196,4 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test live_value_contract
+          bash tools/run-private-platform-golden.sh wasm default

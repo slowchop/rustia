@@ -1,0 +1,81 @@
+# Private platform and facade acceptance
+
+Status: checks implemented; final CI, independent review, and private-candidate
+acceptance remain pending. Publication stays disabled and the version stays
+`0.0.1`.
+
+## Executed targets
+
+The private milestone requires real execution on Linux x86-64, macOS arm64,
+and Node/V8 Wasm. These are correctness checks; no timings are collected or
+used as performance evidence.
+
+| CI lane | Executed coverage |
+|---|---|
+| Linux release preflight | Workspace tests/conformance, the shared golden in default and bare modes, and external archived-facade contracts |
+| Native macOS arm64 | The shared golden, host functions, typed objects, and live-value contracts in default and bare modes |
+| Node/V8 Wasm | The same golden in default and bare modes, alongside the existing host-adapter, object, callback and live-value suites |
+
+The native jobs verify the actual OS and architecture. The Mac job also checks
+the compiler host triple, so an Intel process under translation cannot stand in
+for arm64 execution. CI logs the tested checkout and the exact golden transcript.
+The shared runner requires exactly one transcript sentinel, rejecting empty
+test runs as well as failed execution. Policy self-tests exercise wrong runner
+placement, missing checks, and zero/duplicate/failed golden execution.
+
+The separate eight-target engine build matrix remains unchanged. Build success
+for Intel macOS, Linux arm64, Windows, iOS and Android is not runtime evidence.
+Real Firefox/Safari and the wider native/mobile execution matrix remain future
+public-release gates.
+
+## One shared transcript
+
+`crates/rustia/tests/platform_golden.rs` executes through the public facade on
+all three targets. Each run checks the same fixed bytes under both
+`DeterministicSim` and `ReproducibleStandard`, then repeats after reset.
+
+The transcript covers f64 NaN/infinity/negative-zero arithmetic, selected libm
+results, ordered table iteration, a seeded random sequence, buffer byte order,
+coroutine yield/resume, and a cyclic table. Numeric edge cases retain the
+existing VM golden. The seeded sequence comes from the pinned Luau 0.709
+conformance fixture. This is a bounded regression corpus, not proof of universal
+determinism or complete language compatibility. Host/object lifecycle suites
+remain separate so this transcript stays small and easy to review.
+
+Local correctness commands are:
+
+```sh
+cargo test --locked -p rustia --test platform_golden -- --nocapture
+cargo test --locked -p rustia --no-default-features --test platform_golden -- --nocapture
+```
+
+For Wasm, use `--target wasm32-unknown-unknown` and the lock-matched
+`wasm-bindgen-test-runner`. Local Darwin/arm64 execution can supplement CI;
+it does not count as a completed Mac CI job.
+
+## Clean external facade contracts
+
+`node tools/check-external-facade.js` packages and extracts the five runtime
+crates without publication. It verifies production source bytes against the
+checkout and creates a fresh Cargo application outside the workspace. That
+application depends directly on only `rustia` and `serde`; internal packages
+are patched to their extracted archives.
+
+The harness copies existing public contract tests from the facade archive,
+checking that their bytes match the canonical sources. There is no second
+copy of those tests to maintain. The selected suites cover values/Serde, live
+cycles and aliases, callback bounds and results, typed objects and journals,
+typed errors, limits/settings, reset, and successful/failed module installation.
+Core-only compiler tests are excluded from the application.
+
+The candidate's lock seeds offline resolution. The harness permits no package
+version/source/checksum absent from that lock, apart from its own application
+root. The application uses the repository's pinned Rust toolchain. It then runs
+all contracts with `--locked --offline` in default and bare
+feature modes. This tests the actual private archives without relying on a
+registry placeholder or allowing a moving dependency update. It establishes
+neither registry installation nor docs.rs publication.
+
+The full private acceptance still requires one final immutable candidate in
+the active clients, runtime-gap closure, all required CI, independent reviews,
+and remote benchmark evidence under [the release plan](92-first-release.md).
