@@ -13,6 +13,49 @@ fn player_type() -> ObjectType<Player> {
     ObjectType::new("Player").method("score", 1, |p: &Player| p.score)
 }
 
+#[test]
+fn expanded_call_continuations_root_typed_objects() -> Result<()> {
+    let mut lua = RustiaBuilder::standard()
+        .memory_limit_bytes(2 * 1024 * 1024)
+        .fuel(100_000)
+        .build()?;
+    lua.register_object_type(player_type())?;
+    lua.register_function("make_player", || NewObject::new(Player { score: 21 }))?;
+    let source = r#"
+        local function pass(...) return ... end
+        local function pressure()
+            for i=1,48 do local garbage=table.create(16000,i) end
+        end
+        local function argument(...)
+            coroutine.yield('argument')
+            string.len=function(object,x,y)
+                coroutine.yield('callee')
+                return object:score()+x+y
+            end
+            return ...
+        end
+        local co=coroutine.create(function()
+            return string.len(make_player(),pass(pass(pass(pass(argument(4,5))))))
+        end)
+        local a,b=coroutine.resume(co)
+        pressure()
+        local c,d=coroutine.resume(co)
+        pressure()
+        local e,f=coroutine.resume(co)
+        return tostring(a)..':'..b..':'..tostring(c)..':'..d..':'..tostring(e)..':'..f
+    "#;
+    assert_eq!(
+        lua.eval::<String>(source)?,
+        "true:argument:true:callee:true:30"
+    );
+    lua.reset_decision()?;
+    assert_eq!(
+        lua.eval::<String>(source)?,
+        "true:argument:true:callee:true:30"
+    );
+    Ok(())
+}
+
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     wasm_bindgen_test::wasm_bindgen_test

@@ -294,3 +294,6 @@ base case. Two additional corpus fixtures record `2:3:false:false:2` for nested
 result counts and `3` for the recursive call. Four-profile ordering controls
 also pin the shared Luau call semantics; `Puc51Compat` continues to select its
 documented table/sort/format behavior rather than a second language compiler.
+The combined typed-object candidate also keeps a fresh object alive in an
+expanded-call continuation across both suspensions, repeated collection pressure,
+and reset; its method remains callable after each resume.
