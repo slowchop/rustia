@@ -86,7 +86,16 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          if [ ! -x "$cargo_bin/rustup" ]; then
+            echo "::error::Rustup is missing from this account's Cargo tools directory."
+            exit 1
+          fi
+          export PATH="$cargo_bin:$PATH"
+          echo "$cargo_bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update
 
       - name: Verify native arm64 execution and run shared correctness suites
         run: |

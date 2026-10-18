@@ -443,7 +443,11 @@ function checkCi(text) {
   for (const check of [
     `RUSTUP_TOOLCHAIN: ${rustChannel}`,
     "RUSTFLAGS: -D warnings",
-    `run: rustup toolchain install ${rustChannel} --profile minimal --target aarch64-apple-darwin --no-self-update`,
+    'cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
+    'if [ ! -x "$cargo_bin/rustup" ]; then',
+    'export PATH="$cargo_bin:$PATH"',
+    'echo "$cargo_bin" >> "$GITHUB_PATH"',
+    `rustup toolchain install ${rustChannel} --profile minimal --target aarch64-apple-darwin --no-self-update`,
     'test "$(uname -s)" = Darwin',
     'test "$(uname -m)" = arm64',
     'test "$(rustc -vV | sed -n \'s/^host: //p\')" = aarch64-apple-darwin',
@@ -1241,6 +1245,7 @@ if (process.argv.includes("--self-test")) {
       ["missing architecture check", canonical.replace('test "$(uname -m)" = arm64', "true"), /must include.*uname/],
       ["unpinned Mac toolchain", canonical.replace(`RUSTUP_TOOLCHAIN: ${pinnedRustChannel()}`, "RUSTUP_TOOLCHAIN: stable"), /must include.*RUSTUP_TOOLCHAIN/],
       ["Mac package manager mutation", canonical.replace("      - name: Verify native arm64", "      - run: brew install bash\n      - name: Verify native arm64"), /must not include.*brew/],
+      ["missing user Cargo path", canonical.replace('export PATH="$cargo_bin:$PATH"', "true"), /must include.*export PATH/],
       ["missing Mac golden target", canonical.replace("native default aarch64-apple-darwin", "native default"), /must include.*aarch64-apple-darwin/],
       ["missing Mac suite target", canonical.replace("--target aarch64-apple-darwin --test host_functions", "--test host_functions"), /must include.*aarch64-apple-darwin/],
       ["missing Linux golden target", canonical.replace("native default x86_64-unknown-linux-gnu", "native default"), /must include.*x86_64-unknown-linux-gnu/],
@@ -1274,7 +1279,7 @@ if (process.argv.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, eleven policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, twelve policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

@@ -19,8 +19,8 @@ used as performance evidence.
 The native jobs verify the actual OS and architecture and pass their target
 triples explicitly to Cargo. The Mac job also checks the compiler host triple;
 runner configuration cannot silently substitute Intel execution for arm64.
-The Mac job installs the pinned toolchain with rustup in the runner account,
-without system package changes, and treats compiler warnings as errors.
+The Mac job discovers the account's Cargo tools and installs the pinned
+toolchain with rustup, without system package changes. Compiler warnings are errors.
 CI logs the tested checkout and the exact golden transcript.
 The shared runner requires exactly one transcript sentinel, rejecting empty
 test runs as well as failed execution. Policy self-tests exercise wrong runner
