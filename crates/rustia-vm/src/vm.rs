@@ -1,6 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 
+mod expanded_calls;
 mod host_functions;
+
+use expanded_calls::ExpandedCallState;
 
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
@@ -2334,6 +2337,7 @@ struct StacklessSelfCallFrame {
 
 #[derive(Clone)]
 enum BytecodeContinuation {
+    ExpandedCalls(ExpandedCallState),
     WriteFirst {
         register: u8,
     },
@@ -4264,6 +4268,64 @@ impl Vm {
                         &varargs,
                         &pending_return_prefixes,
                     );
+                    let (continuation, resume_results) = match continuation {
+                        BytecodeContinuation::ExpandedCalls(mut state) => {
+                            let outcome = self
+                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
+                                .map_err(|e| {
+                                    attach_instruction_source(
+                                        program,
+                                        function,
+                                        pc.saturating_sub(1),
+                                        e,
+                                    )
+                                });
+                            match outcome {
+                                Ok(VmFlow::Yield(suspension)) => {
+                                    return self.suspend_bytecode_frame(
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        suspension,
+                                    );
+                                }
+                                Ok(VmFlow::Return(results)) => {
+                                    match state.finish(
+                                        &mut registers,
+                                        &mut pending_return_prefixes,
+                                        results,
+                                        self,
+                                    ) {
+                                        Ok(Some(results)) => {
+                                            unwind_stackless_return!(results);
+                                        }
+                                        Ok(None) => {
+                                            self.sync_register_cells(
+                                                &mut registers,
+                                                &register_cells,
+                                            )?;
+                                        }
+                                        Err(error) => {
+                                            unwind_stackless_error!(error);
+                                        }
+                                    }
+                                    continue 'run_function_loop;
+                                }
+                                Err(error) => {
+                                    unwind_stackless_error!(error);
+                                    continue 'run_function_loop;
+                                }
+                            }
+                        }
+                        other => (other, resume_results),
+                    };
                     let continuation_root_mark =
                         self.push_bytecode_continuation_roots(&continuation);
                     let continuation_result = self.apply_bytecode_continuation(
@@ -4482,6 +4544,52 @@ impl Vm {
                         }
 
                         pc += 1;
+                        if instruction.aux < 0
+                            && crate::bytecode::expanded_call_count(instruction.op).is_some()
+                        {
+                            let call_site = instruction_source_location(program, function, pc - 1);
+                            let mut state = ExpandedCallState::new(
+                                program,
+                                instruction,
+                                &registers,
+                                &varargs,
+                                context.depth,
+                                call_site,
+                            )
+                            .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
+                            let results = match self
+                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
+                                .map_err(|e| {
+                                    attach_instruction_source(program, function, pc - 1, e)
+                                })? {
+                                VmFlow::Return(results) => results,
+                                VmFlow::Yield(suspension) => {
+                                    return self.suspend_bytecode_frame(
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::ExpandedCalls(state),
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        suspension,
+                                    );
+                                }
+                            };
+                            if let Some(results) = state.finish(
+                                &mut registers,
+                                &mut pending_return_prefixes,
+                                results,
+                                self,
+                            )? {
+                                return Ok(VmFlow::Return(results.into()));
+                            }
+                            self.sync_register_cells(&mut registers, &register_cells)?;
+                            continue;
+                        }
                         match instruction.op {
                             Opcode::Halt => {
                                 return Ok(VmFlow::Return(finish_function_results(
@@ -7739,6 +7847,9 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Option<Vec<Value>>> {
         match continuation {
+            BytecodeContinuation::ExpandedCalls(_) => Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "expanded calls require resumable continuation handling",
+            })),
             BytecodeContinuation::WriteFirst { register } => {
                 let value = first_result_or_nil(results);
                 set_register(registers, register, value)?;
@@ -7917,7 +8028,7 @@ impl Vm {
                     )
                 }
             }
-            Constant::Import(_) => {
+            Constant::Import(_) | Constant::CallDescriptor(_) => {
                 return Err(Error::new(ErrorKind::InvalidProgram {
                     reason: "import descriptors cannot be loaded as values",
                 }));
@@ -20704,6 +20815,11 @@ fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
             ));
         }
         for (pc, instruction) in function.code.iter().enumerate() {
+            if instruction.aux < 0 && crate::bytecode::expanded_call_count(instruction.op).is_some()
+            {
+                expanded_calls::descriptor(program, *instruction)
+                    .map_err(|e| attach_instruction_source(program, function, pc, e))?;
+            }
             let feature = match instruction.op {
                 Opcode::SetGlobal => Some("global mutation"),
                 Opcode::SetUpvalue => Some("captured upvalue mutation"),
@@ -23468,6 +23584,7 @@ fn shrink_call_stack_frame_capacity(frame: &mut CallStackFrame) {
 
 fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation) {
     match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => state.shrink(),
         BytecodeContinuation::CallExpandAfterTrailing { args, .. } => args.shrink_to_fit(),
         BytecodeContinuation::ReturnWithPrefix { prefix } => prefix.shrink_to_fit(),
         BytecodeContinuation::WriteFirst { .. }
@@ -23842,6 +23959,9 @@ fn try_clone_bytecode_continuation(
     continuation: &BytecodeContinuation,
 ) -> Result<BytecodeContinuation> {
     Ok(match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => {
+            BytecodeContinuation::ExpandedCalls(state.try_clone()?)
+        }
         BytecodeContinuation::WriteFirst { register } => BytecodeContinuation::WriteFirst {
             register: *register,
         },
@@ -24176,6 +24296,7 @@ fn add_register_cells_memory(values: &RegisterCells, usage: &mut MemoryUsage) {
 
 fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut MemoryUsage) {
     match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => state.memory(usage),
         BytecodeContinuation::CallExpandAfterTrailing {
             args, call_site, ..
         } => {
@@ -25884,6 +26005,7 @@ fn extend_capture_cell_roots(roots: &mut Vec<Value>, cells: &[Option<u32>]) {
 
 fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &BytecodeContinuation) {
     match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => state.roots(roots),
         BytecodeContinuation::CallExpandAfterTrailing {
             outer_callee, args, ..
         } => {
@@ -25906,6 +26028,7 @@ fn extend_bytecode_continuation_heap_roots(
     continuation: &BytecodeContinuation,
 ) {
     match continuation {
+        BytecodeContinuation::ExpandedCalls(state) => state.heap_roots(roots),
         BytecodeContinuation::CallExpandAfterTrailing {
             outer_callee, args, ..
         } => {

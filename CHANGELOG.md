@@ -552,6 +552,10 @@ Current unpublished workspace version: `0.0.1`.
   Oracle-verified fixed-arity builtins and `pairs`/`ipairs` ignore trailing
   arguments after evaluating them; invalid `table.insert` arities still fail
   during execution.
+  Trailing calls and varargs also retain zero or multiple results; parentheses
+  select one. Recognized direct builtin callees resolve after arguments, even
+  across coroutine suspension, while aliases and parenthesized callees keep
+  their ordinary lookup order.
 
 - **The owned-host benchmark lanes queue instead of cancelling a waiting run.**
   The per-commit series, weekly matrix, memory cohort and A/B acceptance share

@@ -200,3 +200,59 @@ true frontend rejection. The differential generator now includes these call
 shapes rather than only ordinary arithmetic/table failures. Full CI and
 independent review remain pending; broader language parity and yieldable
 `require` remain open.
+
+### Expanded arguments and builtin lookup order
+
+Independent review extended the same audit to effective argument counts.
+An unparenthesized trailing call or `...` contributes all its results, including
+zero. For example, `type(empty())` must fail for a missing argument, while
+`type((empty()))` receives one nil and returns `"nil"`. Likewise, if `many()`
+returns `4, 99`, `table.insert(values, 1, many())` supplies four arguments and
+fails; `table.insert(values, 1, (many()))` supplies three and inserts `4`.
+These were existing gaps in the initial facade candidate, not regressions from
+the ignored-extra fixes above.
+
+The compiler now uses syntax to preserve expansion across scalar, tuple,
+return, table-constructor, and iterator contexts. It no longer assumes every
+`math`/`string`/`table` call has one result. Parentheses retain their explicit
+single-result meaning. Value and method calls share argument-window lowering,
+including the implicit receiver, so a method wrapper preserves nested results.
+The compiler-only conformance `concat` helper remains
+known to return one value; ordinary guest builtins are not granted that shortcut.
+
+Luau also distinguishes callee lookup order for recognized builtin calls.
+`string.len('abc', extra())` resolves the recognized direct callee after its
+arguments. If `extra()` replaces `string.len`, that replacement receives the
+complete argument list. `(string.len)('abc', extra())` and a local function
+alias capture their callee before the arguments. Recognition follows the exact
+Luau 0.709 `Compiler/src/Builtins.cpp` list and syntactic global writes; a
+library field assignment does not have the same effect as assigning the
+library's global name. Unknown fields and non-recognized functions such as
+`string.upper` retain ordinary order. Arguments that can execute guest code,
+including metamethods, cannot use an opcode that bypasses the selected callee.
+
+Expanded calls retain explicit, validated import metadata so lookup happens
+after the trailing call completes. The continuation preserves this rule if
+the argument suspends, and can suspend again in the selected callee. Metadata
+is not a guest value, participates in program memory accounting, and is checked
+before callbacks. Deferred callee slots have no placeholder load instruction;
+the omitted import's fuel and logical steps are charged at the actual lookup.
+These forms use scalar dispatch until an optimized executor
+explicitly supports the contract; no wrapper closures or new opcodes are added.
+
+The pinned captures add two runtime-error fixtures and one successful fixture:
+
+| Fixture | Luau 0.709 observation |
+|---|---|
+| `builtin_expanded_insert_arity.luau` | Runtime error containing `arguments` |
+| `builtin_zero_result_argument.luau` | Runtime error containing `argument` |
+| `builtin_callee_evaluation_order.luau` | `103:3:3:103:103` |
+
+`builtin_argument_expansion.rs` tests 21 oracle-derived cases across four
+profiles. `builtin_callee_order.rs` covers direct/aliased/parenthesized and
+replaced callees, source-later global writes, and metamethod effects. Twelve
+additional oracle-derived cases suspend first in the argument and again in
+the callee across fixed, return, append, nested, method and vararg forms, under a quota
+and after reset. The bounded differential generator includes expansion and
+lookup-order shapes. Full CI and new independent review remain pending; this
+is a focused compatibility fix rather than a claim of complete language parity.

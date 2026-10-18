@@ -340,6 +340,18 @@ pub fn instruction_facts(
     function: &Function,
     instruction: Instruction,
 ) -> InstructionFacts {
+    let instruction =
+        if instruction.aux < 0 && crate::bytecode::expanded_call_count(instruction.op).is_some() {
+            match program.constants().get((!instruction.aux) as usize) {
+                Some(crate::bytecode::Constant::CallDescriptor(descriptor)) => Instruction {
+                    aux: descriptor.aux,
+                    ..instruction
+                },
+                _ => instruction,
+            }
+        } else {
+            instruction
+        };
     let base = InstructionFacts::new();
     let Instruction { op, a, b, c, aux } = instruction;
     match op {

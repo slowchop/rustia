@@ -461,7 +461,7 @@ fn primitive_constant(program: &Program, index: usize) -> Option<Value> {
         Constant::Nil => Some(Value::nil()),
         Constant::Boolean(value) => Some(Value::boolean(*value)),
         Constant::Number(value) => Some(Value::number(*value)),
-        Constant::String(_) | Constant::Import(_) => None,
+        Constant::String(_) | Constant::Import(_) | Constant::CallDescriptor(_) => None,
     }
 }
 

@@ -162,6 +162,32 @@ pub enum Constant {
     String(Vec<u8>),
     /// A one-to-three component import path whose entries index string constants.
     Import(Vec<u32>),
+    /// Argument windows and deferred import lookups for an expanded call.
+    /// A supported call instruction references this with `aux = !index`.
+    CallDescriptor(Box<CallDescriptor>),
+}
+
+/// Per-level callee lookup order for a fused expanded call, outermost first.
+/// Unused entries must be `None`; each present entry references an import constant.
+#[derive(Clone, Debug)]
+pub struct CallDescriptor {
+    pub aux: i32,
+    pub deferred_imports: [Option<u32>; 4],
+}
+
+pub(crate) fn expanded_call_count(op: Opcode) -> Option<usize> {
+    match op {
+        Opcode::CallExpand
+        | Opcode::CallExpandVarargs
+        | Opcode::ReturnCallExpand
+        | Opcode::ReturnCallExpandVarargs
+        | Opcode::AppendCallExpand => Some(2),
+        Opcode::CallExpand2 | Opcode::ReturnCallExpand2 | Opcode::ReturnCallExpand2Varargs => {
+            Some(3)
+        }
+        Opcode::CallExpand3 => Some(4),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -651,6 +677,10 @@ impl Program {
                         live = live.saturating_add(path.len().saturating_mul(size_of::<u32>()));
                         reserved = reserved
                             .saturating_add(path.capacity().saturating_mul(size_of::<u32>()));
+                    }
+                    Constant::CallDescriptor(_) => {
+                        live = live.saturating_add(size_of::<CallDescriptor>());
+                        reserved = reserved.saturating_add(size_of::<CallDescriptor>());
                     }
                     Constant::Nil | Constant::Boolean(_) | Constant::Number(_) => {}
                 }

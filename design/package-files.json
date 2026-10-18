@@ -542,7 +542,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 19,
+      "file_count": 20,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -551,6 +551,7 @@
         "LICENSE-APACHE",
         "LICENSE-MIT",
         "README.md",
+        "src/builtins.rs",
         "src/lib.rs",
         "src/o2.rs",
         "tests/array_slot_write_coverage.rs",
@@ -570,7 +571,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 738,
+      "file_count": 741,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -610,8 +611,11 @@
         "corpus/conformance/fixtures/puc51-compat/table_iter_sparse_jumps.luau",
         "corpus/conformance/fixtures/puc51-compat/table_iter_string_heavy.luau",
         "corpus/conformance/fixtures/puc51-compat/table_next_walk.luau",
+        "corpus/conformance/fixtures/regressions/builtin_callee_evaluation_order.luau",
+        "corpus/conformance/fixtures/regressions/builtin_expanded_insert_arity.luau",
         "corpus/conformance/fixtures/regressions/builtin_ignored_extra_arguments.luau",
         "corpus/conformance/fixtures/regressions/builtin_unreachable_calls.luau",
+        "corpus/conformance/fixtures/regressions/builtin_zero_result_argument.luau",
         "corpus/conformance/fixtures/regressions/iterator_ignored_extra_arguments.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/PROVENANCE.tsv",
         "corpus/conformance/fixtures/upstream-luau-0.709/assert_error_source_prefix.luau",
@@ -1351,7 +1355,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-vm/Cargo.toml",
       "publish": false,
-      "file_count": 25,
+      "file_count": 27,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1375,9 +1379,11 @@
         "src/register_blocks.rs",
         "src/tape.rs",
         "src/value.rs",
+        "src/vm/expanded_calls.rs",
         "src/vm/host_functions.rs",
         "src/vm.rs",
-        "tests/core.rs"
+        "tests/core.rs",
+        "tests/deferred_calls.rs"
       ]
     },
     {
@@ -1385,7 +1391,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 57,
+      "file_count": 59,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1424,7 +1430,9 @@
         "src/value.rs",
         "tests/array_slot_mutation.rs",
         "tests/bare_wasm_live.rs",
+        "tests/builtin_argument_expansion.rs",
         "tests/builtin_call_phases.rs",
+        "tests/builtin_callee_order.rs",
         "tests/callback_adapter_api.rs",
         "tests/chunk_builder.rs",
         "tests/error_recovery.rs",

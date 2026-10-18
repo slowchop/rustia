@@ -21,7 +21,9 @@ mod tape;
 mod value;
 pub mod vm;
 
-pub use bytecode::{Constant, Function, Instruction, Opcode, Program, ProgramLogicalUnits};
+pub use bytecode::{
+    CallDescriptor, Constant, Function, Instruction, Opcode, Program, ProgramLogicalUnits,
+};
 pub use error::{Error, ErrorKind, Result};
 #[cfg(any(test, feature = "executor-diagnostics"))]
 pub use executor_census::ExecutorCensus;
