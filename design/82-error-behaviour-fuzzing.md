@@ -284,6 +284,11 @@ case can yield, then resume and unwind through selected callees in different
 functions or programs. Pending frames participate in the existing roots, program
 retention and memory accounting, including explicit collection while callers are
 pending. Recursion exhaustion remains a structured, uncatchable VM error.
+Callable table/userdata targets in those chains resolve `__call` receivers
+iteratively before dispatch, with the existing receiver order and recursion
+charges. Their bytecode targets use the same saved frames; native and host
+targets keep ordinary dispatch. Pinned controls cover recursive callable tables,
+their suspension and guest error identity, and native receiver arguments.
 
 The review also found that the configured `RecursionLimit` had incorrectly
 remained catchable in protected calls. It now follows the documented hard-abort
@@ -296,7 +301,7 @@ runtime error. Ordinary recovery and typed rollback tests cover this distinction
 16, zero and multiple results, parentheses, constructors, method receivers,
 varargs, repeated suspension, and recursive depth 20/100 including a suspended
 base case. Two additional corpus fixtures record `2:3:false:false:2` for nested
-result counts and `3:3` for self and mutual recursive calls. Four-profile ordering
+result counts and `3:3:3` for self, mutual and callable recursive calls. Four-profile ordering
 controls also pin the shared Luau call semantics; `Puc51Compat` continues to select its
 documented table/sort/format behavior rather than a second language compiler.
 The combined typed-object candidate also keeps a fresh object alive in an

@@ -57,7 +57,8 @@ parentheses select one value. Recognized direct builtin callees resolve after
 argument execution, with explicit import metadata preserving that order across
 repeated coroutine suspension. Variable-length argument chains preserve expansion
 beyond the fixed instruction shapes, and recursive calls resume those chains
-through explicit VM frames across functions and programs. Aliases and parenthesized callees keep ordinary
+through explicit VM frames across functions, programs and callable receivers.
+Aliases and parenthesized callees keep ordinary
 lookup order. Four-profile failure/recovery and call-shape regressions, eight
 new pinned-Luau fixtures, and expanded bounded differential cases cover this
 slice. Full CI and independent review remain pending. This does not close the

@@ -402,6 +402,12 @@ impl Vm {
                         });
                     }
                 }
+                if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
+                    return Ok(ExpandedCallFlow::Call {
+                        callee,
+                        args: call.args,
+                    });
+                }
                 let flow = self.call_value_with_site_resumable(
                     program,
                     callee,

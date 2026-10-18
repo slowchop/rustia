@@ -75,7 +75,7 @@ impl Vm {
                     flow = self.enter_deferred_bytecode_call(
                         fallback_program,
                         callee,
-                        &args,
+                        args,
                         depth,
                         call_site,
                         fuel,
@@ -135,16 +135,43 @@ impl Vm {
     fn enter_deferred_bytecode_call(
         &mut self,
         fallback_program: u32,
-        callee: Value,
-        args: &[Value],
-        depth: usize,
-        call_site: Option<ErrorLocation>,
+        mut callee: Value,
+        mut args: Vec<Value>,
+        mut depth: usize,
+        mut call_site: Option<ErrorLocation>,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
-        self.check_recursion_depth(depth)?;
-        let handle = callee
-            .as_function()
-            .ok_or_else(|| invalid_deferred_call("missing bytecode callee"))?;
+        // Resolve callable receivers before entering bytecode, rather than
+        // re-entering `run_function` through each recursive `__call` boundary.
+        // This uses the same receiver order and depth increments as ordinary
+        // `call_metamethod`; actual guest suspension stays with the driver.
+        let handle = loop {
+            self.check_recursion_depth(depth)?;
+            if let Some(handle) = callee.as_function() {
+                break handle;
+            }
+            let method = if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
+                self.metamethod_for_value(callee, "__call")?
+            } else {
+                None
+            };
+            let Some(method) = method else {
+                let program = self.dynamic_program(fallback_program)?;
+                return self.call_value_with_site_resumable(
+                    &program, callee, &args, depth, call_site, fuel,
+                );
+            };
+            args.try_reserve(1)
+                .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            args.insert(0, callee);
+            callee = method;
+            depth = depth.saturating_add(1);
+            call_site = None;
+        };
+        self.mutate_last_call_stack_frame(|frame| {
+            extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
+            extend_heap_backed_roots(&mut frame.stackless_roots, &args);
+        });
         let (kind, data) = self
             .heap
             .function_dispatch_data(handle)
@@ -154,7 +181,12 @@ impl Vm {
                 (program.unwrap_or(fallback_program), Some(prototype))
             }
             FunctionKind::DynamicMain { program } => (program, None),
-            _ => return Err(invalid_deferred_call("deferred callee is not bytecode")),
+            _ => {
+                let program = self.dynamic_program(fallback_program)?;
+                return self.call_function_kind_with_site_resumable(
+                    &program, callee, handle, kind, data, &args, depth, call_site, fuel,
+                );
+            }
         };
         let program = self.dynamic_program(program_id)?;
         let function = match prototype {
@@ -171,7 +203,7 @@ impl Vm {
             &program,
             Some(program_id),
             function,
-            args,
+            &args,
             FunctionCallContext {
                 current_function: Some(callee),
                 captures: &captures,

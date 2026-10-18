@@ -13,4 +13,10 @@ right = function(n)
     if n == 0 then return 4, 5 end
     return string.len('abc', left(n - 1))
 end
-return self .. ':' .. tostring(left(20))
+local callable = setmetatable({}, {
+    __call = function(receiver, n)
+        if n == 0 then return 4, 5 end
+        return string.len('abc', receiver(n - 1))
+    end,
+})
+return self .. ':' .. tostring(left(20)) .. ':' .. tostring(callable(20))

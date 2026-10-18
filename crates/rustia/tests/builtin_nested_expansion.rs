@@ -236,3 +236,42 @@ fn deferred_errors_resume_saved_protected_callers() {
         return tostring(ok)..':'..tostring(value)";
     assert_eq!(vm.eval::<String>(source).unwrap(), "false:42");
 }
+
+#[test]
+fn callable_receivers_use_the_same_expanded_call_driver() {
+    for depth in [20, 100] {
+        for base in ["return 4,5", "coroutine.yield('base'); return 4,5"] {
+            let source = format!(
+                "local a,b={{}},{{}}; \
+                 setmetatable(a,{{__call=function(self,n) if n==0 then {base} end; \
+                     return string.len('abc',b(n-1)) end}}); \
+                 setmetatable(b,{{__call=function(self,n) if n==0 then {base} end; \
+                     return string.len('abc',a(n-1)) end}}); \
+                 string.len=function(...) return select('#',...),7 end; \
+                 local co=coroutine.create(function() return tostring(a({depth})) end); \
+                 local ok,value=coroutine.resume(co); \
+                 if value=='base' then ok,value=coroutine.resume(co) end; \
+                 return tostring(ok)..':'..tostring(value)"
+            );
+            let mut vm = RustiaBuilder::standard()
+                .memory_limit_bytes(2 * 1024 * 1024)
+                .build()
+                .unwrap();
+            assert_eq!(vm.eval::<String>(&source).unwrap(), "true:3", "{source}");
+        }
+    }
+    let source = "local token={}; local receiver=setmetatable({}, \
+        {__call=function(self,n) if n==0 then error(token) end; \
+            return string.len('abc',self(n-1)) end}); \
+        local ok,value=pcall(function() return tostring(receiver(20)) end); \
+        return tostring(ok)..':'..tostring(rawequal(value,token))";
+    let mut vm = RustiaBuilder::standard().build().unwrap();
+    assert_eq!(vm.eval::<String>(source).unwrap(), "false:true");
+    let mut limited = RustiaBuilder::standard()
+        .recursion_limit(8)
+        .build()
+        .unwrap();
+    let error = limited.eval::<String>(source).unwrap_err();
+    assert!(matches!(error.kind(), ErrorKind::Vm(error)
+        if matches!(error.kind(), rustia::VmErrorKind::RecursionLimit { limit: 8 })));
+}
