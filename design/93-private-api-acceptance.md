@@ -2,6 +2,12 @@
 
 The private 0.x milestone uses immutable source revision
 `92a85d65eb33724c17103d43477d34a633392768`.
+The integrated CI commit `0e8422acdfd71d3d92d568696d9a200ee58e0d01`
+changes only the preflight time limit and its explanatory comments. Runtime
+sources, tests, manifests, dependency locks, tools and the API inventory remain
+byte-identical to this baseline. Both packaged and workspace conformance still
+run in full; the job now allows 60 minutes after the earlier 30-minute limit
+cancelled corpus execution without a failed-test verdict.
 The workspace remains at `0.0.1`, with publication disabled. This baseline gives
 future API work a concrete comparison point; the stable 1.0 decision and public
 release gates remain in [the release plan](92-first-release.md).
