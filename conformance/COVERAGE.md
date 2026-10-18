@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 720 fixtures and 517 refs: 702 executable `luau-0.709` fixtures, 0
+- The current manifest contains 723 fixtures and 517 refs: 705 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, 18 `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and 0 whole upstream
   Luau 0.709 conformance scripts as `pending-impl` inventory.
 - The `puc-lua-5.1.5` rows are the `Puc51Compat` differential corpus: expectations were captured offline
@@ -264,3 +264,5 @@ A conformance topic counts as covered only when:
 - the fixture is executable by the rustia harness,
 - the expectation is marked `luau-0.709`, and
 - the fixture passes under the intended profile.
+
+- Callable receivers have pinned-oracle controls for ordinary recursive calls, yield/resume, and rejection of non-function `__call` values in ordinary and expanded calls.

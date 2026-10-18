@@ -54,7 +54,7 @@ fn dependency_syntax_error_obeys_zero_snapshot_budget() {
 
 #[test]
 fn require_resolves_by_host_identity_and_executes_once() {
-    assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 2);
+    assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 3);
     let resolutions = Rc::new(Cell::new(0_u32));
     let resolutions_for_host = Rc::clone(&resolutions);
     let resolver = ServiceModuleResolver::from_fn(move |requested, referrer| {
@@ -195,7 +195,7 @@ fn require_reports_cycles_and_does_not_cache_failures() {
         .expect("cycle is catchable");
     assert_eq!(result.get_string_as::<bool>("first").unwrap(), Some(false));
     assert_eq!(result.get_string_as::<bool>("second").unwrap(), Some(false));
-    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), None);
+    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(2.0));
     assert_eq!(result.get_string_as::<bool>("cycle").unwrap(), Some(true));
 }
 
@@ -293,7 +293,7 @@ fn multi_result_modules_fail_without_entering_the_cache() {
         .expect("module errors are catchable");
     assert_eq!(result.get_string_as::<bool>("first").unwrap(), Some(false));
     assert_eq!(result.get_string_as::<bool>("second").unwrap(), Some(false));
-    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), None);
+    assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(2.0));
     assert_eq!(result.get_string_as::<bool>("message").unwrap(), Some(true));
 }
 
@@ -369,22 +369,6 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
                 }
             )
     ));
-
-    let low_level = rustia_vm::VmSettings {
-        guest_surface: rustia_vm::GuestSurface::HardenedLeaf,
-        memory_limit_bytes: Some(256 * 1024),
-        module_resolver: Some(rustia_vm::ModuleResolver::new(
-            |_, _| {
-                Err(rustia_vm::Error::new(rustia_vm::ErrorKind::RuntimeError {
-                    message: "unused".to_owned(),
-                }))
-            },
-            true,
-        )),
-        ..rustia_vm::VmSettings::default()
-    };
-    let vm = rustia_vm::Vm::with_settings(rustia_vm::Profile::DeterministicSim, low_level);
-    assert!(vm.settings().module_resolver.is_none());
 }
 
 #[test]

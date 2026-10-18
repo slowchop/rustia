@@ -1,4 +1,4 @@
-//! Explicit transfers between bytecode functions without native recursion.
+//! Explicit transfers between bytecode functions used by expanded arguments.
 //! A saved caller carries the same complete state as a suspended coroutine.
 use super::*;
 
@@ -33,6 +33,9 @@ impl Vm {
         }
         let pending_slot = self.active_coroutine_frames.len();
         if self.active_coroutine_frames.try_reserve(1).is_err() {
+            if let Ok(VmFlow::Call(request)) = &initial {
+                self.release_require_frames(&request.callers);
+            }
             self.call_stack.truncate(stack_base);
             self.mark_control_memory_dirty();
             return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
@@ -42,9 +45,14 @@ impl Vm {
         let result = self.drive_bytecode_calls(initial, pending_slot, fuel);
         self.call_stack.truncate(stack_base);
         let pending = self.active_coroutine_frames.pop();
+        if let Some(pending) = &pending {
+            self.release_require_frames(pending);
+        }
         debug_assert!(pending.is_some());
         debug_assert_eq!(self.active_coroutine_frames.len(), pending_slot);
         self.mark_control_memory_dirty();
+        // A collection inside the driver kept coroutine indices stable. Once
+        // the last transfer scope closes, release any dead registry entries.
         if self.guest_transactions.is_empty() {
             self.prune_unreachable_coroutines_if_idle();
         }
@@ -72,6 +80,7 @@ impl Vm {
                         .try_reserve(callers.len())
                         .is_err()
                     {
+                        self.release_require_frames(&callers);
                         return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
                     }
                     self.active_coroutine_frames[pending_slot].extend(callers.into_iter().rev());
@@ -101,6 +110,9 @@ impl Vm {
                                 fuel,
                             )
                         }
+                        CoroutineFrame::Require(frame) => self
+                            .finish_required_module(frame, results.into_vec())
+                            .map(|results| VmFlow::Return(results.into())),
                         CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => {
                             let mut protected = Vec::new();
                             protected
@@ -117,6 +129,7 @@ impl Vm {
                 Ok(VmFlow::Yield(mut suspension)) => {
                     let pending = &mut self.active_coroutine_frames[pending_slot];
                     if suspension.frames.try_reserve(pending.len()).is_err() {
+                        self.release_require_frames(&suspension.frames);
                         return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
                     }
                     while let Some(mut frame) = pending.pop() {
@@ -147,6 +160,10 @@ impl Vm {
                                 fuel,
                             )
                         }
+                        CoroutineFrame::Require(frame) => {
+                            self.release_module_load(&frame);
+                            Err(error)
+                        }
                         CoroutineFrame::PCall => {
                             self.last_error_traceback = None;
                             self.mark_control_memory_dirty();
@@ -162,30 +179,6 @@ impl Vm {
         }
     }
 
-    pub(super) fn push_coroutine_frame(
-        &mut self,
-        suspension: &mut CoroutineYield,
-        frame: CoroutineFrame,
-    ) -> Result<()> {
-        if suspension.frames.try_reserve(1).is_err() {
-            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
-        }
-        suspension.frames.push(frame);
-        Ok(())
-    }
-
-    pub(super) fn push_deferred_caller(
-        &mut self,
-        request: &mut DeferredBytecodeCall,
-        frame: CoroutineFrame,
-    ) -> Result<()> {
-        if request.callers.try_reserve(1).is_err() {
-            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
-        }
-        request.callers.push(frame);
-        Ok(())
-    }
-
     pub(super) fn retain_dynamic_program_ref_with_roots(
         &mut self,
         program: &Program,
@@ -197,6 +190,7 @@ impl Vm {
         self.call_stack
             .try_reserve(1)
             .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        // The second reservation can fail after call-stack capacity grew.
         self.mark_control_memory_dirty();
         self.active_coroutine_frames
             .try_reserve(1)
@@ -235,21 +229,20 @@ impl Vm {
         mut call_site: Option<ErrorLocation>,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
-        // Resolve callable receivers before entering bytecode, rather than
-        // re-entering `run_function` through each recursive `__call` boundary.
-        // This uses the same receiver order and depth increments as ordinary
-        // `call_metamethod`; actual guest suspension stays with the driver.
-        let handle = loop {
-            self.check_recursion_depth(depth)?;
-            if let Some(handle) = callee.as_function() {
-                break handle;
-            }
+        // Resolve one callable receiver without re-entering the native stack.
+        // Like Luau 0.709 luaV_tryfuncTM, __call itself must be a function.
+        self.check_recursion_depth(depth)?;
+        let handle = if let Some(handle) = callee.as_function() {
+            handle
+        } else {
             let method = if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
                 self.metamethod_for_value(callee, "__call")?
             } else {
                 None
             };
-            let Some(method) = method else {
+            let Some((method, handle)) =
+                method.and_then(|value| value.as_function().map(|handle| (value, handle)))
+            else {
                 let program = self.dynamic_program(fallback_program)?;
                 return self.call_value_with_site_resumable(
                     &program, callee, &args, depth, call_site, fuel,
@@ -261,6 +254,7 @@ impl Vm {
             callee = method;
             depth = depth.saturating_add(1);
             call_site = None;
+            handle
         };
         self.mutate_last_call_stack_frame(|frame| {
             extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
@@ -391,6 +385,7 @@ impl Vm {
             None => match self.retain_dynamic_program_ref(program) {
                 Ok(id) => id,
                 Err(error) => {
+                    self.release_require_frames(&request.callers);
                     return Err(error);
                 }
             },

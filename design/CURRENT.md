@@ -24,7 +24,7 @@ behind accessors, reports stale/cross-VM live handles through typed VM errors,
 and checks table/function/export receivers before converting inputs or allocating
 guest values. Handle validation uses the core VM's ownership-first, epoch-second
 contract. These changes do not
-close typed-object consumer validation, yieldable `require`,
+close typed-object consumer validation, final yieldable-`require` acceptance,
 language error-phase, real-platform golden, or packaging gates.
 
 **The application API boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)**
@@ -59,6 +59,8 @@ repeated coroutine suspension. Variable-length argument chains preserve expansio
 beyond the fixed instruction shapes, and recursive calls resume those chains
 through explicit VM frames across functions, programs and callable receivers.
 Ordinary bytecode fallbacks share those frames after resumption.
+Repeated-string output work now charges the same variable fuel before allocation
+in specialized and ordinary calls; four-profile overlap/recovery tests cover both limits.
 Pending protected-call values stay rooted during fallible program retention.
 Aliases and parenthesized callees keep ordinary
 lookup order. Four-profile failure/recovery and call-shape regressions, eight
@@ -66,12 +68,36 @@ new pinned-Luau fixtures, and expanded bounded differential cases cover this
 slice. Full CI and independent review remain pending. This does not close the
 broader language-parity audit or yieldable `require`.
 
+**Yieldable `require` is implemented in the current private follow-up.** A
+coroutine-owned loading continuation keeps pending module execution alive and
+publishes the zero/one-result cache only on completion. Same-owner cycles and
+another coroutine's in-progress identity report errors without taking over the
+load. Ordinary module failure keeps completed guest writes and typed records
+when caught; no whole-VM savepoint spans unrelated coroutine execution. A failed
+outer installation still restores guest/cache/coroutine state and provisional
+records. Close, abandoned-coroutine collection, hard abort, and reset release
+loading ownership. Module-resolution ABI v3 records this changed failure and
+suspension contract. Ordinary callable receivers now use the same VM continuation driver, preserving
+yield/resume and bounded recursion without growing the native stack. The pinned
+Luau oracle requires `__call` itself to be a function; callable table metamethods
+are rejected in both ordinary and expanded calls. Native/Node tests cover suspended loaders and typed-object
+aliases; the bounded stateful driver also interleaves load/resume/close/reset and
+installation rollback. Final checks and independent review remain pending.
+
 The [private delivery order](92-first-release.md#delivery-order) groups the work
 into a green baseline, facade boundary, construction/failure contracts, typed
 Rust objects, runtime gaps, Linux/macOS-arm64/Node-V8 correctness, and an exact
 candidate used by WOTS/civfun/Grabby. Runtime and platform work can run alongside
 API work. The full native/mobile/Firefox/Safari runtime matrix remains required
 before public release, but does not block this private milestone.
+The [private platform checks](84-private-platform-acceptance.md) now add one
+shared exact transcript on Linux x86-64, native macOS arm64, and Node/V8 in
+default and bare modes. Native jobs pass explicit targets; the Mac job also
+verifies the actual OS, architecture and compiler host. A clean external Cargo
+application reuses public contract tests
+against the five extracted runtime archives with only facade/Serde dependencies
+and candidate-lock package identities. These checks are implemented; final
+three-platform CI, independent review, and candidate acceptance remain pending.
 PR #60's stale generated benchmark-progress report was repaired in
 [PR #61](https://github.com/slowchop/rustia/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The
@@ -709,8 +735,8 @@ unreachable suspended-coroutine frames.
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
    release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
-6. **Keep the executable conformance corpus green**. The current repo has 720 executable fixtures covering 517
-   behavior refs with no pending rows: 702/499 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
+6. **Keep the executable conformance corpus green**. The current repo has 723 executable fixtures covering 517
+   behavior refs with no pending rows: 705/499 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
@@ -861,7 +887,7 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **720 fixtures**, **517 refs**, 702 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
+  **723 fixtures**, **517 refs**, 705 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
   Lua 5.1.5 oracle, **0 pending-oracle**,
   **0 pending-impl**, and **0 rustia-only**. That named executable denominator is authoritative; it does not
   claim a one-to-one audit of every row in the older 709-row design inventory. Future work is focused oracle
@@ -916,7 +942,7 @@ invocation, and a separately versioned guest ABI.
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 720 fixtures / 517 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 723 fixtures / 517 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
@@ -939,7 +965,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 720 fixtures (702 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 517 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 723 fixtures (705 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 517 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |

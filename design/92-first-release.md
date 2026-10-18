@@ -174,17 +174,23 @@ Do not add a required method to a public extension trait during 1.x.
 |---|---|---|
 | Enforce memory limits consistently on optimized execution paths | Implemented; final CI pending | Memory-limited VMs use scalar instruction boundaries for batched paths; cross-profile quota tests and execution counters cover the [former unchecked window](58-vm-core2.md) |
 | Match Luau's compile-time versus runtime error behavior | Focused builtin fixes implemented; wider audit open | Eight new Luau 0.709 fixtures plus call-shape, expansion, argument-effect and repeated-suspension tests cover specialization fallback and builtin lookup order; final CI and review remain pending |
-| Allow a required module to yield where the pinned Luau contract permits it | Open | A resumable loading continuation with cache commit on completion, cycle/error cleanup, and shared fuel tests |
+| Allow a required module to yield within the host loading contract | Implemented in the current follow-up; final review and CI pending | ABI v3 continuations, cache commit after completion, coroutine-owned cycle/error cleanup, shared fuel, close/collection/reset, and installation rollback tests |
 | Confirm collection settings suit long-running applications | Correctness coverage exists; tuning open | Preserve the deterministic scheduling contract; use remote measurements for any tuning or performance claim |
 | Retain clear source diagnostics and recovery behavior | Implemented | Keep the diagnostics and error/fuzz regressions green; add fixtures for newly found gaps |
 
-The current corpus has 720 fixtures covering 517 named behaviors with zero pending
+The current corpus has 723 fixtures covering 517 named behaviors with zero pending
 cases. This describes the tested inventory, not universal compatibility. Roblox
 APIs, a Luau typechecker, raw Luau C API compatibility, async Rust callbacks, and a
 JIT are outside this first release. These exclusions do not waive any existing
 runtime or embedding requirement above.
 
 ## 3. Verify the platforms we promise
+
+The [private platform checks](84-private-platform-acceptance.md) implement a
+shared exact transcript for Linux x86-64, native macOS arm64 and Node/V8, plus
+clean external archived-facade contracts. Default and bare features are covered.
+Final three-platform CI, independent review and acceptance evidence are pending;
+the broader public matrix below remains open.
 
 - [ ] Complete the native correctness and deterministic-result matrix in
   [00-constraints.md](00-constraints.md), using real execution where promised.

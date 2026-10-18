@@ -429,7 +429,7 @@ fn typed_install_remains_provisional_until_the_outer_invocation_commits() {
 }
 
 #[test]
-fn caught_failed_require_rolls_back_guest_state_and_typed_records() {
+fn caught_failed_require_keeps_completed_guest_writes_and_typed_records() {
     let resolver = ServiceModuleResolver::from_fn(|requested, _| match requested {
         "bad" => Ok(ModuleSource::new(
             "bad",
@@ -458,7 +458,7 @@ fn caught_failed_require_rolls_back_guest_state_and_typed_records() {
         .set_live(&mut rustia, "shared_state", &shared.as_value())
         .unwrap();
     let module = Rustia::compile_module(
-        "require-savepoint.luau",
+        "require-recovery.luau",
         r#"
             local ok = pcall(require, "bad")
             assert(not ok)
@@ -488,7 +488,11 @@ fn caught_failed_require_rolls_back_guest_state_and_typed_records() {
             .iter()
             .map(|record| &record.kind)
             .collect::<Vec<_>>(),
-        [&RecordKind::Effect(6), &RecordKind::Effect(8)]
+        [
+            &RecordKind::Effect(7),
+            &RecordKind::Effect(6),
+            &RecordKind::Effect(8)
+        ]
     );
     assert_eq!(
         shared
@@ -496,7 +500,7 @@ fn caught_failed_require_rolls_back_guest_state_and_typed_records() {
             .unwrap()
             .as_number(&rustia)
             .unwrap(),
-        Some(1.0)
+        Some(99.0)
     );
 }
 

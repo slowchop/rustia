@@ -81,8 +81,13 @@ ambient loader. Atomic `install` gives every candidate a fresh inheriting
 environment and fresh lazy dependency cohort, rolls back guest heap/global/
 coroutine/RNG/logical-time/GC/cache state and provisional roots on failure, and
 is versioned by `RUSTIA_INSTALL_TRANSACTION_ABI_VERSION`. External host and
-resolver effects remain host-owned. Supporting a yieldable `require`
-continuation remains part of the semantic-tail blocker.
+resolver effects remain host-owned. Module-resolution ABI v3 adds resumable
+loading continuations with coroutine-owned in-progress identities and cache
+commit after completion. Ordinary module failures keep completed writes and
+typed records when caught; an enclosing failed installation still restores its
+guest and record savepoints. Cancellation, abandonment, reset, and hard-abort
+cleanup are covered by native/Node acceptance tests. Final CI and independent
+reviews remain required for this slice; wider semantic-tail work stays open.
 
 ## Current Policy
 
@@ -135,6 +140,14 @@ continuation remains part of the semantic-tail blocker.
   an example outside the core package.
 
 ## API Gate
+
+Private acceptance additionally runs `tools/check-external-facade.js`: a clean
+Cargo application with only `rustia` and `serde`, compiled from extracted
+candidate archives, reuses the public contract suites in default/bare modes.
+Its package identities must come from the candidate lock. The shared private
+platform golden and its remaining CI gates are described in
+[84-private-platform-acceptance.md](84-private-platform-acceptance.md); no
+registry installation, public release, or complete platform matrix is implied.
 
 - Public error types, source-span/runtime-location accessors, conversion
   traits, retained handles, extension APIs, and replacement semantics have stable

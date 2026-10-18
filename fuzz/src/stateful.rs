@@ -1,4 +1,7 @@
-use rustia::{Error, HostFunction, NewObject, ObjectType, Profile, RustiaBuilder, VmErrorKind};
+use rustia::{
+    Error, HostFunction, ModuleSource, NewObject, ObjectType, Profile, RustiaBuilder,
+    ServiceModuleResolver, VmErrorKind,
+};
 
 struct ObjectPayload(i64);
 
@@ -29,6 +32,12 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
         .profile(profile)
         .fuel(4096)
         .memory_limit_bytes(2 * 1024 * 1024)
+        .module_resolver(ServiceModuleResolver::from_fn(|_, _| {
+            Ok(ModuleSource::new(
+                "stateful-module",
+                "local value = coroutine.yield('module'); return { value = value }",
+            ))
+        }))
         .build()
         .unwrap();
     let mut expected = 0;
@@ -45,8 +54,10 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
     vm.register_object_type(object_type(object_scale)).unwrap();
     let mut object: Option<(rustia::Object<ObjectPayload>, i64, i64)> = None;
     let mut retained = None;
+    let mut module_loading = false;
+    let mut module_answer = None;
     for (index, operation) in data.iter().enumerate() {
-        match operation % 13 {
+        match operation % 18 {
             0 => {
                 vm.exec("counter = counter + 1").unwrap();
                 expected += 1;
@@ -76,6 +87,8 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 expected = 0;
                 vm.insert_global("counter", expected).unwrap();
                 vm.exec("shared = { value = 7 }").unwrap();
+                module_loading = false;
+                module_answer = None;
             }
             4 => {
                 assert!(vm.eval::<bool>("local t = {}; local ok, e = pcall(error, t); return not ok and rawequal(t, e)").unwrap());
@@ -132,7 +145,7 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 object_scale = 3 - object_scale;
                 vm.register_object_type(object_type(object_scale)).unwrap();
             }
-            _ => {
+            12 => {
                 if let Some((value, payload, scale)) = &object {
                     assert_eq!(
                         value.call_method::<_, i64>(&mut vm, "value", ()).unwrap(),
@@ -150,6 +163,63 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                     assert!(vm
                         .eval::<bool>("return rawequal(object, object_alias)")
                         .unwrap());
+                }
+            }
+            13 => {
+                if !module_loading {
+                    let result = vm
+                        .eval::<rustia::OwnedTable>(
+                            "module_owner = coroutine.create(function() return require('module') end); return {coroutine.resume(module_owner)}",
+                        )
+                        .unwrap();
+                    assert_eq!(result.get_array_as::<bool>(0).unwrap(), Some(true));
+                    if let Some(answer) = module_answer {
+                        let value = result
+                            .get_array_as::<rustia::OwnedTable>(1)
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(value.get_string_as::<i64>("value").unwrap(), Some(answer));
+                    } else {
+                        assert_eq!(
+                            result.get_array_as::<String>(1).unwrap().as_deref(),
+                            Some("module")
+                        );
+                        module_loading = true;
+                    }
+                }
+            }
+            14 => {
+                if module_loading {
+                    let answer = i64::from(*operation);
+                    vm.insert_global("module_input", answer).unwrap();
+                    assert!(vm.eval::<bool>(
+                        "local ok, value = coroutine.resume(module_owner, module_input); return ok and value.value == module_input and require('module') == value",
+                    ).unwrap());
+                    module_loading = false;
+                    module_answer = Some(answer);
+                }
+            }
+            15 => {
+                if module_loading {
+                    vm.exec("assert(coroutine.close(module_owner)); module_owner = nil")
+                        .unwrap();
+                    module_loading = false;
+                }
+            }
+            16 => {
+                if module_loading {
+                    vm.load("local ok = coroutine.resume(module_owner, 999); assert(ok); error('rollback loader', 0)")
+                        .install()
+                        .unwrap_err();
+                }
+            }
+            _ => {
+                if module_loading && profile != Profile::DeterministicSim {
+                    vm.exec(
+                        "module_owner = nil; collectgarbage('collect'); collectgarbage('collect')",
+                    )
+                    .unwrap();
+                    module_loading = false;
                 }
             }
         }

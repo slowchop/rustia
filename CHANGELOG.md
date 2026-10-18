@@ -6,6 +6,19 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+- Charge repeated-string output work before allocation in specialized calls, matching ordinary builtin calls when fuel and memory limits overlap.
+
+- Keep ordinary callable receivers on VM continuations through recursion and suspension; reject non-function `__call` values as Luau 0.709 does.
+
+### Changed
+
+- Required modules can yield and resume inside guest coroutines. Results enter
+  the cache only after completion; cancelled or failed loads can be retried.
+  Ordinary module failures keep completed writes and caught typed records,
+  matching ordinary function calls. An enclosing failed installation still
+  restores guest state and provisional records. Module-resolution ABI is now 3.
+  Final correctness review and CI remain pending.
+
 ### Fixed
 
 - Object and callback definitions keep their exact Rust payload and host-schema
@@ -16,6 +29,12 @@ Current unpublished workspace version: `0.0.1`.
   value that is still being stored or passed to a function or object method.
 
 ### Added
+
+- Private acceptance checks execute one shared deterministic transcript on
+  Linux x86-64, macOS arm64 and Node/V8, alongside the existing eight-target
+  build matrix. A clean Cargo application reuses public facade contracts
+  against extracted runtime archives in default/bare modes. Final CI,
+  independent review and candidate acceptance remain pending.
 
 - Typed Rust objects through `ObjectType<T, H>`, `register_object_type`, and
   `create_object`. Scripts call methods with `object:method(...)`; Rust keeps

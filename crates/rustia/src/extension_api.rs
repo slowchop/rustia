@@ -579,6 +579,32 @@ impl ModuleSource {
 /// resolver result, the resolver is called before every cache lookup; a host
 /// with expensive I/O or compilation should keep its own source cache. A cache
 /// hit skips module execution and discards the newly resolved program.
+///
+/// A module may return zero or one value. Successful results are cached within
+/// the calling function's module cohort; failures can be retried. Module code
+/// running in a guest coroutine may yield and resume before its result is
+/// cached. Recursive loading is an error, as is requesting an identity that a
+/// different coroutine is still loading.
+///
+/// Ordinary `require` keeps completed writes when a module fails. An enclosing
+/// [`Chunk::install`](crate::Chunk::install) still rolls back guest state when
+/// the installation fails; external Rust effects remain outside that rollback.
+///
+/// ```
+/// use rustia::{ModuleSource, RustiaBuilder, ServiceModuleResolver};
+///
+/// # fn main() -> rustia::Result<()> {
+/// let resolver = ServiceModuleResolver::from_fn(|name, _referrer| {
+///     match name {
+///         "answer" => Ok(ModuleSource::new("answer", "return 42")),
+///         _ => Err(rustia::Error::embed(format!("unknown module {name}"))),
+///     }
+/// });
+/// let mut lua = RustiaBuilder::deterministic().module_resolver(resolver).build()?;
+/// assert_eq!(lua.load("return require('answer')").eval::<i64>()?, 42);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct ServiceModuleResolver {
     provider: ModuleResolver,

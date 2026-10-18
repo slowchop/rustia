@@ -140,3 +140,22 @@ fn hardened_transactions_preserve_short_collection_cadence_coverage() {
         make_vm(4 * 1024 * 1024),
     );
 }
+
+#[test]
+fn unchecked_hardened_settings_remove_module_resolvers() {
+    let low_level = rustia_vm::VmSettings {
+        guest_surface: rustia_vm::GuestSurface::HardenedLeaf,
+        memory_limit_bytes: Some(256 * 1024),
+        module_resolver: Some(rustia_vm::ModuleResolver::new(
+            |_, _| {
+                Err(rustia_vm::Error::new(rustia_vm::ErrorKind::RuntimeError {
+                    message: "unused".to_owned(),
+                }))
+            },
+            true,
+        )),
+        ..rustia_vm::VmSettings::default()
+    };
+    let vm = rustia_vm::Vm::with_settings(rustia_vm::Profile::DeterministicSim, low_level);
+    assert!(vm.settings().module_resolver.is_none());
+}

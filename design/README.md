@@ -44,6 +44,7 @@ docs are design intent.
 | [`81-benchmark-operations.md`](81-benchmark-operations.md) | qualified-host measurement, freshness/publication state, landscape refresh, and no-scheduled-billing policy | **[ROLLING OUT]** |
 | [`82-error-behaviour-fuzzing.md`](82-error-behaviour-fuzzing.md) | error recovery, bounded embedding fuzzing, and pinned-Luau differential campaigns | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
 | [`83-rust-objects.md`](83-rust-objects.md) | typed Rust objects, method capabilities, staged requests, immediate mutation, lifetime and memory rules | **[IMPLEMENTED; FINAL VALIDATION/ROLLOUT PENDING]** |
+| [`84-private-platform-acceptance.md`](84-private-platform-acceptance.md) | shared Linux/macOS-arm64/Node golden and clean external archived-facade contracts | **[CHECKS IMPLEMENTED; CI/ACCEPTANCE PENDING]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 | [`92-first-release.md`](92-first-release.md) | Rustia 1.0 acceptance checklist: API, runtime gaps, platforms, documentation, and publication | **[IN PROGRESS]** |
