@@ -102,7 +102,7 @@ struct DeterministicBytes(u64);
 #[test]
 #[ignore = "requires the separately built pinned oracle worker; run in differential CI"]
 fn generated_differential_smoke() {
-    for shape in 8..32 {
+    for shape in 8..35 {
         for builtin in 0..7 {
             assert!(rustia_fuzz::differential::fuzz_differential(&[
                 shape, 1, builtin, 0,

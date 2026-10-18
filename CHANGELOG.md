@@ -587,8 +587,10 @@ Current unpublished workspace version: `0.0.1`.
   across coroutine suspension, while aliases and parenthesized callees keep
   their ordinary lookup order.
   Nested calls retain complete result lists beyond the fixed fused instruction
-  shapes, including constructors and method receivers. Recursive expanded self
-  calls use explicit VM frames and can resume a suspended base case.
+  shapes, including constructors and method receivers. Recursive expanded
+  calls use explicit VM frames across functions/programs and callable receivers,
+  and can resume a suspended base case or continue with ordinary bytecode calls.
+  Pending protected calls keep their target and arguments alive during program retention.
   The configured recursion limit now aborts protected calls and typed invocations
   as documented; Luau's opt-in compatibility stack limit remains catchable.
 

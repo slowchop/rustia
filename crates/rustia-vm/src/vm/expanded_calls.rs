@@ -1,5 +1,5 @@
-//! Resumable expanded calls whose recognized builtin callees are looked up
-//! after argument evaluation (Luau 0.709 `compileExprCall` ordering).
+//! Resumable trailing-argument expansion, with late imports for recognized
+//! builtin calls (Luau 0.709 `compileExprCall` ordering).
 use super::*;
 use crate::bytecode::{supports_call_descriptor, CallDescriptor, CallDescriptorCall};
 
