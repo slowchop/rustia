@@ -17,6 +17,10 @@ Make necessary API changes during this private phase and migrate active clients
 together. Record the proposed API baseline after consumer validation; do not
 freeze known design mistakes into 1.0.
 
+[The private acceptance record](93-private-api-acceptance.md) identifies the
+immutable candidate, API inventory and exact application rollouts. Every linked
+PR must pass its required checks/reviews and merge before private acceptance.
+
 [CURRENT.md](CURRENT.md) records what is built. The delivery order below defines
 this private milestone. The detailed checklist after it, together with
 [90-release-readiness.md](90-release-readiness.md), retains the eventual public

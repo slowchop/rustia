@@ -2,30 +2,27 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-18.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-19.)
 
 ## One-paragraph state
 
 **Current milestone:** private 0.x API and real-application readiness, tracked in
-[`92-first-release.md`](92-first-release.md). Keep publication disabled and the
-repository private. The workspace remains at `0.0.1`; this milestone does not
-authorize a public candidate or 1.0 promotion. The future 1.0 promise will cover
-the embedding API and CLI, with lower-level engine packages separately versioned
-at 0.x. The landing page now starts with executable API
-examples and plain-language feature/speed comparisons; contributor instructions
-and README example checks are part of the release workflow. The README now keeps
-ordinary readers on runnable examples and the API reference. The crate's rustdoc
-starts with a working example and a short task index; common API entries explain
-conversions, callback ownership, reset, limits, and failure behavior next to the
-methods that use them. This is a documentation pass, not a completed API freeze.
-The API hardening
-in this change makes facade error classifications non-exhaustive and private
-behind accessors, reports stale/cross-VM live handles through typed VM errors,
-and checks table/function/export receivers before converting inputs or allocating
-guest values. Handle validation uses the core VM's ownership-first, epoch-second
-contract. These changes do not
-close typed-object consumer validation, final yieldable-`require` acceptance,
-language error-phase, real-platform golden, or packaging gates.
+[`92-first-release.md`](92-first-release.md). The immutable acceptance candidate is
+`92a85d65eb33724c17103d43477d34a633392768`; its API inventory, tests, application
+pins, CI and merge gates are recorded in
+[`93-private-api-acceptance.md`](93-private-api-acceptance.md). Keep publication
+disabled and the repository private. The workspace remains at `0.0.1`; this
+milestone does not authorize a public candidate or 1.0 promotion. The future 1.0
+promise will cover the embedding API and CLI, with lower-level engine packages
+separately versioned at 0.x.
+
+The README starts with executable examples and plain-language feature/speed
+comparisons. Rustdoc starts with a working example and a short task index, with
+conversion, ownership, reset, limits and failure rules next to the relevant
+methods. Facade-owned settings/errors and VM/epoch-safe handles keep application
+code independent of interpreter implementation types. Required checks and
+independent reviews gate every rollout PR; the private baseline does not close
+the broader public-release checklist.
 
 **The application API boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)**
 as `8f8558abf361e939599d2c093614ae0776682d26`. The facade owns settings,
@@ -40,13 +37,15 @@ calls entirely within guest code keep object identity. Required CI and independe
 reviews passed for that boundary. WOTS [#7](https://github.com/slowchop/wots/pull/7)
 merged as `97b87889`, and civfun [#51](https://github.com/civfun/civfun/pull/51)
 merged as `6aaa3466`, using exact reviewed Rustia revision `030cb038`.
-Grabby [#1083](https://github.com/slowchop/grabby-next/pull/1083), at `9b5cc21`,
-has clear independent reviews and local correctness checks; its current-head CI
-and merge remain pending. This is the facade rollout, not the later object
-integration. The CLI accepts `-V`/`--version`.
+The final common-candidate rollout is WOTS [#8](https://github.com/slowchop/wots/pull/8),
+civfun [#53](https://github.com/civfun/civfun/pull/53), and Grabby
+[#1083](https://github.com/slowchop/grabby-next/pull/1083). The earlier facade
+pins above remain historical evidence; final pins and gates are in the acceptance
+record. The CLI accepts `-V`/`--version`.
 See [the boundary contract](75-embedded-api.md#application-api-boundary).
 
-**Focused builtin error-phase fixes are implemented in the runtime follow-up.**
+**Focused builtin error-phase fixes merged in [PR #64](https://github.com/slowchop/rustia/pull/64)**
+as `71524dba99b277622f27e0522c8740f611c37547`.
 Unknown standard-library fields and argument lists outside a specialized opcode's
 shape use ordinary calls, so runtime failures no longer reject valid source or
 unreachable branches during compilation. The oracle-verified fixed-arity
@@ -59,14 +58,13 @@ repeated coroutine suspension. Variable-length argument chains preserve expansio
 beyond the fixed instruction shapes, and recursive calls resume those chains
 through explicit VM frames across functions, programs and callable receivers.
 Ordinary bytecode fallbacks share those frames after resumption.
-Repeated-string output work now charges the same variable fuel before allocation
-in specialized and ordinary calls; four-profile overlap/recovery tests cover both limits.
 Pending protected-call values stay rooted during fallible program retention.
 Aliases and parenthesized callees keep ordinary
 lookup order. Four-profile failure/recovery and call-shape regressions, eight
 new pinned-Luau fixtures, and expanded bounded differential cases cover this
-slice. Full CI and independent review remain pending. This does not close the
-broader language-parity audit or yieldable `require`.
+slice. The batch passed required CI, independent review and remote screening
+before merge. The integrated module-loading/resource follow-up is tracked in the
+acceptance record; the broader language-parity audit remains open.
 
 **Yieldable `require` is implemented in the current private follow-up.** A
 coroutine-owned loading continuation keeps pending module execution alive and
@@ -82,7 +80,10 @@ yield/resume and bounded recursion without growing the native stack. The pinned
 Luau oracle requires `__call` itself to be a function; callable table metamethods
 are rejected in both ordinary and expanded calls. Native/Node tests cover suspended loaders and typed-object
 aliases; the bounded stateful driver also interleaves load/resume/close/reset and
-installation rollback. Final checks and independent review remain pending.
+installation rollback. Repeated-string output work charges the same variable fuel
+before allocation in specialized and ordinary calls; four-profile overlap/recovery
+tests cover both limits. Source, independent reviews and final CI gates are linked
+from the acceptance record.
 
 The [private delivery order](92-first-release.md#delivery-order) groups the work
 into a green baseline, facade boundary, construction/failure contracts, typed
@@ -96,14 +97,16 @@ default and bare modes. Native jobs pass explicit targets; the Mac job also
 verifies the actual OS, architecture and compiler host. A clean external Cargo
 application reuses public contract tests
 against the five extracted runtime archives with only facade/Serde dependencies
-and candidate-lock package identities. These checks are implemented; final
-three-platform CI, independent review, and candidate acceptance remain pending.
+and candidate-lock package identities. Native Mac and Node jobs have executed
+the integrated candidate; the complete job logs and Linux/final acceptance gates
+are linked from the acceptance record.
 PR #60's stale generated benchmark-progress report was repaired in
 [PR #61](https://github.com/slowchop/rustia/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The
 repair changed no measurement or performance claim.
 
-**Typed Rust objects are implemented in the current private API change.**
+**Typed Rust objects merged in [PR #65](https://github.com/slowchop/rustia/pull/65)**
+as `2187c8d16ec5c222bb01ed15ab68950569e937ce`.
 `ObjectType<T, H>` registers methods and `Object<T>` keeps a VM/epoch-bound live
 instance. Callbacks accept object handles and return existing or fresh objects
 through `NewObject<T>`. Deterministic methods read replay-stable input and stage
@@ -114,17 +117,17 @@ receivers fail before argument conversion. Definitions survive reset, while
 instances are released even if stale handles remain. Replacement changes future
 instances. VM metadata/roots are quota-accounted; arbitrary Rust payload
 allocations remain host memory. Public and private tests cover these contracts;
-final checks, independent reviews, and the civfun object integration remain
-pending. See [the object guide](83-rust-objects.md). Wider runtime parity,
-yieldable `require`, private-platform acceptance, and generic mutable-object
-snapshots are not completed by this change; snapshots remain deferred.
+civfun's Player integration merged in [#52](https://github.com/civfun/civfun/pull/52)
+as `2787ff8ae0afa913fc6a8f9a667427fef93d7443`. Its final common pin, 62 host tests
+and saved-map acceptance are recorded alongside the other clients. See
+[the object guide](83-rust-objects.md). Generic mutable-payload snapshots remain deferred.
 
 **Memory-limit hardening:** memory-limited VMs now avoid batched execution paths
 and use the scalar dispatcher's instruction-boundary quota checks, closing the
 former HotIR/tape collection-window gap. Cross-profile, cross-interval regressions
 and instrumentation-free execution counters cover this policy. See the
-[quota-window resolution](58-vm-core2.md). Remote screening remains pending until
-the PR's final checks complete; no local timings or new speed claim are used.
+[quota-window resolution](58-vm-core2.md). Screening evidence is linked from the
+acceptance record; no local timings or new speed claim are used.
 
 [Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is complete in
 [PR #34](https://github.com/slowchop/rustia/pull/34): cross-profile failure/recovery

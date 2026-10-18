@@ -141,6 +141,10 @@ reviews remain required for this slice; wider semantic-tail work stays open.
 
 ## API Gate
 
+The [private API baseline](93-private-api-acceptance.md) records the immutable
+source, API inventory and controlled-client validation; the public gates in this
+checklist remain separate.
+
 Private acceptance additionally runs `tools/check-external-facade.js`: a clean
 Cargo application with only `rustia` and `serde`, compiled from extracted
 candidate archives, reuses the public contract suites in default/bare modes.

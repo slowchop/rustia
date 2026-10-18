@@ -1,7 +1,8 @@
 # Private platform and facade acceptance
 
-Status: checks implemented; final CI, independent review, and private-candidate
-acceptance remain pending. Publication stays disabled and the version stays
+The [private acceptance record](93-private-api-acceptance.md) identifies the
+source candidate and links its final CI/review/merge evidence. Publication stays
+disabled and the version stays
 `0.0.1`.
 
 ## Executed targets
