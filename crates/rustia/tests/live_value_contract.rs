@@ -4,6 +4,36 @@ use rustia::{
 };
 use std::cell::Cell;
 
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn owned_table_keys_survive_value_conversion_under_quota_pressure() -> Result<()> {
+    for profile in [
+        rustia::Profile::LuauCompat,
+        rustia::Profile::ReproducibleStandard,
+        rustia::Profile::DeterministicSim,
+        rustia::Profile::Puc51Compat,
+    ] {
+        let mut lua = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .memory_limit_bytes(2 * 1024 * 1024)
+            .build()?;
+        let table = lua.create_table()?;
+        let garbage = lua.load("return table.create(70000, 1)").eval_live()?;
+        drop(garbage);
+        let key = "an_owned_string_key_that_requires_heap_storage";
+        table.set(&mut lua, key, vec![vec![7_i64; 512]; 112])?;
+        let rows: Vec<Vec<i64>> = table.get(&mut lua, key)?.deserialize(&mut lua)?;
+        assert_eq!(rows.len(), 112, "{profile:?}");
+        assert!(rows
+            .iter()
+            .all(|row| row.len() == 512 && row.iter().all(|n| *n == 7)));
+    }
+    Ok(())
+}
+
 struct ConversionProbe<'a>(&'a Cell<usize>);
 
 impl IntoRustia for ConversionProbe<'_> {

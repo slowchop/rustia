@@ -11,9 +11,9 @@ Current unpublished workspace version: `0.0.1`.
 - Object and callback definitions keep their exact Rust payload and host-schema
   types. Automatic function-pointer conversions cannot create a mismatched
   registration or live handle.
-- Owned table conversion keeps partial tables and earlier call arguments alive
-  while later values allocate. Quota collection can no longer discard a table
-  that is still being passed to a function or object method.
+- Owned conversion keeps partial tables, table keys, and earlier call arguments
+  alive while later values allocate. Quota collection can no longer discard a
+  value that is still being stored or passed to a function or object method.
 
 ### Added
 

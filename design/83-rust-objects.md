@@ -117,6 +117,10 @@ unreachable payload. Decision reset invalidates all old handles and releases
 instance payloads even when stale Rust handles remain. It rebuilds only the
 current registered definitions. Dropping the VM releases its remaining payloads.
 
+Owned conversions root partial tables, table keys, and earlier arguments while
+later values allocate. Memory-pressure collection must preserve values until
+the enclosing table write or function/object call has consumed them.
+
 Rustia admits method metadata, instance storage, and public roots under its
 logical-live memory quota. Arbitrary allocations inside `T` remain application
 memory, like callback captures. `T` must be `'static`, but need not be `Clone`,
