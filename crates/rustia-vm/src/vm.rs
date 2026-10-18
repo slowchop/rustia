@@ -4652,9 +4652,7 @@ impl Vm {
                         }
 
                         pc += 1;
-                        if instruction.aux < 0
-                            && crate::bytecode::supports_call_descriptor(instruction.op)
-                        {
+                        if crate::bytecode::supports_call_descriptor(instruction.op) {
                             let call_site = instruction_source_location(program, function, pc - 1);
                             let mut state = ExpandedCallState::new(
                                 program,
