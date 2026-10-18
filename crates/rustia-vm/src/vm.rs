@@ -3,7 +3,9 @@
 mod expanded_calls;
 mod host_functions;
 mod host_objects;
+mod require;
 use host_objects::HostObjectTypeBinding;
+use require::{try_clone_module_load, try_clone_module_loads, ModuleLoad, SuspendedRequireFrame};
 
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
@@ -69,11 +71,12 @@ pub const HARDENED_LEAF_GUEST_ABI_VERSION: u32 = 1;
 /// Version of host-resolved module identity, cache, cycle, and reset behavior.
 ///
 /// Replay/package protocols that permit script-visible `require` must record
-/// this value together with their resolver's own content identity. Version 2
-/// selects the cache cohort from executing function origin: ordinary code uses
-/// the decision-wide cohort, while every atomic installation has a fresh lazy
-/// cohort shared by its root and required modules.
-pub const MODULE_RESOLUTION_ABI_VERSION: u32 = 2;
+/// this value together with their resolver's own content identity. Version 3
+/// permits coroutine suspension with owner-scoped loading identities. Ordinary
+/// module failure preserves completed calls; outer installation owns rollback.
+/// Cache cohorts still follow function origin, with a fresh lazy cohort shared
+/// by each atomic installation and its dependencies.
+pub const MODULE_RESOLUTION_ABI_VERSION: u32 = 3;
 /// Guest-state transaction contract used by compiled-module installation.
 ///
 /// Version 1 runs a candidate in a fresh globals-inheriting environment unless
@@ -544,7 +547,7 @@ struct ExternalRootRegistry {
 #[derive(Clone, Default)]
 struct ModuleCohort {
     cache: BTreeMap<String, Option<Value>>,
-    loading_stack: Vec<String>,
+    loading: Vec<ModuleLoad>,
 }
 
 struct ExternalRootLease {
@@ -2152,7 +2155,7 @@ struct GuestTransaction {
 struct ModuleCohortCheckpoint {
     id: u32,
     cache_identities: Vec<String>,
-    loading_stack: Vec<String>,
+    loading: Vec<ModuleLoad>,
 }
 
 #[derive(Clone)]
@@ -2239,6 +2242,7 @@ enum CoroutineFrame {
     Bytecode(SuspendedBytecodeFrameStorage),
     PCall,
     XPCall(SuspendedXPCallFrame),
+    Require(SuspendedRequireFrame),
 }
 
 #[derive(Clone)]
@@ -3035,6 +3039,7 @@ impl Vm {
         }
         self.collect_heap_weak_tables(&roots);
         if self.guest_transactions.is_empty() {
+            self.prune_abandoned_module_loads();
             self.prune_unreachable_coroutines_if_idle();
             self.prune_unreachable_module_cohorts(&roots);
         }
@@ -3521,7 +3526,7 @@ impl Vm {
                     .binary_search_by(|candidate| candidate.as_str().cmp(identity.as_str()))
                     .is_ok()
             });
-            cohort.loading_stack = checkpoint.loading_stack;
+            cohort.loading = checkpoint.loading;
         }
         self.next_module_cohort = transaction.next_module_cohort;
         self.coroutines = transaction.coroutines;
@@ -3881,8 +3886,12 @@ impl Vm {
                 execution,
             )
             .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
-        let VmFlow::Return(results) = results else {
-            return Err(non_yieldable_boundary_error());
+        let results = match results {
+            VmFlow::Return(results) => results,
+            VmFlow::Yield(suspension) => {
+                self.release_require_frames(&suspension.frames);
+                return Err(non_yieldable_boundary_error());
+            }
         };
         Ok(first_result_or_nil(results))
     }
@@ -3925,8 +3934,12 @@ impl Vm {
                 execution,
             )
             .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
-        let VmFlow::Return(results) = results else {
-            return Err(non_yieldable_boundary_error());
+        let results = match results {
+            VmFlow::Return(results) => results,
+            VmFlow::Yield(suspension) => {
+                self.release_require_frames(&suspension.frames);
+                return Err(non_yieldable_boundary_error());
+            }
         };
         Ok(first_result_or_nil(results))
     }
@@ -3981,6 +3994,7 @@ impl Vm {
         self.collect_heap_weak_tables(&roots);
         let transaction_active = !self.guest_transactions.is_empty();
         if !transaction_active {
+            self.prune_abandoned_module_loads();
             self.prune_unreachable_coroutines();
             self.prune_unreachable_module_cohorts(&roots);
             self.reclaim_unreferenced_programs();
@@ -3993,6 +4007,7 @@ impl Vm {
         self.heap.finish_collection_cycle();
         self.collect_heap_weak_tables(&roots);
         if !transaction_active {
+            self.prune_abandoned_module_loads();
             self.prune_unreachable_module_cohorts(&roots);
             self.heap.release_spare_capacity();
             self.dynamic_programs.release_spare_capacity();
@@ -7900,36 +7915,42 @@ impl Vm {
         tail_call_count: usize,
         mut suspension: CoroutineYield,
     ) -> VmFlowResult<ReturnValues> {
-        self.sync_register_cells(&mut registers, &register_cells)?;
-        let program_id = program_id.ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "suspended coroutine frame is missing its program handle",
-            })
-        })?;
-        let frame = SuspendedBytecodeFrameStorage::try_new(SuspendedBytecodeFrame {
-            program_id,
-            prototype: context.prototype,
-            current_function: context.current_function,
-            captures: context.captures.to_vec(),
-            depth: context.depth,
-            environment: context.environment,
-            thread_environment: self.current_thread_environment(),
-            module_cohort: context.module_cohort,
-            call_site: context.call_site.clone(),
-            pc,
-            registers,
-            register_cells,
-            varargs,
-            pending_return_prefixes,
-            continuation,
-            stackless_self_calls,
-            tail_call_count,
-        })?;
-        suspension
-            .frames
-            .try_reserve(1)
-            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-        suspension.frames.push(CoroutineFrame::Bytecode(frame));
+        let prepared = (|| {
+            self.sync_register_cells(&mut registers, &register_cells)?;
+            let program_id = program_id.ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "suspended coroutine frame is missing its program handle",
+                })
+            })?;
+            let frame = SuspendedBytecodeFrameStorage::try_new(SuspendedBytecodeFrame {
+                program_id,
+                prototype: context.prototype,
+                current_function: context.current_function,
+                captures: try_copy_vec(context.captures)?,
+                depth: context.depth,
+                environment: context.environment,
+                thread_environment: self.current_thread_environment(),
+                module_cohort: context.module_cohort,
+                call_site: context.call_site.clone(),
+                pc,
+                registers,
+                register_cells,
+                varargs,
+                pending_return_prefixes,
+                continuation,
+                stackless_self_calls,
+                tail_call_count,
+            })?;
+            Ok(frame)
+        })();
+        let frame = match prepared {
+            Ok(frame) => frame,
+            Err(error) => {
+                self.release_require_frames(&suspension.frames);
+                return Err(error);
+            }
+        };
+        self.push_coroutine_frame(&mut suspension, CoroutineFrame::Bytecode(frame))?;
         Ok(VmFlow::Yield(suspension))
     }
 
@@ -11074,7 +11095,10 @@ impl Vm {
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, None, fuel)? {
             VmFlow::Return(results) => Ok(results.into_vec()),
-            VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
+            VmFlow::Yield(suspension) => {
+                self.release_require_frames(&suspension.frames);
+                Err(non_yieldable_boundary_error())
+            }
         }
     }
 
@@ -11089,7 +11113,10 @@ impl Vm {
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)? {
             VmFlow::Return(results) => Ok(results.into_vec()),
-            VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
+            VmFlow::Yield(suspension) => {
+                self.release_require_frames(&suspension.frames);
+                Err(non_yieldable_boundary_error())
+            }
         }
     }
 
@@ -12578,6 +12605,12 @@ impl Vm {
         if native == NativeFunction::CoroutineYield {
             return self.native_coroutine_yield_resumable(args, call_site);
         }
+        if native == NativeFunction::Require {
+            self.check_recursion_depth(depth)?;
+            let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
+            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)?;
+            return self.native_require_resumable(args, program, depth, call_site, fuel);
+        }
         if native == NativeFunction::PCall {
             return self.native_pcall_resumable(program, args, depth, call_site, fuel);
         }
@@ -14052,146 +14085,11 @@ impl Vm {
         call_site: Option<ErrorLocation>,
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
-        validate_native_arity(args, 1, 1, "require arguments")?;
-        let requested_bytes = self.value_to_string(args[0])?;
-        let requested = std::str::from_utf8(&requested_bytes).map_err(|_| {
-            Error::new(ErrorKind::RuntimeError {
-                message: "require path must be valid UTF-8".to_owned(),
-            })
-        })?;
-        let resolver = self.settings.module_resolver.clone().ok_or_else(|| {
-            Error::new(ErrorKind::RuntimeError {
-                message: "require resolver is not configured".to_owned(),
-            })
-        })?;
-        let referrer = requiring_program.source_name.as_deref();
-        let profile = self.profile;
-        let resolved = self
-            .catch_host_callback(MODULE_RESOLVER_SERVICE_NAME, || {
-                resolver.resolve(requested, referrer, profile)
-            })
-            .map_err(|error| {
-                self.annotate_host_boundary(error, requiring_program, call_site.as_ref())
-            })?;
-        let resolved = resolved.map_err(|mut error| {
-            if let ErrorKind::RuntimeError { message } = &mut error.kind {
-                *message = format!("error requiring module {requested:?}: {message}");
-            }
-            if let Some(diagnostic) = &mut error.diagnostic {
-                self.admit_host_diagnostic(Arc::make_mut(diagnostic));
-            }
-            error
-        })?;
-        if resolved.identity.is_empty() {
-            return Err(Error::new(ErrorKind::RuntimeError {
-                message: format!(
-                    "error requiring module {requested:?}: resolver returned an empty identity"
-                ),
-            }));
-        }
-        let module_cohort = self.current_module_cohort();
-        let environment = self.current_environment()?;
-        let cohort = self.module_cohorts.get(&module_cohort).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "module cache cohort is missing",
-            })
-            .without_source_location()
-        })?;
-        if let Some(cached) = cohort.cache.get(&resolved.identity).copied() {
-            return Ok(cached.into_iter().collect());
-        }
-        if let Some(cycle_start) = cohort
-            .loading_stack
-            .iter()
-            .position(|identity| identity == &resolved.identity)
-        {
-            let mut cycle = cohort.loading_stack[cycle_start..].to_vec();
-            cycle.push(resolved.identity);
-            return Err(Error::new(ErrorKind::RuntimeError {
-                message: format!(
-                    "requiring a module that is in the process of being required: {}",
-                    cycle.join(" -> ")
-                ),
-            }));
-        }
-
-        let identity = resolved.identity;
-        fuel.hosts.begin_savepoint()?;
-        if let Err(error) = self.begin_guest_transaction() {
-            fuel.hosts.rollback_savepoint();
-            return Err(error);
-        }
-        let outcome = (|| {
-            self.ensure_memory_growth(size_of::<String>().saturating_add(identity.len()), &[])?;
-            self.module_cohorts
-                .get_mut(&module_cohort)
-                .expect("validated module cohort")
-                .loading_stack
-                .push(identity.clone());
-            self.mark_control_memory_dirty();
-            let result = (|| {
-                let program_id = self.retain_dynamic_program(resolved.program)?;
-                let handle = self
-                    .heap
-                    .alloc_dynamic_main_function_in_cohort(program_id, environment, module_cohort)
-                    .ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "function handle overflow",
-                        })
-                    })?;
-                self.call_value_with_site(
-                    requiring_program,
-                    Value::function(handle),
-                    &[],
-                    depth.saturating_add(1),
-                    call_site,
-                    fuel,
-                )
-            })();
-            let popped = self
-                .module_cohorts
-                .get_mut(&module_cohort)
-                .expect("validated module cohort")
-                .loading_stack
-                .pop();
-            self.mark_control_memory_dirty();
-            debug_assert_eq!(popped.as_deref(), Some(identity.as_str()));
-            let results = result?;
-            if results.len() > 1 {
-                return Err(Error::new(ErrorKind::RuntimeError {
-                    message: "module must return a single value".to_owned(),
-                }));
-            }
-            let value = results.first().copied();
-            let cache_growth = identity
-                .len()
-                .saturating_add(size_of::<Option<Value>>())
-                .saturating_add(size_of::<usize>().saturating_mul(4));
-            let cache_roots = value.into_iter().collect::<SmallVec<[Value; 1]>>();
-            self.ensure_memory_growth(cache_growth, &cache_roots)?;
-            self.module_cohorts
-                .get_mut(&module_cohort)
-                .expect("validated module cohort")
-                .cache
-                .insert(identity, value);
-            self.mark_control_memory_dirty();
-            Ok(results)
-        })();
-        match outcome {
-            Ok(results) => {
-                if let Err(error) = self.commit_guest_transaction() {
-                    self.rollback_guest_transaction();
-                    fuel.hosts.rollback_savepoint();
-                    Err(error)
-                } else {
-                    fuel.hosts.commit_savepoint();
-                    Ok(results)
-                }
-            }
-            Err(error) => {
-                self.rollback_guest_transaction();
-                fuel.hosts.rollback_savepoint();
-                Err(error)
+        match self.native_require_resumable(args, requiring_program, depth, call_site, fuel)? {
+            VmFlow::Return(results) => Ok(results),
+            VmFlow::Yield(suspension) => {
+                self.release_require_frames(&suspension.frames);
+                Err(non_yieldable_boundary_error())
             }
         }
     }
@@ -14259,6 +14157,7 @@ impl Vm {
                 message: "cannot close normal coroutine".to_owned(),
             }));
         }
+        self.release_module_owner(self.coroutines[coroutine].handle);
         let state = &mut self.coroutines[coroutine];
         state.frames.clear();
         state.initialized = true;
@@ -14613,10 +14512,17 @@ impl Vm {
         resume_results: Vec<Value>,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
+        let active_frames = match try_clone_coroutine_frames(&frames) {
+            Ok(frames) => frames,
+            Err(error) => {
+                self.release_require_frames(&frames);
+                return Err(error);
+            }
+        };
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
-        self.active_coroutine_frames.push(frames.clone());
+        self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
         let active = self.active_coroutine_frames.pop();
@@ -14636,10 +14542,17 @@ impl Vm {
         error: Error,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
+        let active_frames = match try_clone_coroutine_frames(&frames) {
+            Ok(frames) => frames,
+            Err(error) => {
+                self.release_require_frames(&frames);
+                return Err(error);
+            }
+        };
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
-        self.active_coroutine_frames.push(frames.clone());
+        self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.propagate_coroutine_error(frames, error, fuel);
         let active = self.active_coroutine_frames.pop();
@@ -14667,6 +14580,9 @@ impl Vm {
                 CoroutineFrame::Bytecode(frame) => {
                     self.resume_suspended_bytecode_frame(frame.into_inner(), results, fuel)
                 }
+                CoroutineFrame::Require(frame) => self
+                    .finish_required_module(frame, results)
+                    .map(VmFlow::Return),
                 CoroutineFrame::PCall => {
                     let mut protected_results = Vec::with_capacity(results.len() + 1);
                     protected_results.push(Value::boolean(true));
@@ -14691,6 +14607,11 @@ impl Vm {
                     results = returned;
                 }
                 VmFlow::Yield(mut suspension) => {
+                    if suspension.frames.try_reserve(frames.len()).is_err() {
+                        self.release_require_frames(&suspension.frames);
+                        self.release_require_frames(&frames);
+                        return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+                    }
                     suspension.frames.extend(frames);
                     return Ok(VmFlow::Yield(suspension));
                 }
@@ -14705,6 +14626,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         if error_is_uncatchable(&error, fuel) {
+            self.release_require_frames(&frames);
             return Err(error);
         }
         loop {
@@ -14713,6 +14635,7 @@ impl Vm {
             }
             match frames.remove(0) {
                 CoroutineFrame::Bytecode(_) => {}
+                CoroutineFrame::Require(frame) => self.release_module_load(&frame),
                 CoroutineFrame::PCall => {
                     self.last_error_traceback = None;
                     self.mark_control_memory_dirty();
@@ -14724,7 +14647,13 @@ impl Vm {
                     );
                 }
                 CoroutineFrame::XPCall(frame) => {
-                    let results = self.resume_xpcall_error_handler(frame, error, fuel)?;
+                    let results = match self.resume_xpcall_error_handler(frame, error, fuel) {
+                        Ok(results) => results,
+                        Err(error) => {
+                            self.release_require_frames(&frames);
+                            return Err(error);
+                        }
+                    };
                     return self.resume_coroutine_frames_inner(frames, results, fuel);
                 }
             }
@@ -14857,8 +14786,14 @@ impl Vm {
                 values.extend(suspension.yielded);
                 Ok(values)
             }
-            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
+                self.coroutines[coroutine].dead = true;
+                self.coroutines[coroutine].frames.clear();
+                Err(error)
+            }
             Err(error) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
                 let error_value = self.error_object(error);
@@ -14910,8 +14845,14 @@ impl Vm {
                 state.frames = suspension.frames;
                 Ok(Vec::new())
             }
-            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
+                self.coroutines[coroutine].dead = true;
+                self.coroutines[coroutine].frames.clear();
+                Err(error)
+            }
             Err(error) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
                 let error_value = self.error_object(error);
@@ -14970,8 +14911,14 @@ impl Vm {
                 state.frames = suspension.frames;
                 Ok(suspension.yielded)
             }
-            Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
+            Err(error) if error_is_uncatchable(&error, fuel) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
+                self.coroutines[coroutine].dead = true;
+                self.coroutines[coroutine].frames.clear();
+                Err(error)
+            }
             Err(error) => {
+                self.release_module_owner(self.coroutines[coroutine].handle);
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
                 let error_value = self.error_object(error);
@@ -15094,7 +15041,7 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                suspension.frames.push(CoroutineFrame::PCall);
+                self.push_coroutine_frame(&mut suspension, CoroutineFrame::PCall)?;
                 Ok(VmFlow::Yield(suspension))
             }
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
@@ -15187,15 +15134,22 @@ impl Vm {
                 Ok(VmFlow::Return(protected_results))
             }
             Ok(VmFlow::Yield(mut suspension)) => {
-                let program_id = self.retain_dynamic_program_ref(program)?;
-                suspension
-                    .frames
-                    .push(CoroutineFrame::XPCall(SuspendedXPCallFrame {
+                let program_id = match self.retain_dynamic_program_ref(program) {
+                    Ok(program_id) => program_id,
+                    Err(error) => {
+                        self.release_require_frames(&suspension.frames);
+                        return Err(error);
+                    }
+                };
+                self.push_coroutine_frame(
+                    &mut suspension,
+                    CoroutineFrame::XPCall(SuspendedXPCallFrame {
                         program_id,
                         handler,
                         depth,
                         traceback_base: 0,
-                    }));
+                    }),
+                )?;
                 Ok(VmFlow::Yield(suspension))
             }
             Err(error) if error_is_uncatchable(&error, fuel) => Err(error),
@@ -15711,6 +15665,7 @@ impl Vm {
         for frames in &self.active_coroutine_frames {
             traced_cohorts.extend(frames.iter().filter_map(|frame| match frame {
                 CoroutineFrame::Bytecode(frame) => Some(frame.module_cohort),
+                CoroutineFrame::Require(frame) => Some(frame.cohort),
                 CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => None,
             }));
         }
@@ -15750,9 +15705,14 @@ impl Vm {
                 roots.push(Value::table(coroutine.thread_environment));
                 for frame in &coroutine.frames {
                     self.extend_coroutine_frame_roots(&mut roots, frame);
-                    if let CoroutineFrame::Bytecode(frame) = frame {
-                        if traced_cohorts.insert(frame.module_cohort) {
-                            if let Some(cohort) = self.module_cohorts.get(&frame.module_cohort) {
+                    let cohort_id = match frame {
+                        CoroutineFrame::Bytecode(frame) => Some(frame.module_cohort),
+                        CoroutineFrame::Require(frame) => Some(frame.cohort),
+                        CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => None,
+                    };
+                    if let Some(cohort_id) = cohort_id {
+                        if traced_cohorts.insert(cohort_id) {
+                            if let Some(cohort) = self.module_cohorts.get(&cohort_id) {
                                 roots.extend(cohort.cache.values().flatten().copied());
                             }
                         }
@@ -15779,6 +15739,22 @@ impl Vm {
         let mut reachable = self.heap.reachable_module_cohorts(roots);
         reachable.insert(0);
         reachable.extend(self.call_stack.iter().map(|frame| frame.module_cohort));
+        for frames in &self.active_coroutine_frames {
+            for frame in frames {
+                if let CoroutineFrame::Require(frame) = frame {
+                    reachable.insert(frame.cohort);
+                }
+            }
+        }
+        for coroutine in &self.coroutines {
+            if self.heap.has_userdata(coroutine.handle) {
+                for frame in &coroutine.frames {
+                    if let CoroutineFrame::Require(frame) = frame {
+                        reachable.insert(frame.cohort);
+                    }
+                }
+            }
+        }
         self.module_cohorts
             .retain(|cohort, _| reachable.contains(cohort));
         self.mark_control_memory_dirty();
@@ -15875,7 +15851,7 @@ impl Vm {
                     extend_stackless_self_call_frame_roots(roots, stackless_frame);
                 }
             }
-            CoroutineFrame::PCall => {}
+            CoroutineFrame::PCall | CoroutineFrame::Require(_) => {}
             CoroutineFrame::XPCall(frame) => {
                 roots.push(frame.handler);
             }
@@ -23731,6 +23707,7 @@ fn shrink_coroutine_frame_capacity(frame: &mut CoroutineFrame) {
             }
             frame.stackless_self_calls.shrink_to_fit();
         }
+        CoroutineFrame::Require(frame) => frame.load.identity.shrink_to_fit(),
         CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => {}
     }
 }
@@ -23760,7 +23737,7 @@ fn extend_coroutine_program_roots(
             CoroutineFrame::XPCall(frame) => {
                 roots.insert(frame.program_id);
             }
-            CoroutineFrame::PCall => {}
+            CoroutineFrame::PCall | CoroutineFrame::Require(_) => {}
         }
     }
 }
@@ -23835,9 +23812,9 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
                     .saturating_add(module_cache_node_overhead),
             );
         }
-        usage.add_vec(&cohort.loading_stack);
-        for identity in &cohort.loading_stack {
-            usage.add(identity.len(), identity.capacity());
+        usage.add_vec(&cohort.loading);
+        for load in &cohort.loading {
+            usage.add(load.identity.len(), load.identity.capacity());
         }
     }
     usage.add_vec(&vm.call_stack);
@@ -23913,17 +23890,11 @@ fn guest_transaction_snapshot_live_bytes(vm: &Vm) -> usize {
             usage.add(identity.len(), identity.len());
         }
         usage.add(
-            cohort
-                .loading_stack
-                .len()
-                .saturating_mul(size_of::<String>()),
-            cohort
-                .loading_stack
-                .len()
-                .saturating_mul(size_of::<String>()),
+            cohort.loading.len().saturating_mul(size_of::<ModuleLoad>()),
+            cohort.loading.len().saturating_mul(size_of::<ModuleLoad>()),
         );
-        for identity in &cohort.loading_stack {
-            usage.add(identity.len(), identity.len());
+        for load in &cohort.loading {
+            usage.add(load.identity.len(), load.identity.len());
         }
     }
     usage.add(
@@ -23966,9 +23937,9 @@ fn add_guest_transaction_memory(transaction: &GuestTransaction, usage: &mut Memo
         for identity in &cohort.cache_identities {
             usage.add(identity.len(), identity.capacity());
         }
-        usage.add_vec(&cohort.loading_stack);
-        for identity in &cohort.loading_stack {
-            usage.add(identity.len(), identity.capacity());
+        usage.add_vec(&cohort.loading);
+        for load in &cohort.loading {
+            usage.add(load.identity.len(), load.identity.capacity());
         }
     }
     usage.add_vec(&transaction.coroutines);
@@ -24203,6 +24174,10 @@ fn try_clone_coroutine_frame(frame: &CoroutineFrame) -> Result<CoroutineFrame> {
             SuspendedBytecodeFrameStorage::try_new(try_clone_suspended_bytecode_frame(frame)?)?,
         ),
         CoroutineFrame::PCall => CoroutineFrame::PCall,
+        CoroutineFrame::Require(frame) => CoroutineFrame::Require(SuspendedRequireFrame {
+            cohort: frame.cohort,
+            load: try_clone_module_load(&frame.load)?,
+        }),
         CoroutineFrame::XPCall(frame) => CoroutineFrame::XPCall(SuspendedXPCallFrame {
             program_id: frame.program_id,
             handler: frame.handler,
@@ -24292,7 +24267,7 @@ fn try_snapshot_module_cohorts(
         checkpoints.push(ModuleCohortCheckpoint {
             id,
             cache_identities: try_clone_strings(cohort.cache.keys())?,
-            loading_stack: try_clone_strings(cohort.loading_stack.iter())?,
+            loading: try_clone_module_loads(&cohort.loading)?,
         });
     }
     Ok(checkpoints)
@@ -24387,6 +24362,9 @@ fn add_coroutine_frame_memory(frame: &CoroutineFrame, usage: &mut MemoryUsage) {
         }
         CoroutineFrame::XPCall(frame) => {
             let _ = frame;
+        }
+        CoroutineFrame::Require(frame) => {
+            usage.add(frame.load.identity.len(), frame.load.identity.capacity())
         }
         CoroutineFrame::PCall => {}
     }
