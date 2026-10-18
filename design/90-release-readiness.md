@@ -126,6 +126,9 @@ continuation remains part of the semantic-tail blocker.
   `rustia-parser`, `rustia-vm`, `rustia-compiler`, `rustia`, `rustia-cli`,
   then `rustia-conformance`; `rustia-lexer` and `rustia-vm` are the first
   candidates after the policy flip because they have no internal dependencies.
+  This generated workspace order includes conformance archive validation; the
+  initial public publication order in `91-semver-policy.md` excludes conformance
+  and benchmark tooling. Keep both tools unpublished unless separately selected.
 - The benchmark crate must either publish the `rustia-*` crates first, move the
   rustia adapter into a git/path-only integration crate, or ship that adapter as
   an example outside the core package.

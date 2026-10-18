@@ -43,7 +43,31 @@ changes cannot escape an enclosing guest rollback. `create_named_function` sets 
 
 All ordinary profiles share the API. Capability checks preserve each selected environment contract.
 Hardened leaves continue using pre-registered configuration and reject disposable construction
-before allocation. Async callbacks, borrowed callback scopes, and userdata methods are separate work.
+before allocation. Typed Rust-object methods are required, planned work for the
+[API and consumer-readiness milestone](92-first-release.md); the synchronous function API does not yet
+provide object registration. Async callbacks and borrowed callback scopes remain later work.
+
+## Planned object-method integration
+
+The minimum typed Rust-object API must reuse these synchronous callback contracts: typed conversions,
+capability/fuel metadata, panic containment, capture bounds, collection ownership, and the distinction
+between persistent configuration and disposable live values. Existing userdata identity in live handles
+does not implement arbitrary host-created typed objects or methods.
+
+Deterministic applications expose read-only replay-stable input and stage authoritative changes through
+the existing typed effects/slot-write journal. Method callbacks use the matching typed capability views
+to stage changes, without a second queue. Standard/live applications may explicitly register methods
+that mutate Rust-owned state or perform external work. External application changes and I/O are outside
+invocation and installation rollback and are not undone by reset. Reset still releases disposable instance
+payloads and invalidates their handles. Capability validation must reject a forbidden method definition
+atomically rather than silently installing a profile-dependent subset. Hardened leaves reject object
+construction before guest allocation.
+
+Rust payload allocations retain the callback-capture host-memory boundary; VM-owned storage and roots
+need atomic quota admission. Captures remain a semantic trust boundary, and destructors must not panic.
+VM-owned mutable-object snapshot/rollback, custom fields/metamethods, borrowed scopes, and async methods
+are outside this milestone. See the [object contract](75-embedded-api.md#planned-typed-rust-object-methods)
+for the full intent; none of these planned methods changes runtime behavior yet.
 
 ## Verification and rollout
 
@@ -76,4 +100,6 @@ Each client PR records its own required delivery checks and merge state. The rol
 any client repository's merge gate or include production deployment.
 
 No runtime performance improvement is claimed by this rollout. Async callbacks, borrowed scopes,
-userdata registration and stronger stack diagnostics remain separate follow-on work.
+and a full userdata object system remain separate follow-on work. Minimal typed Rust-object methods
+are instead required planned work under the [current milestone](92-first-release.md); the completed
+synchronous-function rollout above does not satisfy that requirement.

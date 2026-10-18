@@ -6,9 +6,12 @@
 
 ## One-paragraph state
 
-**First-release milestone:** target a stable Rustia 1.0 after a release-candidate
-cycle, tracked in [`92-first-release.md`](92-first-release.md). The workspace
-remains unpublished at `0.0.1`. The landing page now starts with executable API
+**Current milestone:** private 0.x API and real-application readiness, tracked in
+[`92-first-release.md`](92-first-release.md). Keep publication disabled and the
+repository private. The workspace remains at `0.0.1`; this milestone does not
+authorize a public candidate or 1.0 promotion. The future 1.0 promise will cover
+the embedding API and CLI, with lower-level engine packages separately versioned
+at 0.x. The landing page now starts with executable API
 examples and plain-language feature/speed comparisons; contributor instructions
 and README example checks are part of the release workflow. The README now keeps
 ordinary readers on runnable examples and the API reference. The crate's rustdoc
@@ -24,14 +27,23 @@ contract. These changes do not
 close the remaining public settings/userdata design, yieldable `require`,
 language error-phase, real-platform golden, or packaging gates.
 
-The [release delivery order](92-first-release.md#delivery-order) now groups the
-remaining work into a green baseline, API boundary decisions, embedding
-completeness, runtime correctness, platform validation, a consumer-tested
-candidate, and publication. API work leads; runtime and platform work can run
-alongside it. PR #60's full preflight found a stale generated benchmark-progress
-report after the rustdoc commit; refreshing that report changes no measurement
-or performance claim. Its follow-up still needs final CI before the baseline
-batch closes.
+The [private delivery order](92-first-release.md#delivery-order) groups the work
+into a green baseline, facade boundary, construction/failure contracts, typed
+Rust objects, runtime gaps, Linux/macOS-arm64/Node-V8 correctness, and an exact
+candidate used by WOTS/civfun/Grabby. Runtime and platform work can run alongside
+API work. The full native/mobile/Firefox/Safari runtime matrix remains required
+before public release, but does not block this private milestone.
+PR #60's stale generated benchmark-progress report was repaired in
+[PR #61](https://github.com/slowchop/rustia/pull/61), merged after full preflight,
+platform/Node-V8, differential smoke, and remote screening checks passed. The
+repair changed no measurement or performance claim.
+
+The accepted, **not yet implemented**, typed-object model uses read-only
+replay-stable input plus staged effects/slot writes for deterministic game logic.
+Standard/live methods may declare immediate mutation of application state;
+external effects remain outside rollback and reset. Deterministic construction
+must reject forbidden method capabilities atomically. Generic mutable-object
+snapshots are deferred. See the [object contract](92-first-release.md#agreed-rust-object-contract).
 
 **Memory-limit hardening:** memory-limited VMs now avoid batched execution paths
 and use the scalar dispatcher's instruction-boundary quota checks, closing the

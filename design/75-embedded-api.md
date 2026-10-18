@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [COHERENT EXECUTION + SYNCHRONOUS HOST FUNCTIONS IMPLEMENTED] (updated 2026-09-07).**
+> **Status: [COHERENT EXECUTION + SYNCHRONOUS HOST FUNCTIONS IMPLEMENTED; TYPED RUST-OBJECT METHODS PLANNED] (updated 2026-10-18).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -47,6 +47,9 @@ live values. `create_function`, persistent `register_function`, and `HostModule:
 `HostFunction` definition, capability/fuel metadata, and typed owned/live argument and tuple-result conversions.
 Heap functions own their callbacks; guest aliases keep replaced functions callable, collection reclaims
 unreachable callbacks, and reset releases disposable captures while restoring persistent registrations.
+Existing live values preserve userdata identity, but creating an arbitrary typed Rust object and exposing its
+methods is not implemented. That minimum object surface is required by the
+[API and consumer-readiness milestone](92-first-release.md); its accepted behavior is specified below.
 The composable `load(source).source_name(...).environment(...)` builder provides borrowed
 text/byte source, diagnostic names, exact rooted lexical environments, `eval`, `eval_live`, `eval_serde`,
 `exec`, and `install` terminals,
@@ -121,7 +124,8 @@ one engine:
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
    on a real host-side scheduling caller. Reclaimable synchronous host-function construction and the
-   composable chunk builder are implemented. Optional `UserData`/`Scope` and async remain later layers.
+   composable chunk builder are implemented. Minimal typed Rust-object methods are planned and required for
+   API readiness; a full mlua-style `UserData` system, `Scope`, and async remain later layers.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
@@ -151,6 +155,40 @@ The environment is chosen independently of the API layer:
 This is an API-availability rule, not a promise that every feature is meaningful in every profile. For example,
 async host work and suspended cross-tick coroutines are unsuitable for `DeterministicSim`, but they must not be
 globally omitted merely because that profile exists.
+
+### Planned typed Rust-object methods
+
+The accepted model has two uses of the same object API, following the existing host-function capability
+rules. This is a requirement for the [API and consumer-readiness milestone](92-first-release.md), not a claim
+that object registration or method dispatch is implemented.
+
+- **Deterministic game logic:** expose read-only methods over replay-stable input. Authoritative changes go
+  through the existing typed effects or slot-write journal. Method callbacks can receive the matching typed
+  capability view to stage those changes; never capture a separate mutable queue as a pure method.
+  A successful invocation returns those requests
+  for the host to apply; a failure escaping the invocation publishes none. Read-only access alone does not
+  prove replay stability: captured state remains an embedding trust boundary.
+- **Standard/live applications:** permit methods that mutate Rust-owned state or perform external work when
+  explicitly declared with the corresponding host capability. External application changes and I/O happen
+  immediately and remain after a later script error, failed installation, or decision reset. Rustia does not
+  undo them. Reset still releases disposable instance payloads and invalidates their handles.
+
+Validate the complete method registration against the selected profile before installing it. A deterministic
+VM rejects a definition containing forbidden capabilities atomically; it must not silently hide mutating
+methods and leave a different method set. Reuse synchronous host functions' argument/result conversions,
+fuel, panic containment, capture bounds, and ownership rules rather than adding another callback model.
+Object handles remain VM/epoch-bound, preserve identity, and reject wrong receiver types safely.
+Hardened leaves reject object construction before guest allocation.
+
+Object lifetime must account for host and guest aliases, replacement, collection, and reset. Host-owned Rust
+payloads and their allocations have the same quota boundary as callback captures; VM-owned object storage
+and roots require atomic logical-live quota admission. Destructors must not panic and are not guest
+finalizers. Persistent configuration and disposable instances must have the same explicit reset distinction
+as host-function definitions and values.
+
+VM-owned mutable Rust objects with automatic snapshots or rollback are outside this milestone. So are
+custom fields/metamethods, borrowed scopes, and async methods. A real consumer must exercise the minimum
+surface before its API is considered settled.
 
 ## Best Five Implementation Shapes
 
@@ -568,9 +606,12 @@ store authoritative state on the GC heap instead of in captured host slots.
 16. 🔨 **Complete rich integration and failure semantics:** transactional extension/module/replacement
     installation and explicit handle behavior across replacement/reset are implemented. Stack diagnostics and
     yieldable `require` remain.
-17. ⏳ **Add mlua-style `UserData`/`Scope` only after the live handle/context layer is stable and a real
-    host-object caller fixes the requirements.** Support methods, fields, metamethods, borrowed scoped
-    callbacks, and safe invalidation without weakening the owned facade.
+17. ⏳ **Add the required minimal typed Rust-object methods and verify them in a real consumer.** Use
+    read-only replay-stable input plus staged actions for deterministic game logic; permit explicitly
+    capability-labeled direct mutation in standard/live applications, outside rollback. Follow the
+    [planned object contract](#planned-typed-rust-object-methods) and the canonical
+    [milestone](92-first-release.md). A full mlua-style object system, fields/metamethods, borrowed `Scope`,
+    and VM-owned mutable-object snapshots remain optional later work.
 18. ⏳ **Make async an optional advanced layer, not a core assumption:** Rust futures may bridge to Luau
     coroutines for tools and live applications; `DeterministicSim` may reject or narrowly constrain operations
     that cannot satisfy its replay contract.
@@ -579,7 +620,7 @@ store authoritative state on the GC heap instead of in captured host slots.
     dedicated compatibility suite, and do not let a shim erase Rustia's builder, capability, fuel, or reset
     contracts.
 
-Steps 13–16 are the ordered advanced embedding track. Steps 17–19 are later optional layers, not
-reasons to delay memory safety, the host boundary, or the first public release unless a concrete release
-consumer promotes them. Every step applies to the shared engine; `live()` users are not forced through
+Steps 13–17 are the advanced embedding track; the minimal object methods in step 17 are required for the
+API and consumer-readiness milestone. The larger object features named there and steps 18–19 remain
+optional later layers. Every step applies to the shared engine; `live()` users are not forced through
 `DeterministicSim` restrictions.
