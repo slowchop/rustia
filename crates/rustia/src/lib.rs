@@ -125,7 +125,10 @@ pub const RUSTIA_DECISION_RESET_ABI_VERSION: u32 = rustia_vm::DECISION_RESET_ABI
 pub const RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION: u32 = rustia_vm::HARDENED_LEAF_GUEST_ABI_VERSION;
 /// Version of installation rollback and publication behavior.
 pub const RUSTIA_INSTALL_TRANSACTION_ABI_VERSION: u32 = rustia_vm::INSTALL_TRANSACTION_ABI_VERSION;
-/// Version of module resolution and cache identity behavior.
+/// Version of module resolution, suspension, and cache behavior.
+///
+/// Replay protocols should record this value and their resolver's own content
+/// identity. See [`ServiceModuleResolver`] for loading and failure rules.
 pub const RUSTIA_MODULE_RESOLUTION_ABI_VERSION: u32 = rustia_vm::MODULE_RESOLUTION_ABI_VERSION;
 pub use serde_value::SerdeValueError;
 pub use settings::{ServiceDeterminism, Settings, VmMemoryStats};

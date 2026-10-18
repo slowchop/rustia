@@ -517,6 +517,40 @@ their originating cohort, and collector reachability reclaims cohorts when no st
 reach them. `RUSTIA_INSTALL_TRANSACTION_ABI_VERSION` and `RUSTIA_MODULE_RESOLUTION_ABI_VERSION` version these
 contracts.
 
+#### Yielding script modules
+
+Module-resolution ABI v3 lets module code yield inside a guest coroutine. The
+loading continuation retains its code, environment, and pending values until
+the caller resumes it. The cache publishes only after successful completion;
+zero or one return value is allowed. Failures and multiple-result modules are
+not cached. Resolution still runs before every cache lookup, so a host may
+cache expensive source retrieval separately.
+
+Loading ownership belongs to the executing coroutine and cache cohort. A nested
+request for that owner's active identity reports a cycle. A different coroutine
+requesting the same in-progress identity gets an error; it cannot take over or
+observe a provisional result. Other identities and coroutines may run normally.
+Error unwinding, close, collection of an abandoned coroutine, hard abort, and
+decision reset release the corresponding loading entries. Loading-owner IDs do
+not keep otherwise unreachable coroutines alive.
+
+Ordinary `require` has ordinary call failure semantics: completed guest writes
+remain, and completed typed records remain if the error is caught. It does not
+hold a whole-VM savepoint across suspension. An escaping invocation error still
+discards its provisional records. An enclosing failed `install` restores the
+guest/cache/coroutine snapshot and typed savepoint, including loaders that were
+already suspended before installation. Host effects remain outside rollback.
+Fuel is shared with the caller; module loading does not create a fresh budget.
+
+`require` is host policy rather than part of the standalone Luau language oracle
+([target boundary](05-luau-target.md)). The pinned upstream
+[loading continuation](https://github.com/luau-lang/luau/blob/0.709/Require/src/RequireImpl.cpp#L130)
+commits a result after loading completes; Rustia specifies its own cohort,
+zero-result caching, ownership, and failure rules above. The acceptance tests in
+`crates/rustia/tests/yieldable_require.rs` cover nested/repeated suspension,
+completion, interleaving, failure/retry, cycles, cancellation, collection, reset,
+installation rollback, fuel abort, and typed-object roots on native and Node/V8.
+
 ### 5. Optional macro/codegen sugar
 
 An early `rustia_extension!` declarative macro is implemented. The attribute-macro/codegen shape below is a
@@ -660,8 +694,9 @@ store authoritative state on the GC heap instead of in captured host slots.
     host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
     `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; the host must separately bind its resolver content.
 16. 🔨 **Complete rich integration and failure semantics:** transactional extension/module/replacement
-    installation and explicit handle behavior across replacement/reset are implemented. Stack diagnostics and
-    yieldable `require` remain.
+    installation, explicit replacement/reset lifetimes, source diagnostics, and resumable
+    `require` are implemented. Final correctness checks, independent review, and private-platform
+    acceptance remain delivery gates.
 17. 🔨 **Validate the implemented typed Rust-object methods in a real consumer.** Registration, live
     handles, method dispatch, read-only replay-stable input plus staged actions, and explicit
     direct mutation in standard/live applications are implemented. Final checks, independent reviews,

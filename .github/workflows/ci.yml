@@ -146,6 +146,7 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test live_value_contract
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test yieldable_require
 
       - name: Run default web-live adapter tests on Node/V8
         env:
@@ -155,3 +156,4 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test live_value_contract
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test yieldable_require

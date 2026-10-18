@@ -118,6 +118,19 @@ fn generated_differential_smoke() {
 
 #[test]
 fn deterministic_stateful_failure_and_recovery_sequences() {
+    for profile in 0..4 {
+        for suffix in [
+            &[13, 14, 13][..],
+            &[13, 15, 13, 14][..],
+            &[13, 16, 14][..],
+            &[13, 17, 13, 14][..],
+            &[13, 3, 13, 14][..],
+        ] {
+            let mut data = vec![profile];
+            data.extend_from_slice(suffix);
+            assert!(rustia_fuzz::fuzz_stateful(&data));
+        }
+    }
     let mut random = DeterministicBytes::new(0x6572_726f_7273);
     for _ in 0..256 {
         let data: Vec<_> = (0..32).map(|_| random.byte()).collect();

@@ -6,6 +6,15 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+### Changed
+
+- Required modules can yield and resume inside guest coroutines. Results enter
+  the cache only after completion; cancelled or failed loads can be retried.
+  Ordinary module failures keep completed writes and caught typed records,
+  matching ordinary function calls. An enclosing failed installation still
+  restores guest state and provisional records. Module-resolution ABI is now 3.
+  Final correctness review and CI remain pending.
+
 ### Fixed
 
 - Object and callback definitions keep their exact Rust payload and host-schema

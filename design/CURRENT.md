@@ -24,7 +24,7 @@ behind accessors, reports stale/cross-VM live handles through typed VM errors,
 and checks table/function/export receivers before converting inputs or allocating
 guest values. Handle validation uses the core VM's ownership-first, epoch-second
 contract. These changes do not
-close typed-object consumer validation, yieldable `require`,
+close typed-object consumer validation, final yieldable-`require` acceptance,
 language error-phase, real-platform golden, or packaging gates.
 
 **The application API boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)**
@@ -62,6 +62,19 @@ lookup order. Four-profile failure/recovery and call-shape regressions, eight
 new pinned-Luau fixtures, and expanded bounded differential cases cover this
 slice. Full CI and independent review remain pending. This does not close the
 broader language-parity audit or yieldable `require`.
+
+**Yieldable `require` is implemented in the current private follow-up.** A
+coroutine-owned loading continuation keeps pending module execution alive and
+publishes the zero/one-result cache only on completion. Same-owner cycles and
+another coroutine's in-progress identity report errors without taking over the
+load. Ordinary module failure keeps completed guest writes and typed records
+when caught; no whole-VM savepoint spans unrelated coroutine execution. A failed
+outer installation still restores guest/cache/coroutine state and provisional
+records. Close, abandoned-coroutine collection, hard abort, and reset release
+loading ownership. Module-resolution ABI v3 records this changed failure and
+suspension contract. Native/Node tests cover suspended loaders and typed-object
+aliases; the bounded stateful driver also interleaves load/resume/close/reset and
+installation rollback. Final checks and independent review remain pending.
 
 The [private delivery order](92-first-release.md#delivery-order) groups the work
 into a green baseline, facade boundary, construction/failure contracts, typed
