@@ -86,6 +86,9 @@ check-executor-ownership:
     cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings
     cargo test --locked -p rustia-compiler --features executor-diagnostics --test executor_ownership -- --nocapture
 
+check-facade-api:
+    node tools/check-facade-api.js
+
 check-examples:
     cargo test --locked -p rustia --examples --no-run
 
