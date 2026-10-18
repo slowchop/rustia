@@ -48,7 +48,7 @@ impl Vm {
         requiring_program: &Program,
         depth: usize,
         call_site: Option<ErrorLocation>,
-        fuel: &mut Execution<'_>,
+        _fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
         self.check_recursion_depth(depth)?;
         validate_native_arity(args, 1, 1, "require arguments")?;
@@ -161,28 +161,27 @@ impl Vm {
                 .heap
                 .alloc_dynamic_main_function_in_cohort(program_id, environment, cohort_id)
                 .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-            self.call_value_with_site_resumable(
-                requiring_program,
-                Value::function(handle),
-                &[],
-                depth.saturating_add(1),
+            let mut callers = Vec::new();
+            callers
+                .try_reserve_exact(1)
+                .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            callers.push(CoroutineFrame::Require(SuspendedRequireFrame {
+                cohort: frame.cohort,
+                load: try_clone_module_load(&frame.load)?,
+            }));
+            Ok(VmFlow::Call(DeferredBytecodeCall {
+                callee: Value::function(handle),
+                args: Vec::new(),
+                depth: depth.saturating_add(1),
                 call_site,
-                fuel,
-            )
+                fallback_program: program_id,
+                callers,
+            }))
         })();
-        match outcome {
-            Ok(VmFlow::Return(results)) => self
-                .finish_required_module(frame, results.into_vec())
-                .map(VmFlow::Return),
-            Ok(VmFlow::Yield(mut suspension)) => {
-                self.push_coroutine_frame(&mut suspension, CoroutineFrame::Require(frame))?;
-                Ok(VmFlow::Yield(suspension))
-            }
-            Err(error) => {
-                self.release_module_load(&frame);
-                Err(error)
-            }
+        if outcome.is_err() {
+            self.release_module_load(&frame);
         }
+        outcome
     }
 
     pub(super) fn finish_required_module(
@@ -261,6 +260,20 @@ impl Vm {
             return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
         }
         suspension.frames.push(frame);
+        Ok(())
+    }
+
+    pub(super) fn push_deferred_caller(
+        &mut self,
+        request: &mut DeferredBytecodeCall,
+        frame: CoroutineFrame,
+    ) -> Result<()> {
+        if request.callers.try_reserve(1).is_err() {
+            self.release_require_frames(&request.callers);
+            self.release_require_frames(std::slice::from_ref(&frame));
+            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+        }
+        request.callers.push(frame);
         Ok(())
     }
 

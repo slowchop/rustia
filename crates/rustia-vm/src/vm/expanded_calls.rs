@@ -27,14 +27,15 @@ pub(super) struct ExpandedCallState {
     // Outermost first: popping evaluates the next innermost pending call.
     calls: Vec<PendingExpandedCall>,
     finish: ExpandedFinish,
-    depth: usize,
-    call_site: Option<ErrorLocation>,
+    pub(super) depth: usize,
+    pub(super) call_site: Option<ErrorLocation>,
 }
 
 pub(super) enum ExpandedCallFlow {
+    Transfer(DeferredBytecodeCall),
     Return(Vec<Value>),
     Yield(CoroutineYield),
-    SelfCall(Vec<Value>),
+    Call { callee: Value, args: Vec<Value> },
 }
 
 fn invalid(reason: &'static str) -> Error {
@@ -396,7 +397,6 @@ impl Vm {
         program: &Program,
         state: &mut ExpandedCallState,
         mut results: Vec<Value>,
-        current_function: Option<Value>,
         fuel: &mut Execution<'_>,
     ) -> Result<ExpandedCallFlow> {
         while !state.calls.is_empty() {
@@ -449,23 +449,45 @@ impl Vm {
                 self.mutate_last_call_stack_frame(|frame| {
                     extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
                 });
-                if current_function.and_then(Value::as_function).is_some()
-                    && current_function.and_then(Value::as_function) == callee.as_function()
-                {
-                    return Ok(ExpandedCallFlow::SelfCall(call.args));
+                if let Some(handle) = callee.as_function() {
+                    let kind = self
+                        .heap
+                        .function_kind(handle)
+                        .ok_or_else(|| invalid("function handle is missing"))?;
+                    if let Some(results) =
+                        self.try_leaf_bytecode_handle(kind, handle, state.depth, fuel)?
+                    {
+                        return Ok(ExpandedCallFlow::Return(results.into_vec()));
+                    }
+                    if matches!(
+                        kind,
+                        FunctionKind::Bytecode { .. } | FunctionKind::DynamicMain { .. }
+                    ) {
+                        return Ok(ExpandedCallFlow::Call {
+                            callee,
+                            args: call.args,
+                        });
+                    }
                 }
-                self.call_value_with_site_resumable(
+                if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
+                    return Ok(ExpandedCallFlow::Call {
+                        callee,
+                        args: call.args,
+                    });
+                }
+                let flow = self.call_value_with_site_resumable(
                     program,
                     callee,
                     &call.args,
                     state.depth,
                     state.call_site.clone(),
                     fuel,
-                )
-                .map(|flow| match flow {
-                    VmFlow::Return(results) => ExpandedCallFlow::Return(results.into_vec()),
-                    VmFlow::Yield(suspension) => ExpandedCallFlow::Yield(suspension),
-                })
+                )?;
+                match flow {
+                    VmFlow::Return(results) => Ok(ExpandedCallFlow::Return(results.into_vec())),
+                    VmFlow::Yield(suspension) => Ok(ExpandedCallFlow::Yield(suspension)),
+                    VmFlow::Call(request) => Ok(ExpandedCallFlow::Transfer(request)),
+                }
             })();
             self.truncate_stackless_self_call_roots(root_mark);
             match outcome? {

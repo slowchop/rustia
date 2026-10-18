@@ -294,3 +294,237 @@ fn snapshot_quota_rejection_preserves_pending_ownership_without_a_savepoint() {
     assert_eq!(vm.module_cohorts[&0].loading.len(), 1);
     assert_eq!(vm.module_cohorts[&0].loading[0].owner, None);
 }
+
+fn module_request(
+    vm: &mut Vm,
+    identity: &str,
+    program: Program,
+    depth: usize,
+    protected: bool,
+) -> DeferredBytecodeCall {
+    let program_id = vm.retain_dynamic_program(program).unwrap();
+    let function = vm
+        .heap
+        .alloc_dynamic_main_function_in_cohort(program_id, vm.globals, 0)
+        .unwrap();
+    let frame = pending(vm, identity, None);
+    let mut callers = vec![CoroutineFrame::Require(frame)];
+    if protected {
+        callers.push(CoroutineFrame::PCall);
+    }
+    DeferredBytecodeCall {
+        callee: Value::function(function),
+        args: Vec::new(),
+        depth,
+        call_site: None,
+        fallback_program: program_id,
+        callers,
+    }
+}
+
+fn drive_module(vm: &mut Vm, request: DeferredBytecodeCall) -> VmFlowResult<ReturnValues> {
+    let mut state = vm.begin_transactional_execution_with_fuel(None);
+    let mut hosts = RejectHostDispatcher;
+    vm.drive_deferred_bytecode_flow(
+        Ok(VmFlow::Call(request)),
+        0,
+        &mut Execution {
+            state: &mut state,
+            hosts: &mut hosts,
+        },
+    )
+}
+
+#[test]
+fn deferred_module_completion_settles_native_frames_without_bytecode_headers() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let request = module_request(&mut vm, "empty", empty_program(), 0, true);
+    let VmFlow::Return(results) = drive_module(&mut vm, request).unwrap() else {
+        panic!("module should complete");
+    };
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].as_bool(), Some(true));
+    assert!(matches!(
+        vm.module_cohorts[&0].cache.get("empty"),
+        Some(None)
+    ));
+    assert!(vm.module_cohorts[&0].loading.is_empty());
+    assert!(vm.call_stack.is_empty());
+    assert!(vm.active_coroutine_frames.is_empty());
+}
+
+#[test]
+fn deferred_module_failure_releases_ownership_before_protected_completion() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let failing = Program::new(
+        Function::new(vec![Instruction::with_aux(Opcode::Call, 0, 0, 0, 0)], 1),
+        Vec::new(),
+    );
+    let request = module_request(&mut vm, "failure", failing, 0, true);
+    let VmFlow::Return(results) = drive_module(&mut vm, request).unwrap() else {
+        panic!("protected module failure should complete");
+    };
+    assert_eq!(results[0].as_bool(), Some(false));
+    assert!(vm
+        .string_value(results[1])
+        .unwrap()
+        .unwrap()
+        .contains("attempt to call"));
+    assert!(!vm.module_cohorts[&0].cache.contains_key("failure"));
+    assert!(vm.module_cohorts[&0].loading.is_empty());
+    assert!(vm.call_stack.is_empty());
+    assert!(vm.active_coroutine_frames.is_empty());
+}
+
+#[test]
+fn deferred_module_hard_abort_releases_ownership_and_bypasses_protection() {
+    for quota in [false, true] {
+        let mut vm = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                recursion_limit: 4,
+                ..VmSettings::default()
+            },
+        );
+        let request = module_request(
+            &mut vm,
+            "abort",
+            empty_program(),
+            if quota { 0 } else { 4 },
+            true,
+        );
+        if quota {
+            vm.settings.memory_limit_bytes = Some(0);
+        }
+        let error = match drive_module(&mut vm, request) {
+            Err(error) => error,
+            Ok(_) => panic!("hard module failure must escape pcall"),
+        };
+        assert!(matches!(
+            error.kind,
+            ErrorKind::OutOfMemory | ErrorKind::RecursionLimit { .. }
+        ));
+        assert!(!vm.module_cohorts[&0].cache.contains_key("abort"));
+        assert!(vm.module_cohorts[&0].loading.is_empty());
+        assert!(vm.call_stack.is_empty());
+        assert!(vm.active_coroutine_frames.is_empty());
+    }
+}
+
+#[test]
+fn deferred_protected_module_suspension_rebases_its_error_handler_traceback() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let library = vm
+        .get_global_value("coroutine")
+        .unwrap()
+        .as_table()
+        .unwrap();
+    let key = vm.string("yield");
+    let yield_function = vm.raw_table_get(library, key).unwrap();
+    let coroutine = vm.native_coroutine_create(&[yield_function]).unwrap();
+    let owner = vm
+        .coroutines
+        .iter()
+        .position(|state| Some(state.handle) == coroutine.as_userdata())
+        .unwrap();
+    let mut request = module_request(&mut vm, "yielding", empty_program(), 0, false);
+    request.callee = yield_function;
+    let handler = vm.get_global_value("tostring").unwrap();
+    request
+        .callers
+        .push(CoroutineFrame::XPCall(SuspendedXPCallFrame {
+            program_id: request.fallback_program,
+            handler,
+            depth: 0,
+            traceback_base: 7,
+        }));
+    vm.running_coroutines.push(owner);
+    vm.running_coroutine_stack_bases.push(0);
+    let VmFlow::Yield(suspension) = drive_module(&mut vm, request).unwrap() else {
+        panic!("module transfer should expose a genuine coroutine yield");
+    };
+    let Some(CoroutineFrame::XPCall(handler)) = suspension.frames.last() else {
+        panic!("protected completion frame was lost");
+    };
+    assert_eq!(handler.traceback_base, 0);
+    assert_eq!(vm.module_cohorts[&0].loading.len(), 1);
+    vm.release_require_frames(&suspension.frames);
+    vm.running_coroutine_stack_bases.pop();
+    vm.running_coroutines.pop();
+    assert!(vm.module_cohorts[&0].loading.is_empty());
+    assert!(vm.call_stack.is_empty());
+    assert!(vm.active_coroutine_frames.is_empty());
+}
+
+#[test]
+fn ordinary_recursion_after_fresh_module_completion_uses_the_shared_driver() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for depth in [20, 100] {
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = resolutions.clone();
+        let mut vm = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                memory_limit_bytes: Some(2 * 1024 * 1024),
+                module_resolver: Some(ModuleResolver::new(
+                    move |_, _| {
+                        let identity = format!("module{}", observed.fetch_add(1, Ordering::SeqCst));
+                        Ok(ResolvedModule::new(identity, empty_program()))
+                    },
+                    true,
+                )),
+                ..VmSettings::default()
+            },
+        );
+        // require a fresh identity, then perform an ordinary non-tail self call.
+        // The require completion has restored this caller before recursion.
+        let mut recursive = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 1, 0, 0, 3),
+                Instruction::new(Opcode::LoadConst, 2, 0, 4),
+                Instruction::with_aux(Opcode::Call, 1, 1, 2, 1),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::new(Opcode::Equal, 1, 0, 1),
+                Instruction::with_aux(Opcode::JumpIfNot, 1, 0, 0, 8),
+                Instruction::new(Opcode::LoadConst, 0, 0, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+                Instruction::new(Opcode::LoadCurrentFunction, 1, 0, 0),
+                Instruction::new(Opcode::LoadConst, 2, 0, 2),
+                Instruction::new(Opcode::Sub, 2, 0, 2),
+                Instruction::with_aux(Opcode::Call, 1, 1, 2, 1),
+                Instruction::new(Opcode::LoadConst, 2, 0, 2),
+                Instruction::new(Opcode::Add, 0, 1, 2),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            3,
+        );
+        recursive.parameter_count = 1;
+        let program = Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                    Instruction::with_aux(Opcode::Call, 0, 0, 1, 1),
+                    Instruction::new(Opcode::Return, 0, 1, 0),
+                ],
+                2,
+            ),
+            vec![
+                Constant::Number(f64::from(depth)),
+                Constant::Number(0.0),
+                Constant::Number(1.0),
+                Constant::String(b"require".to_vec()),
+                Constant::String(b"module".to_vec()),
+            ],
+            vec![recursive],
+        );
+        assert_eq!(
+            vm.run(&program).unwrap().as_number(),
+            Some(f64::from(depth))
+        );
+        assert_eq!(resolutions.load(Ordering::SeqCst), depth as usize + 1);
+        assert!(vm.module_cohorts[&0].loading.is_empty());
+        assert!(vm.call_stack.is_empty());
+        assert!(vm.active_coroutine_frames.is_empty());
+    }
+}
