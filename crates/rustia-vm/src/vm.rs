@@ -10813,10 +10813,7 @@ impl Vm {
     ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
-            return self
-                .call_metamethod(program, callee, args, depth, fuel)
-                .map(ReturnValues::from_vec)
-                .map(VmFlow::Return);
+            return self.call_metamethod_resumable(program, callee, args, depth, fuel);
         };
         let kind = self.heap.function_kind(handle).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -10856,10 +10853,7 @@ impl Vm {
     ) -> VmFlowResult<ReturnValues> {
         self.check_recursion_depth(depth)?;
         let Some(handle) = callee.as_function() else {
-            return self
-                .call_metamethod(program, callee, args, depth, fuel)
-                .map(ReturnValues::from_vec)
-                .map(VmFlow::Return);
+            return self.call_metamethod_resumable(program, callee, args, depth, fuel);
         };
         if let Some(entry) = self.native_call_inline_cache(
             cache_site.program_id,
@@ -11734,40 +11728,45 @@ impl Vm {
         Ok(Some(outcome))
     }
 
-    fn call_metamethod(
+    fn call_metamethod_resumable(
         &mut self,
         program: &Program,
         callee: Value,
         args: &[Value],
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<Vec<Value>> {
-        match callee.kind() {
-            ValueKind::Table | ValueKind::Userdata => {
-                let Some(method) = self.metamethod_for_value(callee, "__call")? else {
-                    return Err(self.with_diagnostic_reason(
-                        Error::new(ErrorKind::RuntimeError {
-                            message: format!("attempt to call a {} value", value_type_name(callee)),
-                        }),
-                        crate::diagnostic::DiagnosticReason::Call {
-                            value_type: value_type_name(callee),
-                        },
-                    ));
-                };
-                let mut call_args = Vec::with_capacity(args.len() + 1);
-                call_args.push(callee);
-                call_args.extend_from_slice(args);
-                self.call_value(program, method, &call_args, depth.saturating_add(1), fuel)
-            }
-            _ => Err(self.with_diagnostic_reason(
+    ) -> VmFlowResult<ReturnValues> {
+        self.check_recursion_depth(depth)?;
+        let method = if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
+            self.metamethod_for_value(callee, "__call")?
+        } else {
+            None
+        };
+        // Luau 0.709 luaV_tryfuncTM requires a function here, even when
+        // the metamethod value has a callable metatable of its own.
+        let Some(method) = method.filter(|value| value.as_function().is_some()) else {
+            return Err(self.with_diagnostic_reason(
                 Error::new(ErrorKind::RuntimeError {
                     message: format!("attempt to call a {} value", value_type_name(callee)),
                 }),
                 crate::diagnostic::DiagnosticReason::Call {
                     value_type: value_type_name(callee),
                 },
-            )),
-        }
+            ));
+        };
+        let mut call_args = try_copy_vec(args)?;
+        call_args
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        call_args.insert(0, callee);
+        self.call_value_with_site_resumable(
+            program,
+            method,
+            &call_args,
+            depth.saturating_add(1),
+            None,
+            fuel,
+        )
     }
 
     fn call_function_multi(

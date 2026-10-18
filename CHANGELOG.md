@@ -6,6 +6,8 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+- Keep ordinary callable receivers on VM continuations through recursion and suspension; reject non-function `__call` values as Luau 0.709 does.
+
 ### Changed
 
 - Required modules can yield and resume inside guest coroutines. Results enter

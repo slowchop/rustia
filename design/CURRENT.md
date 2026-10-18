@@ -72,7 +72,10 @@ when caught; no whole-VM savepoint spans unrelated coroutine execution. A failed
 outer installation still restores guest/cache/coroutine state and provisional
 records. Close, abandoned-coroutine collection, hard abort, and reset release
 loading ownership. Module-resolution ABI v3 records this changed failure and
-suspension contract. Native/Node tests cover suspended loaders and typed-object
+suspension contract. Ordinary callable receivers now use the same VM continuation driver, preserving
+yield/resume and bounded recursion without growing the native stack. The pinned
+Luau oracle requires `__call` itself to be a function; callable table metamethods
+are rejected in both ordinary and expanded calls. Native/Node tests cover suspended loaders and typed-object
 aliases; the bounded stateful driver also interleaves load/resume/close/reset and
 installation rollback. Final checks and independent review remain pending.
 
@@ -719,8 +722,8 @@ unreachable suspended-coroutine frames.
    regression alerts.
 5. **Stabilize and publish the public crates.** Settle the consumer API and semver surface, close the generated
    release gates, flip `publish = false` in dependency order, and publish honest per-workload documentation.
-6. **Keep the executable conformance corpus green**. The current repo has 720 executable fixtures covering 517
-   behavior refs with no pending rows: 702/499 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
+6. **Keep the executable conformance corpus green**. The current repo has 723 executable fixtures covering 517
+   behavior refs with no pending rows: 705/499 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
 7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
    nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
@@ -871,7 +874,7 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **720 fixtures**, **517 refs**, 702 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
+  **723 fixtures**, **517 refs**, 705 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
   Lua 5.1.5 oracle, **0 pending-oracle**,
   **0 pending-impl**, and **0 rustia-only**. That named executable denominator is authoritative; it does not
   claim a one-to-one audit of every row in the older 709-row design inventory. Future work is focused oracle
@@ -926,7 +929,7 @@ invocation, and a separately versioned guest ABI.
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 720 fixtures / 517 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 723 fixtures / 517 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
@@ -949,7 +952,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 720 fixtures (702 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 517 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 723 fixtures (705 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 517 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |

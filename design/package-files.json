@@ -571,7 +571,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 743,
+      "file_count": 746,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -661,6 +661,9 @@
         "corpus/conformance/fixtures/upstream-luau-0.709/bit32_conversion_edges.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/bit32_extract_replace_count_byteswap.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/bit32_shift_rotate.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/callable_function_required.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/callable_recursive_frames.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/callable_yield_resume.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/calls_math_sin_extra_arg_ignored.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/calls_rawget_extra_arg_nil.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/calls_rawset_extra_arg_ignored.luau",
@@ -1357,7 +1360,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-vm/Cargo.toml",
       "publish": false,
-      "file_count": 30,
+      "file_count": 33,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1382,10 +1385,13 @@
         "src/register_blocks.rs",
         "src/tape.rs",
         "src/value.rs",
+        "src/vm/bytecode_calls.rs",
         "src/vm/expanded_calls.rs",
         "src/vm/host_functions.rs",
         "src/vm/host_objects/tests.rs",
         "src/vm/host_objects.rs",
+        "src/vm/require/tests.rs",
+        "src/vm/require.rs",
         "src/vm.rs",
         "tests/core.rs",
         "tests/deferred_calls.rs"
@@ -1396,7 +1402,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 68,
+      "file_count": 70,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1446,6 +1452,7 @@
         "tests/builtin_call_phases.rs",
         "tests/builtin_callee_order.rs",
         "tests/builtin_nested_expansion.rs",
+        "tests/callable_continuations.rs",
         "tests/callback_adapter_api.rs",
         "tests/chunk_builder.rs",
         "tests/error_recovery.rs",
@@ -1465,7 +1472,8 @@
         "tests/transactional_install.rs",
         "tests/typed_invocation.rs",
         "tests/typed_objects.rs",
-        "tests/web_live.rs"
+        "tests/web_live.rs",
+        "tests/yieldable_require.rs"
       ]
     }
   ]

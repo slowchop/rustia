@@ -229,21 +229,20 @@ impl Vm {
         mut call_site: Option<ErrorLocation>,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
-        // Resolve callable receivers before entering bytecode, rather than
-        // re-entering `run_function` through each recursive `__call` boundary.
-        // This uses the same receiver order and depth increments as ordinary
-        // `call_metamethod`; actual guest suspension stays with the driver.
-        let handle = loop {
-            self.check_recursion_depth(depth)?;
-            if let Some(handle) = callee.as_function() {
-                break handle;
-            }
+        // Resolve one callable receiver without re-entering the native stack.
+        // Like Luau 0.709 luaV_tryfuncTM, __call itself must be a function.
+        self.check_recursion_depth(depth)?;
+        let handle = if let Some(handle) = callee.as_function() {
+            handle
+        } else {
             let method = if matches!(callee.kind(), ValueKind::Table | ValueKind::Userdata) {
                 self.metamethod_for_value(callee, "__call")?
             } else {
                 None
             };
-            let Some(method) = method else {
+            let Some((method, handle)) =
+                method.and_then(|value| value.as_function().map(|handle| (value, handle)))
+            else {
                 let program = self.dynamic_program(fallback_program)?;
                 return self.call_value_with_site_resumable(
                     &program, callee, &args, depth, call_site, fuel,
@@ -255,6 +254,7 @@ impl Vm {
             callee = method;
             depth = depth.saturating_add(1);
             call_site = None;
+            handle
         };
         self.mutate_last_call_stack_frame(|frame| {
             extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
