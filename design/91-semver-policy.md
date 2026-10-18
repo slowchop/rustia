@@ -7,6 +7,9 @@ only; grabby-specific integration code remains outside this repository.
 ## Current Status
 
 - All public workspace crates are currently `0.0.1` and `publish = false`.
+- The current milestone is private 0.x API and real-application readiness.
+  Keep publication disabled; a public candidate or stable release needs a
+  separate publication decision. See [`92-first-release.md`](92-first-release.md).
 - `0.0.x` means implementation-preview only. APIs may still change while P1
   engine, conformance, benchmark, and release gates are open.
 - Until Rustia's first public release, prefer the cleanest coherent long-term
@@ -20,6 +23,11 @@ only; grabby-specific integration code remains outside this repository.
   and the acceptance checklist in [`92-first-release.md`](92-first-release.md).
   This is a target, not a declaration that the current API is frozen or ready
   to publish. The workspace version remains `0.0.1` until its gates pass.
+- The future 1.0 promise covers the `rustia` embedding API and the CLI command
+  contract. Supporting lexer/parser/compiler/VM packages retain separately
+  versioned 0.x APIs; conformance and benchmark tooling remain unpublished.
+  Separate package versions and update uniform-version release checks when
+  preparing that future public candidate, not during this private plan update.
 
 ## Public Crate Roles
 
@@ -91,7 +99,8 @@ Before a breaking public-facade change lands after `0.1.0`:
 
 ## Publish Order
 
-When publishing starts, publish crates in dependency order:
+After a separate publication decision, publish the initial public packages in
+dependency order:
 
 1. `rustia-lexer`
 2. `rustia-parser`
@@ -99,7 +108,9 @@ When publishing starts, publish crates in dependency order:
 4. `rustia-compiler`
 5. `rustia`
 6. `rustia-cli`
-7. `rustia-conformance`
+
+Conformance and benchmark tooling are excluded from that initial publication.
+Publishing either tool later requires its own packaging and publication decision.
 
 The benchmark crate remains unpublished until the rustia adapter strategy is
 chosen: publish `rustia-*` first, move the adapter into a git/path-only

@@ -1,51 +1,135 @@
-# First release: a Rust API people can depend on
+# Private API milestone and future 1.0 release
 
-Target: **Rustia 1.0**, after a release-candidate cycle. Status: **in progress;
-not ready to publish**. The workspace remains unpublished at `0.0.1`.
+Current target: **a private 0.x milestone for API and real-application readiness**.
+Keep the repository private and every workspace crate at `publish = false`.
+The workspace version remains `0.0.1`; this plan does not authorize publication,
+a public release candidate, or a version bump.
+
+The future stable target remains **Rustia 1.0**, after a separate publication
+and release-candidate decision. That compatibility promise will cover the
+`rustia` embedding API and the CLI command contract. Parser, lexer, compiler,
+and VM packages will retain separately versioned 0.x APIs; benchmark and
+conformance tooling remain unpublished unless separately selected later.
 
 The goal is straightforward: a Rust developer should be able to try Rustia in a
-few minutes, understand its limits, and keep using the same API throughout 1.x.
-We will make the necessary API changes before release and migrate existing
-consumers together. We cannot promise that a breaking change will never be
-needed; we can avoid freezing known design mistakes into the first release.
+few minutes, understand its limits, and use it without application workarounds.
+Make necessary API changes during this private phase and migrate active clients
+together. Record the proposed API baseline after consumer validation; do not
+freeze known design mistakes into 1.0.
 
-This is the delivery checklist for the first release. [CURRENT.md](CURRENT.md)
-records what is built; [90-release-readiness.md](90-release-readiness.md) holds
-the detailed validation and packaging requirements. A passing preflight alone
-does not complete this milestone.
+[CURRENT.md](CURRENT.md) records what is built. The delivery order below defines
+this private milestone. The detailed checklist after it, together with
+[90-release-readiness.md](90-release-readiness.md), retains the eventual public
+release requirements. Passing private acceptance does not close those broader
+gates.
 
 ## Delivery order
 
-Use these batches to turn the acceptance checklist below into small, reviewable
-changes. Each batch may take several PRs; close it with recorded evidence rather
-than a percentage or a deadline. API changes include examples, documentation,
-tests, and active-client migration in the same rollout.
+Each batch may take several small PRs. API changes include tests, examples,
+documentation, and active-client migration in the same rollout. Required checks
+and independent reviews must pass before merge; use merge commits.
 
 | Batch | Work | Done when |
 |---|---|---|
-| 1. Establish a green baseline | Resolve the stale generated benchmark-progress report found by PR #60's full preflight; confirm current main's checks. Required checks and independent reviews must pass before merge. | The reviewed revision passes complete preflight and required checks; no blocking independent-review findings remain. |
-| 2. Decide the 1.0 API boundary | Inventory every public type, function, trait, and reachable dependency type. Settle constructors/defaults, settings, profiles, errors, metadata, extension traits, and which crates need stable versions. Remove accidental engine controls from the facade. | Independent API review accepts the proposed surface, documented defaults have consumer tests, and every intended extension point can grow compatibly. |
-| 3. Finish embedding workflows | Define the minimum useful opaque Rust-object API. Exercise conversions, live values, callbacks, reset, failure precedence, and module replacement from an external application. Migrate active clients with any necessary API changes. | A real consumer demonstrates each supported workflow without engine internals or workaround code; focused tests cover its failure and lifetime contracts. |
-| 4. Close runtime gaps | Finish yieldable `require` and compile-time versus runtime error parity; repeat bounded fuzz and long-running memory/reset tests. Review collection scheduling against the existing contract and remote evidence. | Pinned Luau fixtures and regression tests pass, no known release-blocking semantic gaps remain, and any tuning is supported by `ci-bench`. |
-| 5. Verify supported platforms | Execute the promised native and browser correctness/golden matrix, including real Firefox and Safari. | Exact candidate revisions and results cover the platform promises in `00-constraints.md`; build-only checks are not recorded as runtime proof. |
-| 6. Exercise a release candidate | Propose the API freeze, record its public API baseline, finish docs/package audits, and use the exact candidate in the active applications. Verify minimum Rust, feature combinations, recovery, and remote benchmark evidence. | Clean external installations and active consumers pass; independent review, complete preflight, platform tests, and candidate evidence are green. No known API redesign remains. |
-| 7. Publish and verify | Publish dependencies in order, then the embedding crate and CLI; tag the source and publish release notes. | Registry installation and documentation work, licenses and support statements agree, and the released API baseline is ready to check future 1.x changes. |
+| 1. Restore the baseline | Land the generated benchmark-progress repair in PR #61. | The reviewed revision passes full preflight and remote screening; this repair merged after its checks passed. |
+| 2. Separate application APIs from engine controls | Inventory the entire reachable facade, including error payloads, trait bounds, conversion impls, and re-exports. Replace accidental VM/compiler/parser exposure with facade-owned types and deliberately implementable or sealed extension points. | Independent API review accepts the inventory; facade consumers do not need lower-level engine types. |
+| 3. Settle construction and failure contracts | Make builder presets canonical; provide deliberate limits and settings readback. Preserve standard/live capability freedom. Make evolving classifications extensible and document conversion, ownership, reset, concurrency, and failure behavior. | External consumer tests cover defaults, error matching, data conversion, callbacks, module replacement, and rejected receivers without relying on implementation controls. |
+| 4. Add typed Rust objects and methods | Implement the accepted object contract below through the existing callback conversions, capabilities, fuel, and panic rules. Migrate real consumers alongside the API. | A real application uses read-only deterministic objects with staged writes, and a separate standard/live example uses immediate mutable methods. Collection, reset, rejection, and failure tests pass. |
+| 5. Close runtime gaps | Finish yieldable `require`, audit compile-time versus runtime error parity, and repeat bounded fuzz and memory/reset coverage. Extend lifecycle tests for the new object and suspended-module state. | Pinned Luau fixtures and regression tests pass; no known private-milestone semantic blocker remains. Retain GC settings unless remote measurements justify a change. |
+| 6. Verify the private platform baseline | Execute a shared correctness/golden corpus on Linux x86-64, macOS arm64, and Node/V8 Wasm, and retain the existing eight-target build matrix. | Exact revisions produce matching deterministic results on those executed targets; reports distinguish build coverage from execution. |
+| 7. Accept a private candidate | Use one immutable Git revision in WOTS, civfun, and Grabby; verify packages, examples, CLI, feature combinations, recovery, and remote benchmark evidence. | Full CI, independent reviews, clean external integration, active-client runtime tests, and private-platform results pass. Record the API inventory, consumer revisions, test results, and remaining public-release gates. |
 
-The main dependency is **1 → 2 → 3 → 6 → 7**. Runtime hardening and platform
-validation (4 and 5) can proceed alongside API work, but both must finish before
-the candidate is accepted. Package audits and documentation checks can start
-early; final verification always uses the candidate revision.
+The main dependency is **1 → 2 → 3 → 4 → 7**. Runtime and platform work (5 and 6)
+can proceed alongside API work after the baseline repair, with final tests
+including the new object and module-loading behavior. Both tracks join before
+private acceptance. Documentation and package checks run throughout.
 
-Start batch 2 with two focused reviews: **public settings and exports**, then
-**construction, extensible types, and errors**. Follow with a separate opaque
-Rust-object design and implementation. Keep these decisions small enough to
-review and exercise in a consumer before moving to the next one.
+Start with the settings/export boundary, then construction/errors/extensibility,
+then typed objects. Keep the selected semantics fixed while breaking the
+implementation into independently reviewable changes. Use README + rustdoc.
 
-Use README + rustdoc for the first release. A documentation site, async Rust
-callbacks, scoped callbacks, a JIT, a full mlua-style object system, and a
-standalone benchmark project are outside this release unless an existing
-acceptance requirement depends on them. The opaque-object requirement above
-remains part of the release; deferring a larger object system does not waive it.
+The full native/mobile/Firefox/Safari runtime matrix remains a **future public
+release gate**, not a blocker for this private milestone. Do not remove that
+matrix from the platform contract or imply that cross-compilation proves it.
+Public package publication, docs.rs verification, public issue-tracker opening,
+and 1.0 promotion are deferred. A documentation site, async/scoped callbacks,
+custom object fields/metamethods, a JIT, VM-owned mutable-object snapshots, and
+benchmark-project extraction are outside the private milestone.
+
+## Agreed Rust-object contract
+
+Typed Rust-object construction and method dispatch are **planned, not built**.
+Existing live userdata identity and synchronous callback support are foundations,
+not evidence that this API is complete.
+
+- Provide typed object registration and VM/epoch-bound live handles, ordinary
+  `object:method(...)` calls, safe Rust type checks, and reuse of existing typed
+  callback arguments/results. Method definitions persist across reset; instances
+  and their handles do not.
+- Deterministic game logic reads replay-stable object input. Authoritative writes
+  use the existing typed effect/slot-write journal, including method callbacks
+  that receive the matching typed capability view. An invocation returns its
+  ordered requests only on success; the application decides when to apply them.
+  An error caught by script `pcall` follows the existing journal semantics and
+  does not automatically cancel the complete invocation.
+- Standard/live methods may mutate application state immediately when declared
+  with the corresponding capability. External application changes and I/O are
+  outside installation/invocation rollback and are not undone by reset.
+- Deterministic construction rejects a method definition with forbidden
+  capabilities atomically, before publishing bindings or allocating an instance.
+  Do not silently drop methods. Read-only signatures and captured state still
+  require the host's replay-stability promise.
+- Host-side calls validate receiver VM/epoch before argument conversion, guest
+  allocation, or invocation-fuel effects. Guest method dispatch checks the Rust
+  receiver type before converting other arguments or executing host effects;
+  normal script instruction and call fuel still applies. Keep callbacks
+  synchronous, without a VM re-entry borrow or escaping payload references.
+  Hardened leaves reject object construction before guest allocation.
+- Admit VM-owned metadata and roots under the existing logical-live quota;
+  arbitrary Rust payload allocations remain host memory, like callback captures.
+  Cover aliases, collection, replacement, reset, panic containment, and single
+  payload destruction. Destructors must not panic. Hidden ownership cycles in
+  Rust captures/payloads remain the host's responsibility.
+
+Use the existing typed invocation API for staged changes; do not invent a second
+transaction or effect queue. Generic Rust-object snapshot/rollback is deferred.
+The same Luau method syntax may stage a request or mutate immediately; the
+registered Rust implementation and its capability declaration determine the
+behavior, not the method's spelling.
+
+## Private acceptance evidence
+
+- Run a clean external application against the exact candidate using only the
+  facade: values/Serde, live shared and cyclic tables, Rust/script calls, typed
+  objects, errors, limits, reset, and successful/failed reload.
+- Test staged-action success, escaping-error discard, and `pcall` recovery;
+  verify standard/live immediate changes survive an ensuing script or install
+  error. Reject forbidden deterministic registrations and wrong/stale/foreign
+  receivers without conversion side effects or partial installation.
+- Extend existing collection/quota/mixed-heap tests for object aliases and
+  suspended modules; exercise loader yield/resume, cycles, interleaving,
+  abandonment, reset, cache commit, failure/retry, and shared fuel. Do not leave
+  a whole-VM savepoint open across unrelated coroutine execution.
+- Run full release preflight, README/rustdoc checks, default and bare feature
+  tests, minimum Rust 1.95, CLI black-box checks including `--version`, bounded
+  fuzz campaigns, and remote `ci-bench` screening on the reviewed candidate.
+  Local correctness tests are allowed; local performance measurements are not.
+- Pin WOTS/civfun to the candidate rather than a moving branch or machine-local
+  path. Update Grabby through its documented faithful vendoring process and
+  verify its recorded revision, dependency/features identity, and normal guards.
+  Record consumer runtime/replay/reset results, not compilation alone.
+- Audit archive contents and compile packaged dependencies in a clean temporary
+  environment, including repository-only compiler test fixtures. No registry
+  install or docs.rs success is claimed during private acceptance. Record the
+  accepted private API baseline for later compatibility checks; the existing
+  registry placeholder is not the baseline.
+
+## Future public-release checklist
+
+The requirements below remain open until verified. Public 1.0 applies to the
+embedding facade and CLI; separately versioned internal 0.x crates must not leak
+through their public contracts. Registry/public-candidate operations require a
+separate publication decision.
 
 ## 1. Settle the public API
 
@@ -57,7 +141,7 @@ remains part of the release; deferring a larger object system does not waive it.
 | Validate invalid handles before converting inputs or allocating guest values | Implemented in this change | Stale-handle and cross-VM tests, including conversion side effects and memory accounting |
 | Separate stable settings from engine implementation details | Open | Review every facade export; replace exposed conformance/compiler/collector controls with a deliberate advanced boundary before freezing it |
 | Allow public classifications and metadata to evolve | Review open | Audit re-exported VM errors, profiles, capabilities, diagnostic types, and owned value/key enums; document exhaustive contracts or make them extensible before 1.0 |
-| Define host-created opaque userdata | Open | Registration, ownership, type checks, collection/reset, quota admission, and deterministic-profile rules with an actual consumer example |
+| Provide typed Rust objects with methods | Planned; required for private readiness | Read-only deterministic input plus staged actions; capability-declared mutable standard/live methods; ownership, collection/reset, quota, and failure tests in a real consumer |
 | Complete host value construction and conversion ergonomics | Review open | Exercise binary strings, buffers, vectors, shared/cyclic tables, tuples, serde, live callbacks, and meaningful conversion errors from an external consumer |
 | Specify conversion, concurrency, and failure contracts | Review open | Document missing results, sparse sequences, integer conversion, VM thread affinity, callback sharing, and validation precedence with consumer tests |
 | Make callback and module lifetimes easy to understand | Implemented; review open | Document which values survive replacement/reset, callback capture responsibilities, and exact installation rollback limits |
@@ -160,6 +244,6 @@ remote result remains pending.
 6. Tag the released source, verify installation and documentation from the public
    packages, and record the release/API baseline for future 1.x checks.
 
-The current change starts this milestone. It improves the landing page, contributor
-workflow, error/handle API, and quota enforcement; it does not claim that the open runtime, platform,
-consumer-validation, or publication gates have passed.
+This document records the private milestone and the later public-release gates.
+It does not implement the planned API, close runtime or consumer-validation
+requirements, or authorize public publication.
