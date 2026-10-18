@@ -34,7 +34,7 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => "next({a=1}, nil, 99)",
         _ => "tonumber('1', 10, 99)",
     };
-    match byte(0) % 25 {
+    match byte(0) % 29 {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -62,7 +62,11 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         21 => body.push_str("local len=string.len; local function extra() string.len=function() return 100 end; return 99 end; return ''..len('abc',extra())"),
         22 => body.push_str("local function argument() coroutine.yield('argument'); string.len=function(...) coroutine.yield('callee'); return select('#',...) end; return 99,88 end; local thread=coroutine.create(function() return 0+string.len('abc',argument()) end); local a,b=coroutine.resume(thread); local c,d=coroutine.resume(thread); local e,f=coroutine.resume(thread); return tostring(a)..':'..tostring(b)..':'..tostring(c)..':'..tostring(d)..':'..tostring(e)..':'..tostring(f)"),
         23 => body.push_str("local object={pass=function(self,...) return ... end}; local function argument() string.len=function(...) return select('#',...) end; return 99,88 end; return ''..object:pass(string.len('abc',argument()))"),
-        _ => body.push_str("local function empty() end; for k,v in ipairs(empty()) do end; return 'wrong'"),
+        24 => body.push_str("local function empty() end; for k,v in ipairs(empty()) do end; return 'wrong'"),
+        25 => body.push_str("local function pass(...) return ... end; local function empty() end; local t={type(pass(pass(pass(empty()))))}; return tostring(t[1])"),
+        26 => body.push_str("local function pass(...) return ... end; local function run(...) return 0+select('#',pass(pass(pass(...)))) end; return tostring(run(4,5))"),
+        27 => body.push_str("local function run(n) if n==0 then return 4,5 end; return string.len('abc',run(n-1)) end; string.len=function(...) return select('#',...),7 end; return tostring(run(20))"),
+        _ => body.push_str("local function pass(...) return ... end; local function many() return 4,5 end; local t={select('#',pass(pass(pass(pass(many())))))}; return tostring(t[1])"),
     }
     body
 }

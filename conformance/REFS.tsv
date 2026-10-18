@@ -510,8 +510,9 @@ puc51.sort.plain-duplicates	stdlib	conformance/fixtures/puc51-compat/sort_plain_
 puc51.sort.comparator-ties	stdlib	conformance/fixtures/puc51-compat/sort_comparator_ties.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort ascending-comparator tie order pinned by record ids.
 puc51.sort.reverse-comparator	stdlib	conformance/fixtures/puc51-compat/sort_reverse_comparator.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort descending-comparator tie order pinned by record ids.
 puc51.sort.shapes	stdlib	conformance/fixtures/puc51-compat/sort_shapes.luau	puc-lua-5.1.5	PUC 5.1.5 auxsort over engineered array shapes: ascending, descending, organ-pipe, all-equal, sawtooth.
-runtime.builtin-call-error-phase	runtime	conformance/fixtures/regressions/builtin_unreachable_calls.luau	luau-0.709	Syntactically valid builtin calls remain runtime operations, including unreachable calls.
-stdlib.ignored-extra-arguments	stdlib	conformance/fixtures/regressions/builtin_ignored_extra_arguments.luau	luau-0.709	The verified fixed-arity builtins evaluate and ignore arguments after their consumed parameters.
-stdlib.iterator-extra-arguments	stdlib	conformance/fixtures/regressions/iterator_ignored_extra_arguments.luau	luau-0.709	pairs and ipairs evaluate and ignore trailing arguments before returning their iterator triple.
-runtime.expanded-builtin-arity	runtime	conformance/fixtures/regressions/builtin_expanded_insert_arity.luau	luau-0.709	Trailing calls and varargs preserve actual result counts, while parentheses select one value.
-runtime.builtin-callee-evaluation-order	runtime	conformance/fixtures/regressions/builtin_callee_evaluation_order.luau	luau-0.709	Recognized direct builtin callees resolve after arguments; parenthesized and aliased callees retain ordinary lookup order.
+runtime.builtin-call-error-phase	runtime	upstream-luau-0.709:Compiler/src/Compiler.cpp	luau-0.709	Syntactically valid builtin calls remain runtime operations, including unreachable calls.
+stdlib.ignored-extra-arguments	stdlib	upstream-luau-0.709:VM/src/lbaselib.cpp	luau-0.709	The verified fixed-arity builtins evaluate and ignore arguments after their consumed parameters.
+stdlib.iterator-extra-arguments	stdlib	upstream-luau-0.709:VM/src/lbaselib.cpp	luau-0.709	pairs and ipairs evaluate and ignore trailing arguments before returning their iterator triple.
+runtime.expanded-builtin-arity	runtime	upstream-luau-0.709:Compiler/src/Compiler.cpp	luau-0.709	Trailing calls and varargs preserve actual result counts, while parentheses select one value.
+runtime.builtin-callee-evaluation-order	runtime	upstream-luau-0.709:Compiler/src/Compiler.cpp	luau-0.709	Recognized direct builtin callees resolve after arguments; parenthesized and aliased callees retain ordinary lookup order.
+runtime.expanded-call-recursion	runtime	upstream-luau-0.709:VM/src/lvmexecute.cpp	luau-0.709	Recursive expanded calls preserve complete results and unwind through structured VM continuations.

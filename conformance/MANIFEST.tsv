@@ -717,3 +717,5 @@ luau-0-709.regression.iterator_ignored_extra_arguments	stdlib	stdlib.iterator-ex
 luau-0-709.regression.builtin_expanded_insert_arity	runtime	runtime.expanded-builtin-arity	ReproducibleStandard	luau-0.709	error_contains:arguments	conformance/fixtures/regressions/builtin_expanded_insert_arity.luau
 luau-0-709.regression.builtin_zero_result_argument	runtime	runtime.expanded-builtin-arity	ReproducibleStandard	luau-0.709	error_contains:argument	conformance/fixtures/regressions/builtin_zero_result_argument.luau
 luau-0-709.regression.builtin_callee_evaluation_order	runtime	runtime.builtin-callee-evaluation-order	ReproducibleStandard	luau-0.709	string:103:3:3:103:103	conformance/fixtures/regressions/builtin_callee_evaluation_order.luau
+luau-0-709.regression.builtin_nested_result_expansion	runtime	runtime.expanded-builtin-arity	ReproducibleStandard	luau-0.709	string:2:3:false:false:2	conformance/fixtures/regressions/builtin_nested_result_expansion.luau
+luau-0-709.regression.builtin_recursive_expanded_call	runtime	runtime.expanded-call-recursion	ReproducibleStandard	luau-0.709	string:3	conformance/fixtures/regressions/builtin_recursive_expanded_call.luau

@@ -5,8 +5,8 @@ use rustia_parser::{
     InterpolatedStringPart, Stmt, TableField, UnaryOp,
 };
 use rustia_vm::bytecode::{
-    CallDescriptor, Constant, Function, Instruction, InstructionSource, Opcode, Program,
-    RuntimeType, UpvalueDescriptor, ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
+    CallDescriptor, CallDescriptorCall, Constant, Function, Instruction, InstructionSource, Opcode,
+    Program, RuntimeType, UpvalueDescriptor, ASSERT_MESSAGE_MISSING_ARGUMENT, ASSERT_MESSAGE_NONE,
     ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
 };
 use rustia_vm::number::{binary, NumericOp};
@@ -2360,6 +2360,18 @@ impl Compiler {
         original_next_register: u16,
         span: Span,
     ) -> Result<()> {
+        if self.try_compile_general_expanded_call(
+            ExpandedCallTarget::Value(callee),
+            args,
+            ExpandedCallFinish::Append {
+                table: table_register,
+                index: array_index,
+            },
+            span,
+        )? {
+            self.free_registers_back_to(original_next_register);
+            return Ok(());
+        }
         let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
             CompileError::at("expanded table call needs a trailing argument", span)
         })?;
@@ -2414,6 +2426,18 @@ impl Compiler {
             unreachable!("compile_append_method_call_expand_to_table requires a method call");
         };
         let span = expr.span();
+        if self.try_compile_general_expanded_call(
+            ExpandedCallTarget::Method { object, method },
+            args,
+            ExpandedCallFinish::Append {
+                table: table_register,
+                index: array_index,
+            },
+            span,
+        )? {
+            self.free_registers_back_to(original_next_register);
+            return Ok(());
+        }
         let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
             CompileError::at("expanded table method call needs a trailing argument", span)
         })?;
@@ -3645,6 +3669,17 @@ impl Compiler {
         prefix_count: usize,
         span: Span,
     ) -> Result<()> {
+        if self.try_compile_general_expanded_call(
+            callee,
+            args,
+            ExpandedCallFinish::Return {
+                prefix: prefix_first,
+                count: prefix_count,
+            },
+            span,
+        )? {
+            return Ok(());
+        }
         if prefix_count > u8::MAX as usize {
             return Err(CompileError::at("return list is too large", span));
         }
@@ -4139,6 +4174,17 @@ impl Compiler {
         result_count: usize,
         span: Span,
     ) -> Result<()> {
+        if self.try_compile_general_expanded_call(
+            callee,
+            args,
+            ExpandedCallFinish::Fixed {
+                first: first_register,
+                count: result_count,
+            },
+            span,
+        )? {
+            return Ok(());
+        }
         let scalar_prefix_count = args
             .len()
             .checked_sub(1)
@@ -5294,6 +5340,117 @@ impl Compiler {
         Ok(())
     }
 
+    fn try_compile_general_expanded_call(
+        &mut self,
+        callee: ExpandedCallTarget<'_>,
+        args: &[Expr],
+        finish: ExpandedCallFinish,
+        span: Span,
+    ) -> Result<bool> {
+        let mut levels = Vec::new();
+        let mut target = callee;
+        let mut arguments = args;
+        let append_varargs = loop {
+            let trailing = arguments.last().filter(|last| self.expr_can_expand(last));
+            let scalar_count = arguments.len() - usize::from(trailing.is_some());
+            levels.push((target, arguments, scalar_count));
+            match trailing {
+                Some(Expr::Call { callee, args, .. }) => {
+                    target = ExpandedCallTarget::Value(callee);
+                    arguments = args;
+                }
+                Some(Expr::MethodCall {
+                    object,
+                    method,
+                    args,
+                    ..
+                }) => {
+                    target = ExpandedCallTarget::Method { object, method };
+                    arguments = args;
+                }
+                Some(Expr::Varargs(vararg_span)) => {
+                    self.validate_varargs_available(*vararg_span)?;
+                    break true;
+                }
+                _ => break false,
+            }
+        };
+        let needs_general = match finish {
+            ExpandedCallFinish::Fixed { .. } => levels.len() > if append_varargs { 2 } else { 4 },
+            ExpandedCallFinish::Return { .. } => levels.len() > 3,
+            ExpandedCallFinish::Append { .. } => levels.len() > 2 || append_varargs,
+        };
+        if !needs_general {
+            return Ok(false);
+        }
+        let mut calls = Vec::with_capacity(levels.len());
+        let mut window_len = 0usize;
+        for (target, _, scalar_count) in &levels {
+            let fixed_args = scalar_count + target.implicit_args();
+            let fixed_args = u8::try_from(fixed_args)
+                .map_err(|_| CompileError::at("function call has too many arguments", span))?;
+            window_len = window_len
+                .checked_add(1 + usize::from(fixed_args))
+                .ok_or_else(|| CompileError::at("expanded call register window overflow", span))?;
+            calls.push(CallDescriptorCall {
+                fixed_args,
+                deferred_import: None,
+            });
+        }
+        let original_next_register = self.next_register;
+        let (base, instruction, aux) = match finish {
+            ExpandedCallFinish::Fixed { first, count } => {
+                self.validate_call_multi_shape(0, count, span)?;
+                self.ensure_register_window_len(first, window_len.max(count), span)?;
+                (
+                    first,
+                    Instruction::new(Opcode::CallExpand, first, 0, 0),
+                    count as i32,
+                )
+            }
+            ExpandedCallFinish::Return { prefix, count } => {
+                let count = u8::try_from(count)
+                    .map_err(|_| CompileError::at("return list is too large", span))?;
+                let base = self.alloc_register_window_at(window_len, span)?;
+                (
+                    base,
+                    Instruction::new(Opcode::ReturnCallExpand, prefix, count, base),
+                    0,
+                )
+            }
+            ExpandedCallFinish::Append { table, index } => {
+                let base = self.alloc_register_window_at(window_len, span)?;
+                (
+                    base,
+                    Instruction::new(Opcode::AppendCallExpand, table, base, 0),
+                    pack_append_call_expand_aux(index, 0, span)?,
+                )
+            }
+        };
+        let mut cursor = usize::from(base);
+        for ((target, arguments, scalar_count), call) in levels.into_iter().zip(&mut calls) {
+            if let Some(callee) = target.value() {
+                self.mark_global_environment_escape_for_call(callee, arguments);
+                call.deferred_import = self.deferred_builtin_import(callee, arguments)?;
+            }
+            self.compile_expanded_call_prefix(target, arguments, scalar_count, cursor as u8, span)?;
+            cursor += 1 + usize::from(call.fixed_args);
+        }
+        let index = self.constant_index(Constant::CallDescriptor(Box::new(CallDescriptor {
+            aux,
+            calls,
+            append_varargs,
+        })))?;
+        let mut instruction = instruction;
+        instruction.aux = !i32::try_from(index)
+            .map_err(|_| CompileError::at("call descriptor index overflow", span))?;
+        self.emit_source_mapped_instruction(instruction, span);
+        if !matches!(finish, ExpandedCallFinish::Return { .. }) {
+            self.free_registers_back_to(original_next_register);
+        }
+        Ok(true)
+    }
+
     fn compile_expanded_callee(&mut self, callee: &Expr, args: &[Expr], target: u8) -> Result<()> {
         if self.deferred_builtin_import(callee, args)?.is_some() {
             // The descriptor performs and charges this lookup after arguments.
@@ -5310,35 +5467,58 @@ impl Compiler {
         args: &[Expr],
         span: Span,
     ) -> Result<()> {
-        let mut imports = [None; 4];
+        let mut calls = Vec::new();
         let mut current_callee = callee;
         let mut current_args = args;
+        let mut implicit_args = usize::from(callee.is_none());
+        let append_varargs = matches!(
+            instruction.op,
+            Opcode::CallExpandVarargs
+                | Opcode::ReturnCallExpandVarargs
+                | Opcode::ReturnCallExpand2Varargs
+        );
         let levels = match instruction.op {
             Opcode::CallExpand3 => 4,
             Opcode::CallExpand2 | Opcode::ReturnCallExpand2 | Opcode::ReturnCallExpand2Varargs => 3,
             _ => 2,
         };
-        for import in imports.iter_mut().take(levels) {
-            if let Some(callee) = current_callee {
-                *import = self.deferred_builtin_import(callee, current_args)?;
-            }
+        for level in 0..levels {
+            let deferred_import = match current_callee {
+                Some(callee) => self.deferred_builtin_import(callee, current_args)?,
+                None => None,
+            };
+            let fixed_args = current_args.len() + implicit_args
+                - usize::from(level + 1 < levels || append_varargs);
+            calls.push(CallDescriptorCall {
+                fixed_args: u8::try_from(fixed_args)
+                    .map_err(|_| CompileError::at("function call has too many arguments", span))?,
+                deferred_import,
+            });
             match current_args.last() {
                 Some(Expr::Call { callee, args, .. }) => {
                     current_callee = Some(callee);
                     current_args = args;
+                    implicit_args = 0;
                 }
                 Some(Expr::MethodCall { args, .. }) => {
                     current_callee = None;
                     current_args = args;
+                    implicit_args = 1;
                 }
                 _ => break,
             }
         }
-        if imports.iter().any(Option::is_some) {
+        if calls.iter().any(|call| call.deferred_import.is_some()) {
+            let aux = match instruction.op {
+                Opcode::CallExpand => instruction.aux,
+                Opcode::AppendCallExpand => instruction.aux & !255,
+                _ => 0,
+            };
             let index =
                 self.constant_index(Constant::CallDescriptor(Box::new(CallDescriptor {
-                    aux: instruction.aux,
-                    deferred_imports: imports,
+                    aux,
+                    calls,
+                    append_varargs,
                 })))?;
             instruction.aux = !i32::try_from(index)
                 .map_err(|_| CompileError::at("call descriptor index overflow", span))?;
@@ -6048,6 +6228,13 @@ impl<'a> ExpandedCallTarget<'a> {
             Self::Method { .. } => None,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum ExpandedCallFinish {
+    Fixed { first: u8, count: usize },
+    Return { prefix: u8, count: usize },
+    Append { table: u8, index: f64 },
 }
 
 #[derive(Clone, Copy)]
@@ -6805,7 +6992,12 @@ fn constants_equal(lhs: &Constant, rhs: &Constant) -> bool {
         (Constant::String(lhs), Constant::String(rhs)) => lhs == rhs,
         (Constant::Import(lhs), Constant::Import(rhs)) => lhs == rhs,
         (Constant::CallDescriptor(lhs), Constant::CallDescriptor(rhs)) => {
-            lhs.aux == rhs.aux && lhs.deferred_imports == rhs.deferred_imports
+            lhs.aux == rhs.aux
+                && lhs.append_varargs == rhs.append_varargs
+                && lhs.calls.len() == rhs.calls.len()
+                && lhs.calls.iter().zip(&rhs.calls).all(|(lhs, rhs)| {
+                    lhs.fixed_args == rhs.fixed_args && lhs.deferred_import == rhs.deferred_import
+                })
         }
         _ => false,
     }
@@ -8605,8 +8797,8 @@ return lineerror("function a.x.y ()\na=a+1\nend")
             ..VmSettings::default()
         };
         let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
-        let result = vm.run(&program).unwrap();
-        assert_eq!(result.as_bool(), Some(true));
+        let error = vm.run(&program).unwrap_err();
+        assert!(matches!(error.kind, ErrorKind::RecursionLimit { limit: 0 }));
     }
 
     #[test]
@@ -8639,8 +8831,8 @@ return not ok and err:find("stack overflow") ~= nil
                 ..VmSettings::default()
             };
             let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings);
-            let result = vm.run(&program).unwrap();
-            assert_eq!(result.as_bool(), Some(true), "{source}");
+            let error = vm.run(&program).unwrap_err();
+            assert!(matches!(error.kind, ErrorKind::RecursionLimit { limit: 8 }));
         }
     }
 

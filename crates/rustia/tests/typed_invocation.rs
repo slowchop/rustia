@@ -855,6 +855,8 @@ return {
         return value
     end,
 }
+
+
 "#,
         )
         .unwrap();
@@ -880,6 +882,59 @@ return {
         error.kind(),
         rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::FuelExhausted { limit: 70 })
     ));
+}
+
+#[test]
+fn recursion_exhaustion_aborts_the_invocation_and_discards_staged_records() {
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::DeterministicSim)
+        .recursion_limit(8)
+        .build_for_host::<Host>()
+        .unwrap();
+    rustia
+        .add_effect(
+            "emit",
+            1,
+            |mut effects: Effects<'_, Host>, value: i64| -> Result<()> { effects.emit(value) },
+        )
+        .unwrap();
+    let exports = rustia
+        .install_source(
+            "counter=0; local function recur() return string.len('abc',recur()) end; \
+         return {run=function() emit(7); counter=1; pcall(recur); counter=2; return 2 end, \
+         counter=function() return counter end}",
+        )
+        .unwrap();
+    let mut host = Host {
+        input: 0,
+        slots: vec![],
+    };
+    let limits = InvocationLimits::new(100_000)
+        .with_max_records(8)
+        .with_max_record_bytes(128);
+    let prefix = Record {
+        sequence: 77,
+        kind: RecordKind::Effect(77),
+    };
+    let mut lane = vec![prefix.clone()];
+    let error = rustia
+        .invoke_into(&mut host, limits, &mut lane, |invocation| {
+            let run = exports.function_in(invocation, "run")?;
+            assert!(run.call_in::<_, _, i64>(invocation, ()).is_err());
+            Ok(99)
+        })
+        .unwrap_err();
+    assert!(matches!(error.kind(), rustia::ErrorKind::Vm(error)
+        if matches!(error.kind(), VmErrorKind::RecursionLimit { limit: 8 })));
+    assert_eq!(lane.as_slice(), std::slice::from_ref(&prefix));
+    let recovered = rustia
+        .invoke(&mut host, limits, |invocation| {
+            let counter = exports.function_in(invocation, "counter")?;
+            counter.call_in::<_, _, i64>(invocation, ())
+        })
+        .unwrap();
+    assert_eq!(*recovered.value(), 1);
+    assert!(recovered.records().is_empty());
 }
 
 #[test]

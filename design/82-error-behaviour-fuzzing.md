@@ -256,3 +256,41 @@ the callee across fixed, return, append, nested, method and vararg forms, under 
 and after reset. The bounded differential generator includes expansion and
 lookup-order shapes. Full CI and new independent review remain pending; this
 is a focused compatibility fix rather than a claim of complete language parity.
+
+### Nested expansion and recursive calls
+
+Independent review found two remaining fusion-boundary gaps. The compiler could
+still collapse the final call beyond the fixed two-, three-, or four-call
+instruction shapes. For example, `{type(pass(empty()))}` incorrectly supplied
+nil instead of zero arguments, and a deeper constructor silently dropped the
+second result of `many()`. This also affected ordinary `select` calls; it was
+not limited to builtin lookup order.
+
+The call descriptor now records a variable-length sequence of argument windows,
+optional late imports, and an optional innermost vararg tail. Calls beyond a
+fixed instruction's shape use that explicit chain through the existing fixed,
+return, and append terminals. Parentheses still stop expansion. The chain fits
+the same checked register limit as other compiled calls, and its windows and
+imports are validated before callbacks. The former fixed forms retain their
+ordinary lowering when they can represent the whole expression.
+
+The new continuation also exposed native stack growth when a function called
+itself from an expanded argument. Recursive self calls now use the VM's existing
+explicit saved frames and resume their pending expansion iteratively. The base
+case can yield, then resume and unwind through the selected callees. Recursion
+exhaustion remains a structured, uncatchable VM error.
+
+The review also found that the configured `RecursionLimit` had incorrectly
+remained catchable in protected calls. It now follows the documented hard-abort
+policy, including the VM's synthetic protected-call shortcuts, and aborts a
+typed invocation before publishing staged records. The opt-in Luau conformance
+call limit is separate: it reports the oracle's catchable `stack overflow`
+runtime error. Ordinary recovery and typed rollback tests cover this distinction.
+
+`builtin_nested_expansion.rs` captures 90 pinned-Luau programs: depths through
+16, zero and multiple results, parentheses, constructors, method receivers,
+varargs, repeated suspension, and recursive depth 20/100 including a suspended
+base case. Two additional corpus fixtures record `2:3:false:false:2` for nested
+result counts and `3` for the recursive call. Four-profile ordering controls
+also pin the shared Luau call semantics; `Puc51Compat` continues to select its
+documented table/sort/format behavior rather than a second language compiler.

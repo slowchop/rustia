@@ -117,12 +117,20 @@ fn builtin_callees_follow_pinned_argument_evaluation_order() {
             "second",
         ),
     ];
-    for (source, expected) in cases {
-        let mut vm = RustiaBuilder::standard()
-            .profile(Profile::LuauCompat)
-            .build()
-            .unwrap();
-        assert_eq!(vm.eval::<String>(source).unwrap(), expected, "{source}");
+    for profile in [
+        Profile::LuauCompat,
+        Profile::ReproducibleStandard,
+        Profile::DeterministicSim,
+        Profile::Puc51Compat,
+    ] {
+        for (source, expected) in cases {
+            let mut vm = RustiaBuilder::standard().profile(profile).build().unwrap();
+            assert_eq!(
+                vm.eval::<String>(source).unwrap(),
+                expected,
+                "{profile:?}: {source}"
+            );
+        }
     }
 }
 

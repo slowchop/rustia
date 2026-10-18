@@ -2,7 +2,7 @@
 
 > **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-08-13).** This file began as
 > a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live executable
-> ground truth is now **718 fixtures / 516 refs / 0 pending**: 700/498 are Luau 0.709 oracle-backed and 18/18
+> ground truth is now **720 fixtures / 517 refs / 0 pending**: 702/499 are Luau 0.709 oracle-backed and 18/18
 > are offline PUC 5.1.5 oracle-backed. The corpus is
 > enforced by project-status checks. The CORRECTIONS block below still supersedes contradictory historical rows;
 > that named executable denominator does not imply a one-to-one audit of every historical inventory row. New or
@@ -951,7 +951,9 @@ matches), constructor pre-sizing (compiler hash-hint + `luaH_resizearray` append
 number-to-string. Parity is covered by the offline-derived differential corpus in
 `conformance/fixtures/puc51-compat/` — expectations captured from the pinned PUC 5.1.5 C sources
 (`third_party/lua-src` submodule, regeneration procedure in `conformance/README.md`) — not by the
-upstream Luau 0.709 oracle.
+upstream Luau 0.709 oracle. The shared language and call-evaluation semantics remain Luau;
+this profile does not select a separate Lua 5.1 compiler. In particular, recognized direct
+builtin lookup follows the Luau ordering described above in every profile.
 
 Accepted divergences from stock PUC 5.1.5 under this profile:
 
