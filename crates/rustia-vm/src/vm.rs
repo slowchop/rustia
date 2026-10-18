@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+mod bytecode_calls;
 mod expanded_calls;
 mod host_functions;
 mod host_objects;
@@ -2166,6 +2167,8 @@ struct CoroutineDebugSnapshot {
 enum VmFlow<T> {
     Return(T),
     Yield(CoroutineYield),
+    /// Internal bytecode transfer, consumed by the `run_function` trampoline.
+    Call(DeferredBytecodeCall),
 }
 
 type VmFlowResult<T> = std::result::Result<VmFlow<T>, Error>;
@@ -2232,6 +2235,17 @@ struct Execution<'a> {
 struct CoroutineYield {
     yielded: Vec<Value>,
     frames: Vec<CoroutineFrame>,
+}
+
+#[derive(Clone)]
+struct DeferredBytecodeCall {
+    callee: Value,
+    args: Vec<Value>,
+    depth: usize,
+    call_site: Option<ErrorLocation>,
+    fallback_program: u32,
+    // Completion frames, innermost first, as for a coroutine suspension.
+    callers: Vec<CoroutineFrame>,
 }
 
 #[derive(Clone)]
@@ -2320,6 +2334,7 @@ struct ResumedFunctionState {
     pending_return_prefixes: Vec<Value>,
     continuation: BytecodeContinuation,
     resume_results: Vec<Value>,
+    resume_error: Option<Error>,
     stackless_self_calls: Vec<StacklessSelfCallFrame>,
     tail_call_count: usize,
 }
@@ -3981,7 +3996,7 @@ impl Vm {
         self.collect_heap_weak_tables(&roots);
         let transaction_active = !self.guest_transactions.is_empty();
         if !transaction_active {
-            self.prune_unreachable_coroutines();
+            self.prune_unreachable_coroutines_if_idle();
             self.prune_unreachable_module_cohorts(&roots);
             self.reclaim_unreferenced_programs();
         }
@@ -4031,7 +4046,7 @@ impl Vm {
         });
     }
 
-    fn run_function(
+    fn run_function_step(
         &mut self,
         program: &Program,
         program_id: Option<u32>,
@@ -4091,6 +4106,8 @@ impl Vm {
                 program.logical_units_for(context.prototype.map(|index| index as usize));
 
             let allow_stackless_self_calls = resumed.is_none();
+            let mut resumed = resumed;
+            let mut resumed_error = resumed.as_mut().and_then(|state| state.resume_error.take());
             let stackless_recursion_limit = self.stackless_recursion_limit();
             let mut stackless_self_calls;
             let mut tail_call_count;
@@ -4270,78 +4287,11 @@ impl Vm {
                 }};
             }
 
-            // Expanded argument calls use the same iterative self-call frames as
-            // ordinary calls. Saving the pending chain avoids adding a native
-            // Rust stack frame for each recursive argument expression.
-            macro_rules! enter_expanded_self_call {
-                ($state:expr, $args:expr) => {{
-                    (|| -> Result<()> {
-                        let call_args = $args;
-                        let next_depth = context
-                            .depth
-                            .saturating_add(stackless_self_calls.len())
-                            .saturating_add(1);
-                        if self.recursion_depth_exceeded(next_depth) {
-                            return Err(attach_instruction_source(
-                                program,
-                                function,
-                                pc.saturating_sub(1),
-                                self.recursion_limit_error(),
-                            ));
-                        }
-                        stackless_self_calls.try_reserve(1).map_err(|_| {
-                            Error::new(ErrorKind::OutOfMemory).without_source_location()
-                        })?;
-                        let continuation = BytecodeContinuation::ExpandedCalls($state);
-                        let root_mark = self.push_stackless_self_call_roots(
-                            &registers,
-                            &register_cells,
-                            &varargs,
-                            &pending_return_prefixes,
-                            &continuation,
-                        );
-                        let debug_frame = stackless_self_call_debug_frame(
-                            &context,
-                            function,
-                            instruction_source_location(program, function, pc.saturating_sub(1)),
-                        );
-                        let debug_mark = self.push_stackless_self_call_debug_frame(&debug_frame);
-                        stackless_self_calls.push(StacklessSelfCallFrame {
-                            pc,
-                            registers: std::mem::take(&mut registers),
-                            register_cells: std::mem::take(&mut register_cells),
-                            varargs: std::mem::take(&mut varargs),
-                            pending_return_prefixes: std::mem::take(&mut pending_return_prefixes),
-                            continuation,
-                            tail_call_count,
-                            root_mark,
-                            debug_mark,
-                            debug_frame,
-                        });
-                        registers.resize(function.max_registers, Value::nil());
-                        register_cells.resize(function.max_registers, None);
-                        reset_current_function_frame(
-                            function,
-                            &mut registers,
-                            &mut register_cells,
-                            &mut varargs,
-                            &call_args,
-                        )?;
-                        self.validate_conformance_native_parameter_types(function, &registers)?;
-                        self.update_current_gc_roots(
-                            &registers,
-                            &register_cells,
-                            &varargs,
-                            &pending_return_prefixes,
-                        );
-                        pc = 0;
-                        tail_call_count = 0;
-                        Ok(())
-                    })()
-                }};
-            }
-
             'run_function_loop: loop {
+                if let Some(error) = resumed_error.take() {
+                    resumed_continuation = None;
+                    unwind_stackless_error!(error);
+                }
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
                     self.update_current_gc_roots(
                         &registers,
@@ -4352,13 +4302,7 @@ impl Vm {
                     let (continuation, resume_results) = match continuation {
                         BytecodeContinuation::ExpandedCalls(mut state) => {
                             let outcome = self
-                                .continue_expanded_calls(
-                                    program,
-                                    &mut state,
-                                    resume_results,
-                                    context.current_function,
-                                    fuel,
-                                )
+                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
                                 .map_err(|e| {
                                     attach_instruction_source(
                                         program,
@@ -4368,11 +4312,22 @@ impl Vm {
                                     )
                                 });
                             match outcome {
-                                Ok(ExpandedCallFlow::SelfCall(args)) => {
-                                    if let Err(error) = enter_expanded_self_call!(state, args) {
-                                        unwind_stackless_error!(error);
-                                    }
-                                    continue 'run_function_loop;
+                                Ok(ExpandedCallFlow::Call { callee, args }) => {
+                                    return self.defer_expanded_bytecode_call(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        state,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        callee,
+                                        args,
+                                    );
                                 }
                                 Ok(ExpandedCallFlow::Yield(suspension)) => {
                                     return self.suspend_bytecode_frame(
@@ -4651,20 +4606,27 @@ impl Vm {
                             )
                             .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
                             let results = match self
-                                .continue_expanded_calls(
-                                    program,
-                                    &mut state,
-                                    Vec::new(),
-                                    context.current_function,
-                                    fuel,
-                                )
+                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {
                                 ExpandedCallFlow::Return(results) => results,
-                                ExpandedCallFlow::SelfCall(args) => {
-                                    enter_expanded_self_call!(state, args)?;
-                                    continue;
+                                ExpandedCallFlow::Call { callee, args } => {
+                                    return self.defer_expanded_bytecode_call(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        state,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        callee,
+                                        args,
+                                    );
                                 }
                                 ExpandedCallFlow::Yield(suspension) => {
                                     return self.suspend_bytecode_frame(
@@ -5157,6 +5119,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::ReturnWithPrefix {
@@ -6384,6 +6347,7 @@ impl Vm {
                                 let results = match call.map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6562,6 +6526,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(()) => {}
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6677,6 +6642,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6714,6 +6680,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6808,6 +6775,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(()) => {}
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -6934,6 +6902,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::ReturnWithPrefix {
@@ -7188,6 +7157,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         let continuation = BytecodeContinuation::ReturnWithPrefix {
@@ -7310,6 +7280,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -7420,6 +7391,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -7568,6 +7540,7 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })? {
+                                    VmFlow::Call(_) => return Err(escaped_deferred_call()),
                                     VmFlow::Return(results) => results,
                                     VmFlow::Yield(suspension) => {
                                         return self.suspend_bytecode_frame(
@@ -7863,6 +7836,7 @@ impl Vm {
                         unwind_stackless_return!(results);
                         continue 'run_function_loop;
                     }
+                    Ok(VmFlow::Call(request)) => return Ok(VmFlow::Call(request)),
                     Ok(VmFlow::Yield(suspension)) => return Ok(VmFlow::Yield(suspension)),
                     Err(error) => {
                         unwind_stackless_error!(error);
@@ -7880,7 +7854,9 @@ impl Vm {
             self.mark_control_memory_dirty();
             self.record_running_coroutine_error_snapshot(error.location.clone());
         }
-        self.call_stack.pop();
+        if !matches!(result, Ok(VmFlow::Call(_))) {
+            self.call_stack.pop();
+        }
         self.mark_control_memory_dirty();
         result
     }
@@ -11073,6 +11049,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, None, fuel)? {
+            VmFlow::Call(_) => Err(escaped_deferred_call()),
             VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
@@ -11088,6 +11065,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         match self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel)? {
+            VmFlow::Call(_) => Err(escaped_deferred_call()),
             VmFlow::Return(results) => Ok(results.into_vec()),
             VmFlow::Yield(_) => Err(non_yieldable_boundary_error()),
         }
@@ -12175,6 +12153,7 @@ impl Vm {
             call_site,
             fuel,
         )? {
+            VmFlow::Call(_) => return Err(escaped_deferred_call()),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(VmFlow::Yield(suspension)),
         };
@@ -12232,6 +12211,7 @@ impl Vm {
         let results = match self
             .call_value_with_site_resumable(program, callee, &args, depth, call_site, fuel)?
         {
+            VmFlow::Call(_) => return Err(escaped_deferred_call()),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(VmFlow::Yield(suspension)),
         };
@@ -14687,6 +14667,7 @@ impl Vm {
                 Err(error) => return self.propagate_coroutine_error(frames, error, fuel),
             };
             match flow {
+                VmFlow::Call(_) => return Err(escaped_deferred_call()),
                 VmFlow::Return(returned) => {
                     results = returned;
                 }
@@ -14797,6 +14778,7 @@ impl Vm {
                 pending_return_prefixes: frame.pending_return_prefixes,
                 continuation: frame.continuation,
                 resume_results,
+                resume_error: None,
                 stackless_self_calls: frame.stackless_self_calls,
                 tail_call_count: frame.tail_call_count,
             }),
@@ -14840,6 +14822,7 @@ impl Vm {
             self.resume_coroutine_frames(coroutine, frames, args[1..].to_vec(), fuel)
         };
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -14897,6 +14880,7 @@ impl Vm {
         let error = self.guest_error_from_value(args[1])?;
         let flow = self.resume_coroutine_error(coroutine, frames, error, fuel);
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(_)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -14957,6 +14941,7 @@ impl Vm {
             )
         };
         let result = match flow {
+            Ok(VmFlow::Call(_)) => return Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let state = &mut self.coroutines[coroutine];
                 state.initialized = true;
@@ -15087,6 +15072,7 @@ impl Vm {
             protected_call_site,
             fuel,
         ) {
+            Ok(VmFlow::Call(_)) => Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let mut protected_results = Vec::with_capacity(results.len() + 1);
                 protected_results.push(Value::boolean(true));
@@ -15180,6 +15166,7 @@ impl Vm {
             protected_call_site,
             fuel,
         ) {
+            Ok(VmFlow::Call(_)) => Err(escaped_deferred_call()),
             Ok(VmFlow::Return(results)) => {
                 let mut protected_results = Vec::with_capacity(results.len() + 1);
                 protected_results.push(Value::boolean(true));
@@ -20528,6 +20515,7 @@ impl Vm {
             None,
             fuel,
         )? {
+            VmFlow::Call(_) => return Err(escaped_deferred_call()),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
         };
@@ -23663,6 +23651,7 @@ fn into_return_values_flow(flow: VmFlow<Vec<Value>>) -> VmFlow<ReturnValues> {
     match flow {
         VmFlow::Return(results) => VmFlow::Return(ReturnValues::from_vec(results)),
         VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        VmFlow::Call(request) => VmFlow::Call(request),
     }
 }
 
@@ -23670,6 +23659,7 @@ fn into_vec_flow(flow: VmFlow<ReturnValues>) -> VmFlow<Vec<Value>> {
     match flow {
         VmFlow::Return(results) => VmFlow::Return(results.into_vec()),
         VmFlow::Yield(suspension) => VmFlow::Yield(suspension),
+        VmFlow::Call(request) => VmFlow::Call(request),
     }
 }
 
@@ -34090,4 +34080,10 @@ mod inline_cache_tests {
         );
         assert!(retained.value(&vm).is_ok());
     }
+}
+
+fn escaped_deferred_call() -> Error {
+    Error::new(ErrorKind::InvalidProgram {
+        reason: "internal bytecode call escaped its trampoline",
+    })
 }

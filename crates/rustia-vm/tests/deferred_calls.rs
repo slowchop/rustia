@@ -363,7 +363,7 @@ fn install_counter(vm: &mut Vm) {
 }
 
 #[test]
-fn recursive_expanded_arguments_use_iterative_self_call_frames() {
+fn recursive_expanded_arguments_use_iterative_bytecode_frames() {
     let mut vm = Vm::with_settings(
         Profile::ReproducibleStandard,
         VmSettings {

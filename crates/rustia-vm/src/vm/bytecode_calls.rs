@@ -1,0 +1,305 @@
+//! Explicit transfers between bytecode functions used by expanded arguments.
+//! A saved caller carries the same complete state as a suspended coroutine.
+use super::*;
+
+impl Vm {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn run_function(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        function: &Function,
+        args: &[Value],
+        context: FunctionCallContext<'_>,
+        resumed: Option<ResumedFunctionState>,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        let stack_base = self.call_stack.len();
+        let first =
+            self.run_function_step(program, program_id, function, args, context, resumed, fuel);
+        self.drive_deferred_bytecode_flow(first, stack_base, fuel)
+    }
+
+    /// Drives internal calls; genuine guest yields remain visible to the caller.
+    /// `stack_base` is the call-stack length before the initial dispatch.
+    pub(super) fn drive_deferred_bytecode_flow(
+        &mut self,
+        initial: VmFlowResult<ReturnValues>,
+        stack_base: usize,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        if !matches!(initial, Ok(VmFlow::Call(_))) {
+            return initial;
+        }
+        let pending_slot = self.active_coroutine_frames.len();
+        if self.active_coroutine_frames.try_reserve(1).is_err() {
+            self.call_stack.truncate(stack_base);
+            self.mark_control_memory_dirty();
+            return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+        }
+        self.active_coroutine_frames.push(Vec::new());
+        self.mark_control_memory_dirty();
+        let result = self.drive_bytecode_calls(initial, pending_slot, fuel);
+        self.call_stack.truncate(stack_base);
+        let pending = self.active_coroutine_frames.pop();
+        debug_assert!(pending.is_some());
+        debug_assert_eq!(self.active_coroutine_frames.len(), pending_slot);
+        self.mark_control_memory_dirty();
+        result
+    }
+
+    fn drive_bytecode_calls(
+        &mut self,
+        mut flow: VmFlowResult<ReturnValues>,
+        pending_slot: usize,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        loop {
+            match flow {
+                Ok(VmFlow::Call(request)) => {
+                    let DeferredBytecodeCall {
+                        callee,
+                        args,
+                        depth,
+                        call_site,
+                        fallback_program,
+                        callers,
+                    } = request;
+                    self.active_coroutine_frames[pending_slot]
+                        .try_reserve(callers.len())
+                        .map_err(|_| {
+                            Error::new(ErrorKind::OutOfMemory).without_source_location()
+                        })?;
+                    self.active_coroutine_frames[pending_slot].extend(callers.into_iter().rev());
+                    self.mark_control_memory_dirty();
+                    flow = self.enter_deferred_bytecode_call(
+                        fallback_program,
+                        callee,
+                        &args,
+                        depth,
+                        call_site,
+                        fuel,
+                    );
+                }
+                Ok(VmFlow::Return(results)) => {
+                    let Some(frame) = self.active_coroutine_frames[pending_slot].pop() else {
+                        return Ok(VmFlow::Return(results));
+                    };
+                    self.mark_control_memory_dirty();
+                    let CoroutineFrame::Bytecode(frame) = frame else {
+                        return Err(invalid_deferred_call("non-bytecode pending caller"));
+                    };
+                    // The suspended caller kept its call-stack entry while the
+                    // callee ran. The resumed step installs that entry afresh.
+                    self.call_stack.pop();
+                    flow = self.resume_deferred_bytecode_frame(
+                        frame.into_inner(),
+                        results.into_vec(),
+                        None,
+                        fuel,
+                    );
+                }
+                Ok(VmFlow::Yield(mut suspension)) => {
+                    let pending = &mut self.active_coroutine_frames[pending_slot];
+                    suspension.frames.try_reserve(pending.len()).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    while let Some(frame) = pending.pop() {
+                        suspension.frames.push(frame);
+                    }
+                    return Ok(VmFlow::Yield(suspension));
+                }
+                Err(error) => {
+                    if error_is_uncatchable(&error, fuel) {
+                        return Err(error);
+                    }
+                    let Some(frame) = self.active_coroutine_frames[pending_slot].pop() else {
+                        return Err(error);
+                    };
+                    self.mark_control_memory_dirty();
+                    let CoroutineFrame::Bytecode(frame) = frame else {
+                        return Err(invalid_deferred_call("non-bytecode pending caller"));
+                    };
+                    self.call_stack.pop();
+                    flow = self.resume_deferred_bytecode_frame(
+                        frame.into_inner(),
+                        Vec::new(),
+                        Some(error),
+                        fuel,
+                    );
+                }
+            }
+        }
+    }
+
+    fn enter_deferred_bytecode_call(
+        &mut self,
+        fallback_program: u32,
+        callee: Value,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        self.check_recursion_depth(depth)?;
+        let handle = callee
+            .as_function()
+            .ok_or_else(|| invalid_deferred_call("missing bytecode callee"))?;
+        let (kind, data) = self
+            .heap
+            .function_dispatch_data(handle)
+            .ok_or_else(|| invalid_deferred_call("bytecode function handle is missing"))?;
+        let (program_id, prototype) = match kind {
+            FunctionKind::Bytecode { program, prototype } => {
+                (program.unwrap_or(fallback_program), Some(prototype))
+            }
+            FunctionKind::DynamicMain { program } => (program, None),
+            _ => return Err(invalid_deferred_call("deferred callee is not bytecode")),
+        };
+        let program = self.dynamic_program(program_id)?;
+        let function = match prototype {
+            Some(index) => program
+                .functions
+                .get(index as usize)
+                .ok_or_else(|| invalid_deferred_call("bytecode function prototype is missing"))?,
+            None => &program.main,
+        };
+        let (captures, environment, module_cohort) =
+            data.ok_or_else(|| invalid_deferred_call("bytecode function call data is missing"))?;
+        let thread_environment = self.current_thread_environment();
+        self.run_function_step(
+            &program,
+            Some(program_id),
+            function,
+            args,
+            FunctionCallContext {
+                current_function: Some(callee),
+                captures: &captures,
+                depth: depth + 1,
+                environment,
+                thread_environment,
+                module_cohort,
+                call_site,
+                prototype,
+            },
+            None,
+            fuel,
+        )
+        .map_err(|error| attach_existing_instruction_source(&program, function, error))
+    }
+
+    fn resume_deferred_bytecode_frame(
+        &mut self,
+        frame: SuspendedBytecodeFrame,
+        results: Vec<Value>,
+        error: Option<Error>,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        let program = self.dynamic_program(frame.program_id)?;
+        let function = match frame.prototype {
+            Some(index) => program
+                .functions
+                .get(index as usize)
+                .ok_or_else(|| invalid_deferred_call("saved caller prototype is missing"))?,
+            None => &program.main,
+        };
+        self.run_function_step(
+            &program,
+            Some(frame.program_id),
+            function,
+            &[],
+            FunctionCallContext {
+                current_function: frame.current_function,
+                captures: &frame.captures,
+                depth: frame.depth,
+                environment: frame.environment,
+                thread_environment: frame.thread_environment,
+                module_cohort: frame.module_cohort,
+                call_site: frame.call_site,
+                prototype: frame.prototype,
+            },
+            Some(ResumedFunctionState {
+                pc: frame.pc,
+                registers: frame.registers,
+                register_cells: frame.register_cells,
+                varargs: frame.varargs,
+                pending_return_prefixes: frame.pending_return_prefixes,
+                continuation: frame.continuation,
+                resume_results: results,
+                resume_error: error,
+                stackless_self_calls: frame.stackless_self_calls,
+                tail_call_count: frame.tail_call_count,
+            }),
+            fuel,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn defer_expanded_bytecode_call(
+        &mut self,
+        program: &Program,
+        program_id: Option<u32>,
+        context: &FunctionCallContext<'_>,
+        pc: usize,
+        mut registers: RegisterValues,
+        register_cells: RegisterCells,
+        varargs: Vec<Value>,
+        pending_return_prefixes: Vec<Value>,
+        state: ExpandedCallState,
+        stackless_self_calls: Vec<StacklessSelfCallFrame>,
+        tail_call_count: usize,
+        callee: Value,
+        args: Vec<Value>,
+    ) -> VmFlowResult<ReturnValues> {
+        // Retaining a hand-built program can collect. Keep the fresh selected
+        // callee, arguments, and intermediate chain results rooted first.
+        self.mutate_last_call_stack_frame(|frame| {
+            extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
+            extend_heap_backed_roots(&mut frame.stackless_roots, &args);
+            state.heap_roots(&mut frame.stackless_roots);
+        });
+        let program_id = match program_id {
+            Some(id) => id,
+            None => self.retain_dynamic_program_ref(program)?,
+        };
+        self.sync_register_cells(&mut registers, &register_cells)?;
+        let depth = state.depth;
+        let call_site = state.call_site.clone();
+        let caller = SuspendedBytecodeFrameStorage::try_new(SuspendedBytecodeFrame {
+            program_id,
+            prototype: context.prototype,
+            current_function: context.current_function,
+            captures: try_copy_vec(context.captures)?,
+            depth: context.depth,
+            environment: context.environment,
+            thread_environment: self.current_thread_environment(),
+            module_cohort: context.module_cohort,
+            call_site: context.call_site.clone(),
+            pc,
+            registers,
+            register_cells,
+            varargs,
+            pending_return_prefixes,
+            continuation: BytecodeContinuation::ExpandedCalls(state),
+            stackless_self_calls,
+            tail_call_count,
+        })?;
+        let mut callers = Vec::new();
+        callers
+            .try_reserve_exact(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        callers.push(CoroutineFrame::Bytecode(caller));
+        Ok(VmFlow::Call(DeferredBytecodeCall {
+            callee,
+            args,
+            depth,
+            call_site,
+            fallback_program: program_id,
+            callers,
+        }))
+    }
+}
+
+fn invalid_deferred_call(reason: &'static str) -> Error {
+    Error::new(ErrorKind::InvalidProgram { reason })
+}

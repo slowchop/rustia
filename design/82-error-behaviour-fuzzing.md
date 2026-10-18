@@ -274,11 +274,16 @@ the same checked register limit as other compiled calls, and its windows and
 imports are validated before callbacks. The former fixed forms retain their
 ordinary lowering when they can represent the whole expression.
 
-The new continuation also exposed native stack growth when a function called
-itself from an expanded argument. Recursive self calls now use the VM's existing
-explicit saved frames and resume their pending expansion iteratively. The base
-case can yield, then resume and unwind through the selected callees. Recursion
-exhaustion remains a structured, uncatchable VM error.
+The new continuation also exposed native stack growth in recursive expanded
+arguments. Bytecode calls use an internal call request consumed by an iterative
+driver. Saved callers retain the program, prototype, closure captures, environment,
+thread environment, module cohort, registers, source/debug state and continuation;
+return values and ordinary errors resume that complete state. Actual guest yields
+carry the saved callers through the existing coroutine frame machinery. A base
+case can yield, then resume and unwind through selected callees in different
+functions or programs. Pending frames participate in the existing roots, program
+retention and memory accounting, including explicit collection while callers are
+pending. Recursion exhaustion remains a structured, uncatchable VM error.
 
 The review also found that the configured `RecursionLimit` had incorrectly
 remained catchable in protected calls. It now follows the documented hard-abort
@@ -291,9 +296,15 @@ runtime error. Ordinary recovery and typed rollback tests cover this distinction
 16, zero and multiple results, parentheses, constructors, method receivers,
 varargs, repeated suspension, and recursive depth 20/100 including a suspended
 base case. Two additional corpus fixtures record `2:3:false:false:2` for nested
-result counts and `3` for the recursive call. Four-profile ordering controls
-also pin the shared Luau call semantics; `Puc51Compat` continues to select its
+result counts and `3:3` for self and mutual recursive calls. Four-profile ordering
+controls also pin the shared Luau call semantics; `Puc51Compat` continues to select its
 documented table/sort/format behavior rather than a second language compiler.
 The combined typed-object candidate also keeps a fresh object alive in an
 expanded-call continuation across both suspensions, repeated collection pressure,
 and reset; its method remains callable after each resume.
+
+Additional regressions cover mutual depth 20/100, suspended bases, original guest
+error identity, protected saved-caller unwinding, configured exhaustion, and calls
+between independently loaded programs with distinct captures, `setfenv`
+environments and module cohorts across suspension. These address the
+mutual-recursion native-stack abort found during independent review.

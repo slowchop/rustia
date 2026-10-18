@@ -34,7 +34,7 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => "next({a=1}, nil, 99)",
         _ => "tonumber('1', 10, 99)",
     };
-    match byte(0) % 29 {
+    match byte(0) % 30 {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -66,7 +66,8 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         25 => body.push_str("local function pass(...) return ... end; local function empty() end; local t={type(pass(pass(pass(empty()))))}; return tostring(t[1])"),
         26 => body.push_str("local function pass(...) return ... end; local function run(...) return 0+select('#',pass(pass(pass(...)))) end; return tostring(run(4,5))"),
         27 => body.push_str("local function run(n) if n==0 then return 4,5 end; return string.len('abc',run(n-1)) end; string.len=function(...) return select('#',...),7 end; return tostring(run(20))"),
-        _ => body.push_str("local function pass(...) return ... end; local function many() return 4,5 end; local t={select('#',pass(pass(pass(pass(many())))))}; return tostring(t[1])"),
+        28 => body.push_str("local function pass(...) return ... end; local function many() return 4,5 end; local t={select('#',pass(pass(pass(pass(many())))))}; return tostring(t[1])"),
+        _ => body.push_str("local a,b; a=function(n) if n==0 then return 4,5 end; return string.len('abc',b(n-1)) end; b=function(n) if n==0 then return 4,5 end; return string.len('abc',a(n-1)) end; string.len=function(...) return select('#',...),7 end; return tostring(a(20))"),
     }
     body
 }
