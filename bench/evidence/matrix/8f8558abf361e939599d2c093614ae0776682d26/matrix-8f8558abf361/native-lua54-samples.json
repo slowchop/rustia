@@ -1,0 +1,292 @@
+{
+  "measurements": [
+    {
+      "checksum": "f64:341732220.00000000000000000",
+      "cold_start_ns_median": 126090.00000000001,
+      "cold_start_ns_min": 122540.99999999999,
+      "commit": "8f8558abf361e939599d2c093614ae0776682d26",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 47490.0,
+      "first_call_ns_min": 47360.0,
+      "mode_family": "mlua-lua54",
+      "n": 2652,
+      "n_selection": "calibrated",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 45526.052790346905,
+      "ns_per_unit_min": 45270.64441930618,
+      "prepare_ns_median": 78630.0,
+      "prepare_ns_min": 75051.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        122540.99999999999,
+        127860.00000000001,
+        126090.00000000001,
+        125919.99999999999,
+        126870.00000000001
+      ],
+      "samples_first_call_ns": [
+        47490.0,
+        47660.0,
+        47460.0,
+        47670.0,
+        47360.0
+      ],
+      "samples_ns_per_unit": [
+        45493.82805429864,
+        46697.62330316742,
+        45706.67194570136,
+        45526.052790346905,
+        45270.64441930618
+      ],
+      "samples_prepare_ns": [
+        75051.0,
+        80200.0,
+        78630.0,
+        78250.0,
+        79510.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1792346741,
+      "unit": "build+sum+sort of 256-elem array",
+      "units_per_sec": 22089.369674922025,
+      "workload": "dense_tables"
+    },
+    {
+      "checksum": "i64:20102378400",
+      "cold_start_ns_median": 120880.0,
+      "cold_start_ns_min": 117480.0,
+      "commit": "8f8558abf361e939599d2c093614ae0776682d26",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 39390.0,
+      "first_call_ns_min": 38850.0,
+      "mode_family": "mlua-lua54",
+      "n": 4395,
+      "n_selection": "calibrated",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 27280.92536973834,
+      "ns_per_unit_min": 27211.473492605233,
+      "prepare_ns_median": 81661.0,
+      "prepare_ns_min": 77820.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        117480.0,
+        123821.0,
+        121151.0,
+        120880.0,
+        120410.0
+      ],
+      "samples_first_call_ns": [
+        39660.0,
+        39390.0,
+        39490.0,
+        38970.0,
+        38850.0
+      ],
+      "samples_ns_per_unit": [
+        27223.432536973833,
+        27211.473492605233,
+        27643.191126279864,
+        27586.931513083047,
+        27280.92536973834
+      ],
+      "samples_prepare_ns": [
+        77820.0,
+        84431.0,
+        81661.0,
+        81910.0,
+        81560.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1792346743,
+      "unit": "fill+read 128 hash entries",
+      "units_per_sec": 36749.20434836988,
+      "workload": "sparse_tables"
+    },
+    {
+      "checksum": "i64:2423340385204",
+      "cold_start_ns_median": 77190.0,
+      "cold_start_ns_min": 74260.0,
+      "commit": "8f8558abf361e939599d2c093614ae0776682d26",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 2610.0,
+      "first_call_ns_min": 2580.0,
+      "mode_family": "mlua-lua54",
+      "n": 2935346,
+      "n_selection": "calibrated",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 41.34388041477904,
+      "ns_per_unit_min": 40.572236799341546,
+      "prepare_ns_median": 74610.0,
+      "prepare_ns_min": 71600.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        74260.0,
+        77540.0,
+        77190.0,
+        76881.0,
+        77360.0
+      ],
+      "samples_first_call_ns": [
+        2660.0,
+        2610.0,
+        2580.0,
+        2710.0,
+        2580.0
+      ],
+      "samples_ns_per_unit": [
+        42.0098530122173,
+        40.898837138790455,
+        41.34388041477904,
+        41.84813374641354,
+        40.572236799341546
+      ],
+      "samples_prepare_ns": [
+        71600.0,
+        74930.0,
+        74610.0,
+        74171.0,
+        74780.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1792346745,
+      "unit": "one upvalue-mutating closure call",
+      "units_per_sec": 24647396.32043726,
+      "workload": "closures_upvalues"
+    },
+    {
+      "checksum": "i64:895743980",
+      "cold_start_ns_median": 98770.0,
+      "cold_start_ns_min": 96500.0,
+      "commit": "8f8558abf361e939599d2c093614ae0776682d26",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 6020.0,
+      "first_call_ns_min": 5860.0,
+      "mode_family": "mlua-lua54",
+      "n": 39124,
+      "n_selection": "calibrated",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 3119.118903997546,
+      "ns_per_unit_min": 3076.4121766690523,
+      "prepare_ns_median": 92910.0,
+      "prepare_ns_min": 90480.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        96500.0,
+        98770.0,
+        100761.0,
+        97560.0,
+        99471.0
+      ],
+      "samples_first_call_ns": [
+        6020.0,
+        5860.0,
+        6020.0,
+        5980.0,
+        6160.0
+      ],
+      "samples_ns_per_unit": [
+        3119.118903997546,
+        3146.963296186484,
+        3076.4121766690523,
+        3080.0904815458543,
+        3158.0544934055824
+      ],
+      "samples_prepare_ns": [
+        90480.0,
+        92910.0,
+        94741.0,
+        91580.0,
+        93311.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1792346747,
+      "unit": "__iter(32)+pairs(5)+ipairs(32) pass",
+      "units_per_sec": 325053.9728011146,
+      "workload": "generic_iteration"
+    },
+    {
+      "checksum": "f64:6062261.87277984339743853",
+      "cold_start_ns_median": 85940.0,
+      "cold_start_ns_min": 84110.0,
+      "commit": "8f8558abf361e939599d2c093614ae0776682d26",
+      "dialect": "lua54",
+      "engine": "mlua-lua54",
+      "execution_mode": "interpreter",
+      "first_call_ns_median": 1190.0,
+      "first_call_ns_min": 1150.0,
+      "mode_family": "mlua-lua54",
+      "n": 413933,
+      "n_selection": "calibrated",
+      "native_verification": "not-applicable",
+      "native_verification_ratio": null,
+      "native_verified": false,
+      "ns_per_unit_median": 294.731169053929,
+      "ns_per_unit_min": 286.91486544923936,
+      "prepare_ns_median": 84750.0,
+      "prepare_ns_min": 82800.0,
+      "reps": 5,
+      "samples_cold_start_ns": [
+        84110.0,
+        86450.0,
+        85991.0,
+        84641.0,
+        85940.0
+      ],
+      "samples_first_call_ns": [
+        1310.0,
+        1150.0,
+        1180.0,
+        1230.0,
+        1190.0
+      ],
+      "samples_ns_per_unit": [
+        296.15510239579834,
+        286.91486544923936,
+        294.731169053929,
+        287.87012149309186,
+        297.7580502158562
+      ],
+      "samples_prepare_ns": [
+        82800.0,
+        85300.0,
+        84811.0,
+        83411.0,
+        84750.0
+      ],
+      "target": "linux-x86_64",
+      "timestamp_unix": 1792346749,
+      "unit": "math fastcalls + buffered push",
+      "units_per_sec": 3485354.439318582,
+      "workload": "stdlib_math_table"
+    }
+  ],
+  "metadata": {
+    "cold_measurement": "fresh prepare followed immediately by one workload unit; prepare, first-call, and combined latency are retained separately",
+    "cold_sample_count": 25,
+    "description": "Raw per-repetition timings in execution order. This sidecar is separate from the append-only public history schema.",
+    "measurement_count": 5,
+    "measurement_isolation": "fresh prepared workload per repetition",
+    "sample_count": 25,
+    "sample_order": "execution order (unsorted)",
+    "warmup": "one untimed invocation immediately before each recorded sample"
+  },
+  "schema": "rustia.bench.raw-samples.v1",
+  "schema_version": 1,
+  "source": "script-bench-harness"
+}
