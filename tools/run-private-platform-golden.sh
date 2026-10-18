@@ -4,9 +4,14 @@ set -euo pipefail
 
 args=(test --locked -p rustia --test platform_golden)
 case "${1:-}" in
-  native) ;;
+  native)
+    case "${3:-}" in
+      aarch64-apple-darwin|x86_64-unknown-linux-gnu) args+=(--target "$3") ;;
+      *) echo "native execution requires an explicit supported target triple" >&2; exit 2 ;;
+    esac
+    ;;
   wasm) args+=(--target wasm32-unknown-unknown) ;;
-  *) echo "usage: run-private-platform-golden.sh native|wasm default|bare" >&2; exit 2 ;;
+  *) echo "usage: run-private-platform-golden.sh native|wasm default|bare [native-target]" >&2; exit 2 ;;
 esac
 case "${2:-}" in
   default) ;;

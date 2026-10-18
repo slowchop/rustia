@@ -54,8 +54,9 @@ API work. The full native/mobile/Firefox/Safari runtime matrix remains required
 before public release, but does not block this private milestone.
 The [private platform checks](84-private-platform-acceptance.md) now add one
 shared exact transcript on Linux x86-64, native macOS arm64, and Node/V8 in
-default and bare modes. The Mac job verifies the actual OS, architecture and
-compiler host. A clean external Cargo application reuses public contract tests
+default and bare modes. Native jobs pass explicit targets; the Mac job also
+verifies the actual OS, architecture and compiler host. A clean external Cargo
+application reuses public contract tests
 against the five extracted runtime archives with only facade/Serde dependencies
 and candidate-lock package identities. These checks are implemented; final
 three-platform CI, independent review, and candidate acceptance remain pending.

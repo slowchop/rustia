@@ -16,9 +16,10 @@ used as performance evidence.
 | Native macOS arm64 | The shared golden, host functions, typed objects, and live-value contracts in default and bare modes |
 | Node/V8 Wasm | The same golden in default and bare modes, alongside the existing host-adapter, object, callback and live-value suites |
 
-The native jobs verify the actual OS and architecture. The Mac job also checks
-the compiler host triple, so an Intel process under translation cannot stand in
-for arm64 execution. CI logs the tested checkout and the exact golden transcript.
+The native jobs verify the actual OS and architecture and pass their target
+triples explicitly to Cargo. The Mac job also checks the compiler host triple;
+runner configuration cannot silently substitute Intel execution for arm64.
+CI logs the tested checkout and the exact golden transcript.
 The shared runner requires exactly one transcript sentinel, rejecting empty
 test runs as well as failed execution. Policy self-tests exercise wrong runner
 placement, missing checks, and zero/duplicate/failed golden execution.
@@ -45,11 +46,12 @@ remain separate so this transcript stays small and easy to review.
 Local correctness commands are:
 
 ```sh
-cargo test --locked -p rustia --test platform_golden -- --nocapture
-cargo test --locked -p rustia --no-default-features --test platform_golden -- --nocapture
+bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin
+bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin
 ```
 
-For Wasm, use `--target wasm32-unknown-unknown` and the lock-matched
+On Linux x86-64, substitute `x86_64-unknown-linux-gnu` for the native target.
+For Wasm, use the runner's `wasm` mode and the lock-matched
 `wasm-bindgen-test-runner`. Local Darwin/arm64 execution can supplement CI;
 it does not count as a completed Mac CI job.
 

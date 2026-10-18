@@ -444,14 +444,14 @@ function checkCi(text) {
     'test "$(uname -s)" = Darwin',
     'test "$(uname -m)" = arm64',
     'test "$(rustc -vV | sed -n \'s/^host: //p\')" = aarch64-apple-darwin',
-    "bash tools/run-private-platform-golden.sh native default",
-    "bash tools/run-private-platform-golden.sh native bare",
-    "cargo test --locked -p rustia --test host_functions --test typed_objects --test live_value_contract",
-    "cargo test --locked -p rustia --no-default-features --test host_functions --test typed_objects --test live_value_contract",
+    "bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin",
+    "bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin",
+    "cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract",
+    "cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract",
   ]) requireIncludes(macosJob, check, `${label} macos job`);
   for (const command of [
-    "bash tools/run-private-platform-golden.sh native default",
-    "bash tools/run-private-platform-golden.sh native bare",
+    "bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu",
+    "bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu",
   ]) requireIncludes(releasePreflightJob, command, `${label} Linux golden job`);
   for (const command of [
     "bash tools/run-private-platform-golden.sh wasm bare",
@@ -1233,6 +1233,9 @@ if (process.argv.includes("--self-test")) {
       ["Linux job in Mac pool", canonical.replace(linuxBlock, macosBlock), /job release-preflight.*general-linux/],
       ["unregistered Mac job", canonical.replace("  macos-arm64-runtime:", "  another-macos-job:"), /job another-macos-job.*general-linux/],
       ["missing architecture check", canonical.replace('test "$(uname -m)" = arm64', "true"), /must include.*uname/],
+      ["missing Mac golden target", canonical.replace("native default aarch64-apple-darwin", "native default"), /must include.*aarch64-apple-darwin/],
+      ["missing Mac suite target", canonical.replace("--target aarch64-apple-darwin --test host_functions", "--test host_functions"), /must include.*aarch64-apple-darwin/],
+      ["missing Linux golden target", canonical.replace("native default x86_64-unknown-linux-gnu", "native default"), /must include.*x86_64-unknown-linux-gnu/],
       ["missing shared Wasm golden", canonical.replace("bash tools/run-private-platform-golden.sh wasm default", "true"), /must include.*private-platform-golden/],
       ["timing on shared executor", canonical + "\n# node tools/run-dedicated-benchmark.js\n", /must not include.*run-dedicated-benchmark/],
     ]) {
@@ -1245,6 +1248,7 @@ if (process.argv.includes("--self-test")) {
     fs.mkdirSync(fakeBin);
     fs.writeFileSync(path.join(fakeBin, "cargo"), [
       "#!/usr/bin/env bash",
+      '[[ " $* " = *" --target aarch64-apple-darwin "* ]] || exit 23',
       'case "$RUSTIA_GOLDEN_TEST_CASE" in',
       "  zero) exit 0 ;;",
       "  failure) exit 19 ;;",
@@ -1255,14 +1259,14 @@ if (process.argv.includes("--self-test")) {
       "fi", "",
     ].join("\n"), { mode: 0o755 });
     for (const scenario of ["one", "zero", "duplicate", "failure"]) {
-      const result = spawnSync("bash", [path.join(temporary, "tools/run-private-platform-golden.sh"), "native", "default"], {
+      const result = spawnSync("bash", [path.join(temporary, "tools/run-private-platform-golden.sh"), "native", "default", "aarch64-apple-darwin"], {
         encoding: "utf8",
         env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, RUSTIA_GOLDEN_TEST_CASE: scenario },
       });
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, six policy rejections, and four golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, nine policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

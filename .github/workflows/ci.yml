@@ -66,8 +66,8 @@ jobs:
           test "$(uname -s)" = Linux
           test "$(uname -m)" = x86_64
           git rev-parse HEAD
-          bash tools/run-private-platform-golden.sh native default
-          bash tools/run-private-platform-golden.sh native bare
+          bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu
+          bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu
 
   macos-arm64-runtime:
     name: Native runtime (macOS arm64)
@@ -95,10 +95,10 @@ jobs:
           test "$(uname -m)" = arm64
           test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
           git rev-parse HEAD
-          bash tools/run-private-platform-golden.sh native default
-          bash tools/run-private-platform-golden.sh native bare
-          cargo test --locked -p rustia --test host_functions --test typed_objects --test live_value_contract
-          cargo test --locked -p rustia --no-default-features --test host_functions --test typed_objects --test live_value_contract
+          bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin
+          bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin
+          cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract
+          cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract
 
   portable-engine-build:
     name: Engine build (${{ matrix.target }})
