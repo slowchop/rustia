@@ -62,11 +62,11 @@ benchmark-project extraction are outside the private milestone.
 
 ## Agreed Rust-object contract
 
-Typed Rust-object construction and method dispatch are **implemented in the
-current private API change** through `ObjectType<T, H>`, `Object<T>`, and
-`NewObject<T>`. Final CI, independent reviews, and real civfun object use remain
-pending. The [object guide](83-rust-objects.md) documents the implemented API and
-test coverage; this status does not close private acceptance.
+Typed Rust-object construction and method dispatch **merged in PR #65** through
+`ObjectType<T, H>`, `Object<T>`, and `NewObject<T>`. Real civfun Player use merged
+in #52. The [object guide](83-rust-objects.md) documents the API and tests; the
+[private acceptance record](93-private-api-acceptance.md) identifies the final
+common source, verification and rollout gates.
 
 - Provide typed object registration and VM/epoch-bound live handles, ordinary
   `object:method(...)` calls, safe Rust type checks, and reuse of existing typed
@@ -152,17 +152,17 @@ separate publication decision.
 
 | Requirement | Current status | Evidence needed to close it |
 |---|---|---|
-| Evaluate scripts, exchange typed values, register Rust callbacks, call script functions, and reload modules through one coherent API | Implemented; being reviewed | Runnable README examples, ordinary and typed-host consumer tests, and independent API review |
+| Evaluate scripts, exchange typed values, register Rust callbacks, call script functions, and reload modules through one coherent API | Implemented and reviewed for the private baseline | Runnable README examples, ordinary and typed-host consumer tests, and independent API review |
 | Explain construction and defaults consistently | Canonical builder contract implemented | Preserve tested presets, individual limits and immutable settings; final 1.0 acceptance remains open |
-| Leave room to add error categories | Implemented in this change | Non-exhaustive facade errors, private classification storage, and typed handle-error regressions |
-| Validate invalid handles before converting inputs or allocating guest values | Implemented in this change | Stale-handle and cross-VM tests, including conversion side effects and memory accounting |
-| Separate stable settings from engine implementation details | Merged in PR #63; Grabby CI/merge pending | Immutable facade `Settings`, builder configuration, owned profiles/errors/diagnostics, sealed callback adapters, and preserved private engine-control regressions; WOTS #7 and civfun #51 merged |
-| Allow public classifications and metadata to evolve | Review open | Audit re-exported VM errors, profiles, capabilities, diagnostic types, and owned value/key enums; document exhaustive contracts or make them extensible before 1.0 |
-| Provide typed Rust objects with methods | Implemented; final checks/reviews and civfun object use pending | Read-only deterministic input plus staged actions; capability-declared mutable standard/live methods; ownership, collection/reset, quota, and failure tests in a real consumer |
-| Complete host value construction and conversion ergonomics | Review open | Exercise binary strings, buffers, vectors, shared/cyclic tables, tuples, serde, live callbacks, and meaningful conversion errors from an external consumer |
-| Specify conversion, concurrency, and failure contracts | Review open | Document missing results, sparse sequences, integer conversion, VM thread affinity, callback sharing, and validation precedence with consumer tests |
-| Make callback and module lifetimes easy to understand | Implemented; review open | Document which values survive replacement/reset, callback capture responsibilities, and exact installation rollback limits |
-| Publish an explicit compatibility contract | Open until candidate | Inventory the complete public facade, document extension points, and run source-compatibility checks against the candidate and active consumers |
+| Leave room to add error categories | Implemented in the private baseline | Non-exhaustive facade errors, private classification storage, and typed handle-error regressions |
+| Validate invalid handles before converting inputs or allocating guest values | Implemented in the private baseline | Stale-handle and cross-VM tests, including conversion side effects and memory accounting |
+| Separate stable settings from engine implementation details | Merged in PR #63; common rollout tracked in the acceptance record | Immutable facade `Settings`, builder configuration, owned profiles/errors/diagnostics, sealed callback adapters, and preserved private engine-control regressions; WOTS #7 and civfun #51 merged |
+| Allow public classifications and metadata to evolve | Stable 1.0 audit remains open | Audit re-exported VM errors, profiles, capabilities, diagnostic types, and owned value/key enums; document exhaustive contracts or make them extensible before 1.0 |
+| Provide typed Rust objects with methods | Merged in #65; real civfun Player integration merged in #52 | Read-only deterministic input plus staged actions; capability-declared mutable standard/live methods; ownership, collection/reset, quota, and failure tests in a real consumer |
+| Complete host value construction and conversion ergonomics | Private contract suite verified; stable 1.0 audit open | Exercise binary strings, buffers, vectors, shared/cyclic tables, tuples, serde, live callbacks, and meaningful conversion errors from an external consumer |
+| Specify conversion, concurrency, and failure contracts | Private contracts documented/tested; stable 1.0 audit open | Document missing results, sparse sequences, integer conversion, VM thread affinity, callback sharing, and validation precedence with consumer tests |
+| Make callback and module lifetimes easy to understand | Documented/tested privately; stable 1.0 review open | Document which values survive replacement/reset, callback capture responsibilities, and exact installation rollback limits |
+| Publish an explicit compatibility contract | Private baseline recorded; stable promise remains open | Inventory the complete public facade, document extension points, and run source-compatibility checks against the candidate and active consumers |
 
 At 1.0, every public item reachable through `rustia` is covered by its compatibility
 promise, including re-exported types. Calling a public item “advanced” does not
@@ -176,9 +176,9 @@ Do not add a required method to a public extension trait during 1.x.
 
 | Requirement | Current status | Evidence needed to close it |
 |---|---|---|
-| Enforce memory limits consistently on optimized execution paths | Implemented; final CI pending | Memory-limited VMs use scalar instruction boundaries for batched paths; cross-profile quota tests and execution counters cover the [former unchecked window](58-vm-core2.md) |
-| Match Luau's compile-time versus runtime error behavior | Focused builtin fixes implemented; wider audit open | Eight new Luau 0.709 fixtures plus call-shape, expansion, argument-effect and repeated-suspension tests cover specialization fallback and builtin lookup order; final CI and review remain pending |
-| Allow a required module to yield within the host loading contract | Implemented in the current follow-up; final review and CI pending | ABI v3 continuations, cache commit after completion, coroutine-owned cycle/error cleanup, shared fuel, close/collection/reset, and installation rollback tests |
+| Enforce memory limits consistently on optimized execution paths | Implemented; candidate CI linked in the acceptance record | Memory-limited VMs use scalar instruction boundaries for batched paths; cross-profile quota tests and execution counters cover the [former unchecked window](58-vm-core2.md) |
+| Match Luau's compile-time versus runtime error behavior | Focused fixes merged in #64; wider audit open | Eight new Luau 0.709 fixtures plus call-shape, expansion, argument-effect and repeated-suspension tests cover specialization fallback and builtin lookup order; the merged batch passed required CI and review |
+| Allow a required module to yield within the host loading contract | Implemented/reviewed in #68; final candidate gates linked in the acceptance record | ABI v3 continuations, cache commit after completion, coroutine-owned cycle/error cleanup, shared fuel, close/collection/reset, and installation rollback tests |
 | Confirm collection settings suit long-running applications | Correctness coverage exists; tuning open | Preserve the deterministic scheduling contract; use remote measurements for any tuning or performance claim |
 | Retain clear source diagnostics and recovery behavior | Implemented | Keep the diagnostics and error/fuzz regressions green; add fixtures for newly found gaps |
 
@@ -193,8 +193,8 @@ runtime or embedding requirement above.
 The [private platform checks](84-private-platform-acceptance.md) implement a
 shared exact transcript for Linux x86-64, native macOS arm64 and Node/V8, plus
 clean external archived-facade contracts. Default and bare features are covered.
-Final three-platform CI, independent review and acceptance evidence are pending;
-the broader public matrix below remains open.
+The exact candidate and its CI/review/merge evidence are in the acceptance
+record; the broader public matrix below remains open.
 
 - [ ] Complete the native correctness and deterministic-result matrix in
   [00-constraints.md](00-constraints.md), using real execution where promised.

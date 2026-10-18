@@ -478,8 +478,9 @@ facility is finished. The highest-impact gaps are:
    total without a whole-VM census at ordinary instruction boundaries. Extension batches and module candidates
    now install atomically. Each installation owns a fresh lazy dependency-cache cohort selected by function
    origin; unreachable cohorts are collector-pruned and old rooted functions remain callable. Required modules
-   still cross a non-yieldable native boundary; matching Luau's yieldable
-   `require` needs a continuation that preserves the loading stack and commits the cache only after completion.
+   now use coroutine-owned continuations, retain loading ownership across suspension, and publish the cache
+   only on completion. Close, collection, reset and failure release ownership; the ABI v3 contract and
+   final candidate evidence are in [the private acceptance record](93-private-api-acceptance.md).
 3. **Complete public value interop.** The advanced live-handle spine is implemented: VM/epoch-safe rooted
    `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, identity-bearing keys,
    shared/cyclic table graphs, mutation, and raw equality without exposing collector lifetimes. Live values
@@ -490,8 +491,10 @@ facility is finished. The highest-impact gaps are:
    Hardened leaves reject mutable constructor authorities before allocation and dynamic loading before
    compilation. Snapshot-free serde deserialization now reads rooted `Value`, `Table`, and `Exports` graphs
    directly into owned Rust types while keeping the eager `OwnedValue` snapshot explicit. Typed Rust-object
-   registration, live handles, and methods are implemented under [83-rust-objects.md](83-rust-objects.md);
-   final object validation and real-consumer use remain pending before this boundary is settled.
+   registration, live handles, and methods merged in PR #65 under
+   [83-rust-objects.md](83-rust-objects.md), with real civfun Player use merged in #52.
+   The exact common candidate and consumer validation are recorded in
+   [93-private-api-acceptance.md](93-private-api-acceptance.md).
    Synchronous function construction now shares typed owned/live conversions, capability/fuel metadata,
    and contextual dispatch with persistent registrations and host modules. Heap functions own callbacks;
    guest aliases survive replacement, collection releases unreachable captures, and reset discards
