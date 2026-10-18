@@ -1218,7 +1218,8 @@ function checkBenchmarkPublication(text) {
 
 }
 
-if (process.argv.includes("--self-test")) {
+// Embedded policy checks may supply a minimal process object.
+if (process.argv?.includes("--self-test")) {
   const os = require("node:os");
   const assert = require("node:assert/strict");
   const { spawnSync } = require("node:child_process");
