@@ -169,6 +169,8 @@ run("cargo", [
 ]);
 run("cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]);
 run("cargo", ["test", "--locked", "-p", "rustia", "--examples", "--no-run"]);
+run("cargo", ["run", "--locked", "-p", "rustia", "--example", "game_objects"]);
+run("cargo", ["run", "--locked", "-p", "rustia", "--example", "mutable_objects"]);
 run("cargo", ["test", "--locked", "--workspace"]);
 run("cargo", [
   "clippy",

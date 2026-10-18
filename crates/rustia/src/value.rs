@@ -762,6 +762,9 @@ pub(crate) fn load_owned_value(vm: &mut Vm, value: &OwnedValue) -> Result<RawVal
         OwnedValue::String(value) => Ok(vm.string(value)),
         OwnedValue::Table(table) => {
             let raw_table = vm.empty_table();
+            // Nested values can force quota collection before they are attached
+            // to this table. Keep the partial parent reachable throughout.
+            let _table_root = vm.retain_value(raw_table).map_err(Error::from_engine)?;
             for (index, value) in table.array.iter().enumerate() {
                 let key = RawValue::number((index + 1) as f64);
                 let value = load_owned_value(vm, value)?;
@@ -770,6 +773,11 @@ pub(crate) fn load_owned_value(vm: &mut Vm, value: &OwnedValue) -> Result<RawVal
             }
             for (key, value) in &table.entries {
                 let key = load_owned_key(vm, key);
+                let _key_root = if key.kind() == ValueKind::String {
+                    Some(vm.retain_value(key).map_err(Error::from_engine)?)
+                } else {
+                    None
+                };
                 let value = load_owned_value(vm, value)?;
                 vm.raw_table_set_value(raw_table, key, value)
                     .map_err(Error::from_engine)?;
@@ -777,6 +785,26 @@ pub(crate) fn load_owned_value(vm: &mut Vm, value: &OwnedValue) -> Result<RawVal
             Ok(raw_table)
         }
     }
+}
+
+/// Keeps earlier arguments alive while later owned graphs allocate or collect.
+pub(crate) fn load_owned_arguments(
+    vm: &mut Vm,
+    values: &[OwnedValue],
+) -> Result<(Vec<RawValue>, Vec<rustia_vm::RetainedValue>)> {
+    let mut arguments = Vec::with_capacity(values.len());
+    let mut roots = Vec::new();
+    for value in values {
+        let value = load_owned_value(vm, value)?;
+        if !matches!(
+            value.kind(),
+            ValueKind::Nil | ValueKind::Boolean | ValueKind::Number
+        ) {
+            roots.push(vm.retain_value(value).map_err(Error::from_engine)?);
+        }
+        arguments.push(value);
+    }
+    Ok((arguments, roots))
 }
 
 fn load_owned_key(vm: &mut Vm, key: &OwnedKey) -> RawValue {

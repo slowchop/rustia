@@ -91,6 +91,8 @@ check-facade-api:
 
 check-examples:
     cargo test --locked -p rustia --examples --no-run
+    cargo run --locked -p rustia --example game_objects
+    cargo run --locked -p rustia --example mutable_objects
 
 release-preflight:
     node tools/run-release-preflight.js

@@ -35,7 +35,7 @@ docs are design intent.
 | [`65-wasmjit.md`](65-wasmjit.md) | **wasm-emit JIT / AOT-to-wasm spike** (verified) — ~176× the interpreter in V8, crossover ≈ 6 calls; the in-browser near-native path | **[SPIKE]** ✅ |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect/slot and decision-reset contract | **[CONTRACT + GENERIC SEAM IMPLEMENTED]** ✅ |
 | [`72-host-services.md`](72-host-services.md) | **host services bus** — stdout sink, determinism-labeled `ServiceClock` providers, `standard()`/`deterministic()`/`live()` presets, logical `os.clock` | **[IMPLEMENTED v1]** ✅ |
-| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — coherent execution facade, typed schema/context transaction, serde, transactional installation/replacement, extension/linker | **[TRANSACTIONAL INSTALLATION IMPLEMENTED]** ✅ |
+| [`75-embedded-api.md`](75-embedded-api.md) | **Grabby-Compatible Embedded API** — coherent execution facade, typed schema/context transaction, serde, installation/replacement, typed Rust objects | **[OBJECT IMPLEMENTATION; VALIDATION/ROLLOUT PENDING]** |
 | [`76-koto-migration.md`](76-koto-migration.md) | public koto-to-rustia migration guide for the implemented embedding facade | **[GUIDE]** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen authoritative guest surface, stateless compiled entries, and fast isolated reset | **[IMPLEMENTED v1]** ✅ |
 | [`78-host-functions.md`](78-host-functions.md) | shared synchronous callback definitions, live construction, persistent registration, reclamation and reset | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
@@ -43,6 +43,7 @@ docs are design intent.
 | [`80-bench-suite.md`](80-bench-suite.md) | 12-adapter Linux/wasm benchmark product, evidence protocol, generated report, and standalone split plan | **[IMPLEMENTED; SPLIT PENDING]** |
 | [`81-benchmark-operations.md`](81-benchmark-operations.md) | qualified-host measurement, freshness/publication state, landscape refresh, and no-scheduled-billing policy | **[ROLLING OUT]** |
 | [`82-error-behaviour-fuzzing.md`](82-error-behaviour-fuzzing.md) | error recovery, bounded embedding fuzzing, and pinned-Luau differential campaigns | **[IMPLEMENTED; CLIENT ROLLOUT VERIFIED]** |
+| [`83-rust-objects.md`](83-rust-objects.md) | typed Rust objects, method capabilities, staged requests, immediate mutation, lifetime and memory rules | **[IMPLEMENTED; FINAL VALIDATION/ROLLOUT PENDING]** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 | [`92-first-release.md`](92-first-release.md) | Rustia 1.0 acceptance checklist: API, runtime gaps, platforms, documentation, and publication | **[IN PROGRESS]** |

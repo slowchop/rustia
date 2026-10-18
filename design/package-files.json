@@ -1348,7 +1348,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-vm/Cargo.toml",
       "publish": false,
-      "file_count": 25,
+      "file_count": 28,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1363,6 +1363,7 @@
         "src/executor_census.rs",
         "src/extension.rs",
         "src/heap.rs",
+        "src/host_object.rs",
         "src/hot_ir.rs",
         "src/instruction_facts.rs",
         "src/lib.rs",
@@ -1373,6 +1374,8 @@
         "src/tape.rs",
         "src/value.rs",
         "src/vm/host_functions.rs",
+        "src/vm/host_objects/tests.rs",
+        "src/vm/host_objects.rs",
         "src/vm.rs",
         "tests/core.rs"
       ]
@@ -1382,7 +1385,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 56,
+      "file_count": 63,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1394,11 +1397,13 @@
         "examples/chunk_builder.rs",
         "examples/diagnostics.rs",
         "examples/embedding.rs",
+        "examples/game_objects.rs",
         "examples/hot_reload.rs",
         "examples/leaf_lifecycle_bench.rs",
         "examples/live_serde_bench.rs",
         "examples/live_values.rs",
         "examples/module_resolution.rs",
+        "examples/mutable_objects.rs",
         "examples/typed_invocation.rs",
         "src/chunk.rs",
         "src/diagnostic.rs",
@@ -1412,6 +1417,10 @@
         "src/lib.rs",
         "src/live_value.rs",
         "src/macros.rs",
+        "src/object.rs",
+        "src/object_context.rs",
+        "src/object_conversion.rs",
+        "src/object_method.rs",
         "src/profile.rs",
         "src/runtime_error.rs",
         "src/serde_value.rs",
@@ -1439,6 +1448,7 @@
         "tests/support/quota_precision.rs",
         "tests/transactional_install.rs",
         "tests/typed_invocation.rs",
+        "tests/typed_objects.rs",
         "tests/web_live.rs"
       ]
     }

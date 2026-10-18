@@ -166,7 +166,7 @@ impl Vm {
         result
     }
 
-    fn ensure_host_configuration_idle(&self) -> Result<()> {
+    pub(super) fn ensure_host_configuration_idle(&self) -> Result<()> {
         self.ensure_healthy()?;
         if !self.call_stack.is_empty()
             || !self.running_coroutines.is_empty()

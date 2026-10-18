@@ -1,4 +1,14 @@
-use rustia::{Error, HostFunction, Profile, RustiaBuilder, VmErrorKind};
+use rustia::{Error, HostFunction, NewObject, ObjectType, Profile, RustiaBuilder, VmErrorKind};
+
+struct ObjectPayload(i64);
+
+fn object_type(scale: i64) -> ObjectType<ObjectPayload> {
+    ObjectType::new("StatefulObject")
+        .method("value", 1, move |value: &ObjectPayload| value.0 * scale)
+        .method("copy", 1, |value: &ObjectPayload| {
+            NewObject::new(ObjectPayload(value.0))
+        })
+}
 
 pub const MAX_STATEFUL_INPUT_BYTES: usize = 128;
 
@@ -31,9 +41,12 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
         }),
     )
     .unwrap();
+    let mut object_scale = 1;
+    vm.register_object_type(object_type(object_scale)).unwrap();
+    let mut object: Option<(rustia::Object<ObjectPayload>, i64, i64)> = None;
     let mut retained = None;
     for (index, operation) in data.iter().enumerate() {
-        match operation % 10 {
+        match operation % 13 {
             0 => {
                 vm.exec("counter = counter + 1").unwrap();
                 expected += 1;
@@ -57,6 +70,9 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 let old = vm.create_table().unwrap();
                 vm.reset_decision().unwrap();
                 assert!(old.get(&mut vm, "anything").is_err());
+                if let Some((old, _, _)) = object.take() {
+                    assert!(old.call_method::<_, i64>(&mut vm, "value", ()).is_err());
+                }
                 expected = 0;
                 vm.insert_global("counter", expected).unwrap();
                 vm.exec("shared = { value = 7 }").unwrap();
@@ -93,7 +109,7 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 assert!(matches!(error.kind(), rustia::ErrorKind::Embed(_)));
                 expected += 1;
             }
-            _ => {
+            9 => {
                 let table = vm.create_table().unwrap();
                 let value = table.as_value();
                 table.set_live(&mut vm, "self", &value).unwrap();
@@ -102,8 +118,48 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                 vm.exec("host_fail()").unwrap_err();
                 assert!(alias.raw_equal(&mut vm, &value).unwrap());
             }
+            10 => {
+                let payload = i64::from(*operation);
+                let value = vm.create_object(ObjectPayload(payload)).unwrap();
+                vm.globals()
+                    .unwrap()
+                    .set_live(&mut vm, "object", &value.as_value())
+                    .unwrap();
+                vm.exec("object_alias = object").unwrap();
+                object = Some((value, payload, object_scale));
+            }
+            11 => {
+                object_scale = 3 - object_scale;
+                vm.register_object_type(object_type(object_scale)).unwrap();
+            }
+            _ => {
+                if let Some((value, payload, scale)) = &object {
+                    assert_eq!(
+                        value.call_method::<_, i64>(&mut vm, "value", ()).unwrap(),
+                        payload * scale
+                    );
+                    let copy = value.call_method_values(&mut vm, "copy", &[]).unwrap();
+                    let copy = copy[0]
+                        .as_object::<ObjectPayload>(&mut vm)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        copy.call_method::<_, i64>(&mut vm, "value", ()).unwrap(),
+                        payload * object_scale
+                    );
+                    assert!(vm
+                        .eval::<bool>("return rawequal(object, object_alias)")
+                        .unwrap());
+                }
+            }
         }
         assert_eq!(vm.eval::<i32>("return shared.value").unwrap(), 7);
+        if let Some((value, payload, scale)) = &object {
+            assert_eq!(
+                value.call_method::<_, i64>(&mut vm, "value", ()).unwrap(),
+                payload * scale
+            );
+        }
         assert_eq!(
             vm.eval::<i32>("return counter")
                 .unwrap_or_else(|error| panic!(

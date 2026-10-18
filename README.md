@@ -125,13 +125,17 @@ platforms and WebAssembly. Choose an engine by the language and integration you 
 
 | Engine | Script language | Features to weigh |
 |---|---|---|
-| **Rustia** | Luau 0.709 target | Rust interpreter, replay modes, instruction budgets, decision reset, typed callbacks and Serde; pre-release |
+| **Rustia** | Luau 0.709 target | Rust interpreter, replay modes, instruction budgets, decision reset, typed Rust objects/callbacks and Serde; pre-release |
 | **[mlua](https://github.com/mlua-rs/mlua)** | Lua or Luau, selected at build time | Upstream runtimes; custom Rust userdata, scoped callbacks, Serde, and async support ([API](https://docs.rs/mlua/latest/mlua/)) |
 | **[Koto](https://koto.dev/)** | Koto | Exported functions, custom Rust objects, and Serde ([guide](https://koto.dev/docs/0.16/api/)) |
 | **[Rhai](https://rhai.rs/book/)** | Rhai | Rust-like scripting with [custom Rust types](https://rhai.rs/book/rust/custom-types.html) and [operation limits](https://rhai.rs/book/safety/max-operations.html) |
 
-Rustia's public userdata registration, scoped callbacks, and async host calls are
-still unavailable. If those are essential today, weigh the alternatives above.
+Expose a Rust type's methods with `ObjectType<T>` and keep instances as live
+`Object<T>` handles. Deterministic methods read input and stage requests;
+standard/live methods can change application state immediately. See the
+[object guide](https://github.com/slowchop/rustia/blob/main/design/83-rust-objects.md)
+for an example and lifetime rules. Custom fields/metamethods, scoped callbacks,
+and async host calls remain future work.
 
 ### Speed: a measured snapshot
 

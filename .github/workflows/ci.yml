@@ -144,6 +144,7 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test mixed_heap_pressure
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --lib engine_boundary_tests::mixed_heap_pressure_preserves_the_short_collection_cadence
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test host_functions
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test typed_objects
 
       - name: Run default web-live adapter tests on Node/V8
         env:
@@ -151,3 +152,4 @@ jobs:
         run: |
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test host_functions
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test typed_objects

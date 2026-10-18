@@ -3,7 +3,7 @@ use crate::function::{
 };
 use crate::serde_value::from_live;
 use crate::value::{
-    load_owned_value, snapshot_value, FromRustia, FromRustiaMulti, IntoRustiaMulti,
+    load_owned_arguments, snapshot_value, FromRustia, FromRustiaMulti, IntoRustiaMulti,
 };
 use crate::{
     CompiledEntry, CompiledModule, Error, Exports, Result, RustiaHostFuelPolicy,
@@ -576,14 +576,14 @@ pub(crate) struct ContextHostFunction<C>
 where
     C: HostSchema,
 {
-    name: String,
-    fuel_cost: u32,
-    capability: OpCapability,
-    parameter_count: u8,
-    parameter_types: Vec<&'static str>,
-    return_types: Vec<&'static str>,
-    fallible: bool,
-    handler: ContextHandler<C>,
+    pub(crate) name: String,
+    pub(crate) fuel_cost: u32,
+    pub(crate) capability: OpCapability,
+    pub(crate) parameter_count: u8,
+    pub(crate) parameter_types: Vec<&'static str>,
+    pub(crate) return_types: Vec<&'static str>,
+    pub(crate) fallible: bool,
+    pub(crate) handler: ContextHandler<C>,
 }
 
 impl<C> ContextHostFunction<C>
@@ -1227,10 +1227,7 @@ where
     {
         self.scoped(|invocation| {
             let owned_args = args.into_rustia_multi()?;
-            let raw_args = owned_args
-                .iter()
-                .map(|value| load_owned_value(invocation.vm, value))
-                .collect::<Result<Vec<_>>>()?;
+            let (raw_args, _argument_roots) = load_owned_arguments(invocation.vm, &owned_args)?;
             let raw_results = invocation.call_retained_raw(function, &raw_args)?;
             let results = raw_results
                 .into_iter()
@@ -1598,7 +1595,7 @@ impl<C: HostSchema, Args, Return, F> IntoExternalFunction<C, Args, Return> for F
 {
 }
 
-trait MakeCapabilityView<C>
+pub(crate) trait MakeCapabilityView<C>
 where
     C: HostSchema,
 {
@@ -1612,10 +1609,27 @@ where
     ) -> Self::View<'call>;
 }
 
-struct InputView;
-struct SlotReadView;
-struct EffectView;
-struct SlotWriteView;
+pub(crate) struct InputView;
+pub(crate) struct SlotReadView;
+pub(crate) struct EffectView;
+pub(crate) struct SlotWriteView;
+pub(crate) struct ExternalView;
+
+impl<C: HostSchema> MakeCapabilityView<C> for ExternalView {
+    type View<'call>
+        = HostMut<'call, C>
+    where
+        C: 'call;
+
+    fn make<'call>(
+        context: &'call mut dyn HostContext<C>,
+        _journal: &'call mut EffectJournal<C::Record>,
+    ) -> Self::View<'call> {
+        HostMut {
+            value: context.external_mut(),
+        }
+    }
+}
 
 impl<C> MakeCapabilityView<C> for InputView
 where
