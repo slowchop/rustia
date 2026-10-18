@@ -1,8 +1,12 @@
 use crate::{CompiledModule, DiagnosticLimits, Error, Result};
 
-/// Maps a same-line generated prefix back to original console input.
-/// For `return `, use `SourceMap::generated_prefix(7)`.
-/// Guest strings remain unchanged. This is not a transpiler source-map format.
+/// Keeps error locations aligned with input when a console adds wrapper text.
+///
+/// For example, a console may turn `1 + 2` into `return 1 + 2` before running
+/// it. Pass `SourceMap::generated_prefix(7)` to
+/// [`Chunk::source_map`](crate::Chunk::source_map) to hide the added `return `
+/// from source excerpts and positions. Wrappers cannot contain line breaks.
+/// Script-visible strings are unchanged.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SourceMap {
     prefix_bytes: usize,
@@ -10,6 +14,7 @@ pub struct SourceMap {
 }
 
 impl SourceMap {
+    /// Marks this many leading bytes as generated text on the first line.
     pub const fn generated_prefix(prefix_bytes: usize) -> Self {
         Self {
             prefix_bytes,

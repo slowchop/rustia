@@ -8,6 +8,10 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Added
 
+- A shorter README and a task-based API reference, with runnable examples and
+  clearer explanations of value conversion, callback lifetimes, reset, resource
+  limits, and error reporting.
+
 - A first-release milestone targeting a stable 1.0 API after a release-candidate
   cycle. The README now opens with runnable examples, plain-language environment
   choices, and feature/speed comparisons backed by a dated remote benchmark

@@ -8,6 +8,10 @@ use serde::ser::{
 use std::cell::RefCell;
 use std::fmt;
 
+/// A serialization or deserialization failure while converting script data.
+///
+/// Public conversion helpers report failures as [`Error`]. Use
+/// [`Error::diagnostic`] to locate a field that could not be deserialized.
 #[derive(Debug)]
 pub struct SerdeValueError(String);
 
@@ -115,6 +119,11 @@ fn diagnostic_data_path(path: &serde_path_to_error::Path) -> String {
 }
 
 impl OwnedValue {
+    /// Reads this value as a Serde-compatible Rust type.
+    ///
+    /// The result may borrow from this owned value. For example, a script
+    /// string can be read as `&str` without making another copy. Conversion
+    /// failures include a field path in [`Error::diagnostic`] when available.
     pub fn deserialize<'de, T>(&'de self) -> Result<T>
     where
         T: Deserialize<'de>,
@@ -122,6 +131,10 @@ impl OwnedValue {
         from_owned(self)
     }
 
+    /// Copies Serde-compatible Rust data into a value independent of any VM.
+    ///
+    /// To send data straight to a script global, use
+    /// [`Rustia::insert_serde`](crate::Rustia::insert_serde).
     pub fn from_serialize<T>(value: &T) -> Result<Self>
     where
         T: Serialize + ?Sized,

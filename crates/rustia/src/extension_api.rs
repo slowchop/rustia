@@ -19,10 +19,28 @@ extern "C" {
     fn web_console_log(text: &str);
 }
 
-/// Fluent builder for [`Rustia`]: start from a preset ([`standard`](Self::standard),
-/// [`deterministic`](Self::deterministic), [`deterministic_leaf`](Self::deterministic_leaf),
-/// [`live`](Self::live)), then override profile, settings, fuel, services, and extensions before
-/// [`build`](Self::build).
+/// Chooses a script environment, resource limits, and host services.
+///
+/// Start with [`Rustia::builder`] for reproducible defaults, or use
+/// [`live`](Self::live) for real clocks, entropy, and `loadstring`.
+/// [`deterministic`](Self::deterministic) rejects nondeterministic input providers
+/// and host capabilities. None of these presets sets a fuel or memory limit.
+///
+/// ```
+/// use rustia::Rustia;
+///
+/// let mut lua = Rustia::builder()
+///     .fuel(100_000)
+///     .memory_limit_bytes(4 * 1024 * 1024)
+///     .build()?;
+/// assert_eq!(lua.load("return 6 * 7").eval::<i64>()?, 42);
+/// # Ok::<(), rustia::Error>(())
+/// ```
+///
+/// Use [`build_for_host`](Self::build_for_host) when callbacks need borrowed
+/// per-invocation state. The more restricted
+/// [`deterministic_leaf`](Self::deterministic_leaf) preset is for stateless
+/// decisions and requires a typed host plus an explicit memory limit.
 pub struct RustiaBuilder {
     profile: Profile,
     settings: VmSettings,
@@ -157,11 +175,14 @@ impl RustiaBuilder {
         &self.settings
     }
 
-    /// Reproducible-by-default preset: `Profile::ReproducibleStandard` plus a real stdout
-    /// `print` sink on native targets (no sink on wasm32, where `print` stays a no-op).
-    /// Clocks keep the VM's built-in deterministic defaults — real time is always an explicit
-    /// `.wall_clock(ServiceClock::system())` choice, never a default.
-    /// [`Rustia::builder()`](crate::Rustia::builder) delegates here.
+    /// Starts with reproducible inputs and the standard script environment.
+    ///
+    /// This uses [`Profile::ReproducibleStandard`]: clocks use deterministic
+    /// defaults, the random seed is zero, and `loadstring` is disabled. Script
+    /// `print` writes to stdout on native/WASI targets and is silent on browser
+    /// Wasm until a sink is supplied. Real clocks and other nondeterministic
+    /// providers remain available when explicitly configured.
+    /// [`Rustia::builder`] starts with this preset.
     pub fn standard() -> Self {
         let builder = Self::new();
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -169,27 +190,30 @@ impl RustiaBuilder {
         builder
     }
 
-    /// Sealed-box preset: `Profile::DeterministicSim`, no services. Deterministic providers
-    /// can still be plugged explicitly via the service sockets.
+    /// Starts with [`Profile::DeterministicSim`] and no host services.
+    ///
+    /// Nondeterministic input providers and host capabilities are rejected.
+    /// Replay-stable providers and a `print` sink can still be added explicitly.
     pub fn deterministic() -> Self {
         RustiaExecutionProfile::DETERMINISTIC_STANDARD.builder()
     }
 
-    /// Authoritative stateless-leaf preset.
+    /// Starts a restricted environment for independent, stateless decisions.
     ///
-    /// This layers [`GuestSurface::HardenedLeaf`] on
-    /// [`Profile::DeterministicSim`]. A logical-live memory limit remains
-    /// mandatory and must be selected explicitly with
-    /// [`memory_limit_bytes`](Self::memory_limit_bytes).
+    /// Uses [`GuestSurface::HardenedLeaf`] with [`Profile::DeterministicSim`].
+    /// Set an explicit [`memory_limit_bytes`](Self::memory_limit_bytes) and use
+    /// [`build_for_host`](Self::build_for_host). Execute host-owned decision
+    /// bodies with [`Rustia::compile_entry`] and [`Rustia::invoke_entry_into`].
     pub fn deterministic_leaf() -> Self {
         RustiaExecutionProfile::DETERMINISTIC_HARDENED_LEAF.builder()
     }
 
-    /// "Normal Luau" preset with `loadstring` enabled (runtime codegen — attack surface for
-    /// hosts running untrusted scripts).
+    /// Starts with real clocks, a fresh random seed, output, and `loadstring`.
     ///
-    /// `Profile::ReproducibleStandard` + host stdout + real wall/monotonic clocks + system
-    /// entropy for the initial `math.random` seed + the stock `loadstring` compiler.
+    /// Uses [`Profile::ReproducibleStandard`] with nondeterministic services;
+    /// results are not guaranteed to repeat. `loadstring` lets scripts compile
+    /// additional code at runtime, so choose this preset deliberately for
+    /// untrusted scripts.
     ///
     /// Native and WASI targets use their system services. With the default `web-live` feature,
     /// `wasm32-unknown-unknown` uses the JavaScript host (`console`, `Date`, `performance`, and
@@ -214,26 +238,29 @@ impl RustiaBuilder {
         builder
     }
 
-    /// PUC Lua 5.1 compatibility preset: `Profile::Puc51Compat` plus the stock
-    /// `loadstring` compiler, on the same service base as
-    /// [`standard`](Self::standard).
+    /// Starts a Lua 5.1 compatibility environment with `loadstring` enabled.
     ///
     /// The profile alone reproduces PUC 5.1.5 table layout, number
     /// formatting, and `table.sort`; this preset adds `loadstring` so PUC-era
     /// code that compiles chunks at runtime works out of the box. Runtime
-    /// codegen is attack surface for hosts running untrusted scripts — add it
-    /// only where PUC source compatibility requires it.
+    /// compilation is an extra capability for untrusted scripts; enable it
+    /// where Lua 5.1 source compatibility requires it. Host services otherwise
+    /// use the defaults from [`standard`](Self::standard).
     pub fn puc51_compat() -> Self {
         let mut builder = Self::standard().profile(Profile::Puc51Compat);
         builder.settings.loadstring_compiler = Some(stock_loadstring_compiler);
         builder
     }
 
+    /// Selects the core compatibility and capability policy.
+    /// Existing settings and services are retained and checked when building.
     pub fn profile(mut self, profile: Profile) -> Self {
         self.profile = profile;
         self
     }
 
+    /// Replaces all VM settings, including earlier limits and service choices.
+    /// Prefer the individual builder methods for ordinary configuration.
     pub fn settings(mut self, settings: VmSettings) -> Self {
         self.settings = settings;
         self
@@ -245,39 +272,46 @@ impl RustiaBuilder {
         self
     }
 
-    /// Sets the VM-wide execution fuel ceiling.
+    /// Limits the instruction work allowed during execution.
     ///
     /// Direct `Rustia<()>` entry points use this as their top-level budget. A
     /// typed invocation uses the lower of this ceiling and its explicit
     /// [`crate::InvocationLimits`] fuel, across every guest call in that
-    /// invocation.
+    /// invocation. Fuel measures deterministic work rather than elapsed time;
+    /// script `pcall` cannot catch fuel exhaustion. The default is unlimited.
     pub fn fuel(mut self, fuel: u64) -> Self {
         self.settings.initial_fuel = Some(fuel);
         self
     }
 
-    /// Caps VM-owned logical live bytes. The same value has deterministic
-    /// semantics on native and wasm32; process RSS and allocator capacity
-    /// remain separate host-level measurements.
+    /// Limits the VM's accounted live memory. The default is unlimited.
+    ///
+    /// Accounting is deterministic across native and Wasm targets. It does not
+    /// bound total process memory, allocator capacity, or memory captured by
+    /// Rust callbacks. Allocations can fail once the limit is reached.
     pub fn memory_limit_bytes(mut self, bytes: usize) -> Self {
         self.settings.memory_limit_bytes = Some(bytes);
         self
     }
 
-    /// Enables exact instruction-boundary live/reserved peak telemetry.
+    /// Enables tracking of live and reserved memory peaks at instruction boundaries.
     pub fn memory_tracking(mut self, enabled: bool) -> Self {
         self.settings.enable_memory_tracking = enabled;
         self
     }
 
+    /// Adds a group of Rust callbacks to install when the VM is built.
+    /// For a typed host, use [`crate::HostModule`] after building instead.
     pub fn extension(mut self, extension: RustiaExtension) -> Self {
         self.extensions.push(extension);
         self
     }
 
-    /// Installs the sink that receives composed `print` output (arguments tab-joined, trailing
-    /// newline). Closure only — sink errors are the host closure's business. `print` is an
-    /// output service: sink-attachable on every profile, including `DeterministicSim`.
+    /// Chooses where script `print` output goes.
+    ///
+    /// Each call sends one string, with arguments joined by tabs and a trailing
+    /// newline. The closure cannot return an error. Output sinks are allowed in
+    /// every ordinary profile, including [`Profile::DeterministicSim`].
     pub fn stdout(mut self, sink: impl FnMut(&str) + 'static) -> Self {
         self.settings.services.stdout = Some(StdoutSink::new(sink));
         self
@@ -293,7 +327,7 @@ impl RustiaBuilder {
         self
     }
 
-    /// Plugs the wall-clock provider backing no-arg `os.time()` and the default `os.date`
+    /// Supplies the clock for no-argument `os.time()` and the default `os.date`
     /// timestamp. A nondeterministic provider is rejected at [`build`](Self::build) on
     /// `DeterministicSim`.
     pub fn wall_clock(mut self, clock: ServiceClock) -> Self {
@@ -301,14 +335,14 @@ impl RustiaBuilder {
         self
     }
 
-    /// Plugs the monotonic-clock provider backing `os.clock()`, overriding the VM's built-in
+    /// Supplies the clock for `os.clock()`, overriding the VM's built-in
     /// logical clock. Same `DeterministicSim` validation as [`wall_clock`](Self::wall_clock).
     pub fn monotonic_clock(mut self, clock: ServiceClock) -> Self {
         self.settings.services.monotonic_clock = Some(clock.into_provider());
         self
     }
 
-    /// Plugs the provider used once at VM construction to choose the initial `math.random`
+    /// Supplies the seed read once at VM construction for the initial `math.random`
     /// sequence. Calling `math.randomseed` later still replaces that state. A nondeterministic
     /// provider is rejected by [`deterministic`](Self::deterministic).
     pub fn entropy(mut self, entropy: ServiceEntropy) -> Self {
@@ -316,6 +350,10 @@ impl RustiaBuilder {
         self
     }
 
+    /// Validates the configuration and builds a VM without a typed host context.
+    ///
+    /// Returns an error for incompatible services, invalid extensions, or a
+    /// hardened-leaf preset, which requires [`build_for_host`](Self::build_for_host).
     pub fn build(self) -> Result<Rustia> {
         self.validate()?;
         if self.settings.guest_surface.is_hardened_leaf() {
@@ -602,10 +640,12 @@ fn module_compile_error(error: Error, name: &str, source: &[u8]) -> rustia_vm::E
     error
 }
 
-/// Host clock provider plugged into a builder clock socket (design/72-host-services.md).
+/// A clock supplied to [`RustiaBuilder::wall_clock`] or
+/// [`RustiaBuilder::monotonic_clock`].
 ///
-/// Every constructor carries a determinism label: `DeterministicSim` rejects a
-/// nondeterministic provider at [`RustiaBuilder::build`]; other profiles accept any provider.
+/// Every constructor declares whether readings repeat during replay.
+/// [`Profile::DeterministicSim`] rejects nondeterministic providers when built;
+/// other profiles accept either kind.
 /// Cloning shares the underlying provider.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -661,8 +701,8 @@ impl ServiceClock {
         }
     }
 
-    /// Host-supplied clock; the host asserts the readings are deterministic (replay-stable).
-    /// The assertion is trusted, not verified — the label stays greppable in host code.
+    /// Supplies a clock whose readings the host promises to reproduce during replay.
+    /// Rustia trusts this declaration and does not verify it.
     pub fn from_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, true),
@@ -830,6 +870,12 @@ fn loadstring_chunk_name(source: &[u8]) -> String {
     format!("[string \"{preview}\"]")
 }
 
+/// A group of Rust callbacks installed together, optionally in a named table.
+///
+/// Add it with [`RustiaBuilder::extension`] or [`Rustia::install_extension`].
+/// For callbacks that borrow per-invocation host state, use [`crate::HostModule`]
+/// instead. The capability labels here describe captured host state; they do
+/// not provide a borrowed host context or make captured mutations transactional.
 #[derive(Clone, Debug)]
 pub struct RustiaExtension {
     namespace: Option<String>,
@@ -859,6 +905,7 @@ pub struct RustiaHostFuelPolicy {
     pub minimum_function_fuel: u32,
 }
 
+/// The fuel policy used by extension registration helpers.
 pub const RUSTIA_HOST_FUEL_POLICY: RustiaHostFuelPolicy = RustiaHostFuelPolicy {
     abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
     default_function_fuel: RUSTIA_DEFAULT_HOST_FUNCTION_FUEL,
@@ -869,18 +916,26 @@ pub const RUSTIA_HOST_FUEL_POLICY: RustiaHostFuelPolicy = RustiaHostFuelPolicy {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RustiaHostFunctionInfo<'a> {
+    /// The binding name inside the extension's namespace, or a global name.
     pub name: &'a str,
     /// ABI version used to interpret `fuel_cost`.
     pub fuel_abi_version: u32,
+    /// Fuel charged per call.
     pub fuel_cost: u32,
+    /// The callback's declared access to host state and effects.
     pub capability: OpCapability,
+    /// The number of typed Rust parameters.
     pub parameter_count: u8,
+    /// Rust type names for the callback parameters.
     pub parameter_types: &'a [&'static str],
+    /// Rust type names for the callback results.
     pub return_types: &'a [&'static str],
+    /// Whether the callback returns a Rustia `Result`.
     pub fallible: bool,
 }
 
 impl RustiaExtension {
+    /// Creates callbacks to install under a named table. An empty name selects globals.
     pub fn new(namespace: impl Into<String>) -> Self {
         let namespace = namespace.into();
         Self {
@@ -889,6 +944,7 @@ impl RustiaExtension {
         }
     }
 
+    /// Creates callbacks to install directly as globals.
     pub fn global() -> Self {
         Self {
             namespace: None,
@@ -896,14 +952,17 @@ impl RustiaExtension {
         }
     }
 
+    /// Returns the table name, or `None` for global callbacks.
     pub fn namespace(&self) -> Option<&str> {
         self.namespace.as_deref()
     }
 
+    /// Returns the fuel policy used by these registration helpers.
     pub fn fuel_policy(&self) -> RustiaHostFuelPolicy {
         RUSTIA_HOST_FUEL_POLICY
     }
 
+    /// Describes the callbacks before installation.
     pub fn functions(&self) -> impl Iterator<Item = RustiaHostFunctionInfo<'_>> + '_ {
         self.functions
             .iter()
@@ -919,6 +978,7 @@ impl RustiaExtension {
             })
     }
 
+    /// Adds a callback declared free of external mutable state, at the default fuel cost.
     pub fn fn_pure<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
@@ -931,6 +991,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback declared to read deterministic input, at the default fuel cost.
     pub fn fn_input<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
@@ -943,6 +1004,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback declared to read slot state, at the default fuel cost.
     pub fn fn_slot_read<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
@@ -955,6 +1017,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback declared to write slot effects, at the default fuel cost.
     pub fn fn_slot_write<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
@@ -967,6 +1030,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback declared to emit deterministic effects, at the default fuel cost.
     pub fn fn_effect<Func, Args, Return>(self, name: impl Into<String>, function: Func) -> Self
     where
         Func: IntoHostFunction<Args, Return>,
@@ -979,6 +1043,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback that reads external mutable state. Deterministic profiles reject it.
     pub fn fn_external_state<Func, Args, Return>(
         self,
         name: impl Into<String>,
@@ -995,6 +1060,7 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a nondeterministic callback. Deterministic profiles reject it.
     pub fn fn_nondeterministic<Func, Args, Return>(
         self,
         name: impl Into<String>,
@@ -1011,6 +1077,8 @@ impl RustiaExtension {
         )
     }
 
+    /// Adds a callback with an explicit capability and nonzero fuel cost.
+    /// Invalid costs and disallowed capabilities are rejected during installation.
     pub fn fn_with<Func, Args, Return>(
         mut self,
         name: impl Into<String>,

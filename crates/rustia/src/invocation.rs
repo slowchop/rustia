@@ -205,7 +205,7 @@ impl HostContext<()> for () {
     }
 }
 
-/// Monotonic resource limits for one typed invocation.
+/// Fuel and output limits shared by calls within one invocation.
 ///
 /// Record publication is disabled by default. Enable its independent count
 /// and logical-byte budgets explicitly:
@@ -266,7 +266,7 @@ impl InvocationLimits {
     }
 }
 
-/// Monotonic resources consumed by one successful invocation.
+/// Resources consumed by one successful invocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InvocationUsage {
     pub(crate) fuel_used: u64,
@@ -288,8 +288,9 @@ impl InvocationUsage {
     }
 }
 
-/// A successful invocation whose ordered records remain in Rustia's reusable
-/// journal until the next mutable use of that VM.
+/// The return value, output records, and resource usage of a successful invocation.
+///
+/// Records borrow Rustia's reusable journal until the next mutable use of that VM.
 #[derive(Debug)]
 pub struct InvocationOutcome<'a, T, Record> {
     pub(crate) value: T,
@@ -327,7 +328,7 @@ impl<'a, T, Record> InvocationOutcome<'a, T, Record> {
     }
 }
 
-/// A successful allocation-safe publication into a caller-owned record lane.
+/// The result and usage after an invocation appends its records to your vector.
 #[derive(Debug)]
 pub struct InvocationReceipt<T> {
     pub(crate) value: T,
@@ -360,7 +361,7 @@ impl<T> InvocationReceipt<T> {
     }
 }
 
-/// Immutable deterministic input authority.
+/// Read-only access to an invocation's deterministic input.
 ///
 /// The invocation lifetime prevents a borrowed input projection from escaping:
 ///
@@ -388,7 +389,7 @@ where
     }
 }
 
-/// Immutable persistent-slot read authority.
+/// Read-only access to saved application state, or "slots".
 #[derive(Clone, Copy)]
 pub struct Slots<'call, C>
 where
@@ -406,7 +407,7 @@ where
     }
 }
 
-/// Deterministic effect emission authority.
+/// Lets a callback stage actions or events for the application.
 pub struct Effects<'call, C>
 where
     C: HostSchema,
@@ -427,7 +428,7 @@ where
     }
 }
 
-/// Deterministic persistent-slot write authority.
+/// Lets a callback stage changes to saved application state.
 pub struct SlotWrites<'call, C>
 where
     C: HostSchema,
@@ -448,8 +449,10 @@ where
     }
 }
 
-/// Mutable host authority, available only to external-state and
-/// nondeterministic functions rejected by `DeterministicSim`.
+/// Lets a callback change application state immediately.
+///
+/// Available only to external-state and nondeterministic callbacks, which
+/// `DeterministicSim` rejects. Changes are outside the record transaction.
 pub struct HostMut<'call, C>
 where
     C: HostSchema,
@@ -608,8 +611,10 @@ where
     }
 }
 
-/// A capability-checked typed host namespace that can be installed as one
-/// persistent VM module.
+/// A group of Rust callbacks installed under one script name.
+///
+/// Registrations persist across decision resets. Each callback declares which
+/// parts of the host context it needs, checked against the selected profile.
 ///
 /// The views constrain how a callback reaches the invocation context. Safe
 /// Rust cannot stop a `'static` callback from using captured globals or
@@ -980,8 +985,11 @@ where
     }
 }
 
-/// A lexically scoped typed host invocation. It cannot be constructed by
-/// embedders and exposes no VM re-entry handle to host callbacks.
+/// Runs scripts while borrowing the application's current host context.
+///
+/// Provided by [`Rustia::invoke`](crate::Rustia::invoke) for the duration of its
+/// closure. Host callbacks receive only their allowed context views, without
+/// a VM handle that would let them call back into Luau.
 pub struct Invocation<'call, C>
 where
     C: HostSchema,

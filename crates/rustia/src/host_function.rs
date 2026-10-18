@@ -9,21 +9,34 @@ use crate::{Error, Function, HostSchema, OpCapability, Result, Rustia, VmError, 
 use rustia_vm::HostFunctionOp;
 use std::marker::PhantomData;
 
-/// A synchronous Rust callback definition, independent of a VM or decision epoch.
+/// A Rust callback and its declared capabilities and fuel cost.
 ///
-/// Use [`Rustia::create_function`] for a disposable live value or
-/// [`Rustia::register_function`] for persistent host configuration. The same
-/// definition can be added to a [`crate::HostModule`]. Capability-specific
-/// constructors preserve the borrowed host-context and transactional effect rules.
+/// Pass it to [`Rustia::create_function`] to create a live function, or to
+/// [`Rustia::register_function`] to keep the registration across decision resets.
+/// It can also be added to a [`crate::HostModule`]. Plain closures work for
+/// simple callbacks; use this type to choose capabilities or change the default
+/// cost of one fuel unit per call.
 ///
-/// Typed arguments and tuple results through arity eight can mix owned values
-/// with rooted [`crate::Value`], [`crate::Table`], and [`Function`] handles. Owned
-/// containers remain snapshots; live handles preserve graph identity. No Rust VM
-/// borrow is supplied to the callback, so this API does not permit guest re-entry.
-/// Callbacks must be `Send + Sync + 'static`; borrow invocation state through the
-/// capability views. Captured destructors must not panic: callback execution is
-/// panic-contained, but reclamation is not a guest finalizer or a fallible call.
-/// Opaque captured allocations belong to the host, outside the VM memory quota.
+/// ```
+/// use rustia::{HostFunction, Rustia};
+///
+/// let mut lua = Rustia::builder().build()?;
+/// lua.register_function("double", HostFunction::pure(|n: i64| n * 2).fuel_cost(2))?;
+/// assert_eq!(lua.load("return double(21)").eval::<i64>()?, 42);
+/// # Ok::<(), rustia::Error>(())
+/// ```
+///
+/// Arguments and tuple results through arity eight can mix ordinary Rust data
+/// with live [`crate::Value`], [`crate::Table`], and [`Function`] handles. Calls
+/// are synchronous and receive no VM borrow, so they cannot call back into Luau.
+/// A callback can return [`Result`] to report a failure.
+///
+/// Closures must be `Send + Sync + 'static`; use the capability-specific
+/// constructors to borrow per-invocation host state. Captured allocations are
+/// outside the VM memory limit. Captured state must honor the declared capability,
+/// and captured destructors must not panic. In unwinding builds, a callback panic
+/// is caught and blocks further guest execution until [`Rustia::reset_decision`];
+/// in aborting builds, it terminates or traps instead.
 pub struct HostFunction<C: HostSchema = ()> {
     build: Box<dyn FnOnce(String, u32) -> HostFunctionOp + Send + Sync>,
     fuel_cost: u32,
@@ -41,8 +54,9 @@ impl<C: HostSchema> HostFunction<C> {
         }
     }
 
-    /// A context-free callback with typed owned or live arguments and results.
-    /// Purity of captured host state remains the embedder's responsibility.
+    /// Declares a callback that neither reads nor changes external mutable state.
+    ///
+    /// Rustia trusts this declaration; it cannot inspect the closure's captures.
     pub fn pure<F, A, R>(function: F) -> Self
     where
         F: IntoHostFunction<A, R>,
@@ -50,8 +64,10 @@ impl<C: HostSchema> HostFunction<C> {
         Self::with_capability(OpCapability::Pure, function)
     }
 
-    /// A context-free callback with an explicit captured-host-state capability.
-    /// Prefer capability-specific borrowed views when using a typed host schema.
+    /// Declares the capability used by a callback's captured state.
+    ///
+    /// For a typed host schema, prefer constructors such as [`input`](Self::input)
+    /// and [`effect`](Self::effect), which provide the appropriate borrowed view.
     pub fn with_capability<F, A, R>(capability: OpCapability, function: F) -> Self
     where
         F: IntoHostFunction<A, R>,
@@ -59,7 +75,7 @@ impl<C: HostSchema> HostFunction<C> {
         Self::from_factory(move |name, fuel| function.into_host_function(name, fuel, capability))
     }
 
-    /// A borrowed deterministic input reader.
+    /// Creates a callback that borrows the invocation's deterministic input.
     pub fn input<F, A, R>(function: F) -> Self
     where
         F: IntoInputFunction<C, A, R>,
@@ -67,7 +83,7 @@ impl<C: HostSchema> HostFunction<C> {
         Self::from_factory(move |name, fuel| function.into_input_function(name, fuel).into_op())
     }
 
-    /// A borrowed deterministic slot reader.
+    /// Creates a callback that borrows the invocation's deterministic slot state.
     pub fn slot_read<F, A, R>(function: F) -> Self
     where
         F: IntoSlotReadFunction<C, A, R>,
@@ -75,7 +91,7 @@ impl<C: HostSchema> HostFunction<C> {
         Self::from_factory(move |name, fuel| function.into_slot_read_function(name, fuel).into_op())
     }
 
-    /// A transactional effect recorder.
+    /// Creates a callback that stages effects in the invocation's record journal.
     pub fn effect<F, A, R>(function: F) -> Self
     where
         F: IntoEffectFunction<C, A, R>,
@@ -83,7 +99,7 @@ impl<C: HostSchema> HostFunction<C> {
         Self::from_factory(move |name, fuel| function.into_effect_function(name, fuel).into_op())
     }
 
-    /// A transactional slot-write recorder.
+    /// Creates a callback that stages slot writes in the invocation's record journal.
     pub fn slot_write<F, A, R>(function: F) -> Self
     where
         F: IntoSlotWriteFunction<C, A, R>,
@@ -117,7 +133,8 @@ impl<C: HostSchema> HostFunction<C> {
         })
     }
 
-    /// Sets the deterministic charge for each call. Zero is rejected at admission.
+    /// Sets the fuel charged for each call. The default is one; zero is rejected
+    /// when the function is created or registered.
     pub fn fuel_cost(mut self, fuel_cost: u32) -> Self {
         self.fuel_cost = fuel_cost;
         self
@@ -151,12 +168,15 @@ where
 }
 
 impl<C: HostSchema> Rustia<C> {
-    /// Creates a disposable rooted function in the current VM decision.
+    /// Creates a live Rust function without installing a global binding.
     ///
-    /// Guest references keep the callback alive after this handle is dropped.
-    /// Collection releases unreachable callbacks; reset invalidates old handles
-    /// and releases decision-local callback ownership. Hardened leaves reject
-    /// this constructor. Use `register_function` for reset-persistent configuration.
+    /// Script references keep the callback alive after its Rust handle is
+    /// dropped. Collection can release it once all references are gone. Decision
+    /// reset invalidates every handle and releases the VM's ownership of the
+    /// callback. Hardened leaves reject this constructor.
+    ///
+    /// Use [`register_function`](Self::register_function) for a global function
+    /// that should be restored after reset.
     pub fn create_function<F, S>(&mut self, function: F) -> Result<Function>
     where
         F: IntoHostFunctionDefinition<C, S>,
@@ -164,7 +184,7 @@ impl<C: HostSchema> Rustia<C> {
         self.create_named_function("<host>", function)
     }
 
-    /// Creates a disposable function with an explicit diagnostic name.
+    /// Creates a live Rust function with a name used in error reports.
     /// The name does not install a binding or change callback ownership.
     pub fn create_named_function<F, S>(
         &mut self,
@@ -191,9 +211,10 @@ impl<C: HostSchema> Rustia<C> {
         Ok(Function::new(value, self.vm.decision_epoch()))
     }
 
-    /// Registers a reset-persistent callback under a global binding.
-    /// Replacing a registration releases its old configuration ownership, while
-    /// reachable guest copies of the old function remain independently callable.
+    /// Installs a global Rust function and restores its binding after decision reset.
+    ///
+    /// Replacing the registration releases the old configuration's ownership.
+    /// Existing script references to the old function still work until reset.
     /// Registration requires an idle VM without an active guest-state savepoint.
     pub fn register_function<F, S>(&mut self, name: impl Into<String>, function: F) -> Result<()>
     where

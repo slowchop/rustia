@@ -6,13 +6,21 @@ use std::fmt::{self, Write};
 pub use rustia_vm::diagnostic::DiagnosticReason;
 pub use rustia_vm::diagnostic::{Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticSpan};
 
-/// A human-readable error report. Formatting never invokes guest code.
+/// An error formatted with source context and a call trace when available.
+///
+/// Create one with [`Error::report`] and print it with `eprintln!("{report}")`.
+/// Formatting is bounded by the configured [`DiagnosticLimits`] and never
+/// runs script code.
 pub struct ErrorReport<'a> {
     error: &'a Error,
 }
 
 impl Error {
-    /// Returns handle-free diagnostic metadata captured before VM unwinding.
+    /// Returns the source location, call trace, and other details captured
+    /// when this error occurred.
+    ///
+    /// These details remain usable after the VM is dropped or reset. Use
+    /// [`report`](Self::report) to format them for a person.
     pub fn diagnostic(&self) -> Option<&Diagnostic> {
         self.diagnostic.as_deref().or_else(|| {
             self.as_vm_error()
@@ -20,8 +28,22 @@ impl Error {
         })
     }
 
-    /// Formats this failure for a person, without changing its original message.
-    /// Ordinary [`std::fmt::Display`] remains the concise error representation.
+    /// Formats this error for a console or log, with source context when available.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// let mut vm = Rustia::builder().build()?;
+    /// if let Err(error) = vm.load("return missing.health")
+    ///     .source_name("combat.luau")
+    ///     .exec()
+    /// {
+    ///     eprintln!("{}", error.report());
+    /// }
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
+    ///
+    /// Printing the error itself gives a shorter message. Use
+    /// [`kind`](Self::kind) to decide how your application should respond.
     pub fn report(&self) -> ErrorReport<'_> {
         ErrorReport { error: self }
     }

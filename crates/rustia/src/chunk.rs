@@ -2,10 +2,19 @@ use crate::serde_value::from_live;
 use crate::value::snapshot_value;
 use crate::{CompiledModule, Error, Exports, FromRustia, HostSchema, Result, Rustia, Table, Value};
 
-/// A borrowed source chunk configured for one execution or installation.
+/// Luau source prepared for one execution or module installation.
 ///
-/// Create this with [`Rustia::load`], optionally attach a source name or exact
-/// lexical environment, then choose one terminal operation.
+/// Created by [`Rustia::load`]. Give it a [`source_name`](Self::source_name) for
+/// useful diagnostics, then choose how to run it:
+///
+/// - [`eval`](Self::eval) returns ordinary Rust data.
+/// - [`eval_serde`](Self::eval_serde) deserializes into a Rust structure.
+/// - [`eval_live`](Self::eval_live) keeps a script value alive without copying it.
+/// - [`exec`](Self::exec) discards the result.
+/// - [`install`](Self::install) returns exports and rolls back guest state on failure.
+///
+/// Loading alone does not parse or execute the source. Each operation consumes
+/// the chunk; use [`Rustia::compile_module`] to compile once and install repeatedly.
 #[must_use = "a chunk does nothing until eval, eval_live, eval_serde, exec, or install is called"]
 pub struct Chunk<'rustia, 'source, C = ()>
 where
@@ -32,14 +41,20 @@ where
         }
     }
 
-    /// Sets the source name used by compile/runtime diagnostics and as the
-    /// referrer passed to the host module resolver for `require` calls.
+    /// Labels the source in errors and module resolution.
+    ///
+    /// Use a filename or another meaningful label, such as `"rules.luau"`.
+    /// The default is `"chunk"`. This name is also the referrer passed to the
+    /// module resolver for `require`; setting it does not read a file.
     pub fn source_name(mut self, source_name: impl Into<String>) -> Self {
         self.source_name = Some(source_name.into());
         self
     }
 
-    /// Maps a generated console prefix out of human-facing diagnostics.
+    /// Maps generated wrapper text out of human-facing diagnostics.
+    ///
+    /// This only changes error presentation; it does not change script execution
+    /// or the source names and lines visible to scripts. See [`crate::SourceMap`].
     pub fn source_map(mut self, mapping: crate::SourceMap) -> Self {
         self.source_map = mapping;
         self
@@ -50,14 +65,30 @@ where
     /// Cross-VM and reset-stale handles are rejected before parsing or
     /// compilation. For [`install`](Self::install), mutations to this table
     /// commit only when the complete installation succeeds.
+    /// This replaces the default environment; globals are inherited only if the
+    /// supplied table's metatable provides that behavior.
     pub fn environment(mut self, environment: impl Into<Table>) -> Self {
         self.environment = Some(environment.into());
         self
     }
 
-    /// Evaluates the chunk and converts its first result through the owned
-    /// typed facade. Ordinary evaluation is stateful and does not roll back
-    /// guest mutations when execution fails.
+    /// Runs the script and converts its first result to Rust data.
+    ///
+    /// Conversion uses [`FromRustia`] over an owned snapshot. No returned value
+    /// means Luau `nil`; extra results are ignored. Use [`eval_live`](Self::eval_live)
+    /// for functions and cyclic tables, or to preserve shared table identity.
+    ///
+    /// Invalid source, execution failures, and incompatible result types return
+    /// [`Error`]. Script mutations remain in place even when execution or result
+    /// conversion fails; use [`install`](Self::install) for guest-state rollback.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// let scores: Vec<i32> = vm.load("return {10, 20, 30}").eval()?;
+    /// assert_eq!(scores, vec![10, 20, 30]);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn eval<T>(self) -> Result<T>
     where
         T: FromRustia,
@@ -73,14 +104,35 @@ where
             .map_err(|error| error.with_result_source(&name, limits))
     }
 
-    /// Evaluates the chunk and retains its first result without snapshotting.
+    /// Runs the script and returns a live handle to its first result.
+    ///
+    /// The handle keeps the value alive in this interpreter and preserves shared
+    /// and cyclic objects. It remains usable until [`Rustia::reset_decision`],
+    /// and cannot be used with another interpreter. No returned value becomes
+    /// a handle to `nil`. As with [`eval`](Self::eval), errors do not undo mutations.
     pub fn eval_live(self) -> Result<Value> {
         let (rustia, value) = self.execute_raw()?;
         Value::retain(rustia.vm_mut(), value)
     }
 
-    /// Evaluates and deserializes the first result directly from the live VM
-    /// graph without constructing an intermediate [`crate::OwnedValue`].
+    /// Runs the script and deserializes its first result into Rust data.
+    ///
+    /// Reads the live VM graph without an intermediate [`crate::OwnedValue`].
+    /// The destination still owns its strings and collections. Invalid source,
+    /// execution failures, and data that does not match `T` return [`Error`];
+    /// mutations remain in place on failure.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// #[derive(serde::Deserialize)]
+    /// struct Settings {
+    ///     volume: f64,
+    /// }
+    /// let settings: Settings = vm.load("return { volume = 0.5 }").eval_serde()?;
+    /// assert_eq!(settings.volume, 0.5);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn eval_serde<T>(self) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -95,16 +147,34 @@ where
     }
 
     /// Executes the chunk and discards its returned value.
+    ///
+    /// Parse, compilation, and execution errors are returned as [`Error`].
+    /// Changes made before an error are retained, as with [`eval`](Self::eval).
     pub fn exec(self) -> Result<()> {
         self.execute_raw().map(|_| ())
     }
 
-    /// Atomically installs this chunk and returns its rooted exports value.
+    /// Runs the script as a module and keeps its returned exports alive.
     ///
     /// Without [`environment`](Self::environment), installation creates a
     /// fresh module environment that inherits VM globals and binds `_G` to
     /// itself. Compile, runtime, quota, and result-retention failures leave
     /// prior guest-visible state unchanged.
+    /// External effects from Rust callbacks or the module resolver cannot be
+    /// undone. A successful installation does not invalidate earlier exports;
+    /// the application chooses when to replace its active handle.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// let exports = vm.load("return { double = function(n) return n * 2 end }")
+    ///     .source_name("math.luau")
+    ///     .install()?;
+    /// let double = exports.function(&mut vm, "double")?;
+    /// let answer: i32 = double.call(&mut vm, (21,))?;
+    /// assert_eq!(answer, 42);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn install(self) -> Result<Exports> {
         let (rustia, module, environment) = self.prepare()?;
         let raw_environment = environment

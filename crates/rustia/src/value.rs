@@ -5,6 +5,15 @@ use std::collections::BTreeMap;
 
 const SNAPSHOT_DEPTH_LIMIT: usize = 64;
 
+/// A Rust-owned copy of a script value.
+///
+/// Use this for ordinary data that should outlive the VM or a
+/// [`reset_decision`](crate::Rustia::reset_decision). Tables are copied
+/// recursively; changes to the original script table do not affect the copy.
+///
+/// This representation supports UTF-8 strings and acyclic tables with boolean,
+/// number, or string keys. Use a live [`crate::Value`] for binary strings,
+/// functions, buffers, vectors, userdata, or shared and cyclic table identity.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OwnedValue {
     Nil,
@@ -14,12 +23,20 @@ pub enum OwnedValue {
     Table(OwnedTable),
 }
 
+/// A Rust-owned table, split into sequence values and keyed entries.
+///
+/// The `array` field uses zero-based Rust indices, corresponding to Luau
+/// keys `1`, `2`, and so on. When a script table is copied, a contiguous sequence
+/// becomes `array`; a sparse or mixed-key table becomes `entries`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OwnedTable {
+    /// Sequence values, starting at Luau index `1`.
     pub array: Vec<OwnedValue>,
+    /// Keyed values in their snapshot order.
     pub entries: Vec<(OwnedKey, OwnedValue)>,
 }
 
+/// A key supported by an [`OwnedTable`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum OwnedKey {
     Boolean(bool),
@@ -28,10 +45,12 @@ pub enum OwnedKey {
 }
 
 impl OwnedTable {
+    /// Creates an empty table.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Creates a sequence from values that are already converted.
     pub fn array(values: impl IntoIterator<Item = OwnedValue>) -> Self {
         Self {
             array: values.into_iter().collect(),
@@ -39,6 +58,7 @@ impl OwnedTable {
         }
     }
 
+    /// Creates a table from keys and values that are already converted.
     pub fn entries(entries: impl IntoIterator<Item = (OwnedKey, OwnedValue)>) -> Self {
         Self {
             array: Vec::new(),
@@ -46,6 +66,7 @@ impl OwnedTable {
         }
     }
 
+    /// Looks up a string key without converting or cloning its value.
     pub fn get_string(&self, key: &str) -> Option<&OwnedValue> {
         self.entries.iter().find_map(|(entry_key, value)| {
             matches!(entry_key, OwnedKey::String(found) if found == key).then_some(value)
@@ -69,6 +90,7 @@ impl OwnedTable {
 }
 
 impl OwnedValue {
+    /// Returns the corresponding Luau type name.
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::Nil => "nil",
@@ -79,6 +101,7 @@ impl OwnedValue {
         }
     }
 
+    /// Borrows the table contents, or returns `None` for another value kind.
     pub fn table(&self) -> Option<&OwnedTable> {
         match self {
             Self::Table(table) => Some(table),
@@ -87,15 +110,30 @@ impl OwnedValue {
     }
 }
 
+/// Converts a Rust value to an owned script value.
+///
+/// Implementations include numbers, strings, `Option<T>`, `Vec<T>`, and
+/// `BTreeMap<String, T>`. `None` becomes `nil`; vectors become one-based Luau
+/// sequences. Integer conversions reject values that cannot be represented
+/// exactly as a Luau number.
 pub trait IntoRustia {
+    /// Converts this value, returning an error if it cannot be represented.
     fn into_rustia(self) -> Result<OwnedValue>;
 }
 
+/// Converts an owned script value to a Rust value.
+///
+/// Conversions check the requested type rather than applying Luau coercions.
+/// `Option<T>` accepts `nil` as `None`; integer types require a finite, whole
+/// number in range. `Vec<T>` requires a sequence without keyed entries, while
+/// `BTreeMap<String, T>` requires string keys without sequence entries.
 pub trait FromRustia: Sized {
+    /// Converts a value, returning an error for an incompatible type or range.
     fn from_rustia(value: OwnedValue) -> Result<Self>;
 }
 
 impl OwnedTable {
+    /// Converts Rust values into a one-based Luau sequence.
     pub fn array_values<T>(values: impl IntoIterator<Item = T>) -> Result<Self>
     where
         T: IntoRustia,
@@ -109,6 +147,7 @@ impl OwnedTable {
         })
     }
 
+    /// Converts Rust values into a table with string keys.
     pub fn string_entries<K, V>(entries: impl IntoIterator<Item = (K, V)>) -> Result<Self>
     where
         K: Into<String>,
@@ -127,6 +166,7 @@ impl OwnedTable {
         })
     }
 
+    /// Reads and converts a string-keyed value. Missing keys return `None`.
     pub fn get_string_as<T>(&self, key: &str) -> Result<Option<T>>
     where
         T: FromRustia,
@@ -149,9 +189,16 @@ impl OwnedTable {
     }
 }
 
+/// Converts function arguments or results to a list of script values.
+///
+/// A single value becomes one argument, `()` becomes no arguments, and tuples
+/// through eight elements become separate arguments. A `Vec<T>` is one Luau
+/// sequence table, not a list of arguments.
 pub trait IntoRustiaMulti {
+    /// Converts the complete argument or result list.
     fn into_rustia_multi(self) -> Result<Vec<OwnedValue>>;
 
+    /// Returns Rust type names used by host-function signature metadata.
     fn rustia_type_names() -> Vec<&'static str>
     where
         Self: Sized,
@@ -160,7 +207,18 @@ pub trait IntoRustiaMulti {
     }
 }
 
+/// Converts a script's return values to a Rust value or tuple.
+///
+/// A single type reads the first result; tuples through eight elements read
+/// successive results. Missing results are treated as `nil`, extra results are
+/// ignored, and `()` discards all results. Each selected result still has to
+/// satisfy its [`FromRustia`] conversion.
+///
+/// Owned execution methods copy every result into [`OwnedValue`] before calling
+/// this trait, including results that will be discarded. Use live-value methods
+/// when any result cannot be represented by [`OwnedValue`].
 pub trait FromRustiaMulti: Sized {
+    /// Converts the selected return values.
     fn from_rustia_multi(values: Vec<OwnedValue>) -> Result<Self>;
 }
 
