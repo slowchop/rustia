@@ -1,8 +1,10 @@
 # Typed Rust objects
 
-Status: implemented in the current private API change; final checks, independent
-reviews, and the civfun object integration remain pending. This does not complete
-the [private milestone](92-first-release.md) or freeze the API.
+Implementation merged in [PR #65](https://github.com/slowchop/rustia/pull/65);
+civfun's real Player integration merged in [#52](https://github.com/civfun/civfun/pull/52).
+The [private acceptance record](93-private-api-acceptance.md) identifies the
+common source, verification and required rollout gates. Stable 1.0 acceptance
+remains in [the release plan](92-first-release.md).
 
 ## Register methods, then create objects
 

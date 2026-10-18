@@ -48,6 +48,7 @@ docs are design intent.
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **[CHECKLIST]** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **[POLICY]** |
 | [`92-first-release.md`](92-first-release.md) | Rustia 1.0 acceptance checklist: API, runtime gaps, platforms, documentation, and publication | **[IN PROGRESS]** |
+| [`93-private-api-acceptance.md`](93-private-api-acceptance.md) | immutable private API baseline, inventory, verification and application rollout evidence | **[ACCEPTANCE RECORD]** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for every workspace package | **[GENERATED]** |
 | [`package-files.json`](package-files.json) | generated `cargo package --list` audit for every workspace package | **[GENERATED]** |
 | [`publishability.json`](publishability.json) | generated publishability blocker audit for every workspace package | **[GENERATED]** |

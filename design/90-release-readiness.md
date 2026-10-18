@@ -1,7 +1,7 @@
 # Release Readiness Checklist
 
 This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-10-18; the ordered runtime
+from `publish = false` to publishable. Updated 2026-10-19; the ordered runtime
 blockers below take precedence over packaging polish.
 
 The first stable release target and its acceptance checklist are in
@@ -38,14 +38,15 @@ Remote screening remains part of final PR validation; no new speed claim is made
    Live globals, quota-aware tables, owned-key/live-value insertion, and the
    composable chunk builder, snapshot-free live serde, and reclaimable synchronous host functions
    are implemented and the controlled-client callback/diagnostics/fuzzing
-   rollouts are verified. Typed Rust-object registration and methods are implemented;
-   complete their final checks, reviews, and real-consumer use under
-   [83-rust-objects.md](83-rust-objects.md), then finish candidate API acceptance. Preserve the
+   rollouts are verified. Typed Rust-object registration/methods and real civfun
+   Player use have merged; [83-rust-objects.md](83-rust-objects.md) describes their
+   contract and [93-private-api-acceptance.md](93-private-api-acceptance.md) links
+   the exact common source and candidate gates. Preserve the
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
-2. Harden compiler/runtime error-phase parity, yieldable `require` and
-   differential/coverage-guided fuzz evidence before stabilizing and publishing
+2. Finish the wider compiler/runtime error-phase audit, preserve the implemented
+   yieldable `require` contract, and retain differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
    f32/f64 buffer-bit round trips, including NaN payloads, are covered. Bounded
@@ -140,6 +141,10 @@ reviews remain required for this slice; wider semantic-tail work stays open.
   an example outside the core package.
 
 ## API Gate
+
+The [private API baseline](93-private-api-acceptance.md) records the immutable
+source, API inventory and controlled-client validation; the public gates in this
+checklist remain separate.
 
 Private acceptance additionally runs `tools/check-external-facade.js`: a clean
 Cargo application with only `rustia` and `serde`, compiled from extracted
