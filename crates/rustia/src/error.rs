@@ -3,7 +3,12 @@ use rustia_compiler::CompileError;
 use rustia_parser::SourceError;
 use std::{fmt, sync::Arc};
 
-/// A typed failure with independently renderable, handle-free diagnostics.
+/// A script, conversion, or host failure with optional source diagnostics.
+///
+/// Formatting with `{error}` gives a short message. Use [`report`](Self::report)
+/// for a source excerpt and call trail, or [`kind`](Self::kind) to classify the
+/// failure in code. Retained diagnostics remain usable after the VM is reset or
+/// dropped. Errors are not logged automatically.
 #[derive(Debug)]
 pub struct Error {
     pub(crate) kind: ErrorKind,
@@ -18,14 +23,21 @@ pub struct Error {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// The source could not be lexed or parsed.
     Source(SourceError),
+    /// Parsed source could not be compiled.
     Compile(CompileError),
+    /// Execution or VM validation failed, including resource and handle errors.
     Vm(Box<VmError>),
+    /// An embedding or conversion failure described by a message.
     Embed(String),
+    /// A host error whose original type and cause chain are preserved.
     External(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
+    /// Creates a message-based error for a callback or embedding operation.
+    /// Use [`external`](Self::external) to preserve an existing error's type.
     pub fn embed(message: impl Into<String>) -> Self {
         Self {
             kind: ErrorKind::Embed(message.into()),
@@ -64,6 +76,8 @@ impl Error {
         self
     }
 
+    /// Returns added context in the order it was attached.
+    /// The most recently added context is displayed first in error messages.
     pub fn contexts(&self) -> impl DoubleEndedIterator<Item = &str> {
         self.contexts.iter().map(String::as_str)
     }
@@ -88,6 +102,8 @@ impl Error {
         self.with_context("converting the script's returned value")
     }
 
+    /// Consumes this error and returns its original failure category.
+    /// Attached context and diagnostics are discarded.
     pub fn into_kind(self) -> ErrorKind {
         self.kind
     }
@@ -96,6 +112,10 @@ impl Error {
         self.with_context("installation failed; guest state was restored; external host effects are not rolled back")
     }
 
+    /// Returns the VM error, if this failure came from execution or VM validation.
+    ///
+    /// Inspect its typed kind to distinguish limits, stale handles, and runtime
+    /// failures without parsing a message.
     pub fn as_vm_error(&self) -> Option<&VmError> {
         match &self.kind {
             ErrorKind::Vm(error) => Some(error),
@@ -103,6 +123,8 @@ impl Error {
         }
     }
 
+    /// Returns the source byte range associated with the failure, when known.
+    /// Use [`source_location`](Self::source_location) for its source name and line.
     pub fn source_span(&self) -> Option<SourceSpan> {
         if let Some(diagnostic) = self.diagnostic() {
             return diagnostic.span.map(|span| SourceSpan {
@@ -122,6 +144,7 @@ impl Error {
         }
     }
 
+    /// Returns the source name and line associated with the failure, when known.
     pub fn source_location(&self) -> Option<SourceLocation<'_>> {
         if let Some(diagnostic) = self.diagnostic() {
             if let (Some(source), Some(line)) = (&diagnostic.source, diagnostic.line) {

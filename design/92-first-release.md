@@ -87,6 +87,13 @@ Detailed engineering records belong in `design/`; readers should not need to
 learn the VM implementation to embed the library. Historical research remains
 available without dominating the landing page.
 
+The initial documentation surface is the README and rustdoc. The README gives
+complete examples and comparisons; rustdoc provides a short task index and
+method-level contracts for ordinary embedding, callbacks, values, errors, and
+limits. Its Rust examples and the README examples run in the existing test gates.
+Finish the remaining API decisions before treating this reference as a 1.0
+contract; this documentation pass does not close the full API-reference gate.
+
 ## 5. Make comparisons useful and reproducible
 
 - [ ] Record the release candidate on `ci-bench` and publish the exact revision,

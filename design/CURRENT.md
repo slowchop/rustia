@@ -10,7 +10,12 @@
 cycle, tracked in [`92-first-release.md`](92-first-release.md). The workspace
 remains unpublished at `0.0.1`. The landing page now starts with executable API
 examples and plain-language feature/speed comparisons; contributor instructions
-and README example checks are part of the release workflow. The API hardening
+and README example checks are part of the release workflow. The README now keeps
+ordinary readers on runnable examples and the API reference. The crate's rustdoc
+starts with a working example and a short task index; common API entries explain
+conversions, callback ownership, reset, limits, and failure behavior next to the
+methods that use them. This is a documentation pass, not a completed API freeze.
+The API hardening
 in this change makes facade error classifications non-exhaustive and private
 behind accessors, reports stale/cross-VM live handles through typed VM errors,
 and checks table/function/export receivers before converting inputs or allocating

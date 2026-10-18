@@ -1,13 +1,13 @@
 # Rustia
 
-**Luau scripting for Rust applications, with reproducible execution when you need it.**
+Rustia is a Luau interpreter written in Rust. Use it to add game logic,
+configuration, or user-written scripts to a Rust application, on native platforms
+or WebAssembly.
 
-Use Rustia to add game logic, configuration, or user-written scripts to your application.
-Pass Rust values into a script, expose Rust functions, and read typed results back.
-Rustia implements its interpreter in Rust and runs on native platforms and WebAssembly.
+Call Rust functions from scripts, read results as Rust types, and choose whether
+scripts use real clocks and randomness or run reproducibly for simulations and replay.
 
-**Pre-release:** the crates are not published yet, and the API can still change.
-We're working toward a stable first release; see the [release milestone](https://github.com/slowchop/rustia/blob/main/design/92-first-release.md).
+Rustia is **pre-release**. The crates are not published yet, and the API can still change.
 
 ## Try it
 
@@ -25,45 +25,34 @@ use rustia::Rustia;
 
 fn main() -> rustia::Result<()> {
     let mut vm = Rustia::builder().build()?;
-    let answer: f64 = vm
-        .load("return 40 + 2")
-        .source_name("answer.luau")
-        .eval()?;
-
-    assert_eq!(answer, 42.0);
-    println!("The answer is {answer}");
-    Ok(())
-}
-```
-
-The Rust return type chooses the conversion. Strings, booleans, optional values,
-vectors, and string-keyed maps work too. `source_name` gives errors a useful filename;
-`vm.eval("return 40 + 2")` is the shorter form when you don't need one.
-
-### Call Rust from a script
-
-```rust
-use rustia::Rustia;
-
-fn main() -> rustia::Result<()> {
-    let mut vm = Rustia::builder().build()?;
-    vm.insert_global("player_name", "Ada")?;
+    vm.insert_global("base_score", 21)?;
     vm.add_fn("double", |value: f64| value * 2.0)?;
 
-    let greeting: String = vm.eval("return 'Hello, ' .. player_name")?;
-    let score: f64 = vm.eval("return double(21)")?;
+    let score: f64 = vm
+        .load("return double(base_score)")
+        .source_name("score.luau")
+        .eval()?;
 
-    assert_eq!(greeting, "Hello, Ada");
+    println!("The score is {score}");
     assert_eq!(score, 42.0);
     Ok(())
 }
 ```
 
-Callbacks can return `rustia::Result<T>` when an operation may fail. For larger APIs,
-group functions into a `HostModule`; use `create_function` when scripts should own
-the lifetime of a callback. See the [host function guide](https://github.com/slowchop/rustia/blob/main/design/78-host-functions.md).
+This prints:
 
-### Call a script function from Rust
+```text
+The score is 42
+```
+
+The return type chooses the conversion. Strings, booleans, optional values,
+vectors, and string-keyed maps work too. For a quick expression,
+`vm.eval("return 40 + 2")` is the shorter form. Rust callbacks can return
+`rustia::Result<T>` when an operation may fail.
+
+## Call script functions from Rust
+
+A script can return functions for the application to call:
 
 ```rust
 use rustia::Rustia;
@@ -82,24 +71,26 @@ fn main() -> rustia::Result<()> {
 }
 ```
 
-`install` runs a candidate module before handing you its exports. If installation
-fails, Rustia restores the previous guest state. Keep the old exports until a new
-installation succeeds to support [hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs).
+`install` runs the new module before returning its exports. If it fails, Rustia
+restores the previous script state. Keep the old exports until a replacement
+succeeds to support [hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs).
 External actions performed by Rust callbacks are outside this rollback.
+
+For structured data, use Serde. For shared or cyclic tables, keep
+[live table and function values](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs)
+in the VM instead of copying them into Rust collections.
 
 ## Choose an environment
 
-`Rustia::builder()` selects the standard environment. Choose another preset when
-your application needs real clocks or strict replay:
+`Rustia::builder()` selects the standard environment:
 
 | Preset | Use it for | Defaults |
 |---|---|---|
 | `RustiaBuilder::standard()` | General embedding | Fixed random seed and repeatable clocks; real stdout on native/WASI |
-| `RustiaBuilder::live()` | Everyday scripting with real-world inputs | System clocks, random seed, output, and runtime compilation |
+| `RustiaBuilder::live()` | Scripts that need real-world inputs | System clocks, random seed, output, and runtime compilation |
 | `RustiaBuilder::deterministic()` | Simulations and replay | Repeatable execution; rejects host services declared nondeterministic |
-| `RustiaBuilder::deterministic_leaf()` | Isolated, stateless decisions | Smaller frozen script environment; explicit memory limit required |
 
-Give a script an instruction budget and a VM-owned memory limit:
+Set an instruction budget and a memory limit when scripts need bounded resources:
 
 ```rust
 use rustia::RustiaBuilder;
@@ -116,35 +107,21 @@ fn main() -> rustia::Result<()> {
 }
 ```
 
-“Fuel” is an instruction-based budget rather than a time limit. The memory limit covers
-Rustia's accounted VM allocations, not the application's total process memory.
-Host callbacks need their own bounds and must honor their declared replay behavior.
+Fuel gives scripts an instruction-based budget. The memory limit covers Rustia's
+accounted VM allocations, not the application's total memory. Rust callbacks
+need their own bounds and must honor their declared replay behavior.
 `standard()` permits explicitly added live services; `live()` promises no reproducibility.
-See the [embedding](https://github.com/slowchop/rustia/blob/main/design/75-embedded-api.md) and
-[host services](https://github.com/slowchop/rustia/blob/main/design/72-host-services.md) guides.
-
-## What you get
-
-- **Familiar scripting:** functions, tables, closures, coroutines, and standalone
-  Luau libraries, targeting [Luau 0.709](https://github.com/slowchop/rustia/blob/main/design/05-luau-target.md).
-- **Rust-friendly data:** typed values and callbacks, Serde conversion, and live
-  tables/functions when you need shared or cyclic data.
-- **Useful errors:** source names, highlighted expressions, call traces, typed error
-  categories, and paths into data that failed to deserialize.
-- **Control over execution:** instruction and memory budgets, host-controlled module
-  loading, and explicit reset for repeated decisions.
-- **One portable runtime:** native and `wasm32-unknown-unknown`, with browser service
-  adapters available through the default `web-live` feature.
-- **Safe Rust in our production code:** workspace crates forbid `unsafe` code.
-
-Rustia targets standalone Luau. It does not include Roblox services or act as Luau's
-static type checker. The current suite has **712 fixtures** covering **511 named
-behaviors**, with **0 pending** cases; that is a tested boundary rather than a claim
-to match every Luau program. See [conformance coverage](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md).
 
 ## How does it compare?
 
-Choose by the language and integration your application needs:
+Rustia targets standalone Luau 0.709, including functions, tables, closures,
+coroutines, and its standard libraries. It does not include Roblox services or
+Luau's static type checker. The [conformance coverage](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md)
+records the behavior tested against the reference interpreter.
+
+Rustia's production workspace forbids unsafe Rust. It provides typed callbacks,
+Serde conversion, source diagnostics, and instruction and memory limits on native
+platforms and WebAssembly. Choose an engine by the language and integration you need:
 
 | Engine | Script language | Features to weigh |
 |---|---|---|
@@ -182,12 +159,31 @@ These workloads exercise different languages and runtime features, so they don't
 provide a universal ranking. Rustia trails the upstream Luau interpreter in each
 of these tests. The [full results](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/RESULTS.md) include more engines, JIT modes,
 startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/current-results.json).
-The [claim checks](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/CLAIMS.md) approve no overall speed headline from this snapshot.
-Fresh measurements run in CI, never on a contributor's local machine.
+See the [benchmark limitations](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/CLAIMS.md) for the scope of these comparisons.
 
-## Run scripts from the command line
+## Examples and API reference
 
-From a checkout:
+To read the API reference locally:
+
+```sh
+git clone https://github.com/slowchop/rustia.git
+cd rustia
+cargo doc --locked -p rustia --no-deps --open
+```
+
+The [examples](https://github.com/slowchop/rustia/tree/main/crates/rustia/examples)
+cover [embedding](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs),
+[host-controlled module loading](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs),
+[custom environments](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/chunk_builder.rs),
+and [host transactions](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs).
+Run one with `cargo run --locked -p rustia --example embedding`.
+
+Use `error.report()` for source-aware diagnostics and `error.kind()` to decide
+how your application responds. The
+[diagnostics example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs)
+shows the formatted output.
+
+To run a script without writing a Rust application:
 
 ```sh
 cargo run --locked -p rustia-cli -- path/to/script.luau
@@ -195,46 +191,12 @@ cargo run --locked -p rustia-cli -- --eval "return 40 + 2"
 cargo run --locked -p rustia-cli -- --repl
 ```
 
-The CLI resolves `require` relative to the calling file in standard and compatibility
-profiles. The deterministic profile leaves filesystem access to an explicitly supplied
-host resolver. See the [module loading example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs).
+## Contributing
 
-## Errors you can show to people
-
-```rust
-use rustia::Rustia;
-
-fn main() -> rustia::Result<()> {
-    let mut vm = Rustia::builder().build()?;
-    if let Err(error) = vm
-        .load("return missing.health")
-        .source_name("combat.luau")
-        .exec()
-    {
-        eprintln!("{}", error.report());
-    }
-    Ok(())
-}
-```
-
-Use `error.report()` for a console or log and `error.kind()` for program decisions.
-See the [diagnostics example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs).
-
-## Explore and contribute
-
-Run an example with `cargo run --locked -p rustia --example embedding`.
-Other starting points: [live tables](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs),
-[custom environments](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/chunk_builder.rs),
-[typed host transactions](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs), and the
-[Koto migration guide](https://github.com/slowchop/rustia/blob/main/design/76-koto-migration.md).
-
-The [first-release milestone](https://github.com/slowchop/rustia/blob/main/design/92-first-release.md) and
-[release checklist](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md) track API stability,
-remaining compatibility work, platform validation, and publication. The
-[canonical project state](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) has the engineering record;
-[CONTRIBUTING.md](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md) explains how to build, test, and help.
-Production code lives in `crates/`, compatibility tests in `conformance/`, design
-notes in `design/`, and historical experiments in `spikes/`.
+[CONTRIBUTING.md](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md)
+explains how to build, test, and help. The [first-release milestone](https://github.com/slowchop/rustia/blob/main/design/92-first-release.md)
+and [release checklist](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md)
+track the remaining API, compatibility, and platform work before publication.
 
 ## License
 

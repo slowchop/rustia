@@ -9,6 +9,23 @@ use rustia_vm::{HostFunctionOp, OpCapability, RetainedValue, Value as RawValue, 
 use std::any::type_name;
 use std::sync::Arc;
 
+/// A live script or Rust function kept alive by a Rust handle.
+///
+/// Call it with ordinary Rust arguments using [`call`](Self::call), or preserve
+/// script object identity with [`call_values`](Self::call_values). Clones refer
+/// to the same function. A handle belongs to one VM, survives module replacement,
+/// and becomes invalid after [`Rustia::reset_decision`]. Using it with another
+/// VM or after reset returns an error.
+///
+/// ```
+/// use rustia::Rustia;
+///
+/// let mut lua = Rustia::builder().build()?;
+/// let exports = lua.load("return { double = function(n) return n * 2 end }").install()?;
+/// let double = exports.function(&mut lua, "double")?;
+/// assert_eq!(double.call::<_, i64>(&mut lua, 21)?, 42);
+/// # Ok::<(), rustia::Error>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct Function {
     value: LiveValue,
@@ -30,14 +47,23 @@ impl Function {
         }
     }
 
+    /// Clones the underlying live value handle.
     pub fn as_value(&self) -> LiveValue {
         self.value.clone()
     }
 
+    /// Returns the decision epoch in which this handle was retained.
     pub fn decision_epoch(&self) -> u64 {
         self.decision_epoch
     }
 
+    /// Calls the function with Rust arguments and copies its results into Rust.
+    ///
+    /// Pass `()` for no arguments or a tuple for multiple arguments. The return
+    /// type selects the results through [`FromRustiaMulti`]. Use
+    /// [`call_values`](Self::call_values) for results that cannot be copied into
+    /// [`OwnedValue`], such as functions or cyclic tables. Every result is copied
+    /// before selection, including extra results and results discarded by `()`.
     pub fn call<Args, Return>(&self, rustia: &mut Rustia, args: Args) -> Result<Return>
     where
         Args: IntoRustiaMulti,
@@ -60,7 +86,9 @@ impl Function {
         Return::from_rustia_multi(results)
     }
 
-    /// Calls this function with rooted live values and retains every result.
+    /// Calls the function with live arguments and returns live handles for every result.
+    ///
+    /// All handles must belong to this VM and its current decision epoch.
     pub fn call_values(&self, rustia: &mut Rustia, args: &[LiveValue]) -> Result<Vec<LiveValue>> {
         let function = self.value.raw(rustia.vm(), "function handle")?;
         let raw_args = args
@@ -74,9 +102,13 @@ impl Function {
         LiveValue::retain_many(rustia.vm_mut(), &results)
     }
 
-    /// Calls this guest function inside a typed host invocation. Argument
-    /// loading, guest execution, result snapshotting, and typed conversion are
-    /// one effect-transaction scope.
+    /// Calls the function within a typed host invocation's shared budget.
+    ///
+    /// If argument conversion, execution, or result conversion fails, records
+    /// staged by this call are discarded. Guest table writes and external host
+    /// changes are not rolled back by this operation.
+    /// As with [`call`](Self::call), every returned value must fit [`OwnedValue`]
+    /// before the requested return type selects or discards results.
     pub fn call_in<C, Args, Return>(
         &self,
         invocation: &mut Invocation<'_, C>,
@@ -112,6 +144,13 @@ impl Function {
     }
 }
 
+/// The live value returned by a successfully installed script.
+///
+/// Scripts commonly return a table of named functions and data. Use
+/// [`function`](Self::function) to retain a callable export, [`get`](Self::get)
+/// to copy data into Rust, or [`get_live`](Self::get_live) to keep a live object.
+/// The exports remain usable after another module is installed, but all clones
+/// become invalid after [`Rustia::reset_decision`].
 #[derive(Clone, Debug)]
 pub struct Exports {
     value: LiveValue,
@@ -126,10 +165,12 @@ impl Exports {
         }
     }
 
+    /// Clones the underlying live value, whether or not it is a table.
     pub fn as_value(&self) -> LiveValue {
         self.value.clone()
     }
 
+    /// Returns a live table handle, or `None` if the installed script returned another type.
     pub fn as_table<C>(&self, rustia: &Rustia<C>) -> Result<Option<crate::Table>>
     where
         C: HostSchema,
@@ -137,15 +178,21 @@ impl Exports {
         self.value.as_table(rustia)
     }
 
+    /// Returns the decision epoch in which these exports were retained.
     pub fn decision_epoch(&self) -> u64 {
         self.decision_epoch
     }
 
+    /// Copies the entire returned value into Rust-owned data.
+    ///
+    /// A returned table containing functions or other values unsupported by
+    /// [`OwnedValue`] cannot be copied as a whole; read individual exports instead.
     pub fn value(&self, rustia: &mut Rustia) -> Result<OwnedValue> {
         let value = self.value.raw(rustia.vm(), "exports handle")?;
         snapshot_value(rustia.vm_mut(), value)
     }
 
+    /// Copies the returned value within a typed host invocation.
     pub fn value_in<C>(&self, invocation: &mut Invocation<'_, C>) -> Result<OwnedValue>
     where
         C: HostSchema,
@@ -156,7 +203,7 @@ impl Exports {
         })
     }
 
-    /// Deserializes the returned value directly without building an owned graph snapshot.
+    /// Deserializes the returned value without first building an [`OwnedValue`] copy.
     pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -165,6 +212,9 @@ impl Exports {
         from_live(rustia.vm_mut(), value)
     }
 
+    /// Reads and converts a string-keyed export without invoking `__index`.
+    ///
+    /// A missing key is `nil`, so it can be read as `Option<T>`.
     pub fn get<T>(&self, rustia: &mut Rustia, name: &str) -> Result<T>
     where
         T: FromRustia,
@@ -174,12 +224,13 @@ impl Exports {
         T::from_rustia(value)
     }
 
-    /// Reads a string-keyed export without snapshotting it.
+    /// Reads a string-keyed export as a live value without invoking `__index`.
     pub fn get_live(&self, rustia: &mut Rustia, name: &str) -> Result<LiveValue> {
         let value = self.raw_get(rustia, name)?;
         LiveValue::retain(rustia.vm_mut(), value)
     }
 
+    /// Reads and converts an export within a typed host invocation.
     pub fn get_in<C, T>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<T>
     where
         C: HostSchema,
@@ -192,6 +243,7 @@ impl Exports {
         })
     }
 
+    /// Reads a live export within a typed host invocation.
     pub fn get_live_in<C>(
         &self,
         invocation: &mut Invocation<'_, C>,
@@ -206,6 +258,9 @@ impl Exports {
         })
     }
 
+    /// Retains a named function export, or returns an error if it is not a function.
+    ///
+    /// Lookup uses the table's stored value and does not invoke `__index`.
     pub fn function(&self, rustia: &mut Rustia, name: &str) -> Result<Function> {
         let value = self.raw_get(rustia, name)?;
         if value.kind() != ValueKind::Function {
@@ -215,6 +270,7 @@ impl Exports {
         Ok(Function::new(value, self.decision_epoch))
     }
 
+    /// Retains a named function export within a typed host invocation.
     pub fn function_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<Function>
     where
         C: HostSchema,
@@ -251,6 +307,10 @@ impl Exports {
     }
 }
 
+/// Converts a typed Rust closure into a synchronous script callback.
+///
+/// Implemented for closures with up to eight arguments and results supported
+/// by [`IntoHostReturn`]. Use [`crate::HostFunction`] to configure the callback.
 pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {
     fn into_host_function(
         self,
@@ -260,11 +320,13 @@ pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {
     ) -> HostFunctionOp;
 }
 
+/// One callback result, either copied Rust data or an existing script object.
 pub enum HostReturnValue {
     Owned(OwnedValue),
     Live(LiveValue),
 }
 
+/// Converts one callback result to owned data or a live handle.
 pub trait IntoHostValue {
     fn into_host_value(self) -> Result<HostReturnValue>;
 }
@@ -328,6 +390,11 @@ impl FromHostArgument for Function {
     }
 }
 
+/// Converts a callback's complete return value to script results.
+///
+/// `()` returns no results; tuples through eight elements return separate
+/// results and can mix owned data with live handles. [`Result`] reports a
+/// callback failure or converts its successful value by the same rules.
 pub trait IntoHostReturn {
     fn into_host_return(self) -> Result<Vec<HostReturnValue>>;
 

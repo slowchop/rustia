@@ -5,7 +5,7 @@ use crate::{Error, HostSchema, IntoRustia, OwnedValue, Result, Rustia};
 use rustia_vm::{RetainedValue, Value as RawValue, ValueKind, Vm};
 use std::fmt;
 
-/// The runtime kind of a rooted live script value.
+/// The Luau type of a live [`Value`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ValueType {
@@ -37,11 +37,18 @@ impl ValueType {
     }
 }
 
-/// A live script value rooted in one Rustia VM and decision epoch.
+/// A script value kept alive in its original Rustia VM.
 ///
-/// Clones share the same root lease. Values preserve table/function/userdata
-/// identity, binary strings, buffers, vectors, rich keys, and cyclic/shared
-/// graphs without exposing the VM's internal collector lifetime.
+/// Unlike [`OwnedValue`], this is a handle rather than a copy. Tables, functions,
+/// and userdata keep their identity; strings can contain arbitrary bytes; tables
+/// can share values or refer to themselves. Cloning a handle keeps the same
+/// value alive and does not copy its contents.
+///
+/// Every operation requires the VM that created the handle. A
+/// [`Rustia::reset_decision`] invalidates all earlier handles; using one after
+/// reset or with another VM returns an error. To keep ordinary data across a
+/// reset, copy it with [`to_owned`](Self::to_owned) or
+/// [`deserialize`](Self::deserialize).
 #[derive(Clone)]
 pub struct Value {
     value: RetainedValue,
@@ -105,7 +112,8 @@ impl Value {
         self.kind(rustia).map(|kind| kind == ValueType::Nil)
     }
 
-    /// Applies Luau truthiness without invoking guest code.
+    /// Tests Luau truthiness: only `nil` and `false` are false.
+    /// This does not invoke guest code.
     pub fn truthy<C>(&self, rustia: &Rustia<C>) -> Result<bool>
     where
         C: HostSchema,
@@ -113,7 +121,7 @@ impl Value {
         self.raw(rustia.vm(), "value handle").map(RawValue::truthy)
     }
 
-    /// Returns the boolean payload, or `None` for another value kind.
+    /// Returns a boolean, or `None` for another value kind. No coercion is applied.
     pub fn as_boolean<C>(&self, rustia: &Rustia<C>) -> Result<Option<bool>>
     where
         C: HostSchema,
@@ -121,7 +129,7 @@ impl Value {
         self.raw(rustia.vm(), "value handle").map(RawValue::as_bool)
     }
 
-    /// Returns the number payload, or `None` for another value kind.
+    /// Returns a number, or `None` for another value kind. No coercion is applied.
     pub fn as_number<C>(&self, rustia: &Rustia<C>) -> Result<Option<f64>>
     where
         C: HostSchema,
@@ -154,7 +162,7 @@ impl Value {
             .map_err(Error::from)
     }
 
-    /// Returns the canonical three-component vector payload, or `None` for another kind.
+    /// Returns the three vector components, or `None` for another value kind.
     pub fn vector_components<C>(&self, rustia: &mut Rustia<C>) -> Result<Option<[f32; 3]>>
     where
         C: HostSchema,
@@ -166,11 +174,13 @@ impl Value {
             .map_err(Error::from)
     }
 
-    /// Deep-copies this value into the small acyclic owned snapshot model.
+    /// Copies this value and any nested tables into Rust-owned data.
     ///
-    /// Binary strings that are not UTF-8, buffers, vectors, userdata,
-    /// functions, rich keys, and cyclic graphs report an explicit conversion
-    /// error instead of losing data or identity.
+    /// Non-UTF-8 strings, buffers, vectors, userdata, functions, keys unsupported
+    /// by [`crate::OwnedKey`], and cyclic graphs return conversion errors.
+    /// Shared tables are copied independently; table identity is not preserved.
+    /// Deeply nested tables also return an error once the snapshot depth limit
+    /// is reached.
     pub fn to_owned<C>(&self, rustia: &mut Rustia<C>) -> Result<OwnedValue>
     where
         C: HostSchema,
@@ -179,11 +189,10 @@ impl Value {
         snapshot_value(rustia.vm_mut(), value)
     }
 
-    /// Deserializes this rooted value directly without first building an
-    /// [`OwnedValue`] snapshot.
+    /// Deserializes this value without first building an [`OwnedValue`] copy.
     ///
-    /// The returned type must own all of its data; VM strings and collector
-    /// values cannot escape the mutable VM borrow.
+    /// The returned type must own its data; it cannot borrow strings or other
+    /// contents from the VM.
     ///
     /// ```compile_fail
     /// use rustia::{Rustia, Value};
@@ -200,7 +209,7 @@ impl Value {
         from_live(rustia.vm_mut(), value)
     }
 
-    /// Returns a rooted table view when this value is a table.
+    /// Returns a table handle, or `None` if this is another value kind.
     pub fn as_table<C>(&self, rustia: &Rustia<C>) -> Result<Option<Table>>
     where
         C: HostSchema,
@@ -208,7 +217,7 @@ impl Value {
         Ok((self.kind(rustia)? == ValueType::Table).then(|| Table::new(self.clone())))
     }
 
-    /// Returns a rooted function view when this value is a function.
+    /// Returns a function handle, or `None` if this is another value kind.
     pub fn as_function<C>(&self, rustia: &Rustia<C>) -> Result<Option<Function>>
     where
         C: HostSchema,
@@ -245,7 +254,21 @@ impl fmt::Debug for Value {
     }
 }
 
-/// A rooted live table handle.
+/// A live table that Rust and Luau can both read and change.
+///
+/// Clones refer to the same table. All lookups and writes are raw: they bypass
+/// `__index` and `__newindex`. Like [`Value`], a table belongs to one VM and
+/// becomes invalid after [`Rustia::reset_decision`].
+///
+/// ```
+/// use rustia::Rustia;
+///
+/// let mut lua = Rustia::builder().build()?;
+/// let scores = lua.create_table()?;
+/// scores.set(&mut lua, "Ada", 42)?;
+/// assert_eq!(scores.get(&mut lua, "Ada")?.as_number(&lua)?, Some(42.0));
+/// # Ok::<(), rustia::Error>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct Table {
     value: Value,
@@ -265,7 +288,7 @@ impl Table {
         self.value.clone()
     }
 
-    /// Deserializes this rooted table directly without an owned graph snapshot.
+    /// Deserializes this table without first building an [`OwnedValue`] copy.
     pub fn deserialize<T>(&self, rustia: &mut Rustia<impl HostSchema>) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -278,7 +301,7 @@ impl Table {
         self.value.decision_epoch()
     }
 
-    /// Performs a raw lookup with a live key, bypassing `__index`.
+    /// Looks up a live key without invoking `__index`. Missing keys return `nil`.
     pub fn get_value<C>(&self, rustia: &mut Rustia<C>, key: &Value) -> Result<Value>
     where
         C: HostSchema,
@@ -292,7 +315,7 @@ impl Table {
         Value::retain(rustia.vm_mut(), value)
     }
 
-    /// Converts an owned key and performs a raw lookup, bypassing `__index`.
+    /// Looks up a Rust key without invoking `__index`. Missing keys return `nil`.
     pub fn get<K, C>(&self, rustia: &mut Rustia<C>, key: K) -> Result<Value>
     where
         K: IntoRustia,
@@ -322,10 +345,9 @@ impl Table {
             .map_err(Error::from)
     }
 
-    /// Converts an owned key and writes a live value, bypassing `__newindex`.
+    /// Stores a live value under a Rust key without invoking `__newindex`.
     ///
-    /// This is the identity-preserving bridge for installing a constructed or
-    /// returned live object under an ordinary string/number/boolean key.
+    /// The stored value keeps its identity; it is not copied into a new object.
     pub fn set_live<K, C>(&self, rustia: &mut Rustia<C>, key: K, value: &Value) -> Result<()>
     where
         K: IntoRustia,
@@ -344,7 +366,9 @@ impl Table {
             .map_err(Error::from)
     }
 
-    /// Converts owned key/value inputs and performs a raw write, bypassing `__newindex`.
+    /// Converts and stores a Rust key and value without invoking `__newindex`.
+    ///
+    /// Use [`set_live`](Self::set_live) to store an existing script object.
     pub fn set<K, V, C>(&self, rustia: &mut Rustia<C>, key: K, value: V) -> Result<()>
     where
         K: IntoRustia,
@@ -362,7 +386,7 @@ impl Table {
             .map_err(Error::from)
     }
 
-    /// Snapshots the current insertion-ordered entries into separately rooted handles.
+    /// Returns the current entries in insertion order as live key/value handles.
     ///
     /// Mutating the table later does not change which key/value handles this
     /// returned vector contains, though those handles still refer to their

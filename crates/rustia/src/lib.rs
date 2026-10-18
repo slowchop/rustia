@@ -1,31 +1,57 @@
 //! Embed Luau scripts in a Rust application.
 //!
-//! Start with [`Rustia::builder`], load a script, and choose the Rust type you
-//! want back. Use [`Rustia::add_fn`] to make a Rust function available to scripts.
+//! Load a script, choose the Rust type to return, and use ordinary Rust functions
+//! to connect it to your application.
 //!
 //! ```
 //! use rustia::Rustia;
 //!
 //! let mut vm = Rustia::builder().build()?;
-//! vm.add_fn("double", |n: f64| n * 2.0)?;
-//! let answer: f64 = vm.load("return double(21)").source_name("example.luau").eval()?;
-//! assert_eq!(answer, 42.0);
+//! vm.insert_global("price", 21)?;
+//! vm.add_fn("double", |n: i32| n * 2)?;
+//! let answer: i32 = vm.load("return double(price)").eval()?;
+//! assert_eq!(answer, 42);
 //! # Ok::<(), rustia::Error>(())
 //! ```
 //!
-//! [`RustiaBuilder::standard`] provides repeatable defaults;
-//! [`RustiaBuilder::live`] adds real clocks and randomness;
-//! [`RustiaBuilder::deterministic`] enforces the stricter replay contract.
-//! Set an instruction budget with [`RustiaBuilder::fuel`] and a VM-owned memory
-//! limit with [`RustiaBuilder::memory_limit_bytes`] when running bounded work.
+//! # Find what you need
 //!
-//! Use [`Error::report`] for readable diagnostics and [`Error::kind`] or
-//! [`Error::as_vm_error`] for program decisions. [`Value`], [`Table`], and
-//! [`Function`] keep script objects alive in their owning VM; reset invalidates
-//! old handles. [`OwnedValue`] is a separate, acyclic copy of ordinary data.
+//! | Task | Start here |
+//! | --- | --- |
+//! | Run a script or read its result | [`Rustia::load`], [`Chunk::exec`], [`Chunk::eval`] |
+//! | Pass Rust data to a script | [`Rustia::insert_global`], [`Rustia::insert_serde`] |
+//! | Call Rust from Luau | [`Rustia::add_fn`], [`HostFunction`] |
+//! | Call Luau from Rust | [`Chunk::install`], [`Exports::function`], [`Function::call`] |
+//! | Work with live script objects | [`Value`], [`Table`], [`Chunk::eval_live`] |
+//! | Read structured data with Serde | [`Chunk::eval_serde`] |
+//! | Show a script error | [`Error::report`] |
+//! | Set execution and memory limits | [`RustiaBuilder::fuel`], [`RustiaBuilder::memory_limit_bytes`] |
+//! | Borrow application state for a call | [`HostSchema`], [`Rustia::invoke`] |
 //!
-//! The API is currently unpublished. See the repository's first-release checklist
-//! before treating it as a stable 1.0 contract.
+//! # Defaults and values
+//!
+//! [`Rustia::builder`] uses [`RustiaBuilder::standard`]: repeatable defaults with
+//! platform output support. Choose [`RustiaBuilder::live`] for real clocks,
+//! randomness, and runtime compilation, or [`RustiaBuilder::deterministic`] to
+//! reject providers and callbacks declared nondeterministic. Callbacks must
+//! honour their declared capabilities; Rustia cannot inspect captured Rust state.
+//!
+//! Most examples return ordinary Rust data. [`OwnedValue`] is an independent,
+//! acyclic copy; [`Value`], [`Table`], [`Function`], and [`Exports`] instead keep
+//! objects alive in their owning interpreter. Live handles preserve shared and
+//! cyclic objects, but cannot be used with another interpreter or after
+//! [`Rustia::reset_decision`].
+//!
+//! # WebAssembly
+//!
+//! The default `web-live` feature supplies JavaScript services for browser Wasm.
+//! Disable default features for bare Wasm and provide services explicitly through
+//! [`RustiaBuilder`]. Enabling this feature does not select the live preset.
+//!
+//! The API is currently unpublished. The [first-release checklist] tracks the
+//! remaining work before a stable 1.0 contract.
+//!
+//! [first-release checklist]: https://github.com/slowchop/rustia/blob/main/design/92-first-release.md
 
 mod chunk;
 mod diagnostic;
@@ -80,11 +106,31 @@ pub use value::{
 
 /// Owns one Luau interpreter and the Rust functions installed in it.
 ///
-/// For ordinary embedding, start with [`Rustia::builder`] and [`load`](Self::load).
-/// `Rustia<()>` needs no per-call host context. `Rustia<H>` stores
-/// only the lifetime-independent [`HostSchema`] and registered callbacks; each
-/// guest execution borrows a fresh [`HostContext<H>`] through
+/// Create one with [`builder`](Self::builder), then use [`load`](Self::load) to
+/// run scripts. Globals and script objects persist between calls until
+/// [`reset_decision`](Self::reset_decision); an ordinary evaluation error does
+/// not undo earlier script mutations.
+///
+/// ```
+/// use rustia::Rustia;
+///
+/// let mut vm = Rustia::builder().build()?;
+/// vm.insert_global("name", "Ada")?;
+/// let greeting: String = vm.eval("return 'Hello, ' .. name")?;
+/// assert_eq!(greeting, "Hello, Ada");
+/// # Ok::<(), rustia::Error>(())
+/// ```
+///
+/// # Typed host contexts
+///
+/// The default `Rustia<()>` needs no per-call host context. For applications that
+/// lend state to a script for one call, `Rustia<H>` stores a lifetime-independent
+/// [`HostSchema`] and registered callbacks. Each execution borrows a fresh
+/// [`HostContext<H>`] through
 /// [`invoke`](Self::invoke) or [`invoke_into`](Self::invoke_into).
+///
+/// <details>
+/// <summary>Why typed hosts require an invocation</summary>
 ///
 /// Typed hosts cannot bypass that authority boundary with the context-free
 /// execution helpers:
@@ -106,6 +152,8 @@ pub use value::{
 ///     let _: i32 = rustia.eval("return 42").unwrap();
 /// }
 /// ```
+///
+/// </details>
 pub struct Rustia<C: HostSchema = ()> {
     vm: Vm,
     journal: Vec<C::Record>,
@@ -129,23 +177,31 @@ where
         }
     }
 
-    /// Returns the VM-owned logical live/reserved memory census and optional
+    /// Reports live and reserved memory owned by the interpreter.
+    ///
+    /// These are logical accounting totals, not process memory usage. Captured
+    /// Rust callback state is outside these totals; diagnostic source retention
+    /// has a separate budget. See [`VmMemoryStats`] for the totals and optional
     /// instruction-boundary peaks.
     pub fn memory_stats(&mut self) -> VmMemoryStats {
         self.vm.memory_stats()
     }
 
-    /// Host-side source-retention charges, separate from the guest heap quota.
+    /// Returns the bytes charged for retained diagnostic source snapshots.
+    ///
+    /// This host-side retention is separate from the script memory limit.
     pub fn diagnostic_source_bytes(&self) -> usize {
         self.vm.diagnostic_source_bytes()
     }
 
-    /// Returns the typed core execution semantics read from this live VM.
+    /// Returns the selected language profile and guest surface.
+    ///
+    /// This descriptor does not include budgets, services, or host callbacks.
     pub fn execution_profile(&self) -> RustiaExecutionProfile {
         RustiaExecutionProfile::from_vm(self.vm.profile(), self.vm.settings().guest_surface)
     }
 
-    /// Returns the complete settings read from this live VM.
+    /// Returns the interpreter's current low-level settings.
     ///
     /// This lets an embedder attest separately versioned budgets and services
     /// after construction rather than trusting only caller-side builder data.
@@ -153,7 +209,10 @@ where
         self.vm.settings()
     }
 
-    /// Current decision epoch. Epoch zero begins at construction.
+    /// Returns the generation used to validate live handles.
+    ///
+    /// It starts at zero and advances when [`reset_decision`](Self::reset_decision)
+    /// succeeds.
     pub fn decision_epoch(&self) -> u64 {
         self.vm.decision_epoch()
     }
@@ -171,6 +230,7 @@ where
     ///
     /// Replay protocols must record
     /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
+    /// Reset requires an idle interpreter; attempting it during execution fails.
     pub fn reset_decision(&mut self) -> Result<()> {
         self.vm.reset_decision().map_err(Error::from)?;
         self.journal.clear();
@@ -324,6 +384,22 @@ where
         }
     }
 
+    /// Copies Rust data into a script global, replacing any existing value.
+    ///
+    /// Uses [`IntoRustia`] for conversion. The value is available to later scripts
+    /// until replaced or [`reset_decision`](Self::reset_decision) clears it.
+    /// Conversion errors and script memory-limit failures are returned as [`Error`].
+    /// To insert a live handle without copying it, use [`Table::set_live`] on
+    /// [`globals`](Self::globals).
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// vm.insert_global("scores", vec![10, 20, 30])?;
+    /// let first: i32 = vm.eval("return scores[1]")?;
+    /// assert_eq!(first, 10);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn insert_global<T>(&mut self, name: impl AsRef<str>, value: T) -> Result<()>
     where
         T: IntoRustia,
@@ -333,6 +409,11 @@ where
         self.vm.set_global_value(name, value).map_err(Error::from)
     }
 
+    /// Serializes Rust data into a script global, replacing any existing value.
+    ///
+    /// This copies the data; later script changes do not modify the Rust input.
+    /// Serialization and script memory-limit failures are returned as [`Error`].
+    /// Like [`insert_global`](Self::insert_global), the binding is cleared by reset.
     pub fn insert_serde<T>(&mut self, name: impl AsRef<str>, value: &T) -> Result<()>
     where
         T: serde::Serialize + ?Sized,
@@ -342,7 +423,7 @@ where
         self.vm.set_global_value(name, value).map_err(Error::from)
     }
 
-    /// Returns a rooted live handle to this VM's real globals table.
+    /// Returns a live handle to the interpreter's globals table.
     ///
     /// Reads and writes through [`Table`] preserve identity and are visible to
     /// subsequently executed guest code. Like ordinary global inputs, these
@@ -354,10 +435,21 @@ where
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
-    /// Creates an empty rooted live table using this VM's selected layout.
+    /// Creates an empty live table in this interpreter.
     ///
     /// The table and its root participate in the logical-live memory quota as
     /// one admission. Hardened leaves reject live table construction.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// let settings = vm.create_table()?;
+    /// settings.set(&mut vm, "volume", 0.5)?;
+    /// vm.globals()?.set_live(&mut vm, "settings", &settings.as_value())?;
+    /// let volume: f64 = vm.eval("return settings.volume")?;
+    /// assert_eq!(volume, 0.5);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn create_table(&mut self) -> Result<Table> {
         let value = self.vm.create_retained_table().map_err(Error::from)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
@@ -523,8 +615,14 @@ fn finish_entry_lifecycle<T, Record>(
 }
 
 impl Rustia<()> {
-    /// Compiles a reusable module. `source_name` labels diagnostics and is the
-    /// referrer supplied to the host resolver for nested `require` calls.
+    /// Compiles a script once for later installation in one or more interpreters.
+    ///
+    /// Compilation does not run the script or change a VM. `source_name` labels
+    /// diagnostics and identifies the caller to the module resolver for `require`.
+    /// Invalid source returns a parse or compilation error. Call
+    /// [`install`](Self::install) to run the compiled module and retain its exports.
+    /// For PUC Lua 5.1 compatibility, use
+    /// [`compile_module_with_profile`](Self::compile_module_with_profile).
     pub fn compile_module(source_name: impl Into<String>, source: &str) -> Result<CompiledModule> {
         Self::compile_module_bytes(source_name, source.as_bytes())
     }
@@ -644,7 +742,10 @@ impl Rustia<()> {
         Self::from_settings(profile, settings)
     }
 
-    /// Creates a typed VM for host schema `H`.
+    /// Creates a service-free interpreter for typed host schema `H`.
+    ///
+    /// Use [`RustiaBuilder::build_for_host`] when configuring services and limits.
+    /// Typed interpreters execute scripts through [`invoke`](Self::invoke).
     pub fn for_host<H>(profile: Profile) -> Rustia<H>
     where
         H: HostSchema,
@@ -652,7 +753,9 @@ impl Rustia<()> {
         Rustia::<H>::from_profile(profile)
     }
 
-    /// Creates a typed VM for host schema `H` with explicit VM settings.
+    /// Creates a typed interpreter with explicit low-level settings and services.
+    ///
+    /// Prefer [`RustiaBuilder::build_for_host`] for application configuration.
     pub fn for_host_with_settings<H>(profile: Profile, settings: VmSettings) -> Rustia<H>
     where
         H: HostSchema,
@@ -660,10 +763,24 @@ impl Rustia<()> {
         Rustia::<H>::from_settings(profile, settings)
     }
 
-    /// Creates a composable builder for borrowed Luau source text or bytes.
+    /// Prepares Luau source text or bytes to run in this interpreter.
     ///
     /// Building the chunk is inert: parsing, compilation, VM allocation, and
     /// execution begin only when a terminal operation is called.
+    /// Use [`Chunk::source_name`] to label errors, then choose [`Chunk::eval`],
+    /// [`Chunk::exec`], or [`Chunk::install`]. The source only needs to live until
+    /// that operation finishes; returned values do not borrow it.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// let answer: i32 = vm
+    ///     .load("return 6 * 7")
+    ///     .source_name("answer.luau")
+    ///     .eval()?;
+    /// assert_eq!(answer, 42);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn load<'rustia, 'source, S>(
         &'rustia mut self,
         source: &'source S,
@@ -675,6 +792,10 @@ impl Rustia<()> {
     }
 
     /// Evaluates source and converts its first result through [`FromRustia`].
+    ///
+    /// Shorthand for `load(source).eval()`. Use [`load`](Self::load) to give the
+    /// source a name or select its environment. See [`Chunk::eval`] for conversion
+    /// and failure behavior.
     pub fn eval<T>(&mut self, source: impl AsRef<[u8]>) -> Result<T>
     where
         T: FromRustia,
@@ -684,6 +805,8 @@ impl Rustia<()> {
     }
 
     /// Evaluates source and deserializes its first result directly from the VM.
+    ///
+    /// Shorthand for `load(source).eval_serde()`; see [`Chunk::eval_serde`].
     pub fn eval_serde<T>(&mut self, source: impl AsRef<[u8]>) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
@@ -693,12 +816,33 @@ impl Rustia<()> {
     }
 
     /// Executes source for side effects and discards its result.
+    ///
+    /// Shorthand for `load(source).exec()`; see [`Chunk::exec`].
     pub fn exec(&mut self, source: impl AsRef<[u8]>) -> Result<()> {
         let source = source;
         self.load(&source).exec()
     }
 
-    /// Atomically installs a reusable compiled module in a fresh environment.
+    /// Runs a compiled module in a fresh environment and retains its exports.
+    ///
+    /// The environment inherits VM globals. A failed installation restores prior
+    /// guest state; external host callback and module-resolver effects cannot be
+    /// undone. Previously installed exports remain usable until reset.
+    /// See [`Chunk::install`] to compile and install source in one step.
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// let module = Rustia::compile_module(
+    ///     "greeting.luau",
+    ///     "return { greet = function(name) return 'Hello, ' .. name end }",
+    /// )?;
+    /// let mut vm = Rustia::builder().build()?;
+    /// let exports = vm.install(&module)?;
+    /// let greet = exports.function(&mut vm, "greet")?;
+    /// let greeting: String = greet.call(&mut vm, ("Ada",))?;
+    /// assert_eq!(greeting, "Hello, Ada");
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn install(&mut self, module: &CompiledModule) -> Result<Exports> {
         self.install_with_environment(module, None)
     }
@@ -745,6 +889,31 @@ where
 }
 
 impl Rustia<()> {
+    /// Registers a Rust function as a script global.
+    ///
+    /// Arguments and results are converted automatically. Return [`Result<T>`]
+    /// from the callback to report a script-visible error. A call costs one fuel
+    /// unit in addition to guest instructions; use [`add_fn_with`](Self::add_fn_with)
+    /// to select another cost or declare captured-state effects.
+    ///
+    /// The callback must be `Fn + Send + Sync + 'static`. This helper declares
+    /// it pure, so captured state must honour that promise. The registration
+    /// survives [`reset_decision`](Self::reset_decision). For a live function
+    /// value instead of a global binding, use [`create_function`](Self::create_function).
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// vm.add_fn("divide", |a: f64, b: f64| -> rustia::Result<f64> {
+    ///     if b == 0.0 {
+    ///         return Err(rustia::Error::embed("division by zero"));
+    ///     }
+    ///     Ok(a / b)
+    /// })?;
+    /// let quotient: f64 = vm.eval("return divide(84, 2)")?;
+    /// assert_eq!(quotient, 42.0);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
     pub fn add_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -756,6 +925,7 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::Pure, function)
     }
 
+    /// Registers a pure callback; equivalent to [`add_fn`](Self::add_fn).
     pub fn add_pure_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -767,6 +937,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::Pure, function)
     }
 
+    /// Registers a callback declared to read deterministic captured input.
+    ///
+    /// The callback receives ordinary arguments. For borrowed per-invocation
+    /// input in a typed host, use [`add_input`](Self::add_input).
     pub fn add_input_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -778,6 +952,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::ReadsDeterministicInput, function)
     }
 
+    /// Registers a callback declared to read captured slot state.
+    ///
+    /// For a borrowed [`Slots`] view in a typed host, use
+    /// [`add_slot_read`](Self::add_slot_read).
     pub fn add_slot_read_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -789,6 +967,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::ReadsSlotState, function)
     }
 
+    /// Registers a callback declared to produce slot-write effects.
+    ///
+    /// Captured Rust mutations are not rolled back. For a transactional
+    /// [`SlotWrites`] journal, use [`add_slot_write`](Self::add_slot_write).
     pub fn add_slot_write_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -800,6 +982,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::WritesSlotEffect, function)
     }
 
+    /// Registers a callback declared to produce deterministic effects.
+    ///
+    /// Captured Rust mutations are not rolled back. For a transactional
+    /// [`Effects`] journal, use [`add_effect`](Self::add_effect).
     pub fn add_effect_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -811,6 +997,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::EmitsDeterministicEffect, function)
     }
 
+    /// Registers a callback declared to access mutable external state.
+    ///
+    /// Deterministic profiles reject this capability. For a borrowed [`HostMut`]
+    /// view in a typed host, use [`add_external`](Self::add_external).
     pub fn add_external_state_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -822,6 +1012,10 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::ReadsExternalMutableState, function)
     }
 
+    /// Registers a callback declared to have nondeterministic effects.
+    ///
+    /// Deterministic profiles reject this capability. Captured Rust effects are
+    /// outside installation and invocation rollback.
     pub fn add_nondeterministic_fn<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -833,6 +1027,12 @@ impl Rustia<()> {
         self.add_fn_with(name, 1, OpCapability::NondeterministicEffect, function)
     }
 
+    /// Registers a callback with an explicit fuel cost and capability.
+    ///
+    /// A zero fuel cost or a capability forbidden by the selected profile fails
+    /// before registration. The capability describes captured host behavior;
+    /// it does not restrict what a Rust closure can do. See [`add_fn`](Self::add_fn)
+    /// for the callback's conversion and lifetime rules.
     pub fn add_fn_with<Func, Args, Return>(
         &mut self,
         name: impl Into<String>,
@@ -849,6 +1049,10 @@ impl Rustia<()> {
         )
     }
 
+    /// Installs a collection of host functions and modules atomically.
+    ///
+    /// Validation or binding failure leaves existing registrations unchanged.
+    /// Use [`RustiaExtension`] to assemble a reusable application API.
     pub fn install_extension(&mut self, extension: RustiaExtension) -> Result<()> {
         extension.install(self)
     }
@@ -862,12 +1066,15 @@ impl Default for Rustia {
     }
 }
 
+/// A value returned by Rustia, or a script, conversion, or embedding [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Compiled artifact that can be cloned and installed into multiple VMs.
+/// A compiled script ready for [`Rustia::install`].
 ///
-/// Constant and string storage is shared across clones; function and debug metadata is currently
-/// cloned with the module.
+/// Create it with [`Rustia::compile_module`]. It owns its source metadata and
+/// compiled code independently of any interpreter, and remains reusable after
+/// reset. A clone shares constant and string storage; function and debug metadata
+/// are currently copied.
 #[derive(Clone)]
 pub struct CompiledModule {
     source_name: String,
@@ -875,6 +1082,7 @@ pub struct CompiledModule {
 }
 
 impl CompiledModule {
+    /// Returns the source label supplied when this module was compiled.
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
@@ -889,14 +1097,18 @@ pub struct CompiledEntry {
 }
 
 impl CompiledEntry {
+    /// Returns the source label supplied when this entry was compiled.
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
 }
 
+/// A half-open byte range in the source, `start..end`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceSpan {
+    /// Byte offset of the first included byte.
     pub start: usize,
+    /// Byte offset immediately after the range.
     pub end: usize,
 }
 
@@ -909,9 +1121,12 @@ impl From<rustia_lexer::Span> for SourceSpan {
     }
 }
 
+/// The source label and one-based line number attached to an error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceLocation<'a> {
+    /// Source label, such as `"rules.luau"`; it need not be a filesystem path.
     pub source: &'a str,
+    /// One-based source line number.
     pub line: u32,
 }
 
