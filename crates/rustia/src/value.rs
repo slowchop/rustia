@@ -667,7 +667,7 @@ fn snapshot_value_inner(vm: &mut Vm, value: RawValue, depth: usize) -> Result<Ow
         ValueKind::Number => Ok(OwnedValue::Number(value.as_number().unwrap_or(f64::NAN))),
         ValueKind::String => vm
             .string_value(value)
-            .map_err(Error::from)?
+            .map_err(Error::from_engine)?
             .map(OwnedValue::String)
             .ok_or_else(|| Error::embed("string value is missing".to_owned())),
         ValueKind::Table => snapshot_table(vm, value, depth + 1),
@@ -688,7 +688,10 @@ fn snapshot_table(vm: &mut Vm, value: RawValue, depth: usize) -> Result<OwnedVal
     let mut ordered = Vec::new();
     let mut all_array_keys = true;
 
-    for (key, value) in vm.raw_table_entries_value(value).map_err(Error::from)? {
+    for (key, value) in vm
+        .raw_table_entries_value(value)
+        .map_err(Error::from_engine)?
+    {
         let key = snapshot_key(vm, key)?;
         let array_index = match key {
             OwnedKey::Number(number) => number_to_array_index(number),
@@ -741,7 +744,7 @@ fn snapshot_key(vm: &mut Vm, key: RawValue) -> Result<OwnedKey> {
         ValueKind::Number => Ok(OwnedKey::Number(key.as_number().unwrap_or(f64::NAN))),
         ValueKind::String => vm
             .string_value(key)
-            .map_err(Error::from)?
+            .map_err(Error::from_engine)?
             .map(OwnedKey::String)
             .ok_or_else(|| Error::embed("string key is missing".to_owned())),
         _ => Err(Error::embed(format!(
@@ -763,13 +766,13 @@ pub(crate) fn load_owned_value(vm: &mut Vm, value: &OwnedValue) -> Result<RawVal
                 let key = RawValue::number((index + 1) as f64);
                 let value = load_owned_value(vm, value)?;
                 vm.raw_table_set_value(raw_table, key, value)
-                    .map_err(Error::from)?;
+                    .map_err(Error::from_engine)?;
             }
             for (key, value) in &table.entries {
                 let key = load_owned_key(vm, key);
                 let value = load_owned_value(vm, value)?;
                 vm.raw_table_set_value(raw_table, key, value)
-                    .map_err(Error::from)?;
+                    .map_err(Error::from_engine)?;
             }
             Ok(raw_table)
         }
@@ -813,14 +816,14 @@ pub(crate) fn embed_to_vm_error(error: Error) -> VmError {
         Error {
             kind: crate::ErrorKind::Vm(error),
             ..
-        } => *error,
+        } => (*error).into_core(),
         error => {
             let mut vm_error = VmError::new(VmErrorKind::RuntimeError {
                 message: error.to_string(),
             });
-            vm_error.diagnostic = Some(std::sync::Arc::new(crate::Diagnostic {
+            vm_error.diagnostic = Some(std::sync::Arc::new(rustia_vm::diagnostic::Diagnostic {
                 host_cause: Some(std::sync::Arc::new(error)),
-                ..crate::Diagnostic::default()
+                ..rustia_vm::diagnostic::Diagnostic::default()
             }));
             vm_error
         }

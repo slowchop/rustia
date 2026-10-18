@@ -37,7 +37,10 @@ fn install(rustia: &mut Rustia, source: &str) -> RustiaResult<Exports> {
 
 #[test]
 fn live_value_table_and_exports_match_the_owned_format() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let exports = install(
         &mut rustia,
         r#"
@@ -74,7 +77,10 @@ fn live_serde_preserves_enum_and_checked_numeric_semantics() {
         wide: i128,
     }
 
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let value = eval_live(
         &mut rustia,
         r#"
@@ -126,7 +132,10 @@ fn live_serde_covers_options_newtypes_tuples_chars_bytes_and_map_keys() {
         directives: BTreeMap<Directive, u32>,
     }
 
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let value = eval_live(
         &mut rustia,
         r#"
@@ -173,7 +182,10 @@ fn live_serde_covers_options_newtypes_tuples_chars_bytes_and_map_keys() {
 
 #[test]
 fn dense_sequences_are_ordered_and_map_shaped_sequences_are_rejected() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let dense = eval_live(&mut rustia, "return { [3] = 'c', [1] = 'a', [2] = 'b' }").unwrap();
     assert_eq!(
         dense.deserialize::<Vec<String>>(&mut rustia).unwrap(),
@@ -203,7 +215,10 @@ fn dense_sequences_are_ordered_and_map_shaped_sequences_are_rejected() {
 
 #[test]
 fn live_serde_rejects_cycles_depth_and_unsupported_values() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let cycle = eval_live(&mut rustia, "local t = {}; t.self = t; return t").unwrap();
     let error = cycle
         .deserialize::<BTreeMap<String, IgnoredAny>>(&mut rustia)
@@ -265,7 +280,10 @@ fn shared_acyclic_tables_deserialize_normally() {
         right: Child,
     }
 
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let value = eval_live(
         &mut rustia,
         "local child = { value = 7 }; return { left = child, right = child }",
@@ -282,12 +300,18 @@ fn shared_acyclic_tables_deserialize_normally() {
 
 #[test]
 fn handle_identity_and_decision_epoch_checks_are_preserved() {
-    let mut first = Rustia::new(Profile::ReproducibleStandard);
+    let mut first = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let value = eval_live(&mut first, "return { answer = 42 }").unwrap();
     let table = value.as_table(&first).unwrap().unwrap();
     let exports = install(&mut first, "return { answer = 42 }").unwrap();
 
-    let mut second = Rustia::new(Profile::ReproducibleStandard);
+    let mut second = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     assert!(value
         .deserialize::<BTreeMap<String, u32>>(&mut second)
         .is_err());
@@ -332,7 +356,10 @@ impl HostSchema for TypedSchema {
 
 #[test]
 fn live_serde_supports_typed_host_vms() {
-    let mut rustia = Rustia::for_host::<TypedSchema>(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build_for_host::<TypedSchema>()
+        .unwrap();
     let table = rustia.create_table().unwrap();
     table.set(&mut rustia, "answer", 42_u32).unwrap();
     assert_eq!(
@@ -345,7 +372,10 @@ fn live_serde_supports_typed_host_vms() {
 
 #[test]
 fn live_deserialization_does_not_mutate_vm_memory_or_state() {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let value = eval_live(
         &mut rustia,
         "local shared = { value = 7 }; collectgarbage('collect'); \
@@ -357,10 +387,10 @@ fn live_deserialization_does_not_mutate_vm_memory_or_state() {
         let _: BTreeMap<String, BTreeMap<String, u32>> = value.deserialize(&mut rustia).unwrap();
     }
     let after = rustia.memory_stats();
-    assert_eq!(after.live_bytes, before.live_bytes);
-    assert_eq!(after.reserved_bytes, before.reserved_bytes);
-    assert_eq!(after.peak_live_bytes, before.peak_live_bytes);
-    assert_eq!(after.peak_reserved_bytes, before.peak_reserved_bytes);
+    assert_eq!(after.live_bytes(), before.live_bytes());
+    assert_eq!(after.reserved_bytes(), before.reserved_bytes());
+    assert_eq!(after.peak_live_bytes(), before.peak_live_bytes());
+    assert_eq!(after.peak_reserved_bytes(), before.peak_reserved_bytes());
 
     struct Panics;
     impl<'de> Deserialize<'de> for Panics {

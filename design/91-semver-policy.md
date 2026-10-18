@@ -32,7 +32,7 @@ only; grabby-specific integration code remains outside this repository.
 ## Public Crate Roles
 
 - `rustia` is the primary public embedding crate. It owns the stable facade:
-  `Rustia`, `RustiaBuilder`, `RustiaExtension`, `Profile`, `VmSettings`,
+  `Rustia`, `RustiaBuilder`, `RustiaExtension`, `Profile`, `Settings`,
   `OwnedValue`, conversion traits, retained `Function` handles, `Exports`,
   serde helpers, and public error types.
 - `rustia-cli` is the command-line runner surface.
@@ -84,6 +84,28 @@ compilation tests. After 1.0, compare proposed changes with that released API
 baseline in CI. Migration notes explain a breaking change; they do not make it
 compatible with 1.x. Replay/fuel/module ABI identifiers remain separately
 versioned and must be included in an application's replay identity.
+
+## Private API inventory
+
+[`facade-api.json`](facade-api.json) records the current reachable embedding API
+for native and browser Wasm, with default and bare features. It is a reviewed
+private snapshot, not a released 1.0 compatibility baseline. Update it with
+`node tools/check-facade-api.js --write` when deliberately changing the facade;
+release preflight verifies the committed result.
+
+The checker follows semantic rustdoc IDs through exports, signatures, associated
+types, supertraits, and implementations. It rejects callable lexer/parser/
+compiler/VM types, including aliases and implicit conversion impls. Private
+callback methods are excluded only while they require a private, unconstructible
+token. Negative self-tests cover those traversal boundaries. Macro declarations
+are inventoried; expansion behavior is tested through consumer examples.
+
+Rustdoc JSON remains unstable, so this check uses the pinned Rust toolchain and
+schema version. `RUSTC_BOOTSTRAP=1` is limited to the documentation command to
+obtain JSON; it does not change Rustia's supported compiler or enable unstable
+features in production code. A compiler/schema upgrade must review the traversal
+before accepting a new inventory. The final candidate still needs independent
+API review, real-consumer checks, and a later released baseline for 1.x diffs.
 
 ## Breaking Change Checklist
 

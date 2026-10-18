@@ -55,6 +55,9 @@
 
 mod chunk;
 mod diagnostic;
+mod diagnostic_data;
+#[cfg(test)]
+mod engine_boundary_tests;
 mod error;
 mod extension_api;
 mod function;
@@ -62,19 +65,27 @@ mod host_function;
 mod invocation;
 mod live_value;
 mod macros;
+mod profile;
+mod runtime_error;
 mod serde_value;
+mod settings;
+mod source_error;
 mod source_map;
 mod value;
 
-use function::IntoHostFunction;
 use invocation::TypedHostDispatcher;
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{HardenedLeafProgram, Program, Vm};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
+#[cfg(test)]
+extern crate self as rustia;
+
 pub use chunk::Chunk;
 pub use diagnostic::DiagnosticReason;
-pub use diagnostic::{Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticSpan, ErrorReport};
+pub use diagnostic::{
+    Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticSpan, ErrorReport, SourceSnapshot,
+};
 pub use error::{Error, ErrorKind};
 pub use extension_api::{
     ModuleSource, RustiaBuilder, RustiaExecutionProfile, RustiaExtension, RustiaHostFuelPolicy,
@@ -82,7 +93,9 @@ pub use extension_api::{
     RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
     RUSTIA_MIN_HOST_FUNCTION_FUEL,
 };
-pub use function::{Exports, Function};
+pub use function::{
+    Exports, FromHostArgument, Function, IntoHostFunction, IntoHostReturn, IntoHostValue,
+};
 pub use host_function::{HostFunction, IntoHostFunctionDefinition};
 pub use invocation::{
     Effects, HostContext, HostModule, HostMut, HostSchema, Input, IntoEffectFunction,
@@ -91,14 +104,19 @@ pub use invocation::{
     InvocationUsage, SlotWrites, Slots,
 };
 pub use live_value::{Table, Value, ValueType};
-pub use rustia_vm::{
-    Error as VmError, ErrorKind as VmErrorKind, GuestSurface, OpCapability, Profile, VmMemoryStats,
-    VmSettings, DECISION_RESET_ABI_VERSION as RUSTIA_DECISION_RESET_ABI_VERSION,
-    HARDENED_LEAF_GUEST_ABI_VERSION as RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION,
-    INSTALL_TRANSACTION_ABI_VERSION as RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
-    MODULE_RESOLUTION_ABI_VERSION as RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
-};
+pub use profile::{GuestSurface, OpCapability, Profile};
+pub use runtime_error::{VmError, VmErrorKind, VmErrorMessage};
+/// Version of the decision-reset lifecycle contract.
+pub const RUSTIA_DECISION_RESET_ABI_VERSION: u32 = rustia_vm::DECISION_RESET_ABI_VERSION;
+/// Version of the hardened-leaf guest environment contract.
+pub const RUSTIA_HARDENED_LEAF_GUEST_ABI_VERSION: u32 = rustia_vm::HARDENED_LEAF_GUEST_ABI_VERSION;
+/// Version of installation rollback and publication behavior.
+pub const RUSTIA_INSTALL_TRANSACTION_ABI_VERSION: u32 = rustia_vm::INSTALL_TRANSACTION_ABI_VERSION;
+/// Version of module resolution and cache identity behavior.
+pub const RUSTIA_MODULE_RESOLUTION_ABI_VERSION: u32 = rustia_vm::MODULE_RESOLUTION_ABI_VERSION;
 pub use serde_value::SerdeValueError;
+pub use settings::{ServiceDeterminism, Settings, VmMemoryStats};
+pub use source_error::{CompileError, LexError, ParseError, SourceError, UnclosedBlock};
 pub use source_map::SourceMap;
 pub use value::{
     FromRustia, FromRustiaMulti, IntoRustia, IntoRustiaMulti, OwnedKey, OwnedTable, OwnedValue,
@@ -163,16 +181,17 @@ impl<C> Rustia<C>
 where
     C: HostSchema,
 {
+    #[cfg(test)]
     fn from_profile(profile: Profile) -> Self {
         Self {
-            vm: Vm::new(profile),
+            vm: Vm::new(profile.to_core()),
             journal: Vec::new(),
         }
     }
 
-    fn from_settings(profile: Profile, settings: VmSettings) -> Self {
+    fn from_settings(profile: Profile, settings: rustia_vm::VmSettings) -> Self {
         Self {
-            vm: Vm::with_settings(profile, settings),
+            vm: Vm::with_settings(profile.to_core(), settings),
             journal: Vec::new(),
         }
     }
@@ -184,7 +203,7 @@ where
     /// has a separate budget. See [`VmMemoryStats`] for the totals and optional
     /// instruction-boundary peaks.
     pub fn memory_stats(&mut self) -> VmMemoryStats {
-        self.vm.memory_stats()
+        VmMemoryStats::from_core(self.vm.memory_stats())
     }
 
     /// Returns the bytes charged for retained diagnostic source snapshots.
@@ -201,11 +220,16 @@ where
         RustiaExecutionProfile::from_vm(self.vm.profile(), self.vm.settings().guest_surface)
     }
 
-    /// Returns the interpreter's current low-level settings.
+    /// Returns the interpreter's effective application settings.
     ///
-    /// This lets an embedder attest separately versioned budgets and services
-    /// after construction rather than trusting only caller-side builder data.
-    pub const fn vm_settings(&self) -> &VmSettings {
+    /// Use [`Settings::identity_bytes`] when binding configuration to a replay
+    /// or package identity. Engine implementation controls remain private.
+    pub fn settings(&self) -> Settings {
+        Settings::from_core(Profile::from_core(self.vm.profile()), self.vm.settings())
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn vm_settings(&self) -> &rustia_vm::VmSettings {
         self.vm.settings()
     }
 
@@ -232,7 +256,7 @@ where
     /// [`RUSTIA_DECISION_RESET_ABI_VERSION`].
     /// Reset requires an idle interpreter; attempting it during execution fails.
     pub fn reset_decision(&mut self) -> Result<()> {
-        self.vm.reset_decision().map_err(Error::from)?;
+        self.vm.reset_decision().map_err(Error::from_engine)?;
         self.journal.clear();
         Ok(())
     }
@@ -355,7 +379,7 @@ where
         self.journal = journal;
         if let Some(error) = hard_error {
             self.journal.clear();
-            return Err(Error::from(error));
+            return Err(Error::from_engine(error));
         }
         match result {
             Ok(value) => {
@@ -406,7 +430,9 @@ where
     {
         let value = value.into_rustia()?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::from)
+        self.vm
+            .set_global_value(name, value)
+            .map_err(Error::from_engine)
     }
 
     /// Serializes Rust data into a script global, replacing any existing value.
@@ -420,7 +446,9 @@ where
     {
         let value = OwnedValue::from_serialize(value)?;
         let value = value::load_owned_value(&mut self.vm, &value)?;
-        self.vm.set_global_value(name, value).map_err(Error::from)
+        self.vm
+            .set_global_value(name, value)
+            .map_err(Error::from_engine)
     }
 
     /// Returns a live handle to the interpreter's globals table.
@@ -431,7 +459,7 @@ where
     /// [`reset_decision`](Self::reset_decision). Hardened leaves reject this
     /// mutable authority.
     pub fn globals(&mut self) -> Result<Table> {
-        let value = self.vm.retain_globals().map_err(Error::from)?;
+        let value = self.vm.retain_globals().map_err(Error::from_engine)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
@@ -451,7 +479,10 @@ where
     /// # Ok::<(), rustia::Error>(())
     /// ```
     pub fn create_table(&mut self) -> Result<Table> {
-        let value = self.vm.create_retained_table().map_err(Error::from)?;
+        let value = self
+            .vm
+            .create_retained_table()
+            .map_err(Error::from_engine)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
     }
 
@@ -678,7 +709,7 @@ impl Rustia<()> {
     ) -> Result<CompiledModule> {
         let source_name = source_name.into();
         let chunk = rustia_parser::parse_source_bytes(source).map_err(|error| {
-            Error::from(error).with_source(&source_name, source, diagnostic_limits)
+            Error::from_engine(error).with_source(&source_name, source, diagnostic_limits)
         })?;
         let options = CompileOptions {
             puc51_constructor_order,
@@ -686,7 +717,7 @@ impl Rustia<()> {
         }
         .with_source_bytes(source_name.clone(), source);
         let mut program = compile_with_options(&chunk, options).map_err(|error| {
-            Error::from(error).with_source(&source_name, source, diagnostic_limits)
+            Error::from_engine(error).with_source(&source_name, source, diagnostic_limits)
         })?;
         program.diagnostic_source = rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
             source,
@@ -709,10 +740,10 @@ impl Rustia<()> {
     /// order; see [`compile_module_bytes`](Self::compile_module_bytes).
     pub fn compile_entry(source_name: impl Into<String>, source: &str) -> Result<CompiledEntry> {
         let source_name = source_name.into();
-        let chunk = rustia_parser::parse_source(source).map_err(Error::from)?;
+        let chunk = rustia_parser::parse_source(source).map_err(Error::from_engine)?;
         let options = CompileOptions::default().with_source(source_name.clone(), source);
-        let program = compile_with_options(&chunk, options).map_err(Error::from)?;
-        let program = HardenedLeafProgram::new(program).map_err(Error::from)?;
+        let program = compile_with_options(&chunk, options).map_err(Error::from_engine)?;
+        let program = HardenedLeafProgram::new(program).map_err(Error::from_engine)?;
         Ok(CompiledEntry {
             source_name,
             program,
@@ -731,32 +762,27 @@ impl Rustia<()> {
     /// Unlike [`builder`](Self::builder), this constructor installs no stdout
     /// sink. Use the builder presets for normal application defaults and host
     /// clock, output, entropy, or module services.
-    pub fn new(profile: Profile) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(profile: Profile) -> Self {
         Self::from_profile(profile)
     }
 
     /// Creates an interpreter with explicit low-level settings and services.
     ///
     /// Prefer [`builder`](Self::builder) for ordinary application configuration.
-    pub fn with_settings(profile: Profile, settings: VmSettings) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_settings(profile: Profile, settings: rustia_vm::VmSettings) -> Self {
         Self::from_settings(profile, settings)
-    }
-
-    /// Creates a service-free interpreter for typed host schema `H`.
-    ///
-    /// Use [`RustiaBuilder::build_for_host`] when configuring services and limits.
-    /// Typed interpreters execute scripts through [`invoke`](Self::invoke).
-    pub fn for_host<H>(profile: Profile) -> Rustia<H>
-    where
-        H: HostSchema,
-    {
-        Rustia::<H>::from_profile(profile)
     }
 
     /// Creates a typed interpreter with explicit low-level settings and services.
     ///
     /// Prefer [`RustiaBuilder::build_for_host`] for application configuration.
-    pub fn for_host_with_settings<H>(profile: Profile, settings: VmSettings) -> Rustia<H>
+    #[cfg(test)]
+    pub(crate) fn for_host_with_settings<H>(
+        profile: Profile,
+        settings: rustia_vm::VmSettings,
+    ) -> Rustia<H>
     where
         H: HostSchema,
     {
@@ -857,25 +883,30 @@ where
         module: &CompiledModule,
         environment: Option<rustia_vm::Value>,
     ) -> Result<Exports> {
-        self.vm.begin_guest_transaction().map_err(Error::from)?;
+        self.vm
+            .begin_guest_transaction()
+            .map_err(Error::from_engine)?;
         let outcome: Result<Exports> = (|| {
-            let module_cohort = self.vm.create_module_cohort().map_err(Error::from)?;
+            let module_cohort = self.vm.create_module_cohort().map_err(Error::from_engine)?;
             let environment = match environment {
                 Some(environment) => environment,
-                None => self.vm.create_module_environment().map_err(Error::from)?,
+                None => self
+                    .vm
+                    .create_module_environment()
+                    .map_err(Error::from_engine)?,
             };
             let value = self
                 .vm
                 .run_installation_with_environment(&module.program, environment, module_cohort)
-                .map_err(Error::from)?;
-            let value = self.vm.retain_value(value).map_err(Error::from)?;
+                .map_err(Error::from_engine)?;
+            let value = self.vm.retain_value(value).map_err(Error::from_engine)?;
             Ok(Exports::new(value, self.decision_epoch()))
         })();
         match outcome {
             Ok(exports) => {
                 if let Err(error) = self.vm.commit_guest_transaction() {
                     self.vm.rollback_guest_transaction();
-                    Err(Error::from(error).installation_rolled_back())
+                    Err(Error::from_engine(error).installation_rolled_back())
                 } else {
                     Ok(exports)
                 }
@@ -1059,10 +1090,11 @@ impl Rustia<()> {
 }
 
 impl Default for Rustia {
-    /// Creates a service-free interpreter with reproducible standard semantics.
-    /// Use [`Rustia::builder`] for the standard preset with native stdout.
+    /// Creates the standard preset, matching [`Rustia::builder`].
     fn default() -> Self {
-        Self::new(Profile::ReproducibleStandard)
+        Self::builder()
+            .build()
+            .expect("the standard preset is valid without caller-supplied configuration")
     }
 }
 
@@ -1112,8 +1144,8 @@ pub struct SourceSpan {
     pub end: usize,
 }
 
-impl From<rustia_lexer::Span> for SourceSpan {
-    fn from(span: rustia_lexer::Span) -> Self {
+impl SourceSpan {
+    pub(crate) fn from_lexer(span: rustia_lexer::Span) -> Self {
         Self {
             start: span.start,
             end: span.end,
@@ -1136,13 +1168,13 @@ mod tests {
         finish_entry_lifecycle, Error, FromRustia, GuestSurface, IntoRustia, OpCapability,
         OwnedTable, OwnedValue, Profile, Result, Rustia, RustiaBuilder, RustiaExecutionProfile,
         RustiaExtension, RustiaHostFunctionInfo, ServiceClock, ServiceEntropy, SourceSpan,
-        ValueType, VmErrorKind, VmSettings, RUSTIA_DECISION_RESET_ABI_VERSION,
+        ValueType, VmErrorKind, RUSTIA_DECISION_RESET_ABI_VERSION,
         RUSTIA_DEFAULT_HOST_FUNCTION_FUEL, RUSTIA_HOST_FUEL_ABI_VERSION, RUSTIA_HOST_FUEL_POLICY,
         RUSTIA_MIN_HOST_FUNCTION_FUEL,
     };
     use rustia_compiler::{compile_with_options, CompileOptions};
     use rustia_parser::parse_source;
-    use rustia_vm::Vm;
+    use rustia_vm::{Vm, VmSettings};
     use serde::{Deserialize, Serialize};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -1407,7 +1439,7 @@ return root
             .memory_limit_bytes(512 * 1024)
             .build_for_host::<()>()
             .unwrap();
-        let before = rustia.memory_stats().live_bytes;
+        let before = rustia.memory_stats().live_bytes();
 
         let globals = rustia.globals().expect_err("hardened globals must reject");
         assert!(matches!(
@@ -1433,13 +1465,16 @@ return root
                     }
                 )
         ));
-        assert_eq!(rustia.memory_stats().live_bytes, before);
+        assert_eq!(rustia.memory_stats().live_bytes(), before);
     }
 
     #[test]
     fn live_table_constructor_quota_failure_recovers_after_a_root_is_dropped() {
         let mut baseline = RustiaBuilder::standard().build().unwrap();
-        let limit = baseline.memory_stats().live_bytes.saturating_add(4 * 1024);
+        let limit = baseline
+            .memory_stats()
+            .live_bytes()
+            .saturating_add(4 * 1024);
         drop(baseline);
         let mut rustia = RustiaBuilder::standard()
             .memory_limit_bytes(limit)
@@ -2560,7 +2595,7 @@ return tostring(ok) .. \"|\" .. tostring(err) .. \"|\" .. debug.traceback(co)
             CompileOptions::default().with_source("debug.luau", source),
         )
         .unwrap();
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut vm = Vm::new(Profile::ReproducibleStandard.to_core());
         let result = vm.run(&program).unwrap();
         let traceback = vm.string_value(result).unwrap().unwrap();
         assert_eq!(
@@ -2586,7 +2621,7 @@ return testlinedefined()
             CompileOptions::default().with_source("debug.luau", source),
         )
         .unwrap();
-        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut vm = Vm::new(Profile::ReproducibleStandard.to_core());
         let result = vm.run(&program).unwrap();
         let lines = vm.string_value(result).unwrap().unwrap();
         assert_eq!(lines, "2|1");
@@ -2881,7 +2916,7 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
         let normalized = Rustia::with_settings(
             Profile::ReproducibleStandard,
             VmSettings {
-                guest_surface: GuestSurface::HardenedLeaf,
+                guest_surface: GuestSurface::HardenedLeaf.to_core(),
                 memory_limit_bytes: Some(512 * 1024),
                 ..VmSettings::default()
             },
@@ -3049,7 +3084,7 @@ return first >= 0 and second >= first
         };
         let extension = RustiaExtension::new("host").fn_pure("bias", || -> f64 { 7.0 });
         let mut rustia = RustiaBuilder::deterministic()
-            .settings(settings)
+            .raw_settings(settings)
             .wall_clock(ServiceClock::fixed(1_234.0))
             .extension(extension)
             .build()
@@ -3073,12 +3108,12 @@ return input == 5 and decision_global == 1
             .eval("return { math.random(), math.random(), math.random() }")
             .unwrap();
         assert!(rustia.vm().deterministic_collection_count() > 0);
-        let peak_before_reset = rustia.memory_stats().peak_live_bytes.unwrap();
+        let peak_before_reset = rustia.memory_stats().peak_live_bytes().unwrap();
 
         rustia.reset_decision().unwrap();
         assert_eq!(rustia.vm().deterministic_collection_count(), 0);
         assert_eq!(
-            rustia.memory_stats().peak_live_bytes,
+            rustia.memory_stats().peak_live_bytes(),
             Some(peak_before_reset),
             "lifetime peak telemetry must survive a decision reset"
         );

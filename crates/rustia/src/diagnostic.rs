@@ -3,8 +3,9 @@
 use crate::Error;
 use std::fmt::{self, Write};
 
-pub use rustia_vm::diagnostic::DiagnosticReason;
-pub use rustia_vm::diagnostic::{Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticSpan};
+pub use crate::diagnostic_data::{
+    Diagnostic, DiagnosticFrame, DiagnosticLimits, DiagnosticReason, DiagnosticSpan, SourceSnapshot,
+};
 
 /// An error formatted with source context and a call trace when available.
 ///
@@ -365,16 +366,12 @@ mod tests {
 
     #[test]
     fn zero_source_budget_keeps_location_and_execution_behavior() {
-        let settings = crate::VmSettings {
-            diagnostic_limits: super::DiagnosticLimits {
-                retained_source_bytes: 0,
-                report_bytes: 0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
         let mut vm = crate::RustiaBuilder::standard()
-            .settings(settings)
+            .diagnostic_limits(
+                super::DiagnosticLimits::default()
+                    .with_retained_source_bytes(0)
+                    .with_report_bytes(0),
+            )
             .build()
             .unwrap();
         let error = vm
@@ -509,10 +506,8 @@ mod tests {
 
     #[test]
     fn deep_calls_are_bounded_and_explicitly_truncated() {
-        let mut settings = crate::VmSettings::default();
-        settings.diagnostic_limits.frames = 3;
         let mut vm = crate::RustiaBuilder::standard()
-            .settings(settings)
+            .diagnostic_limits(super::DiagnosticLimits::default().with_frames(3))
             .build()
             .unwrap();
         let error = vm
@@ -603,17 +598,13 @@ mod tests {
     #[test]
     fn diagnostic_limits_do_not_change_guest_messages_clock_or_live_memory() {
         fn run(limits: crate::DiagnosticLimits) -> ((bool, String, f64), usize) {
-            let settings = crate::VmSettings {
-                diagnostic_limits: limits,
-                ..Default::default()
-            };
             let mut vm = crate::RustiaBuilder::standard()
-                .settings(settings)
+                .diagnostic_limits(limits)
                 .build()
                 .unwrap();
             let result = vm.load("local ok, message = pcall(function() return missing.health end)\nreturn {ok, message, os.clock()}")
                 .source_name("protected.luau").eval_serde().unwrap();
-            (result, vm.memory_stats().live_bytes)
+            (result, vm.memory_stats().live_bytes())
         }
         assert_eq!(
             run(crate::DiagnosticLimits::default()),

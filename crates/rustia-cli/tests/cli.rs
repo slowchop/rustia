@@ -122,6 +122,18 @@ fn evaluates_command_line_source() {
 }
 
 #[test]
+fn version_prints_the_package_version_without_executing_source() {
+    let expected = format!("rustia {}\n", env!("CARGO_PKG_VERSION"));
+    for flag in ["--version", "-V"] {
+        let output = run_rustia([flag], None);
+        assert_output(&output, 0, &expected, "");
+    }
+
+    let output = run_rustia(["--version", "--eval", "error('must not run')"], None);
+    assert_output(&output, 0, &expected, "");
+}
+
+#[test]
 fn guest_print_reaches_stdout_and_chunk_returns_are_ignored() {
     let output = run_rustia(
         [

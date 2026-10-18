@@ -21,7 +21,7 @@ fully non-reproducible environment at construction time.
 The composable `load(...).source_name(...).environment(...)` execution API, owned scalar and table values,
 typed host functions, extension metadata/capabilities, VM/epoch-safe `Function`/`Exports` handles, owned serde,
 transactional installation, diagnostics,
-early declarative macro sugar, and the runtime host-services slice (environment presets, stdout,
+early declarative macro sugar, facade-owned settings/errors, and the runtime host-services slice (environment presets, stdout,
 determinism-labeled clock/entropy providers, and native/WASI/browser adapters per
 [`72-host-services.md`](72-host-services.md)) are implemented.
 The concrete safe-Rust host seam is also implemented: `HostSchema` separates persistent registrations from a
@@ -59,6 +59,51 @@ Hardened leaves reject both table constructor authorities before allocation. `Ow
 acyclic snapshot layer. This advanced layer is additive, not a replacement for the existing typed facade.
 The ordered expansion is recorded in
 [Build Order](#build-order).
+
+## Application API boundary
+
+The `rustia` facade owns its profiles, capabilities, settings, memory samples,
+source/compile/runtime errors, and diagnostic data. These public types expose
+no bytecode, raw heap identity, compiler hooks, conformance flags, or collector
+schedule. Lower-level engine crates retain those controls under their own 0.x
+contracts. There are no public `From` conversions from engine failures into
+facade errors.
+
+Construct ordinary and typed interpreters through `RustiaBuilder`;
+`Rustia::default()` uses the same standard preset as `Rustia::builder()`.
+Use `without_stdout()` for a silent VM, and configure fuel, recursion, memory,
+reporting budgets, and providers through individual methods. The recursion
+limit defaults to 512 and larger requests clamp to 512. Hardened leaves reject
+output, clock, and entropy providers before constructing the VM.
+
+`builder.settings()` and `vm.settings()` return immutable `Settings` snapshots.
+Public getters describe effective limits and service declarations without
+calling providers. `identity_bytes()` is an opaque, versioned encoding of every
+effective setting, including internal options. It uses fixed-width integers and
+explicit tags so pointer width and Rust enum layout do not affect it. A host
+must still bind code/build identities, callback/provider implementations and
+captured state, and resolver results separately. Memory samples expose getters;
+tracking-disabled peaks remain `None`.
+
+Profiles, guest surfaces, capabilities, runtime error categories, source error
+categories, and diagnostic classifications are non-exhaustive. Match with a
+fallback arm. Use `error.as_vm_error().map(|e| e.kind())` for runtime categories.
+Callback adapter traits are sealed marker bounds; application-owned conversions
+implement `IntoRustia`/`FromRustia`, and borrowed host contexts implement
+`HostSchema`/`HostContext`. Engine callback factories and raw conversion methods
+are private, including when a caller uses a generic adapter bound.
+
+A captured non-string guest failure has no transferable guest identity in a
+Rust `Error`. Returning that error from a Rust callback raises its original
+formatted text as a string, even after reset or in another VM. Guest-only
+`pcall`/`xpcall` preserve the original error object. Diagnostic snapshots keep
+their existing shared reporting-budget lease; wrapping an error does not copy
+or release that lease. External typed Rust causes remain downcastable.
+
+External contract tests cover settings readback/identity, error ownership,
+callback bounds and custom conversions. Private unit tests preserve the
+collector and conformance control cases that applications no longer configure.
+The full private milestone, object API, and eventual 1.0 freeze remain open.
 
 ## Non-Negotiable Requirements
 
@@ -341,7 +386,7 @@ Typed VMs run guest module top-level code and retained functions only through `I
 `InvocationLimits::new(fuel).with_max_records(max_records).with_max_record_bytes(max_record_bytes)` names the
 three limits and creates one monotonic budget shared by every `Invocation::install`, invocation chunk
 execution, `Function::call_in`, nested guest/metamethod call, and host dispatch performed by the outer Rust closure. The
-builder/`VmSettings` initial fuel, when configured, is a VM-wide ceiling; the effective typed budget is the
+builder initial fuel, when configured, is a VM-wide ceiling; the effective typed budget is the
 lower of that ceiling and `InvocationLimits::fuel()`. The
 output bounds are checked before a record enters the journal; effects and slot writes share a single dense
 sequence starting at zero. `HostContext::record_bytes` defines the deterministic logical payload charge.
@@ -572,7 +617,7 @@ store authoritative state on the GC heap instead of in captured host slots.
    logical-clock fallbacks, and native/WASI/browser adapters; honest host-facing VM-owned telemetry
    (`Vm::memory_stats()`) is implemented, and script-visible counters read the maintained logical-live total.
 9. ✅ logical-live quotas and atomic/catchable OOM — implemented through
-   `VmSettings::memory_limit_bytes` / `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
+   `RustiaBuilder::memory_limit_bytes`; exact-commit native Linode and wasm32
    pressure validation is retained under `safe-memory-588b541`; maintained heap/program/control totals now
    remove whole-VM census scans from quota-mode instruction boundaries. The shared native/Node-V8 pressure test
    adds 96 epochs and 3,072 mixed allocation waves under a 2 MiB quota, including atomic 8 MiB allocation

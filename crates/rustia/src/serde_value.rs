@@ -181,7 +181,7 @@ impl LiveSerdeError {
     fn into_rustia(self) -> Error {
         match self {
             Self::Format(message) => Error::embed(message),
-            Self::Vm(error) => Error::from(error),
+            Self::Vm(error) => Error::from_engine(error),
         }
     }
 }

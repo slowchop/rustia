@@ -97,7 +97,8 @@ where
             .source_name
             .clone()
             .unwrap_or_else(|| "chunk".to_owned());
-        let limits = self.rustia.vm().settings().diagnostic_limits;
+        let limits =
+            crate::DiagnosticLimits::from_core(self.rustia.vm().settings().diagnostic_limits);
         let (rustia, value) = self.execute_raw()?;
         snapshot_value(rustia.vm_mut(), value)
             .and_then(T::from_rustia)
@@ -141,7 +142,8 @@ where
             .source_name
             .clone()
             .unwrap_or_else(|| "chunk".to_owned());
-        let limits = self.rustia.vm().settings().diagnostic_limits;
+        let limits =
+            crate::DiagnosticLimits::from_core(self.rustia.vm().settings().diagnostic_limits);
         let (rustia, value) = self.execute_raw()?;
         from_live(rustia.vm_mut(), value).map_err(|error| error.with_result_source(&name, limits))
     }
@@ -194,8 +196,11 @@ where
             Some(environment) => rustia
                 .vm_mut()
                 .run_with_environment(&module.program, environment)
-                .map_err(Error::from)?,
-            None => rustia.vm_mut().run(&module.program).map_err(Error::from)?,
+                .map_err(Error::from_engine)?,
+            None => rustia
+                .vm_mut()
+                .run(&module.program)
+                .map_err(Error::from_engine)?,
         };
         Ok((rustia, value))
     }
@@ -214,12 +219,12 @@ where
             .map(|environment| environment.raw(rustia.vm(), "chunk environment handle"))
             .transpose()?;
         source_map.validate(source)?;
-        let limits = rustia.vm().settings().diagnostic_limits;
+        let limits = crate::DiagnosticLimits::from_core(rustia.vm().settings().diagnostic_limits);
         let mut module = Rustia::compile_module_bytes_with_constructor_order(
             source_name.unwrap_or_else(|| "chunk".to_owned()),
             source,
-            rustia.vm().profile() == crate::Profile::Puc51Compat,
-            rustia.vm().settings().diagnostic_limits,
+            rustia.vm().profile() == rustia_vm::Profile::Puc51Compat,
+            limits,
         )
         .map_err(|error| {
             source_map

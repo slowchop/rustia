@@ -1,6 +1,5 @@
+use crate::{CompileError, SourceError, SourceSnapshot};
 use crate::{Diagnostic, DiagnosticLimits, DiagnosticSpan, SourceLocation, SourceSpan, VmError};
-use rustia_compiler::CompileError;
-use rustia_parser::SourceError;
 use std::{fmt, sync::Arc};
 
 /// A script, conversion, or host failure with optional source diagnostics.
@@ -36,6 +35,14 @@ pub enum ErrorKind {
 }
 
 impl Error {
+    pub(crate) fn from_engine(error: impl Into<EngineError>) -> Self {
+        match error.into() {
+            EngineError::Source(error) => Self::from(SourceError::from_core(error)),
+            EngineError::Compile(error) => Self::from(CompileError::from_core(error)),
+            EngineError::Vm(error) => Self::from(VmError::from_core(error)),
+        }
+    }
+
     /// Creates a message-based error for a callback or embedding operation.
     /// Use [`external`](Self::external) to preserve an existing error's type.
     pub fn embed(message: impl Into<String>) -> Self {
@@ -115,7 +122,9 @@ impl Error {
     /// Returns the VM error, if this failure came from execution or VM validation.
     ///
     /// Inspect its typed kind to distinguish limits, stale handles, and runtime
-    /// failures without parsing a message.
+    /// failures without parsing a message. Script-thrown objects remain private
+    /// to their interpreter: returning a captured guest error from a Rust
+    /// callback raises its original text as a string.
     pub fn as_vm_error(&self) -> Option<&VmError> {
         match &self.kind {
             ErrorKind::Vm(error) => Some(error),
@@ -133,9 +142,9 @@ impl Error {
             });
         }
         match &self.kind {
-            ErrorKind::Source(SourceError::Lex(error)) => Some(error.span.into()),
-            ErrorKind::Source(SourceError::Parse(error)) => Some(error.span.into()),
-            ErrorKind::Compile(error) => error.span.map(Into::into),
+            ErrorKind::Source(SourceError::Lex(error)) => Some(error.span),
+            ErrorKind::Source(SourceError::Parse(error)) => Some(error.span),
+            ErrorKind::Compile(error) => error.span,
             ErrorKind::Vm(error) => error.span.map(|span| SourceSpan {
                 start: span.0 as usize,
                 end: span.1 as usize,
@@ -192,10 +201,7 @@ impl Error {
             source: Some(Arc::from(name)),
             line,
             span,
-            snapshot: rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
-                source,
-                limits.source_bytes,
-            ),
+            snapshot: SourceSnapshot::copy_with_limit(source, limits.source_bytes),
             report_bytes: limits.report_bytes,
             ..Diagnostic::default()
         }));
@@ -204,7 +210,10 @@ impl Error {
 
     pub(crate) fn admit_diagnostic(mut self, vm: &rustia_vm::Vm) -> Self {
         if let Some(diagnostic) = &mut self.diagnostic {
-            vm.admit_host_diagnostic(Arc::make_mut(diagnostic));
+            let diagnostic = Arc::make_mut(diagnostic);
+            let mut core = diagnostic.to_core();
+            vm.admit_host_diagnostic(&mut core);
+            *diagnostic = Diagnostic::from_core(&core);
         }
         self
     }
@@ -277,5 +286,29 @@ impl std::error::Error for Error {
             ErrorKind::Embed(_) => None,
             ErrorKind::External(error) => Some(error.as_ref()),
         }
+    }
+}
+
+// Conversion machinery stays private: core packages have independently evolving
+// APIs and must not become part of the facade's public conversion contracts.
+pub(crate) enum EngineError {
+    Source(rustia_parser::SourceError),
+    Compile(rustia_compiler::CompileError),
+    Vm(rustia_vm::Error),
+}
+
+impl From<rustia_parser::SourceError> for EngineError {
+    fn from(error: rustia_parser::SourceError) -> Self {
+        Self::Source(error)
+    }
+}
+impl From<rustia_compiler::CompileError> for EngineError {
+    fn from(error: rustia_compiler::CompileError) -> Self {
+        Self::Compile(error)
+    }
+}
+impl From<rustia_vm::Error> for EngineError {
+    fn from(error: rustia_vm::Error) -> Self {
+        Self::Vm(error)
     }
 }

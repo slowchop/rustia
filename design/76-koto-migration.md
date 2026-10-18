@@ -23,7 +23,7 @@ bounded transactional records, and allocation-safe lane publication.
 
 | koto-side concept | recommended rustia replacement |
 |---|---|
-| engine/settings object | `Rustia::builder()`, `Profile`, `VmSettings`, `.build_for_host::<H>()` |
+| engine/settings object | `Rustia::builder()`, per-limit methods, `Settings` readback, `.build_for_host::<H>()` |
 | per-call execution context | `HostSchema` plus a freshly borrowed `HostContext<H>` |
 | prelude/config insertion | `insert_global`, `insert_serde` |
 | plain host callback | `add_pure`, `add_input`, `add_slot_read`, `add_effect`, `add_slot_write` |

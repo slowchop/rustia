@@ -78,7 +78,7 @@ impl Function {
         let raw_results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         let results = raw_results
             .into_iter()
             .map(|value| snapshot_value(rustia.vm_mut(), value))
@@ -98,7 +98,7 @@ impl Function {
         let results = rustia
             .vm_mut()
             .call_retained_function(function, &raw_args)
-            .map_err(Error::from)?;
+            .map_err(Error::from_engine)?;
         LiveValue::retain_many(rustia.vm_mut(), &results)
     }
 
@@ -266,7 +266,10 @@ impl Exports {
         if value.kind() != ValueKind::Function {
             return Err(Error::embed(format!("export `{name}` is not a function")));
         }
-        let value = rustia.vm_mut().retain_value(value).map_err(Error::from)?;
+        let value = rustia
+            .vm_mut()
+            .retain_value(value)
+            .map_err(Error::from_engine)?;
         Ok(Function::new(value, self.decision_epoch))
     }
 
@@ -280,7 +283,10 @@ impl Exports {
             if value.kind() != ValueKind::Function {
                 return Err(Error::embed(format!("export `{name}` is not a function")));
             }
-            let value = invocation.vm.retain_value(value).map_err(Error::from)?;
+            let value = invocation
+                .vm
+                .retain_value(value)
+                .map_err(Error::from_engine)?;
             Ok(Function::new(value, self.decision_epoch))
         })
     }
@@ -291,7 +297,7 @@ impl Exports {
         rustia
             .vm_mut()
             .raw_table_get_value(table, key)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 
     fn raw_get_in<C>(&self, invocation: &mut Invocation<'_, C>, name: &str) -> Result<RawValue>
@@ -303,77 +309,139 @@ impl Exports {
         invocation
             .vm
             .raw_table_get_value(table, key)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 }
 
-/// Converts a typed Rust closure into a synchronous script callback.
-///
-/// Implemented for closures with up to eight arguments and results supported
-/// by [`IntoHostReturn`]. Use [`crate::HostFunction`] to configure the callback.
-pub trait IntoHostFunction<Args, Return>: Send + Sync + 'static {
-    fn into_host_function(
-        self,
-        name: String,
-        fuel_cost: u32,
-        capability: OpCapability,
-    ) -> HostFunctionOp;
+// Internal adapters carry an unconstructible token because methods of a private
+// supertrait can otherwise be called through a public generic marker bound.
+pub(crate) mod adapter {
+    use super::*;
+
+    pub(crate) struct Token;
+
+    pub(crate) trait Function<Args, Return>: Send + Sync + 'static {
+        fn into_host_function(
+            self,
+            token: Token,
+            name: String,
+            fuel_cost: u32,
+            capability: OpCapability,
+        ) -> HostFunctionOp;
+    }
+
+    pub(crate) trait Value {
+        fn into_host_value(self, token: Token) -> Result<HostReturnValue>;
+    }
+
+    pub(crate) trait Argument: Sized {
+        fn from_host_argument(token: Token, vm: &mut Vm, value: RawValue) -> Result<Self>;
+    }
+
+    pub(crate) trait Return {
+        fn into_host_return(self, token: Token) -> Result<Vec<HostReturnValue>>;
+
+        fn rustia_type_names(token: Token) -> Vec<&'static str>
+        where
+            Self: Sized;
+
+        fn is_fallible(_token: Token) -> bool
+        where
+            Self: Sized,
+        {
+            false
+        }
+    }
 }
 
-/// One callback result, either copied Rust data or an existing script object.
-pub enum HostReturnValue {
+use adapter::Value as _;
+
+/// A synchronous Rust callback accepted by [`crate::HostFunction`].
+///
+/// Closures and function pointers with up to eight arguments implement this
+/// trait automatically. It can be used as a generic bound but cannot be
+/// implemented directly; use [`FromRustia`] and [`IntoRustia`] for custom data
+/// conversions.
+///
+/// ```compile_fail
+/// struct CustomAdapter;
+/// impl rustia::IntoHostFunction<(), ()> for CustomAdapter {}
+/// ```
+#[allow(private_bounds)]
+pub trait IntoHostFunction<Args, Return>:
+    adapter::Function<Args, Return> + Send + Sync + 'static
+{
+}
+
+impl<T, Args, Return> IntoHostFunction<Args, Return> for T where T: adapter::Function<Args, Return> {}
+
+pub(crate) enum HostReturnValue {
     Owned(OwnedValue),
     Live(LiveValue),
 }
 
-/// Converts one callback result to owned data or a live handle.
-pub trait IntoHostValue {
-    fn into_host_value(self) -> Result<HostReturnValue>;
-}
+/// One callback result supported by Rustia's built-in callback adapters.
+///
+/// Implement [`IntoRustia`] for custom owned data. Live [`crate::Value`],
+/// [`crate::Table`], and [`Function`] handles also implement this sealed trait.
+#[allow(private_bounds)]
+pub trait IntoHostValue: adapter::Value {}
 
-impl<T: IntoRustia> IntoHostValue for T {
-    fn into_host_value(self) -> Result<HostReturnValue> {
+impl<T: adapter::Value> IntoHostValue for T {}
+
+impl<T: IntoRustia> adapter::Value for T {
+    fn into_host_value(self, _token: adapter::Token) -> Result<HostReturnValue> {
         self.into_rustia().map(HostReturnValue::Owned)
     }
 }
 
-impl IntoHostValue for LiveValue {
-    fn into_host_value(self) -> Result<HostReturnValue> {
+impl adapter::Value for LiveValue {
+    fn into_host_value(self, _token: adapter::Token) -> Result<HostReturnValue> {
         Ok(HostReturnValue::Live(self))
     }
 }
 
-impl IntoHostValue for crate::Table {
-    fn into_host_value(self) -> Result<HostReturnValue> {
-        self.as_value().into_host_value()
+impl adapter::Value for crate::Table {
+    fn into_host_value(self, token: adapter::Token) -> Result<HostReturnValue> {
+        self.as_value().into_host_value(token)
     }
 }
 
-impl IntoHostValue for Function {
-    fn into_host_value(self) -> Result<HostReturnValue> {
-        self.as_value().into_host_value()
+impl adapter::Value for Function {
+    fn into_host_value(self, token: adapter::Token) -> Result<HostReturnValue> {
+        self.as_value().into_host_value(token)
     }
 }
 
-/// Callback arguments may use either ordinary owned conversions or rooted live handles.
-pub trait FromHostArgument: Sized {
-    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self>;
-}
+/// An owned or live argument accepted by Rustia's built-in callback adapters.
+///
+/// Implement [`FromRustia`] for custom owned arguments. Live [`crate::Value`],
+/// [`crate::Table`], and [`Function`] handles are accepted directly. This trait
+/// is sealed and can be used as a generic bound.
+///
+/// ```compile_fail
+/// struct CustomArgument;
+/// impl rustia::FromHostArgument for CustomArgument {}
+/// ```
+#[allow(private_bounds)]
+pub trait FromHostArgument: adapter::Argument + Sized {}
 
-impl<T: FromRustia> FromHostArgument for T {
-    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+impl<T: adapter::Argument> FromHostArgument for T {}
+
+impl<T: FromRustia> adapter::Argument for T {
+    fn from_host_argument(_token: adapter::Token, vm: &mut Vm, value: RawValue) -> Result<Self> {
         T::from_rustia(snapshot_value(vm, value)?)
     }
 }
 
-impl FromHostArgument for LiveValue {
-    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+impl adapter::Argument for LiveValue {
+    fn from_host_argument(_token: adapter::Token, vm: &mut Vm, value: RawValue) -> Result<Self> {
         LiveValue::retain(vm, value)
     }
 }
 
-impl FromHostArgument for crate::Table {
-    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+impl adapter::Argument for crate::Table {
+    fn from_host_argument(_token: adapter::Token, vm: &mut Vm, value: RawValue) -> Result<Self> {
         if value.kind() != ValueKind::Table {
             return Err(Error::embed("expected table".to_owned()));
         }
@@ -381,8 +449,8 @@ impl FromHostArgument for crate::Table {
     }
 }
 
-impl FromHostArgument for Function {
-    fn from_host_argument(vm: &mut Vm, value: RawValue) -> Result<Self> {
+impl adapter::Argument for Function {
+    fn from_host_argument(_token: adapter::Token, vm: &mut Vm, value: RawValue) -> Result<Self> {
         if value.kind() != ValueKind::Function {
             return Err(Error::embed("expected function".to_owned()));
         }
@@ -390,33 +458,30 @@ impl FromHostArgument for Function {
     }
 }
 
-/// Converts a callback's complete return value to script results.
+/// A complete return value accepted by Rustia's built-in callback adapters.
 ///
 /// `()` returns no results; tuples through eight elements return separate
 /// results and can mix owned data with live handles. [`Result`] reports a
 /// callback failure or converts its successful value by the same rules.
-pub trait IntoHostReturn {
-    fn into_host_return(self) -> Result<Vec<HostReturnValue>>;
+/// This trait is sealed; custom owned results use [`IntoRustia`] and can be
+/// returned as a one-element tuple.
+///
+/// ```compile_fail
+/// struct CustomReturn;
+/// impl rustia::IntoHostReturn for CustomReturn {}
+/// ```
+#[allow(private_bounds)]
+pub trait IntoHostReturn: adapter::Return {}
 
-    fn rustia_type_names() -> Vec<&'static str>
-    where
-        Self: Sized;
-
-    fn is_fallible() -> bool
-    where
-        Self: Sized,
-    {
-        false
-    }
-}
+impl<T: adapter::Return> IntoHostReturn for T {}
 
 macro_rules! impl_single_host_return {
     ($($ty:ty),+ $(,)?) => {$(
-        impl IntoHostReturn for $ty {
-            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
-                Ok(vec![self.into_host_value()?])
+        impl adapter::Return for $ty {
+            fn into_host_return(self, _token: adapter::Token) -> Result<Vec<HostReturnValue>> {
+                Ok(vec![self.into_host_value(adapter::Token)?])
             }
-            fn rustia_type_names() -> Vec<&'static str> {
+            fn rustia_type_names(_token: adapter::Token) -> Vec<&'static str> {
                 vec![type_name::<Self>()]
             }
         }
@@ -448,11 +513,11 @@ impl_single_host_return!(
 
 macro_rules! impl_owned_container_host_return {
     ($ty:ty) => {
-        impl<T: IntoRustia> IntoHostReturn for $ty {
-            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
-                Ok(vec![self.into_host_value()?])
+        impl<T: IntoRustia> adapter::Return for $ty {
+            fn into_host_return(self, _token: adapter::Token) -> Result<Vec<HostReturnValue>> {
+                Ok(vec![self.into_host_value(adapter::Token)?])
             }
-            fn rustia_type_names() -> Vec<&'static str> {
+            fn rustia_type_names(_token: adapter::Token) -> Vec<&'static str> {
                 vec![type_name::<Self>()]
             }
         }
@@ -463,24 +528,24 @@ impl_owned_container_host_return!(Option<T>);
 impl_owned_container_host_return!(Vec<T>);
 impl_owned_container_host_return!(std::collections::BTreeMap<String, T>);
 
-impl IntoHostReturn for () {
-    fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+impl adapter::Return for () {
+    fn into_host_return(self, _token: adapter::Token) -> Result<Vec<HostReturnValue>> {
         Ok(Vec::new())
     }
-    fn rustia_type_names() -> Vec<&'static str> {
+    fn rustia_type_names(_token: adapter::Token) -> Vec<&'static str> {
         Vec::new()
     }
 }
 
 macro_rules! impl_tuple_host_return {
     ($($name:ident),+ $(,)?) => {
-        impl<$($name: IntoHostValue),+> IntoHostReturn for ($($name,)+) {
+        impl<$($name: IntoHostValue),+> adapter::Return for ($($name,)+) {
             #[allow(non_snake_case)]
-            fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
+            fn into_host_return(self, _token: adapter::Token) -> Result<Vec<HostReturnValue>> {
                 let ($($name,)+) = self;
-                Ok(vec![$($name.into_host_value()?,)+])
+                Ok(vec![$($name.into_host_value(adapter::Token)?,)+])
             }
-            fn rustia_type_names() -> Vec<&'static str> {
+            fn rustia_type_names(_token: adapter::Token) -> Vec<&'static str> {
                 vec![$(type_name::<$name>()),+]
             }
         }
@@ -496,25 +561,26 @@ impl_tuple_host_return!(A, B, C, D, E, F);
 impl_tuple_host_return!(A, B, C, D, E, F, G);
 impl_tuple_host_return!(A, B, C, D, E, F, G, H);
 
-impl<T: IntoHostReturn> IntoHostReturn for Result<T> {
-    fn into_host_return(self) -> Result<Vec<HostReturnValue>> {
-        self.and_then(IntoHostReturn::into_host_return)
+impl<T: IntoHostReturn> adapter::Return for Result<T> {
+    fn into_host_return(self, _token: adapter::Token) -> Result<Vec<HostReturnValue>> {
+        self.and_then(|value| value.into_host_return(adapter::Token))
     }
-    fn rustia_type_names() -> Vec<&'static str> {
-        T::rustia_type_names()
+    fn rustia_type_names(_token: adapter::Token) -> Vec<&'static str> {
+        T::rustia_type_names(adapter::Token)
     }
-    fn is_fallible() -> bool {
+    fn is_fallible(_token: adapter::Token) -> bool {
         true
     }
 }
 
-impl<F, Return> IntoHostFunction<(), Return> for F
+impl<F, Return> adapter::Function<(), Return> for F
 where
     F: Fn() -> Return + Send + Sync + 'static,
     Return: IntoHostReturn,
 {
     fn into_host_function(
         self,
+        _token: adapter::Token,
         name: String,
         fuel_cost: u32,
         capability: OpCapability,
@@ -529,15 +595,15 @@ where
         .with_signature(
             0,
             Vec::new(),
-            Return::rustia_type_names(),
-            Return::is_fallible(),
+            Return::rustia_type_names(adapter::Token),
+            Return::is_fallible(adapter::Token),
         )
     }
 }
 
 macro_rules! impl_host_function {
     ($parameter_count:expr; $($name:ident),+ $(,)?) => {
-        impl<Func, Return, $($name),+> IntoHostFunction<($($name,)+), Return> for Func
+        impl<Func, Return, $($name),+> adapter::Function<($($name,)+), Return> for Func
         where
             Func: Fn($($name),+) -> Return + Send + Sync + 'static,
             Return: IntoHostReturn,
@@ -546,6 +612,7 @@ macro_rules! impl_host_function {
             #[allow(non_snake_case)]
             fn into_host_function(
                 self,
+                _token: adapter::Token,
                 name: String,
                 fuel_cost: u32,
                 capability: OpCapability,
@@ -568,8 +635,8 @@ macro_rules! impl_host_function {
                 .with_signature(
                     $parameter_count,
                     vec![$(type_name::<$name>()),+],
-                    Return::rustia_type_names(),
-                    Return::is_fallible(),
+                    Return::rustia_type_names(adapter::Token),
+                    Return::is_fallible(adapter::Token),
                 )
             }
         }
@@ -595,7 +662,7 @@ where
     T: FromHostArgument,
 {
     let value = args.get(index).copied().unwrap_or_else(RawValue::nil);
-    T::from_host_argument(vm, value)
+    T::from_host_argument(adapter::Token, vm, value)
         .map_err(|error| host_embed_error(function_name, format!("argument {}", index + 1), error))
 }
 
@@ -608,7 +675,7 @@ where
     Return: IntoHostReturn,
 {
     let values = value
-        .into_host_return()
+        .into_host_return(adapter::Token)
         .map_err(|error| host_embed_error(function_name, "return value", error))?;
     // Validate every live handle before allocating an owned result. Keep all live
     // values and each newly loaded owned value rooted through later conversions.
@@ -651,7 +718,7 @@ fn host_embed_error(function_name: &str, slot: impl AsRef<str>, error: Error) ->
         Error {
             kind: crate::ErrorKind::Vm(error),
             ..
-        } => *error,
+        } => (*error).into_core(),
         error => embed_to_vm_error(
             error.with_context(format!("host function `{function_name}` {}", slot.as_ref())),
         ),

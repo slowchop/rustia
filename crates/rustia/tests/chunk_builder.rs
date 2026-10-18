@@ -135,7 +135,7 @@ fn custom_environment_is_validated_before_source_compilation() {
         .exec()
         .expect_err("cross-VM environment must reject first");
     assert!(matches!(
-        error.as_vm_error().map(|error| &error.kind),
+        error.as_vm_error().map(|error| error.kind()),
         Some(VmErrorKind::RetainedValueFromDifferentVm)
     ));
     let stale = second.create_table().expect("soon-stale environment");
@@ -146,7 +146,7 @@ fn custom_environment_is_validated_before_source_compilation() {
         .exec()
         .expect_err("stale environment must reject first");
     assert!(matches!(
-        error.as_vm_error().map(|error| &error.kind),
+        error.as_vm_error().map(|error| error.kind()),
         Some(VmErrorKind::StaleRetainedValue {
             retained_epoch: 0,
             current_epoch: 1,
@@ -175,7 +175,7 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
         .build_for_host::<()>()
         .expect("hardened VM");
     assert_eq!(
-        rustia.vm_settings().guest_surface,
+        rustia.settings().guest_surface(),
         GuestSurface::HardenedLeaf
     );
     let before = rustia.memory_stats();
@@ -189,7 +189,7 @@ fn hardened_leaf_rejects_dynamic_loading_without_mutating_the_vm() {
         error.kind(),
         rustia::ErrorKind::Vm(error)
             if matches!(
-                error.kind,
+                error.kind(),
                 VmErrorKind::HardenedLeafViolation {
                     feature: "dynamic source loading"
                 }

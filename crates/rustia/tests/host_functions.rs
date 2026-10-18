@@ -193,10 +193,16 @@ fn constructor_supports_standard_profiles_and_rejects_cross_vm_calls() {
         Profile::LuauCompat,
         Profile::Puc51Compat,
     ] {
-        let mut rustia = Rustia::new(profile);
+        let mut rustia = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         let function = rustia.create_function(|x: i64| x + 1).unwrap();
         assert_eq!(function.call::<_, i64>(&mut rustia, (4_i64,)).unwrap(), 5);
-        let mut other = Rustia::new(profile);
+        let mut other = rustia::RustiaBuilder::standard()
+            .profile(profile)
+            .build()
+            .unwrap();
         assert!(function.call::<_, i64>(&mut other, (4_i64,)).is_err());
     }
 }
@@ -211,14 +217,14 @@ fn rejected_constructors_release_their_captures() {
         .memory_limit_bytes(512 * 1024)
         .build_for_host::<()>()
         .unwrap();
-    let before = rustia.memory_stats().live_bytes;
+    let before = rustia.memory_stats().live_bytes();
     let (definition, capture) = callback(1);
     assert!(matches!(
         (rustia.create_function(definition)).as_ref().err().map(|error| error.kind()),
         Some(rustia::ErrorKind::Vm(error))
-        if matches!(error.kind, VmErrorKind::HardenedLeafViolation { .. })));
+        if matches!(error.kind(), VmErrorKind::HardenedLeafViolation { .. })));
     assert!(capture.upgrade().is_none());
-    assert_eq!(before, rustia.memory_stats().live_bytes);
+    assert_eq!(before, rustia.memory_stats().live_bytes());
 
     let mut rustia = RustiaBuilder::deterministic().build().unwrap();
     assert!(rustia
@@ -258,14 +264,14 @@ fn repeated_create_and_collect_reuses_function_storage() {
         collect(&mut rustia);
     }
     rustia.reset_decision().unwrap();
-    let baseline = rustia.memory_stats().live_bytes;
+    let baseline = rustia.memory_stats().live_bytes();
     for _ in 0..64 {
         let (definition, capture) = callback(1);
         drop(rustia.create_function(definition).unwrap());
         collect(&mut rustia);
         assert!(capture.upgrade().is_none());
         rustia.reset_decision().unwrap();
-        assert_eq!(baseline, rustia.memory_stats().live_bytes);
+        assert_eq!(baseline, rustia.memory_stats().live_bytes());
     }
 }
 
@@ -275,7 +281,7 @@ fn repeated_create_and_collect_reuses_function_storage() {
 )]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn constructor_quota_failure_drops_candidate_and_recovers_after_root_release() {
-    let limit = Rustia::default().memory_stats().live_bytes + 4096;
+    let limit = Rustia::default().memory_stats().live_bytes() + 4096;
     let mut rustia = RustiaBuilder::standard()
         .memory_limit_bytes(limit)
         .build()
@@ -288,7 +294,7 @@ fn constructor_quota_failure_drops_candidate_and_recovers_after_root_release() {
             Err(error) => {
                 assert!(matches!(
         error.kind(),
-        rustia::ErrorKind::Vm(error) if matches!(error.kind, VmErrorKind::OutOfMemory)));
+        rustia::ErrorKind::Vm(error) if matches!(error.kind(), VmErrorKind::OutOfMemory)));
                 assert!(
                     capture.upgrade().is_none(),
                     "failed admission must release the candidate"
@@ -345,7 +351,7 @@ fn created_host_panics_poison_and_reset_releases_callback() {
     assert!(matches!(
         (function.call::<_, i64>(&mut rustia, ())).as_ref().err().map(|error| error.kind()),
         Some(rustia::ErrorKind::Vm(error))
-        if matches!(error.kind, VmErrorKind::HostPanicked { .. })));
+        if matches!(error.kind(), VmErrorKind::HostPanicked { .. })));
     assert!(rustia.eval::<i64>("return 1").is_err());
     rustia.reset_decision().unwrap();
     assert!(weak.upgrade().is_none());

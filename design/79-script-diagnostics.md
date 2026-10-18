@@ -15,8 +15,8 @@ Rust backtraces remain conventional function/file/line reports.
 
 `Error` privately owns a non-exhaustive `ErrorKind` and exposes `kind`, `into_kind`,
 `as_vm_error`, `source_location`, `source_span`, `diagnostic`, and `report`.
-`Error::from` wraps frontend/core
-failures; `Error::embed` is the concise message constructor and
+`Error::from` accepts facade-owned failure payloads; lower-level engine
+conversions remain private; `Error::embed` is the concise message constructor and
 `Error::external` preserves a typed host cause. `with_context` must preserve
 the original typed classification. `Display` stays concise; clients opt into
 the shared report at their existing reporting boundaries. Caught errors do
@@ -35,6 +35,15 @@ generated text around console input. They do not alter guest source names,
 line semantics, or execution. This is deliberately not a general transpiler
 source-map API. Invalid wrapper ranges fail before compilation, and failures
 inside generated text must not be attributed to the user's input.
+
+Facade runtime/source/compile errors and diagnostic data are independent public
+types. `VmError::kind()` exposes a non-exhaustive category without raw heap IDs
+or bytecode positions. Shared source snapshots preserve the existing retention
+lease across facade wrapping, reset, and VM drop. A non-string guest failure
+returned through a Rust callback is re-raised as its original formatted text;
+this prevents stale/foreign guest-object IDs crossing VM lifetimes. Guest-only
+protected calls retain their object identity. The external `facade_errors`
+regressions cover both sides of this boundary.
 
 ## Current implementation checkpoint
 

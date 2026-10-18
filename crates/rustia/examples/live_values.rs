@@ -1,7 +1,10 @@
-use rustia::{HostFunction, HostModule, Profile, Result, Rustia, Table, ValueType};
+use rustia::{HostFunction, HostModule, Profile, Result, Table, ValueType};
 
 fn main() -> Result<()> {
-    let mut rustia = Rustia::new(Profile::ReproducibleStandard);
+    let mut rustia = rustia::RustiaBuilder::standard()
+        .profile(Profile::ReproducibleStandard)
+        .build()
+        .unwrap();
     let root = rustia.create_table()?;
     let shared = rustia.create_table()?;
     shared.set(&mut rustia, "answer", 42_i32)?;

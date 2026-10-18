@@ -1,11 +1,12 @@
 use crate::function::IntoHostFunction;
 use crate::{
-    Error, GuestSurface, HostSchema, Profile, Result, Rustia, VmError, VmErrorKind, VmSettings,
+    Error, GuestSurface, HostSchema, OpCapability, Profile, Result, Rustia, Settings, VmError,
+    VmErrorKind,
 };
 use rustia_compiler::{compile_with_options, CompileOptions};
 use rustia_vm::{
-    ClockProvider, EntropyProvider, HostFunctionOp, ModuleResolver, OpCapability, Program,
-    ResolvedModule, StdoutSink,
+    ClockProvider, EntropyProvider, HostFunctionOp, ModuleResolver, Program, ResolvedModule,
+    StdoutSink, VmSettings,
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -78,8 +79,14 @@ impl RustiaExecutionProfile {
         }
     }
 
-    pub(crate) const fn from_vm(profile: Profile, guest_surface: GuestSurface) -> Self {
-        Self::new(profile, guest_surface)
+    pub(crate) const fn from_vm(
+        profile: rustia_vm::Profile,
+        guest_surface: rustia_vm::GuestSurface,
+    ) -> Self {
+        Self::new(
+            Profile::from_core(profile),
+            GuestSurface::from_core(guest_surface),
+        )
     }
 
     /// Constructs a builder whose core VM semantics exactly match this
@@ -155,23 +162,30 @@ impl RustiaBuilder {
     fn from_execution_profile(execution_profile: RustiaExecutionProfile) -> Self {
         let mut builder = Self::new();
         builder.profile = execution_profile.profile;
-        builder.settings.guest_surface = execution_profile.guest_surface;
+        builder.settings.guest_surface = execution_profile.guest_surface.to_core();
         builder
     }
 
     /// Returns the typed core execution semantics currently selected by this
     /// builder.
     pub const fn execution_profile(&self) -> RustiaExecutionProfile {
-        RustiaExecutionProfile::new(self.profile, self.settings.guest_surface)
+        RustiaExecutionProfile::new(
+            self.profile,
+            GuestSurface::from_core(self.settings.guest_surface),
+        )
     }
 
-    /// Returns the complete VM settings currently held by this builder.
+    /// Returns the effective limits and service declarations selected so far.
     ///
-    /// Embedders can use this readback to verify that separately versioned
-    /// package budgets and services match the values that will reach the VM.
-    /// The core profile and guest surface remain available as the stable,
-    /// compact [`RustiaExecutionProfile`] identity component.
-    pub const fn vm_settings(&self) -> &VmSettings {
+    /// Use [`Settings::identity_bytes`] when configuration is part of a replay
+    /// or package identity. Provider data and application code remain separate
+    /// identity inputs.
+    pub fn settings(&self) -> Settings {
+        Settings::from_core(self.profile, &self.settings)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn vm_settings(&self) -> &VmSettings {
         &self.settings
     }
 
@@ -259,16 +273,15 @@ impl RustiaBuilder {
         self
     }
 
-    /// Replaces all VM settings, including earlier limits and service choices.
-    /// Prefer the individual builder methods for ordinary configuration.
-    pub fn settings(mut self, settings: VmSettings) -> Self {
+    #[cfg(test)]
+    pub(crate) fn raw_settings(mut self, settings: VmSettings) -> Self {
         self.settings = settings;
         self
     }
 
     /// Configures host-side reports independently of guest heap and fuel limits.
     pub fn diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
-        self.settings.diagnostic_limits = limits;
+        self.settings.diagnostic_limits = limits.to_core();
         self
     }
 
@@ -281,6 +294,15 @@ impl RustiaBuilder {
     /// script `pcall` cannot catch fuel exhaustion. The default is unlimited.
     pub fn fuel(mut self, fuel: u64) -> Self {
         self.settings.initial_fuel = Some(fuel);
+        self
+    }
+
+    /// Limits nested script calls. The default and maximum are 512.
+    ///
+    /// Larger values are clamped to the engine maximum. Exhaustion returns a
+    /// distinct error that script `pcall` cannot catch.
+    pub fn recursion_limit(mut self, limit: usize) -> Self {
+        self.settings.recursion_limit = limit.min(rustia_vm::MAX_RECURSION_LIMIT);
         self
     }
 
@@ -314,6 +336,12 @@ impl RustiaBuilder {
     /// every ordinary profile, including [`Profile::DeterministicSim`].
     pub fn stdout(mut self, sink: impl FnMut(&str) + 'static) -> Self {
         self.settings.services.stdout = Some(StdoutSink::new(sink));
+        self
+    }
+
+    /// Discards script `print` output by removing the configured sink.
+    pub fn without_stdout(mut self) -> Self {
+        self.settings.services.stdout = None;
         self
     }
 
@@ -363,7 +391,7 @@ impl RustiaBuilder {
                 },
             )));
         }
-        let mut rustia = Rustia::with_settings(self.profile, self.settings);
+        let mut rustia = Rustia::from_settings(self.profile, self.settings);
         for extension in self.extensions {
             rustia.install_extension(extension)?;
         }
@@ -388,10 +416,7 @@ impl RustiaBuilder {
                     .to_owned(),
             ));
         }
-        Ok(Rustia::for_host_with_settings::<H>(
-            self.profile,
-            self.settings,
-        ))
+        Ok(Rustia::<H>::from_settings(self.profile, self.settings))
     }
 
     fn validate(&self) -> Result<()> {
@@ -469,16 +494,18 @@ impl RustiaBuilder {
             if self.settings.services.stdout.is_some()
                 || self.settings.services.wall_clock.is_some()
                 || self.settings.services.monotonic_clock.is_some()
+                || self.settings.services.entropy.is_some()
             {
                 return Err(Error::from(VmError::new(
                     VmErrorKind::HardenedLeafViolation {
-                        feature: "host output or clock services",
+                        feature: "host output, clock, or entropy services",
                     },
                 )));
             }
             if self.settings.loadstring_compiler.is_some()
                 || self.settings.module_resolver.is_some()
                 || self.settings.enable_conformance_coverage
+                || self.settings.enable_opcode_census
                 || self.settings.enable_conformance_top_level_yield
                 || self.settings.enable_conformance_int64_userdata
                 || self.settings.enable_conformance_native_userdata
@@ -595,7 +622,7 @@ impl ServiceModuleResolver {
 
 fn compile_module_source(
     module: ModuleSource,
-    profile: Profile,
+    profile: rustia_vm::Profile,
 ) -> rustia_vm::Result<ResolvedModule> {
     if module.identity.is_empty() {
         return Err(crate::value::embed_to_vm_error(Error::embed(
@@ -603,15 +630,23 @@ fn compile_module_source(
         )));
     }
     let chunk = rustia_parser::parse_source_bytes(&module.source).map_err(|error| {
-        module_compile_error(Error::from(error), &module.source_name, &module.source)
+        module_compile_error(
+            Error::from_engine(error),
+            &module.source_name,
+            &module.source,
+        )
     })?;
     let options = CompileOptions {
-        puc51_constructor_order: profile == Profile::Puc51Compat,
+        puc51_constructor_order: profile == rustia_vm::Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(module.source_name.clone(), &module.source);
     let mut program = compile_with_options(&chunk, options).map_err(|error| {
-        module_compile_error(Error::from(error), &module.source_name, &module.source)
+        module_compile_error(
+            Error::from_engine(error),
+            &module.source_name,
+            &module.source,
+        )
     })?;
     program.diagnostic_source = rustia_vm::diagnostic::SourceSnapshot::copy_with_limit(
         &module.source,
@@ -633,8 +668,8 @@ fn module_compile_error(error: Error, name: &str, source: &[u8]) -> rustia_vm::E
             .as_ref()
             .and_then(|diagnostic| diagnostic.host_cause.clone());
     }
-    error.diagnostic = diagnostic;
-    if let crate::VmErrorKind::RuntimeError { message: raw } = &mut error.kind {
+    error.diagnostic = diagnostic.map(|diagnostic| std::sync::Arc::new(diagnostic.to_core()));
+    if let rustia_vm::ErrorKind::RuntimeError { message: raw } = &mut error.kind {
         *raw = message;
     }
     error
@@ -831,7 +866,7 @@ fn web_monotonic_seconds() -> f64 {
 fn stock_loadstring_compiler(
     source: &[u8],
     source_name: Option<&[u8]>,
-    profile: Profile,
+    profile: rustia_vm::Profile,
 ) -> std::result::Result<Program, String> {
     let source_name = source_name.map_or_else(
         || loadstring_chunk_name(source),
@@ -840,7 +875,7 @@ fn stock_loadstring_compiler(
     let chunk = rustia_parser::parse_source_bytes(source)
         .map_err(|error| format!("{source_name}:1: {error}"))?;
     let options = CompileOptions {
-        puc51_constructor_order: profile == Profile::Puc51Compat,
+        puc51_constructor_order: profile == rustia_vm::Profile::Puc51Compat,
         ..CompileOptions::default()
     }
     .with_source_bytes(source_name.clone(), source);
@@ -970,7 +1005,7 @@ impl RustiaExtension {
                 name: &function.name,
                 fuel_abi_version: RUSTIA_HOST_FUEL_ABI_VERSION,
                 fuel_cost: function.fuel_cost,
-                capability: function.capability,
+                capability: OpCapability::from_core(function.capability),
                 parameter_count: function.parameter_count,
                 parameter_types: &function.parameter_types,
                 return_types: &function.return_types,
@@ -1089,8 +1124,11 @@ impl RustiaExtension {
     where
         Func: IntoHostFunction<Args, Return>,
     {
-        self.functions
-            .push(function.into_host_function(name.into(), fuel_cost, capability));
+        self.functions.push(
+            crate::HostFunction::<()>::with_capability(capability, function)
+                .fuel_cost(fuel_cost)
+                .into_op(name.into()),
+        );
         self
     }
 
@@ -1099,12 +1137,12 @@ impl RustiaExtension {
             return rustia
                 .vm_mut()
                 .install_host_functions(self.functions)
-                .map_err(Error::from);
+                .map_err(Error::from_engine);
         };
 
         rustia
             .vm_mut()
             .install_host_module(namespace, self.functions)
-            .map_err(Error::from)
+            .map_err(Error::from_engine)
     }
 }

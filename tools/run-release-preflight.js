@@ -118,6 +118,7 @@ node("tools/verify-conformance-package.js");
 node("design/render-progress.js", "--check");
 node("tools/check-project-status.js");
 node("tools/check-readme-examples.js");
+node("tools/check-facade-api.js");
 node("tools/check-readme-comparisons.js");
 run("cargo", ["doc", "--locked", "--workspace", "--lib", "--no-deps"], {
   RUSTDOCFLAGS: [process.env.RUSTDOCFLAGS, "-D warnings"].filter(Boolean).join(" "),
