@@ -22,7 +22,8 @@ mod value;
 pub mod vm;
 
 pub use bytecode::{
-    CallDescriptor, Constant, Function, Instruction, Opcode, Program, ProgramLogicalUnits,
+    CallDescriptor, CallDescriptorCall, Constant, Function, Instruction, Opcode, Program,
+    ProgramLogicalUnits,
 };
 pub use error::{Error, ErrorKind, Result};
 #[cfg(any(test, feature = "executor-diagnostics"))]

@@ -155,6 +155,7 @@ impl Error {
         matches!(
             self.kind,
             ErrorKind::FuelExhausted { .. }
+                | ErrorKind::RecursionLimit { .. }
                 | ErrorKind::HostDispatcherUnavailable
                 | ErrorKind::HostResourceExhausted { .. }
                 | ErrorKind::HostPanicked { .. }

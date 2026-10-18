@@ -1,6 +1,6 @@
 use rustia_vm::{
-    CallDescriptor, Constant, ErrorKind, Function, HardenedLeafProgram, HostFunctionOp,
-    Instruction, OpCapability, Opcode, Profile, Program, ValueKind, Vm, VmSettings,
+    CallDescriptor, CallDescriptorCall, Constant, ErrorKind, Function, HardenedLeafProgram,
+    HostFunctionOp, Instruction, OpCapability, Opcode, Profile, Program, ValueKind, Vm, VmSettings,
 };
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,8 +20,12 @@ fn expanded_program(op: Opcode) -> Program {
             | Opcode::ReturnCallExpandVarargs
             | Opcode::ReturnCallExpand2Varargs
     );
-    let mut imports = [None; 4];
-    imports[..levels - 1].fill(Some(1));
+    let calls = (0..levels)
+        .map(|level| CallDescriptorCall {
+            fixed_args: 0,
+            deferred_import: (level + 1 < levels).then_some(1),
+        })
+        .collect();
     let aux = if append {
         1 << 8
     } else if op == Opcode::CallExpand {
@@ -34,7 +38,13 @@ fn expanded_program(op: Opcode) -> Program {
         Constant::Import(vec![0]),
         Constant::CallDescriptor(Box::new(CallDescriptor {
             aux,
-            deferred_imports: imports,
+            calls,
+            append_varargs: matches!(
+                op,
+                Opcode::CallExpandVarargs
+                    | Opcode::ReturnCallExpandVarargs
+                    | Opcode::ReturnCallExpand2Varargs
+            ),
         })),
         Constant::String(b"mutate".to_vec()),
         Constant::Number(1.0),
@@ -178,19 +188,53 @@ fn malformed_call_descriptors_reject_before_running_arguments() {
     let descriptors = [
         CallDescriptor {
             aux: -1,
-            deferred_imports: [Some(1), None, None, None],
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: Some(1),
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                },
+            ],
+            append_varargs: false,
         },
         CallDescriptor {
             aux: 1,
-            deferred_imports: [Some(99), None, None, None],
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: Some(99),
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                },
+            ],
+            append_varargs: false,
         },
         CallDescriptor {
             aux: 1,
-            deferred_imports: [Some(0), None, None, None],
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: Some(0),
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                },
+            ],
+            append_varargs: false,
         },
         CallDescriptor {
             aux: 1,
-            deferred_imports: [Some(1), None, Some(1), None],
+            calls: vec![CallDescriptorCall {
+                fixed_args: 0,
+                deferred_import: Some(1),
+            }],
+            append_varargs: false,
         },
     ];
     for descriptor in descriptors {
@@ -216,7 +260,8 @@ fn call_descriptors_are_metadata_and_cannot_be_loaded_as_guest_values() {
         Function::new(vec![Instruction::new(Opcode::LoadConst, 0, 0, 0)], 1),
         vec![Constant::CallDescriptor(Box::new(CallDescriptor {
             aux: 1,
-            deferred_imports: [None; 4],
+            calls: Vec::new(),
+            append_varargs: false,
         }))],
     );
     assert!(matches!(
@@ -242,4 +287,211 @@ fn expanded_argument_mutation_uses_existing_transaction_rollback() {
         vm.get_global_value("target").unwrap().kind(),
         ValueKind::Nil
     );
+}
+
+fn recursive_expanded_program(depth: f64) -> Program {
+    let mut function = Function::new(
+        vec![
+            Instruction::new(Opcode::LoadConst, 1, 0, 1),
+            Instruction::new(Opcode::Equal, 1, 0, 1),
+            Instruction::with_aux(Opcode::JumpIfNot, 1, 0, 0, 6),
+            Instruction::new(Opcode::LoadConst, 0, 0, 2),
+            Instruction::new(Opcode::LoadConst, 1, 0, 3),
+            Instruction::new(Opcode::Return, 0, 2, 0),
+            Instruction::new(Opcode::LoadCurrentFunction, 3, 0, 0),
+            Instruction::new(Opcode::LoadConst, 4, 0, 4),
+            Instruction::new(Opcode::Sub, 4, 0, 4),
+            Instruction::new(Opcode::LoadConst, 2, 0, 5),
+            Instruction::with_aux(Opcode::ReturnCallExpand, 0, 0, 1, !8),
+        ],
+        5,
+    );
+    function.parameter_count = 1;
+    let mut program = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 0),
+                Instruction::with_aux(Opcode::Call, 0, 0, 1, 1),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            2,
+        ),
+        vec![
+            Constant::Number(depth),
+            Constant::Number(0.0),
+            Constant::Number(4.0),
+            Constant::Number(5.0),
+            Constant::Number(1.0),
+            Constant::String(b"abc".to_vec()),
+            Constant::String(b"count".to_vec()),
+            Constant::Import(vec![6]),
+            Constant::CallDescriptor(Box::new(CallDescriptor {
+                aux: 0,
+                calls: vec![
+                    CallDescriptorCall {
+                        fixed_args: 1,
+                        deferred_import: Some(7),
+                    },
+                    CallDescriptorCall {
+                        fixed_args: 1,
+                        deferred_import: None,
+                    },
+                ],
+                append_varargs: false,
+            })),
+        ],
+    );
+    program.functions.push(function);
+    program
+}
+
+fn install_counter(vm: &mut Vm) {
+    vm.install_host_function(HostFunctionOp::new(
+        "count",
+        1,
+        OpCapability::Pure,
+        Arc::new(|vm, args| {
+            vm.collect_garbage();
+            Ok(vec![
+                rustia_vm::Value::number(args.len() as f64),
+                rustia_vm::Value::number(7.0),
+            ])
+        }),
+    ))
+    .unwrap();
+}
+
+#[test]
+fn recursive_expanded_arguments_use_iterative_self_call_frames() {
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(1).unwrap(),
+            memory_limit_bytes: Some(2 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
+    install_counter(&mut vm);
+    for depth in [1.0, 2.0, 20.0, 100.0] {
+        assert_eq!(
+            vm.run(&recursive_expanded_program(depth))
+                .unwrap_or_else(|e| panic!("depth {depth}: {e:?}"))
+                .as_number(),
+            Some(3.0)
+        );
+    }
+}
+
+#[test]
+fn recursive_expanded_arguments_exhaust_the_structured_recursion_limit() {
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            recursion_limit: 12,
+            ..VmSettings::default()
+        },
+    );
+    install_counter(&mut vm);
+    assert!(matches!(
+        vm.run(&recursive_expanded_program(100.0)).unwrap_err().kind,
+        ErrorKind::RecursionLimit { limit: 12 }
+    ));
+
+    let original = recursive_expanded_program(100.0);
+    let mut constants = original.constants().to_vec();
+    constants.push(Constant::String(b"pcall".to_vec()));
+    let mut protected = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 9),
+                Instruction::with_aux(Opcode::LoadFunction, 1, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 2, 0, 0),
+                Instruction::new(Opcode::CallMulti, 0, 2, 2),
+                Instruction::new(Opcode::Return, 0, 2, 0),
+            ],
+            3,
+        ),
+        constants,
+    );
+    protected.functions = original.functions;
+    assert!(matches!(
+        vm.run(&protected).unwrap_err().kind,
+        ErrorKind::RecursionLimit { limit: 12 }
+    ));
+}
+
+#[test]
+fn general_descriptor_preserves_results_through_many_call_levels() {
+    let original = expanded_program(Opcode::CallExpand);
+    let mut constants = original.constants().to_vec();
+    constants[2] = Constant::CallDescriptor(Box::new(CallDescriptor {
+        aux: 1,
+        calls: (0..100)
+            .map(|level| CallDescriptorCall {
+                fixed_args: 0,
+                deferred_import: (level != 99).then_some(1),
+            })
+            .collect(),
+        append_varargs: false,
+    }));
+    let program = Program::new(
+        Function::new(
+            vec![
+                Instruction::with_aux(Opcode::GetGlobal, 99, 0, 0, 3),
+                Instruction::with_aux(Opcode::CallExpand, 0, 0, 0, !2),
+                Instruction::new(Opcode::Return, 0, 1, 0),
+            ],
+            100,
+        ),
+        constants,
+    );
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    install_callbacks(&mut vm, Arc::new(AtomicUsize::new(0)), true);
+    let result = vm.run(&program).unwrap();
+    assert_eq!(
+        vm.string_value(result).unwrap().as_deref(),
+        Some("fresh argument survives deferred lookup and collection")
+    );
+}
+
+#[test]
+fn stackless_pcall_shortcuts_cannot_swallow_configured_recursion_limits() {
+    for tail in [false, true] {
+        let original = recursive_expanded_program(100.0);
+        let mut constants = original.constants().to_vec();
+        constants.push(Constant::String(b"pcall".to_vec()));
+        let mut code = vec![
+            Instruction::with_aux(Opcode::GetGlobal, 0, 0, 0, 9),
+            Instruction::new(Opcode::LoadCurrentFunction, 1, 0, 0),
+        ];
+        if tail {
+            code.push(Instruction::with_aux(
+                Opcode::ReturnCall,
+                0,
+                0,
+                0,
+                (1 << 8) | 1,
+            ));
+        } else {
+            code.push(Instruction::new(Opcode::CallMulti, 0, 1, 2));
+            code.push(Instruction::new(Opcode::Return, 0, 2, 0));
+        }
+        let mut program = Program::new(original.main, constants);
+        program.functions.push(Function::new(code, 2));
+        let mut vm = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                recursion_limit: 12,
+                ..VmSettings::default()
+            },
+        );
+        assert!(
+            matches!(
+                vm.run(&program).unwrap_err().kind,
+                ErrorKind::RecursionLimit { limit: 12 }
+            ),
+            "tail={tail}"
+        );
+    }
 }

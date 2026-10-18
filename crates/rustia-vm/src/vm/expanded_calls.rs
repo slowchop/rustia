@@ -1,7 +1,9 @@
 //! Resumable expanded calls whose recognized builtin callees are looked up
 //! after argument evaluation (Luau 0.709 `compileExprCall` ordering).
 use super::*;
-use crate::bytecode::{expanded_call_count, CallDescriptor};
+#[cfg(test)]
+use crate::bytecode::CallDescriptorCall;
+use crate::bytecode::{supports_call_descriptor, CallDescriptor};
 
 #[derive(Clone)]
 enum ExpandedCallee {
@@ -29,6 +31,12 @@ pub(super) struct ExpandedCallState {
     finish: ExpandedFinish,
     depth: usize,
     call_site: Option<ErrorLocation>,
+}
+
+pub(super) enum ExpandedCallFlow {
+    Return(Vec<Value>),
+    Yield(CoroutineYield),
+    SelfCall(Vec<Value>),
 }
 
 fn invalid(reason: &'static str) -> Error {
@@ -59,26 +67,51 @@ fn import_length(program: &Program, index: u32) -> Result<u8> {
 }
 
 pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<&CallDescriptor> {
-    let count = expanded_call_count(instruction.op)
-        .ok_or_else(|| invalid("instruction does not support deferred callees"))?;
+    if !supports_call_descriptor(instruction.op) {
+        return Err(invalid(
+            "instruction does not support expanded call descriptors",
+        ));
+    }
     let Some(Constant::CallDescriptor(descriptor)) =
         program.constants().get((!instruction.aux) as usize)
     else {
         return Err(invalid("expanded call must reference a call descriptor"));
     };
     if descriptor.aux < 0 {
+        return Err(invalid("call descriptor contains negative terminal data"));
+    }
+    if !(2..=256).contains(&descriptor.calls.len()) {
         return Err(invalid(
-            "call descriptor contains a negative argument window",
+            "expanded call descriptor requires between two and 256 calls",
         ));
     }
-    if descriptor.deferred_imports[count..]
-        .iter()
-        .any(Option::is_some)
-    {
-        return Err(invalid("call descriptor contains unused deferred imports"));
+    match instruction.op {
+        Opcode::CallExpand if descriptor.aux > i32::from(u8::MAX) => {
+            return Err(invalid("invalid expanded function result count"));
+        }
+        Opcode::CallExpand => {}
+        Opcode::AppendCallExpand => {
+            if descriptor.aux & 0xff != 0 {
+                return Err(invalid(
+                    "expanded append descriptor contains unused argument bits",
+                ));
+            }
+            unpack_append_call_expand_aux(descriptor.aux)?;
+        }
+        _ if descriptor.aux != 0 => {
+            return Err(invalid("expanded call descriptor contains unused aux data"))
+        }
+        _ => {}
     }
-    for index in descriptor.deferred_imports.iter().flatten() {
-        import_length(program, *index)?;
+    let mut window = 0usize;
+    for call in &descriptor.calls {
+        window += 1 + usize::from(call.fixed_args);
+        if window > 256 {
+            return Err(invalid("expanded call descriptor exceeds register space"));
+        }
+        if let Some(index) = call.deferred_import {
+            import_length(program, index)?;
+        }
     }
     Ok(descriptor)
 }
@@ -108,48 +141,7 @@ impl ExpandedCallState {
         } else {
             instruction.a
         });
-        let mut counts = [0usize; 4];
-        let count =
-            expanded_call_count(instruction.op).ok_or_else(|| invalid("invalid expanded call"))?;
-        let mut append_varargs = false;
-        match instruction.op {
-            Opcode::CallExpand => {
-                if aux > i32::from(u8::MAX) {
-                    return Err(invalid("invalid expanded function result count"));
-                }
-                counts[0] = usize::from(instruction.b);
-                counts[1] = usize::from(instruction.c);
-            }
-            Opcode::ReturnCallExpand => {
-                let (outer, inner) = unpack_expand_aux(aux)?;
-                counts[..2].copy_from_slice(&[usize::from(outer), usize::from(inner)]);
-            }
-            Opcode::AppendCallExpand => {
-                let (_, inner) = unpack_append_call_expand_aux(aux)?;
-                counts[..2].copy_from_slice(&[usize::from(instruction.c), usize::from(inner)]);
-            }
-            Opcode::CallExpand2
-            | Opcode::ReturnCallExpand2
-            | Opcode::ReturnCallExpand2Varargs
-            | Opcode::CallExpand3 => {
-                let (outer, middle, inner) = unpack_nested_expand_aux(aux)?;
-                counts[..3].copy_from_slice(&[
-                    usize::from(outer),
-                    usize::from(middle),
-                    usize::from(inner),
-                ]);
-                if instruction.op == Opcode::CallExpand3 {
-                    counts[3] = usize::from(instruction.c);
-                }
-                append_varargs = instruction.op == Opcode::ReturnCallExpand2Varargs;
-            }
-            Opcode::CallExpandVarargs | Opcode::ReturnCallExpandVarargs => {
-                let (outer, inner) = unpack_expand_varargs_aux(aux)?;
-                counts[..2].copy_from_slice(&[usize::from(outer), usize::from(inner)]);
-                append_varargs = true;
-            }
-            _ => return Err(invalid("invalid expanded call")),
-        }
+        let count = descriptor.calls.len();
         let finish = if returning {
             let first = usize::from(instruction.a);
             let end = first + usize::from(instruction.b);
@@ -190,20 +182,20 @@ impl ExpandedCallState {
             .try_reserve_exact(count)
             .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         let mut cursor = base;
-        for (level, argc) in counts[..count].iter().copied().enumerate() {
-            let end = cursor + 1 + argc;
+        for (level, call) in descriptor.calls.iter().enumerate() {
+            let end = cursor + 1 + usize::from(call.fixed_args);
             let values = registers.get(cursor..end).ok_or_else(|| {
                 Error::new(ErrorKind::RegisterOutOfBounds {
                     register: end,
                     max: registers.len(),
                 })
             })?;
-            let callee = match descriptor.deferred_imports[level] {
+            let callee = match call.deferred_import {
                 Some(index) => ExpandedCallee::Import(index),
                 None => ExpandedCallee::Early(values[0]),
             };
             let mut args = try_copy_vec(&values[1..])?;
-            if append_varargs && level + 1 == count {
+            if descriptor.append_varargs && level + 1 == count {
                 args.try_reserve(varargs.len())
                     .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
                 args.extend_from_slice(varargs);
@@ -338,8 +330,9 @@ impl Vm {
         program: &Program,
         state: &mut ExpandedCallState,
         mut results: Vec<Value>,
+        current_function: Option<Value>,
         fuel: &mut Execution<'_>,
-    ) -> VmFlowResult<Vec<Value>> {
+    ) -> Result<ExpandedCallFlow> {
         while !state.calls.is_empty() {
             let root_mark = self
                 .mutate_last_call_stack_frame(|frame| {
@@ -390,6 +383,11 @@ impl Vm {
                 self.mutate_last_call_stack_frame(|frame| {
                     extend_heap_backed_roots(&mut frame.stackless_roots, &[callee]);
                 });
+                if current_function.and_then(Value::as_function).is_some()
+                    && current_function.and_then(Value::as_function) == callee.as_function()
+                {
+                    return Ok(ExpandedCallFlow::SelfCall(call.args));
+                }
                 self.call_value_with_site_resumable(
                     program,
                     callee,
@@ -398,14 +396,18 @@ impl Vm {
                     state.call_site.clone(),
                     fuel,
                 )
+                .map(|flow| match flow {
+                    VmFlow::Return(results) => ExpandedCallFlow::Return(results.into_vec()),
+                    VmFlow::Yield(suspension) => ExpandedCallFlow::Yield(suspension),
+                })
             })();
             self.truncate_stackless_self_call_roots(root_mark);
             match outcome? {
-                VmFlow::Return(returned) => results = returned.into_vec(),
-                VmFlow::Yield(suspension) => return Ok(VmFlow::Yield(suspension)),
+                ExpandedCallFlow::Return(returned) => results = returned,
+                other => return Ok(other),
             }
         }
-        Ok(VmFlow::Return(results))
+        Ok(ExpandedCallFlow::Return(results))
     }
 }
 
@@ -536,7 +538,17 @@ mod tests {
                 Constant::Import(vec![1, 2]),
                 Constant::CallDescriptor(Box::new(CallDescriptor {
                     aux: 1,
-                    deferred_imports: [Some(3), None, None, None],
+                    calls: vec![
+                        CallDescriptorCall {
+                            fixed_args: 0,
+                            deferred_import: Some(3),
+                        },
+                        CallDescriptorCall {
+                            fixed_args: 0,
+                            deferred_import: None,
+                        },
+                    ],
+                    append_varargs: false,
                 })),
             ],
         );
@@ -557,15 +569,49 @@ mod tests {
             plain.main.clone(),
             vec![Constant::CallDescriptor(Box::new(CallDescriptor {
                 aux: 1,
-                deferred_imports: [None; 4],
+                calls: vec![
+                    CallDescriptorCall {
+                        fixed_args: 0,
+                        deferred_import: None
+                    };
+                    2
+                ],
+                append_varargs: false,
             }))],
         );
         let (plain_live, plain_reserved) = plain.memory_usage(true);
         let (metadata_live, metadata_reserved) = metadata.memory_usage(true);
-        assert_eq!(metadata_live - plain_live, size_of::<CallDescriptor>());
+        assert_eq!(
+            metadata_live - plain_live,
+            size_of::<CallDescriptor>() + 2 * size_of::<CallDescriptorCall>()
+        );
         assert_eq!(
             metadata_reserved - plain_reserved,
-            size_of::<CallDescriptor>()
+            size_of::<CallDescriptor>() + 2 * size_of::<CallDescriptorCall>()
         );
+    }
+
+    #[test]
+    fn compatibility_call_limit_is_distinct_from_the_application_recursion_limit() {
+        let configured = Vm::new(Profile::ReproducibleStandard);
+        let error = configured.recursion_limit_error();
+        assert!(matches!(error.kind, ErrorKind::RecursionLimit { .. }));
+        assert!(error.is_transaction_abort());
+        assert!(error.is_always_hard_abort());
+        let compatibility = Vm::with_settings(
+            Profile::ReproducibleStandard,
+            VmSettings {
+                enable_conformance_luau_call_limit: true,
+                ..VmSettings::default()
+            },
+        );
+        let error = compatibility
+            .check_recursion_depth(LUAU_CONFORMANCE_CALL_LIMIT)
+            .unwrap_err();
+        assert!(
+            matches!(error.kind, ErrorKind::RuntimeError { ref message } if message == "stack overflow")
+        );
+        assert!(!error.is_transaction_abort());
+        assert!(!error.is_always_hard_abort());
     }
 }

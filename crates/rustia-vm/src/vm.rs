@@ -3,7 +3,7 @@
 mod expanded_calls;
 mod host_functions;
 
-use expanded_calls::ExpandedCallState;
+use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
@@ -4169,6 +4169,11 @@ impl Vm {
                             &varargs,
                             &pending_return_prefixes,
                         );
+                        if matches!(continuation, BytecodeContinuation::ExpandedCalls(_)) {
+                            self.truncate_stackless_self_call_roots(root_mark);
+                            resumed_continuation = Some((continuation, returned.into_vec()));
+                            break;
+                        }
                         let continuation_result = self.apply_bytecode_continuation(
                             program,
                             &mut pc,
@@ -4260,6 +4265,77 @@ impl Vm {
                 }};
             }
 
+            // Expanded argument calls use the same iterative self-call frames as
+            // ordinary calls. Saving the pending chain avoids adding a native
+            // Rust stack frame for each recursive argument expression.
+            macro_rules! enter_expanded_self_call {
+                ($state:expr, $args:expr) => {{
+                    (|| -> Result<()> {
+                        let call_args = $args;
+                        let next_depth = context
+                            .depth
+                            .saturating_add(stackless_self_calls.len())
+                            .saturating_add(1);
+                        if self.recursion_depth_exceeded(next_depth) {
+                            return Err(attach_instruction_source(
+                                program,
+                                function,
+                                pc.saturating_sub(1),
+                                self.recursion_limit_error(),
+                            ));
+                        }
+                        stackless_self_calls.try_reserve(1).map_err(|_| {
+                            Error::new(ErrorKind::OutOfMemory).without_source_location()
+                        })?;
+                        let continuation = BytecodeContinuation::ExpandedCalls($state);
+                        let root_mark = self.push_stackless_self_call_roots(
+                            &registers,
+                            &register_cells,
+                            &varargs,
+                            &pending_return_prefixes,
+                            &continuation,
+                        );
+                        let debug_frame = stackless_self_call_debug_frame(
+                            &context,
+                            function,
+                            instruction_source_location(program, function, pc.saturating_sub(1)),
+                        );
+                        let debug_mark = self.push_stackless_self_call_debug_frame(&debug_frame);
+                        stackless_self_calls.push(StacklessSelfCallFrame {
+                            pc,
+                            registers: std::mem::take(&mut registers),
+                            register_cells: std::mem::take(&mut register_cells),
+                            varargs: std::mem::take(&mut varargs),
+                            pending_return_prefixes: std::mem::take(&mut pending_return_prefixes),
+                            continuation,
+                            tail_call_count,
+                            root_mark,
+                            debug_mark,
+                            debug_frame,
+                        });
+                        registers.resize(function.max_registers, Value::nil());
+                        register_cells.resize(function.max_registers, None);
+                        reset_current_function_frame(
+                            function,
+                            &mut registers,
+                            &mut register_cells,
+                            &mut varargs,
+                            &call_args,
+                        )?;
+                        self.validate_conformance_native_parameter_types(function, &registers)?;
+                        self.update_current_gc_roots(
+                            &registers,
+                            &register_cells,
+                            &varargs,
+                            &pending_return_prefixes,
+                        );
+                        pc = 0;
+                        tail_call_count = 0;
+                        Ok(())
+                    })()
+                }};
+            }
+
             'run_function_loop: loop {
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
                     self.update_current_gc_roots(
@@ -4271,7 +4347,13 @@ impl Vm {
                     let (continuation, resume_results) = match continuation {
                         BytecodeContinuation::ExpandedCalls(mut state) => {
                             let outcome = self
-                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    resume_results,
+                                    context.current_function,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(
                                         program,
@@ -4281,7 +4363,13 @@ impl Vm {
                                     )
                                 });
                             match outcome {
-                                Ok(VmFlow::Yield(suspension)) => {
+                                Ok(ExpandedCallFlow::SelfCall(args)) => {
+                                    if let Err(error) = enter_expanded_self_call!(state, args) {
+                                        unwind_stackless_error!(error);
+                                    }
+                                    continue 'run_function_loop;
+                                }
+                                Ok(ExpandedCallFlow::Yield(suspension)) => {
                                     return self.suspend_bytecode_frame(
                                         program_id,
                                         &context,
@@ -4296,7 +4384,7 @@ impl Vm {
                                         suspension,
                                     );
                                 }
-                                Ok(VmFlow::Return(results)) => {
+                                Ok(ExpandedCallFlow::Return(results)) => {
                                     match state.finish(
                                         &mut registers,
                                         &mut pending_return_prefixes,
@@ -4545,7 +4633,7 @@ impl Vm {
 
                         pc += 1;
                         if instruction.aux < 0
-                            && crate::bytecode::expanded_call_count(instruction.op).is_some()
+                            && crate::bytecode::supports_call_descriptor(instruction.op)
                         {
                             let call_site = instruction_source_location(program, function, pc - 1);
                             let mut state = ExpandedCallState::new(
@@ -4553,17 +4641,27 @@ impl Vm {
                                 instruction,
                                 &registers,
                                 &varargs,
-                                context.depth,
+                                context.depth.saturating_add(stackless_self_calls.len()),
                                 call_site,
                             )
                             .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
                             let results = match self
-                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    Vec::new(),
+                                    context.current_function,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {
-                                VmFlow::Return(results) => results,
-                                VmFlow::Yield(suspension) => {
+                                ExpandedCallFlow::Return(results) => results,
+                                ExpandedCallFlow::SelfCall(args) => {
+                                    enter_expanded_self_call!(state, args)?;
+                                    continue;
+                                }
+                                ExpandedCallFlow::Yield(suspension) => {
                                     return self.suspend_bytecode_frame(
                                         program_id,
                                         &context,
@@ -4911,8 +5009,7 @@ impl Vm {
                                     &mut pending_return_prefixes,
                                     ReturnValues::from_slice(&registers[first..end]),
                                 );
-                                unwind_stackless_return!(returned);
-                                continue;
+                                return Ok(VmFlow::Return(returned));
                             }
                             Opcode::ReturnCall => {
                                 let prefix_count = usize::from(instruction.b);
@@ -4983,10 +5080,11 @@ impl Vm {
                                         program,
                                         function,
                                         pc - 1,
-                                        Error::new(ErrorKind::RecursionLimit {
-                                            limit: stackless_recursion_limit,
-                                        }),
+                                        self.recursion_limit_error(),
                                     );
+                                    if error_is_uncatchable(&error, fuel) {
+                                        return Err(error);
+                                    }
                                     let error = self.error_object(error);
                                     results.push(error);
                                     return Ok(VmFlow::Return(finish_function_results(
@@ -5005,9 +5103,7 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         ));
                                     }
                                     if prefix_count > 0 {
@@ -6050,9 +6146,7 @@ impl Vm {
                                                 program,
                                                 function,
                                                 pc - 1,
-                                                Error::new(ErrorKind::RecursionLimit {
-                                                    limit: stackless_recursion_limit,
-                                                }),
+                                                self.recursion_limit_error(),
                                             ));
                                         }
                                         if instruction.aux < 0
@@ -6137,9 +6231,7 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         ));
                                     }
                                     let call_args = registers[args_start..args_end].to_vec();
@@ -6368,10 +6460,11 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::RecursionLimit {
-                                                limit: stackless_recursion_limit,
-                                            }),
+                                            self.recursion_limit_error(),
                                         );
+                                        if error_is_uncatchable(&error, fuel) {
+                                            return Err(error);
+                                        }
                                         let error = self.error_object(error);
                                         write_call_results(
                                             &mut registers,
@@ -12646,11 +12739,23 @@ impl Vm {
 
     fn check_recursion_depth(&self, depth: usize) -> Result<()> {
         if self.recursion_depth_exceeded(depth) {
-            return Err(Error::new(ErrorKind::RecursionLimit {
-                limit: self.stackless_recursion_limit(),
-            }));
+            return Err(self.recursion_limit_error());
         }
         Ok(())
+    }
+
+    fn recursion_limit_error(&self) -> Error {
+        if self.settings.enable_conformance_luau_call_limit {
+            // Luau's own compatibility call limit is a catchable guest error;
+            // application-configured resource limits always abort the host call.
+            Error::new(ErrorKind::RuntimeError {
+                message: "stack overflow".to_owned(),
+            })
+        } else {
+            Error::new(ErrorKind::RecursionLimit {
+                limit: self.settings.recursion_limit,
+            })
+        }
     }
 
     fn recursion_depth_exceeded(&self, depth: usize) -> bool {
@@ -20815,8 +20920,7 @@ fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
             ));
         }
         for (pc, instruction) in function.code.iter().enumerate() {
-            if instruction.aux < 0 && crate::bytecode::expanded_call_count(instruction.op).is_some()
-            {
+            if instruction.aux < 0 && crate::bytecode::supports_call_descriptor(instruction.op) {
                 expanded_calls::descriptor(program, *instruction)
                     .map_err(|e| attach_instruction_source(program, function, pc, e))?;
             }

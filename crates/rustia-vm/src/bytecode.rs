@@ -167,27 +167,38 @@ pub enum Constant {
     CallDescriptor(Box<CallDescriptor>),
 }
 
-/// Per-level callee lookup order for a fused expanded call, outermost first.
-/// Unused entries must be `None`; each present entry references an import constant.
+/// Argument windows and callee lookup order for an expanded call, outermost first.
+/// Each window contains a callee followed by its fixed arguments. The innermost
+/// window may additionally consume the current function's varargs.
 #[derive(Clone, Debug)]
 pub struct CallDescriptor {
+    /// Terminal data: result count for `CallExpand`, append index shifted left
+    /// eight bits for `AppendCallExpand`, and zero for other call forms.
     pub aux: i32,
-    pub deferred_imports: [Option<u32>; 4],
+    pub calls: Vec<CallDescriptorCall>,
+    pub append_varargs: bool,
 }
 
-pub(crate) fn expanded_call_count(op: Opcode) -> Option<usize> {
-    match op {
+#[derive(Clone, Debug)]
+pub struct CallDescriptorCall {
+    pub fixed_args: u8,
+    /// Import constant resolved after this level's arguments have completed.
+    pub deferred_import: Option<u32>,
+}
+
+pub(crate) fn supports_call_descriptor(op: Opcode) -> bool {
+    matches!(
+        op,
         Opcode::CallExpand
-        | Opcode::CallExpandVarargs
-        | Opcode::ReturnCallExpand
-        | Opcode::ReturnCallExpandVarargs
-        | Opcode::AppendCallExpand => Some(2),
-        Opcode::CallExpand2 | Opcode::ReturnCallExpand2 | Opcode::ReturnCallExpand2Varargs => {
-            Some(3)
-        }
-        Opcode::CallExpand3 => Some(4),
-        _ => None,
-    }
+            | Opcode::CallExpandVarargs
+            | Opcode::ReturnCallExpand
+            | Opcode::ReturnCallExpandVarargs
+            | Opcode::AppendCallExpand
+            | Opcode::CallExpand2
+            | Opcode::ReturnCallExpand2
+            | Opcode::ReturnCallExpand2Varargs
+            | Opcode::CallExpand3
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -678,9 +689,23 @@ impl Program {
                         reserved = reserved
                             .saturating_add(path.capacity().saturating_mul(size_of::<u32>()));
                     }
-                    Constant::CallDescriptor(_) => {
-                        live = live.saturating_add(size_of::<CallDescriptor>());
-                        reserved = reserved.saturating_add(size_of::<CallDescriptor>());
+                    Constant::CallDescriptor(descriptor) => {
+                        live = live
+                            .saturating_add(size_of::<CallDescriptor>())
+                            .saturating_add(
+                                descriptor
+                                    .calls
+                                    .len()
+                                    .saturating_mul(size_of::<CallDescriptorCall>()),
+                            );
+                        reserved = reserved
+                            .saturating_add(size_of::<CallDescriptor>())
+                            .saturating_add(
+                                descriptor
+                                    .calls
+                                    .capacity()
+                                    .saturating_mul(size_of::<CallDescriptorCall>()),
+                            );
                     }
                     Constant::Nil | Constant::Boolean(_) | Constant::Number(_) => {}
                 }

@@ -341,7 +341,7 @@ pub fn instruction_facts(
     instruction: Instruction,
 ) -> InstructionFacts {
     let instruction =
-        if instruction.aux < 0 && crate::bytecode::expanded_call_count(instruction.op).is_some() {
+        if instruction.aux < 0 && crate::bytecode::supports_call_descriptor(instruction.op) {
             match program.constants().get((!instruction.aux) as usize) {
                 Some(crate::bytecode::Constant::CallDescriptor(descriptor)) => Instruction {
                     aux: descriptor.aux,
