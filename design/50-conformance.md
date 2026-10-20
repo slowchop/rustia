@@ -1089,3 +1089,25 @@ loading and transactional installation/reload behavior.
 - **[c10]** newproxy: keep it (Luau parity) or treat as a deferred/optional userdata feature, given userdata lands at P4. Decide whether Deterministic gates it.
 - **[c10]** Exact error-message wording parity (e.g. 'cannot resume dead coroutine', 'attempt to yield across metamethod/C-call boundary', 'attempt to compare X with Y'): commit to byte-exact match vs semantically-equivalent. Differential tests will pin these; decide tolerance.
 - **[c10]** Whether host-fn (native) frames should ever be made yieldable beyond the Luau-blessed set (pcall/xpcall/resume/wrap) via the embedding API, and how that interacts with the C-call boundary error.
+
+### Rejected metamethod yields
+
+`runtime.metamethod-yield-error` checks ten lookup, operator and native callback
+contexts against Luau 0.709. A forbidden yield produces the exact unprefixed
+`attempt to yield across metamethod/C-call boundary` error. The coroutine is
+dead afterward. The four-profile facade regression also verifies subsequent VM
+execution. This does not change typed invocation hard-abort rules.
+
+### Colon-call evaluation order
+
+`runtime.method-callee-evaluation-order` captures computed receivers and upvalues
+first, evaluates arguments, then reads a local receiver and selects/checks the
+method. This follows pinned Luau `getExprLocalReg`, including parenthesized locals. Ordinary dot calls still capture
+the callee before arguments. Expanded colon calls retain the method-name constant
+as validated call metadata, resolving it only after nested arguments complete,
+including suspension. This uses the existing continuation driver and roots the
+computed receiver with the argument list; deferred local receivers read the
+restored caller registers/cells after nested execution. Table-constructor method
+calls preserve trailing varargs. The checked lookup charges three fuel units
+and three logical steps, matching a checked `NameCall`. A deferred local read
+charges the existing one-unit register/cell read separately.

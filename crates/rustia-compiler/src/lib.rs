@@ -2201,6 +2201,19 @@ impl Compiler {
                     ));
                 }
                 let original_next_register = self.next_register;
+                if self.method_call_has_trailing_varargs(args) {
+                    self.try_compile_general_expanded_call(
+                        ExpandedCallTarget::Method { object, method },
+                        args,
+                        ExpandedCallFinish::Append {
+                            table: table_register,
+                            index: array_index,
+                        },
+                        expr.span(),
+                    )?;
+                    self.free_registers_back_to(original_next_register);
+                    return Ok(());
+                }
                 let mut argc = argc;
                 if self.method_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
@@ -2238,14 +2251,10 @@ impl Compiler {
                     expr.span(),
                 )?;
                 let self_register = checked_register_offset(callee_register, 1, expr.span())?;
-                self.compile_expr_to(object, self_register)?;
-                self.emit_namecall_lookup(
-                    callee_register,
-                    self_register,
-                    method,
-                    false,
-                    expr.span(),
-                )?;
+                if self.method_receiver_register(object).is_none() {
+                    self.compile_expr_to(object, self_register)?;
+                }
+
                 if self.method_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
@@ -2274,6 +2283,16 @@ impl Compiler {
                         self.compile_expr_to(arg, register)?;
                     }
                 }
+                if self.method_receiver_register(object).is_some() {
+                    self.compile_expr_to(object, self_register)?;
+                }
+                self.emit_namecall_lookup(
+                    callee_register,
+                    self_register,
+                    method,
+                    true,
+                    expr.span(),
+                )?;
                 self.emit_source_mapped_instruction(
                     Instruction::with_aux(
                         Opcode::AppendCall,
@@ -3982,12 +4001,17 @@ impl Compiler {
 
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
-        self.compile_expr_to(object, self_register)?;
-        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
+        if self.method_receiver_register(object).is_none() {
+            self.compile_expr_to(object, self_register)?;
+        }
 
         for arg in args {
             self.compile_expr(arg)?;
         }
+        if self.method_receiver_register(object).is_some() {
+            self.compile_expr_to(object, self_register)?;
+        }
+        self.emit_namecall_lookup(callee_register, self_register, method, true, span)?;
         self.emit_source_mapped_instruction(
             Instruction::with_aux(
                 Opcode::ReturnCall,
@@ -4051,12 +4075,17 @@ impl Compiler {
 
         let callee_register = self.alloc_register_at(span)?;
         let self_register = self.alloc_register_at(span)?;
-        self.compile_expr_to(object, self_register)?;
-        self.emit_namecall_lookup(callee_register, self_register, method, false, span)?;
+        if self.method_receiver_register(object).is_none() {
+            self.compile_expr_to(object, self_register)?;
+        }
 
         for arg in &args[..trailing_index] {
             self.compile_expr(arg)?;
         }
+        if self.method_receiver_register(object).is_some() {
+            self.compile_expr_to(object, self_register)?;
+        }
+        self.emit_namecall_lookup(callee_register, self_register, method, true, span)?;
         self.emit_source_mapped_instruction(
             Instruction::with_aux(
                 Opcode::ReturnCallVarargs,
@@ -4570,13 +4599,18 @@ impl Compiler {
         self.ensure_register_window_len(first_register, window_len, span)?;
 
         let self_register = checked_register_offset(first_register, 1, span)?;
-        self.compile_expr_to(object, self_register)?;
-        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
+        if self.method_receiver_register(object).is_none() {
+            self.compile_expr_to(object, self_register)?;
+        }
 
         for (index, arg) in args.iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
         }
+        if self.method_receiver_register(object).is_some() {
+            self.compile_expr_to(object, self_register)?;
+        }
+        self.emit_namecall_lookup(first_register, self_register, method, true, span)?;
         self.emit_source_mapped_instruction(
             Instruction::new(
                 Opcode::CallMulti,
@@ -4619,13 +4653,18 @@ impl Compiler {
         }
 
         let self_register = self.alloc_register_at(span)?;
-        self.compile_expr_to(object, self_register)?;
-        self.emit_namecall_lookup(target, self_register, method, true, span)?;
+        if self.method_receiver_register(object).is_none() {
+            self.compile_expr_to(object, self_register)?;
+        }
 
         let mut arg_registers = Vec::with_capacity(args.len());
         for arg in args {
             arg_registers.push(self.compile_expr(arg)?);
         }
+        if self.method_receiver_register(object).is_some() {
+            self.compile_expr_to(object, self_register)?;
+        }
+        self.emit_namecall_lookup(target, self_register, method, true, span)?;
         self.emit_source_mapped_instruction(
             Instruction::with_aux(
                 Opcode::Call,
@@ -4690,13 +4729,18 @@ impl Compiler {
         self.ensure_register_window_len(first_register, window_len, span)?;
 
         let self_register = checked_register_offset(first_register, 1, span)?;
-        self.compile_expr_to(object, self_register)?;
-        self.emit_namecall_lookup(first_register, self_register, method, false, span)?;
+        if self.method_receiver_register(object).is_none() {
+            self.compile_expr_to(object, self_register)?;
+        }
 
         for (index, arg) in args[..trailing_index].iter().enumerate() {
             let register = checked_register_offset(first_register, index + 2, span)?;
             self.compile_expr_to(arg, register)?;
         }
+        if self.method_receiver_register(object).is_some() {
+            self.compile_expr_to(object, self_register)?;
+        }
+        self.emit_namecall_lookup(first_register, self_register, method, true, span)?;
         self.emit_source_mapped_instruction(
             Instruction::new(
                 Opcode::CallVarargs,
@@ -5317,6 +5361,19 @@ impl Compiler {
         }
     }
 
+    fn method_receiver_register(&self, object: &Expr) -> Option<u8> {
+        match object {
+            Expr::Paren { expr, .. } => self.method_receiver_register(expr),
+            Expr::Name(name, _) => match self.locals.get(name) {
+                Some(Binding::Register(register) | Binding::CapturedLocal(register)) => {
+                    Some(*register)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn compile_expanded_call_prefix(
         &mut self,
         callee: ExpandedCallTarget<'_>,
@@ -5327,10 +5384,11 @@ impl Compiler {
     ) -> Result<()> {
         match callee {
             ExpandedCallTarget::Value(value) => self.compile_expanded_callee(value, args, base)?,
-            ExpandedCallTarget::Method { object, method } => {
+            ExpandedCallTarget::Method { object, .. } => {
                 let receiver = checked_register_offset(base, 1, span)?;
-                self.compile_expr_to(object, receiver)?;
-                self.emit_namecall_lookup(base, receiver, method, false, span)?;
+                if self.method_receiver_register(object).is_none() {
+                    self.compile_expr_to(object, receiver)?;
+                }
             }
         }
         for (index, arg) in args[..scalar_count].iter().enumerate() {
@@ -5380,7 +5438,11 @@ impl Compiler {
             ExpandedCallFinish::Return { .. } => levels.len() > 3,
             ExpandedCallFinish::Append { .. } => levels.len() > 2 || append_varargs,
         };
-        if !needs_general {
+        if !needs_general
+            && !levels
+                .iter()
+                .any(|(target, _, _)| matches!(target, ExpandedCallTarget::Method { .. }))
+        {
             return Ok(false);
         }
         let mut calls = Vec::with_capacity(levels.len());
@@ -5395,6 +5457,8 @@ impl Compiler {
             calls.push(CallDescriptorCall {
                 fixed_args,
                 deferred_import: None,
+                deferred_method: None,
+                method_receiver_register: None,
             });
         }
         let original_next_register = self.next_register;
@@ -5432,6 +5496,11 @@ impl Compiler {
             if let Some(callee) = target.value() {
                 self.mark_global_environment_escape_for_call(callee, arguments);
                 call.deferred_import = self.deferred_builtin_import(callee, arguments)?;
+            }
+            if let ExpandedCallTarget::Method { object, method } = target {
+                call.method_receiver_register = self.method_receiver_register(object);
+                call.deferred_method =
+                    Some(self.string_constant_index(method.as_bytes(), span)? as u32);
             }
             self.compile_expanded_call_prefix(target, arguments, scalar_count, cursor as u8, span)?;
             cursor += 1 + usize::from(call.fixed_args);
@@ -5493,6 +5562,8 @@ impl Compiler {
                 fixed_args: u8::try_from(fixed_args)
                     .map_err(|_| CompileError::at("function call has too many arguments", span))?,
                 deferred_import,
+                deferred_method: None,
+                method_receiver_register: None,
             });
             match current_args.last() {
                 Some(Expr::Call { callee, args, .. }) => {
@@ -6996,7 +7067,10 @@ fn constants_equal(lhs: &Constant, rhs: &Constant) -> bool {
                 && lhs.append_varargs == rhs.append_varargs
                 && lhs.calls.len() == rhs.calls.len()
                 && lhs.calls.iter().zip(&rhs.calls).all(|(lhs, rhs)| {
-                    lhs.fixed_args == rhs.fixed_args && lhs.deferred_import == rhs.deferred_import
+                    lhs.fixed_args == rhs.fixed_args
+                        && lhs.deferred_import == rhs.deferred_import
+                        && lhs.deferred_method == rhs.deferred_method
+                        && lhs.method_receiver_register == rhs.method_receiver_register
                 })
         }
         _ => false,
@@ -10822,7 +10896,7 @@ return #s * 1000 + string.byte(s, 256)
             .main
             .code
             .iter()
-            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 0));
+            .any(|instruction| instruction.op == Opcode::NameCall && instruction.c == 1));
 
         let indexed_class = compile(
             &parse_source(

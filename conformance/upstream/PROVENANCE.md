@@ -171,3 +171,24 @@ When porting starts, each entry must record:
 - classification (`api-native`, `core-language`, `parser`, `parser-runtime`, `runtime`, `stdlib`,
   `error-message`, `determinism`, or `excluded`)
 - oracle command used to derive expected output
+
+## Release compatibility audit regressions
+
+`fixtures/upstream-luau-0.709/metamethod_yield_errors.luau` is an original
+Rustia regression (project licence), not copied upstream code. It tests runtime
+error behaviour against https://github.com/luau-lang/luau at pinned commit
+`b968ef742741bb2b703afc3b3c53f06608c87481`, `VM/src/ldo.cpp`.
+Classification: `error-message`. Oracle capture:
+`fuzz/target/debug/error-oracle-worker luau < conformance/fixtures/upstream-luau-0.709/metamethod_yield_errors.luau`
+returns `ok`, `0`, `pass` after building the locked fuzz worker with `--features oracle`.
+
+`fixtures/upstream-luau-0.709/method_callee_evaluation_order.luau` is also an
+original project-licensed regression, classified `runtime`. Its initial 14 cases were
+individually captured against the same pin, then the complete assertion fixture
+was run with `fuzz/target/debug/error-oracle-worker luau < conformance/fixtures/upstream-luau-0.709/method_callee_evaluation_order.luau`,
+returning `ok`, `0`, `pass`. Relevant source: `Compiler/src/Compiler.cpp`.
+
+The same method fixture now includes eight exact missing-method message suffixes
+(the oracle vehicle wraps source names differently), and six receiver, argument
+failure, GC, protected-resume and append-vararg cases. The complete extended
+fixture again returns `ok`, `0`, `pass` through the pinned oracle.

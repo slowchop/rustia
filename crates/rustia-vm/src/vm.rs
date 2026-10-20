@@ -4313,7 +4313,14 @@ impl Vm {
                     let (continuation, resume_results) = match continuation {
                         BytecodeContinuation::ExpandedCalls(mut state) => {
                             let outcome = self
-                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    resume_results,
+                                    &registers,
+                                    &mut register_cells,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(
                                         program,
@@ -4629,7 +4636,14 @@ impl Vm {
                             )
                             .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
                             let results = match self
-                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    Vec::new(),
+                                    &registers,
+                                    &mut register_cells,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {
@@ -23804,7 +23818,9 @@ fn error_is_out_of_memory(error: &Error) -> bool {
 }
 
 fn non_yieldable_boundary_error() -> Error {
-    Error::new(ErrorKind::YieldAcrossBoundary)
+    // Luau 0.709 raises this VM boundary error without a source prefix, even
+    // when the caller has debug locations (see metamethod_yield_errors).
+    Error::new(ErrorKind::YieldAcrossBoundary).without_source_location()
 }
 
 fn attach_instruction_source(

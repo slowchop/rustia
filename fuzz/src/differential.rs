@@ -34,7 +34,7 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => "next({a=1}, nil, 99)",
         _ => "tonumber('1', 10, 99)",
     };
-    match byte(0) % 35 {
+    match byte(0) % 40 {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -72,7 +72,12 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         31 => body.push_str("local function argument() observed=observed+1; return 'abc' end; local function run(n) local unused=string.len(argument()); if n==0 then return 0 end; return 1+run(n-1) end; return tostring(run(20))"),
         32 => body.push_str("local left,right={},{}; setmetatable(left,{__call=function(self,n) if n==0 then return 0 end; return 1+right(n-1) end}); setmetatable(right,{__call=function(self,n) if n==0 then return 0 end; return 1+left(n-1) end}); return tostring(left(40))"),
         33 => body.push_str("local receiver={}; setmetatable(receiver,{__call=function(self,n) assert(self==receiver); return n+coroutine.yield('wait') end}); local owner=coroutine.create(function() return receiver(20) end); local a,b=coroutine.resume(owner); local c,d=coroutine.resume(owner,22); return tostring(a)..':'..b..':'..tostring(c)..':'..d"),
-        _ => body.push_str("local inner=setmetatable({},{__call=function() return 42 end}); local outer=setmetatable({},{__call=inner}); local function args() return 1,2 end; local a,b=pcall(function() return outer() end); local c,d=pcall(function() return outer(args()) end); return tostring(a)..':'..type(b)..':'..tostring(c)..':'..type(d)"),
+        34 => body.push_str("local inner=setmetatable({},{__call=function() return 42 end}); local outer=setmetatable({},{__call=inner}); local function args() return 1,2 end; local a,b=pcall(function() return outer() end); local c,d=pcall(function() return outer(args()) end); return tostring(a)..':'..type(b)..':'..tostring(c)..':'..type(d)"),
+        35 => body.push_str("local t={m=function() return 'old' end}; local function arg() t.m=function(self,...) return 'new'..select('#',...) end; return 1,2 end; return t:m(arg())"),
+        36 => body.push_str("local t=setmetatable({}, {__index=function() coroutine.yield('lookup') end}); local c=coroutine.create(function() return t:missing() end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..e"),
+        37 => body.push_str("local t={m=function() return 'old' end}; local function arg() coroutine.yield('argument'); t.m=function() coroutine.yield('method'); return 'new' end; return 1,2 end; local c=coroutine.create(function() return t:m(arg()) end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); local f,g=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..e..':'..tostring(f)..':'..g"),
+        38 => body.push_str("local t={m=function() return 'old' end}; local function arg() t={m=function() return 'new' end}; return 1,2 end; return t:m(arg())"),
+        _ => body.push_str("local t={m=function(self,...) return select('#',...) end}; local function run(...) return ({t:m(...)})[1] end; return tostring(run(1,2))"),
     }
     body
 }

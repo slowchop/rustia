@@ -7,6 +7,10 @@ use crate::bytecode::{supports_call_descriptor, CallDescriptor, CallDescriptorCa
 enum ExpandedCallee {
     Early(Value),
     Import(u32),
+    Method {
+        name: u32,
+        receiver_register: Option<u8>,
+    },
 }
 
 #[derive(Clone)]
@@ -79,9 +83,11 @@ pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<
     if descriptor.aux < 0 {
         return Err(invalid("call descriptor contains negative terminal data"));
     }
-    if !(2..=256).contains(&descriptor.calls.len()) {
+    let valid_call_count = (2..=256).contains(&descriptor.calls.len())
+        || (descriptor.calls.len() == 1 && descriptor.append_varargs);
+    if !valid_call_count {
         return Err(invalid(
-            "expanded call descriptor requires between two and 256 calls",
+            "expanded call descriptor requires two to 256 calls, or one with varargs",
         ));
     }
     match instruction.op {
@@ -110,6 +116,22 @@ pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<
         }
         if let Some(index) = call.deferred_import {
             import_length(program, index)?;
+        }
+        if call.method_receiver_register.is_some() && call.deferred_method.is_none() {
+            return Err(invalid("late receiver requires method lookup"));
+        }
+        if let Some(index) = call.deferred_method {
+            if call.deferred_import.is_some() || call.fixed_args == 0 {
+                return Err(invalid("deferred method requires a receiver and no import"));
+            }
+            if index > i32::MAX as u32
+                || !matches!(
+                    program.constants().get(index as usize),
+                    Some(Constant::String(_))
+                )
+            {
+                return Err(invalid("deferred method must reference a string constant"));
+            }
         }
     }
     Ok(descriptor)
@@ -168,6 +190,8 @@ fn legacy_descriptor(
         .map(|fixed_args| CallDescriptorCall {
             fixed_args: *fixed_args,
             deferred_import: None,
+            deferred_method: None,
+            method_receiver_register: None,
         })
         .collect();
     Ok((aux, calls, append_varargs))
@@ -257,9 +281,18 @@ impl ExpandedCallState {
                     max: registers.len(),
                 })
             })?;
-            let callee = match call.deferred_import {
-                Some(index) => ExpandedCallee::Import(index),
-                None => ExpandedCallee::Early(values[0]),
+            if let Some(register) = call.method_receiver_register {
+                if usize::from(register) >= registers.len() {
+                    return Err(invalid("late method receiver register out of bounds"));
+                }
+            }
+            let callee = match (call.deferred_import, call.deferred_method) {
+                (Some(index), _) => ExpandedCallee::Import(index),
+                (_, Some(index)) => ExpandedCallee::Method {
+                    name: index,
+                    receiver_register: call.method_receiver_register,
+                },
+                _ => ExpandedCallee::Early(values[0]),
             };
             let mut args = try_copy_vec(&values[1..])?;
             if append_varargs && level + 1 == count {
@@ -397,6 +430,8 @@ impl Vm {
         program: &Program,
         state: &mut ExpandedCallState,
         mut results: Vec<Value>,
+        registers: &[Value],
+        register_cells: &mut [Option<u32>],
         fuel: &mut Execution<'_>,
     ) -> Result<ExpandedCallFlow> {
         while !state.calls.is_empty() {
@@ -419,6 +454,53 @@ impl Vm {
                 call.args.append(&mut results);
                 let callee = match call.callee {
                     ExpandedCallee::Early(value) => value,
+                    ExpandedCallee::Method {
+                        name: index,
+                        receiver_register,
+                    } => {
+                        if let Some(register) = receiver_register {
+                            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, 1)?;
+                            self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                            let value = match register_cells
+                                .get(usize::from(register))
+                                .copied()
+                                .flatten()
+                            {
+                                Some(cell) => self
+                                    .heap
+                                    .upvalue_get(cell)
+                                    .ok_or_else(|| invalid("local receiver cell is missing"))?,
+                                None => get_register(registers, register)?,
+                            };
+                            *call
+                                .args
+                                .first_mut()
+                                .ok_or_else(|| invalid("missing method receiver"))? = value;
+                            self.mutate_last_call_stack_frame(|frame| {
+                                extend_heap_backed_roots(&mut frame.stackless_roots, &[value]);
+                            });
+                            self.maybe_collect()?;
+                        }
+                        let receiver = *call
+                            .args
+                            .first()
+                            .ok_or_else(|| invalid("missing method receiver"))?;
+                        charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, 3)?;
+                        self.executed_instructions = self.executed_instructions.wrapping_add(1);
+                        let key = self.instruction_string_key_value(
+                            program,
+                            None,
+                            index as i32,
+                            "negative method-name constant index",
+                            "method-name constant must be a string",
+                        )?;
+                        self.advance_fused_instruction_steps_with_root(1, receiver)?;
+                        let callee =
+                            self.get_index_value(program, receiver, key, state.depth, fuel)?;
+                        self.advance_fused_instruction_steps_with_root(1, callee)?;
+                        self.check_method_value(callee, receiver, key)?;
+                        callee
+                    }
                     ExpandedCallee::Import(index) => {
                         let length = import_length(program, index)?;
                         let cost = u64::from(length) * 2 - 1;
@@ -630,10 +712,14 @@ mod tests {
                         CallDescriptorCall {
                             fixed_args: 0,
                             deferred_import: Some(3),
+                            deferred_method: None,
+                            method_receiver_register: None,
                         },
                         CallDescriptorCall {
                             fixed_args: 0,
                             deferred_import: None,
+                            deferred_method: None,
+                            method_receiver_register: None,
                         },
                     ],
                     append_varargs: false,
@@ -660,7 +746,9 @@ mod tests {
                 calls: vec![
                     CallDescriptorCall {
                         fixed_args: 0,
-                        deferred_import: None
+                        deferred_import: None,
+                        deferred_method: None,
+                        method_receiver_register: None,
                     };
                     2
                 ],

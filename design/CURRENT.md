@@ -6,6 +6,15 @@
 
 ## One-paragraph state
 
+The next release audit is in progress in
+[`94-release-compatibility-audit.md`](94-release-compatibility-audit.md): language
+compatibility first, fresh remote benchmarks second, then an API review using
+the three applications. The working audit branch fixes pinned-oracle gaps in
+method-selection order, local receiver reads, missing-method errors, rejected-yield
+prefixes and table-constructor method varargs. Final CI/review remain pending.
+The private acceptance below remains historical evidence, not closure of these
+broader parity gates.
+
 **Current milestone:** private 0.x API and real-application readiness, tracked in
 [`92-first-release.md`](92-first-release.md). The immutable acceptance candidate is
 `92a85d65eb33724c17103d43477d34a633392768`; its API inventory, tests, application
@@ -892,7 +901,7 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   vector width 3, flags-off — see [`05-luau-target.md`](05-luau-target.md). **f64-only is VERIFIED correct**
   (`math.type==nil`; integers are default-OFF even at HEAD 0.727 behind `FFlag::LuauIntegerType2`).
 - **Conformance corpus is executable and pending-free** (review C2 follow-through): the runner reports
-  **723 fixtures**, **517 refs**, 705 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
+  **725 fixtures**, **519 refs**, 707 of them backed by the Luau 0.709 oracle and 18 by the offline PUC
   Lua 5.1.5 oracle, **0 pending-oracle**,
   **0 pending-impl**, and **0 rustia-only**. That named executable denominator is authoritative; it does not
   claim a one-to-one audit of every row in the older 709-row design inventory. Future work is focused oracle
@@ -907,7 +916,7 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   parity is pinned by the offline-derived `conformance/fixtures/puc51-compat/` corpus (see
   [`50-conformance.md`](50-conformance.md)).
 - **ReproducibleStandard** (the recommended public default) — targets the full pinned standalone Luau surface
-  and is pending-free on the current 517-ref denominator, with reproducible choices for unspecified behavior
+  and is pending-free on the current 519-ref denominator, with reproducible choices for unspecified behavior
   (insertion-order iteration, pinned PCG32, Schubfach tostring, libm). Its `os` table is always registered;
   without providers, `os.time`/`os.date` read the pinned epoch and `os.clock()` returns the deterministic
   logical clock (executed instructions / 1_000_000) instead of the former `0.0`
@@ -947,7 +956,7 @@ invocation, and a separately versioned guest ABI.
 | [`02-pillars.md`](02-pillars.md) | project pillars, non-goals, and the rabbit-hole decision filter | **canonical** |
 | [`30-architecture.md`](30-architecture.md) | the ADR (8 axes, decided) v3 plus v3.1-v3.3 refinements/corrections | authoritative for design |
 | [`05-luau-target.md`](05-luau-target.md) | the pinned-target spec (Luau 0.709) | **authoritative** ✅ |
-| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 723 fixtures / 517 refs / 0 pending |
+| [`50-conformance.md`](50-conformance.md), [`../conformance/COVERAGE.md`](../conformance/COVERAGE.md) | per-behavior conformance table + executable coverage notes | **current runner:** 725 fixtures / 519 refs / 0 pending |
 | [`55-improvements.md`](55-improvements.md) | 10 adopted improvements (+ IC/hot-cold promoted) | authoritative |
 | [`56-performance-research.md`](56-performance-research.md) | no-unsafe SotA performance stack, top-10 ordered bets, C++ Luau estimates | current research note |
 | [`70-host-bridge-contract.md`](70-host-bridge-contract.md) | typed invocation plus the deterministic effect-queue seam to grabby's parallel/rollback sim | **authoritative + implemented generic seam** ✅ |
@@ -970,7 +979,7 @@ All 8 findings assessed **VALID** and **actioned** (folded into the docs below).
 | # | finding | status |
 |---|---|---|
 | C1 | pin the Luau target | **RESOLVED** → [`05-luau-target.md`](05-luau-target.md): Luau **0.709** (= our oracle), standalone surface, vector-3, flags-off; **f64-only verified** (`math.type==nil`); int64 is a tripwire on `FFlag::LuauIntegerType2`. |
-| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 723 fixtures (705 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 517 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
+| C2 | conformance table not trustworthy | **RESOLVED for current corpus** — runner reports 725 fixtures (705 Luau 0.709 oracle-backed, 18 offline PUC 5.1.5 oracle-backed), 519 refs, and 0 pending rows. Keep adding targeted oracle fixtures for new bugs/features. |
 | H1 | version drift | **FIXED** (this file + banners). |
 | H2 | "~5× koto" too narrow | **RESOLVED** — drop the blanket number; state **per-workload** (below). |
 | H3 | wasm gate + Wasm 3.0 | **RESOLVED** — Wasm-3.0 assessed (br_table stays; wasm-GC rejected; relaxed-SIMD banned); V8 + Bun/JSC-family + SpiderMonkey production wasm and `call_ref` dispatch measured. |
