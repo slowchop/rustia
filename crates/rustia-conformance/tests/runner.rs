@@ -888,6 +888,7 @@ fn assert_valid_upstream_source_path(path: &str, line_number: usize) {
     assert!(
         path.starts_with("tests/conformance/")
             || path.starts_with("VM/src/")
+            || path.starts_with("Compiler/src/")
             || path == "tests/Conformance.test.cpp",
         "provenance line {line_number} has unclassified upstream source path {path:?}"
     );
@@ -1032,7 +1033,8 @@ fn assert_valid_oracle_command(command: &str, line_number: usize) {
          <build>/Luau.Conformance --test-case=Conformance/",
     ) || command
         .starts_with("<build>/Luau.Repl conformance/fixtures/upstream-luau-0.709/")
-        || command.starts_with("source-inspection: ");
+        || command.starts_with("source-inspection: ")
+        || command.starts_with("fuzz/target/debug/error-oracle-worker luau < conformance/fixtures/upstream-luau-0.709/");
     assert!(
         valid,
         "provenance line {line_number} has unclassified oracle command {command:?}"
