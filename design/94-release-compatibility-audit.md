@@ -17,6 +17,43 @@ It does not authorize publication or a version change.
    conversion/failure/lifetime contracts and any necessary migrations. Complete
    required checks and independent review before merging changes.
 
+## Broader diagnostic audit
+
+The reproducible [27-case inventory](release-error-audit.json) checks protected
+runtime errors, missing/wrong builtin arguments, table mutation, coroutine
+validation, arbitrary guest error values and frontend rejection. On `189ae963`,
+14 cases match and 13 expose the differences below. This sample complements the
+existing error-phase, builtin argument-order, coroutine and conformance tests;
+it is not exhaustive language parity.
+
+Build the locked fuzz `error-oracle-worker` with `--features oracle`, then run
+`node tools/audit-release-errors.mjs`. The tool emits the complete observations
+and exits nonzero when differences remain. It never rewrites expectations.
+Only the oracle vehicle's source-name wrapper is normalized. No line number,
+argument detail or message text is removed. Successful object addresses are
+excluded by guest-side type labels.
+
+| Case | Remaining difference |
+|---|---|
+| Length of nil | Generic type error rather than Luau's length error |
+| Missing `rawget`, `rawset`, `type` arguments | Missing numbered argument diagnostics |
+| Invalid `string.len`, missing `string.sub` argument | Missing function/argument/type details |
+| Four-argument `table.insert`, invalid `table.sort` comparator | Wrong argument diagnostic |
+| Invalid key to `next` | Extra source prefix |
+| Invalid `coroutine.create` / `coroutine.resume` argument | Missing function/argument/type details |
+| Freezing an already frozen or protected-metatable table | Wrong diagnostic text |
+
+These are known gaps, not deliberate differences. Follow-up fixtures must test
+direct and aliased calls, argument side effects and validation precedence.
+Structured host errors and resource-exhaustion rules must remain intact. The
+pending-free manifest describes its executable inventory; it does not erase
+these independently observed findings.
+
+The intentional differences remain the selected environment contracts:
+reproducible iteration/RNG/numeric choices and deterministic capability limits,
+as described in `05-luau-target.md`, `50-conformance.md` and `72-host-services.md`.
+They must not be used to excuse ordinary language or builtin errors.
+
 ## Initial oracle findings
 
 The existing `error-oracle-worker` was rebuilt from the baseline with its locked
@@ -79,7 +116,7 @@ ten contexts. Its new conformance fixture was independently run through the
 pinned oracle (`ok / 0 / pass`). Full CI and independent review remain pending.
 
 Method ordering now passes 14 oracle-derived call shapes, eight missing-method
-error shapes and six failure/GC/receiver/vararg cases across four profiles,
+error shapes and nine failure/GC/receiver/vararg cases across four profiles,
 including double suspension and ordinary dot-call controls. Expanded method
 lookups use validated continuation metadata; fixed calls select after arguments.
 Missing-method messages now use checked lookup in these paths. Malformed metadata is rejected before argument execution. Explicit GC cases,
@@ -97,3 +134,17 @@ local-receiver/append-vararg follow-up and is not final-candidate evidence.
 - Fresh remote benchmark results, with comparisons updated only where supported.
 - Application-based API review and any resulting migrations.
 - Required CI and independent review on the final changes.
+
+## Delivery status
+
+The method/vararg/yield batch is in [PR #70](https://github.com/slowchop/rustia/pull/70).
+Its initial head passed eight target builds, native macOS arm64, Node/V8 and
+differential CI. Preflight found stale generated publishability file counts;
+those counts have been regenerated. A subsequent malformed-metadata regression
+also made hardened-program validation reject out-of-range late receiver registers
+at construction, matching runtime validation. Final-head checks remain required.
+
+The method fixture now contains 31 cases, including a local receiver changed
+after argument suspension, an upvalue control, and a parenthesized local. All
+four profiles pass it before and after reset. The broader diagnostic findings
+are tracked here because GitHub Issues is disabled for this repository.

@@ -20308,7 +20308,7 @@ fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
         }
         for (pc, instruction) in function.code.iter().enumerate() {
             if instruction.aux < 0 && crate::bytecode::supports_call_descriptor(instruction.op) {
-                expanded_calls::descriptor(program, *instruction)
+                expanded_calls::descriptor(program, *instruction, function.max_registers)
                     .map_err(|e| attach_instruction_source(program, function, pc, e))?;
             }
             let feature = match instruction.op {

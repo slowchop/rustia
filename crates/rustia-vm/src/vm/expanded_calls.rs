@@ -69,7 +69,11 @@ fn import_length(program: &Program, index: u32) -> Result<u8> {
     Ok(path.len() as u8)
 }
 
-pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<&CallDescriptor> {
+pub(super) fn descriptor(
+    program: &Program,
+    instruction: Instruction,
+    max_registers: usize,
+) -> Result<&CallDescriptor> {
     if !supports_call_descriptor(instruction.op) {
         return Err(invalid(
             "instruction does not support expanded call descriptors",
@@ -116,6 +120,12 @@ pub(super) fn descriptor(program: &Program, instruction: Instruction) -> Result<
         }
         if let Some(index) = call.deferred_import {
             import_length(program, index)?;
+        }
+        if call
+            .method_receiver_register
+            .is_some_and(|register| usize::from(register) >= max_registers)
+        {
+            return Err(invalid("late method receiver register out of bounds"));
         }
         if call.method_receiver_register.is_some() && call.deferred_method.is_none() {
             return Err(invalid("late receiver requires method lookup"));
@@ -208,7 +218,7 @@ impl ExpandedCallState {
     ) -> Result<Self> {
         let legacy;
         let (aux, call_windows, append_varargs) = if instruction.aux < 0 {
-            let descriptor = descriptor(program, instruction)?;
+            let descriptor = descriptor(program, instruction, registers.len())?;
             (
                 descriptor.aux,
                 descriptor.calls.as_slice(),
@@ -281,11 +291,6 @@ impl ExpandedCallState {
                     max: registers.len(),
                 })
             })?;
-            if let Some(register) = call.method_receiver_register {
-                if usize::from(register) >= registers.len() {
-                    return Err(invalid("late method receiver register out of bounds"));
-                }
-            }
             let callee = match (call.deferred_import, call.deferred_method) {
                 (Some(index), _) => ExpandedCallee::Import(index),
                 (_, Some(index)) => ExpandedCallee::Method {

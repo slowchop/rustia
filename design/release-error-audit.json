@@ -1,0 +1,196 @@
+{
+  "baseline": "189ae963394237de3d516fcc94d24aa236947ffb",
+  "oracle": "Luau 0.709 via locked fuzz error-oracle-worker",
+  "comparison": "Only the oracle source-name wrapper [string \"differential.luau\"] is replaced with differential.luau. No message or line content is normalized. Successful object addresses are excluded by guest-side type labels.",
+  "cases": [
+    {
+      "name": "nil_index",
+      "source": "local ok,a,b=pcall(function() local x=nil; return x.field end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to index nil with 'field':nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to index nil with 'field':nil:nil\n"
+    },
+    {
+      "name": "boolean_index",
+      "source": "local ok,a,b=pcall(function() return false.field end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "frontend\n0\n",
+      "rustia": "frontend\n0\n"
+    },
+    {
+      "name": "number_call",
+      "source": "local ok,a,b=pcall(function() local x=1; return x() end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to call a number value:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to call a number value:nil:nil\n"
+    },
+    {
+      "name": "add_types",
+      "source": "local ok,a,b=pcall(function() return {}+false end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to perform arithmetic (add) on table and boolean:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to perform arithmetic (add) on table and boolean:nil:nil\n"
+    },
+    {
+      "name": "compare_types",
+      "source": "local ok,a,b=pcall(function() return {}<1 end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to compare table < number:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to compare table < number:nil:nil\n"
+    },
+    {
+      "name": "concat_types",
+      "source": "local ok,a,b=pcall(function() return {}..false end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to concatenate table with boolean:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to concatenate table with boolean:nil:nil\n"
+    },
+    {
+      "name": "length_nil",
+      "source": "local ok,a,b=pcall(function() return #nil end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: attempt to get length of a nil value:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected table or string:nil:nil\n"
+    },
+    {
+      "name": "rawget_missing",
+      "source": "local ok,a,b=pcall(function() return rawget({}) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: missing argument #2:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected rawget arguments:nil:nil\n"
+    },
+    {
+      "name": "rawset_missing",
+      "source": "local ok,a,b=pcall(function() return rawset({},1) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: missing argument #3:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected rawset arguments:nil:nil\n"
+    },
+    {
+      "name": "type_missing",
+      "source": "local ok,a,b=pcall(function() return type() end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: missing argument #1:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected type argument:nil:nil\n"
+    },
+    {
+      "name": "assert_missing",
+      "source": "local ok,a,b=pcall(function() return assert() end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: missing argument #1:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: missing argument #1:nil:nil\n"
+    },
+    {
+      "name": "string_len_type",
+      "source": "local ok,a,b=pcall(function() return string.len({}) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'len' (string expected, got table):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected string or number:nil:nil\n"
+    },
+    {
+      "name": "string_rep_negative",
+      "source": "local ok,a,b=pcall(function() return string.rep('a',-1) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\ntrue:string::nil:nil\n",
+      "rustia": "ok\n0\ntrue:string::nil:nil\n"
+    },
+    {
+      "name": "string_sub_missing",
+      "source": "local ok,a,b=pcall(function() return string.sub('a') end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: missing argument #2 to 'sub' (number expected):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected string.sub arguments:nil:nil\n"
+    },
+    {
+      "name": "math_abs_type",
+      "source": "local ok,a,b=pcall(function() return math.abs({}) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'abs' (number expected, got table):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: invalid argument #1 to 'abs' (number expected, got table):nil:nil\n"
+    },
+    {
+      "name": "insert_many",
+      "source": "local ok,a,b=pcall(function() return table.insert({},1,2,3) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: wrong number of arguments to 'insert':nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected table.insert arguments:nil:nil\n"
+    },
+    {
+      "name": "sort_type",
+      "source": "local ok,a,b=pcall(function() return table.sort({},true) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #2 to 'sort' (function expected, got boolean):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected function:nil:nil\n"
+    },
+    {
+      "name": "next_key",
+      "source": "local ok,a,b=pcall(function() return next({},1) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:invalid key to 'next':nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: invalid key to 'next':nil:nil\n"
+    },
+    {
+      "name": "error_table_identity",
+      "source": "local ok,a,b=pcall(function() local t={}; local ok,e=pcall(error,t); return tostring(ok)..\":\"..tostring(e==t) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\ntrue:string:false:true:nil:nil\n",
+      "rustia": "ok\n0\ntrue:string:false:true:nil:nil\n"
+    },
+    {
+      "name": "xpcall_bad_handler",
+      "source": "local ok,a,b=pcall(function() return xpcall(function() error(\"x\",0) end, false) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #2 to 'xpcall' (function expected, got boolean):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: invalid argument #2 to 'xpcall' (function expected, got boolean):nil:nil\n"
+    },
+    {
+      "name": "pcall_nonfunction",
+      "source": "local ok,a,b=pcall(function() return pcall(false) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\ntrue:boolean:false:string:attempt to call a boolean value\n",
+      "rustia": "ok\n0\ntrue:boolean:false:string:attempt to call a boolean value\n"
+    },
+    {
+      "name": "coroutine_resume_type",
+      "source": "local ok,a,b=pcall(function() return coroutine.resume({}) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'resume' (thread expected, got table):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected thread:nil:nil\n"
+    },
+    {
+      "name": "coroutine_create_type",
+      "source": "local ok,a,b=pcall(function() return coroutine.create({}) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'create' (function expected, got table):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: type error: expected function:nil:nil\n"
+    },
+    {
+      "name": "freeze_twice",
+      "source": "local ok,a,b=pcall(function() local t=table.freeze({}); return table.freeze(t) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'freeze' (table is already frozen):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: attempt to modify a readonly table:nil:nil\n"
+    },
+    {
+      "name": "freeze_locked",
+      "source": "local ok,a,b=pcall(function() return table.freeze(setmetatable({}, {__metatable=false})) end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": false,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: invalid argument #1 to 'freeze' (table has a protected metatable):nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: cannot freeze protected metatable:nil:nil\n"
+    },
+    {
+      "name": "newindex_nil",
+      "source": "local ok,a,b=pcall(function() local t={}; t[nil]=1 end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: table index is nil:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: table index is nil:nil:nil\n"
+    },
+    {
+      "name": "newindex_nan",
+      "source": "local ok,a,b=pcall(function() local t={}; t[0/0]=1 end); local function text(v) if type(v)==\"table\" or type(v)==\"function\" or type(v)==\"thread\" then return type(v) end; return tostring(v) end; return tostring(ok)..\":\"..type(a)..\":\"..text(a)..\":\"..type(b)..\":\"..text(b)",
+      "same": true,
+      "luau": "ok\n0\nfalse:string:[string \"differential.luau\"]:1: table index is NaN:nil:nil\n",
+      "rustia": "ok\n0\nfalse:string:differential.luau:1: table index is NaN:nil:nil\n"
+    }
+  ]
+}

@@ -199,4 +199,22 @@ do
     end
     assert(run() == "new2", "nested_method")
 end
+do
+    local function run()
+        local c=coroutine.create(function() local t={m=function() return 'old' end}; local function arg() coroutine.yield('argument'); t={m=function() return 'new' end}; return 1,2 end; return t:m(arg()) end); local a,b=coroutine.resume(c); if collectgarbage then collectgarbage('collect') end; local d,e=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..e
+    end
+    assert(run() == "true:argument:true:new", "local_after_suspend")
+end
+do
+    local function run()
+        local t={m=function() return 'old' end}; local function arg() t={m=function() return 'new' end}; return 1,2 end; local function run() return t:m(arg()) end; return run()
+    end
+    assert(run() == "old", "upvalue_capture")
+end
+do
+    local function run()
+        local t={m=function() return 'old' end}; local function arg() t={m=function() return 'new' end}; return 1,2 end; return (t):m(arg())
+    end
+    assert(run() == "new", "parenthesized_local")
+end
 return "pass"

@@ -266,3 +266,8 @@ A conformance topic counts as covered only when:
 - the fixture passes under the intended profile.
 
 - Callable receivers have pinned-oracle controls for ordinary recursive calls, yield/resume, and rejection of non-function `__call` values in ordinary and expanded calls.
+
+The pending-free count is not a universal parity claim. The broader
+[release diagnostic audit](../design/94-release-compatibility-audit.md#broader-diagnostic-audit)
+records 13 independently reproduced message/prefix differences outside this
+manifest, alongside its passing comparisons and exact source cases.

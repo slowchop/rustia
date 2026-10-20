@@ -279,6 +279,26 @@ fn malformed_call_descriptors_reject_before_running_arguments() {
             append_varargs: false,
         });
     }
+    for (deferred_method, method_receiver_register) in [(None, Some(0)), (Some(0), Some(255))] {
+        descriptors.push(CallDescriptor {
+            aux: 1,
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args: 1,
+                    deferred_import: None,
+                    deferred_method,
+                    method_receiver_register,
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
+                },
+            ],
+            append_varargs: false,
+        });
+    }
     for descriptor in descriptors {
         let original = expanded_program(Opcode::CallExpand);
         let mut constants = original.constants().to_vec();
