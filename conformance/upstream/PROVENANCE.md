@@ -190,5 +190,6 @@ returning `ok`, `0`, `pass`. Relevant source: `Compiler/src/Compiler.cpp`.
 
 The same method fixture now includes eight exact missing-method message suffixes
 (the oracle vehicle wraps source names differently), and six receiver, argument
-failure, GC, protected-resume and append-vararg cases. The complete extended
-fixture again returns `ok`, `0`, `pass` through the pinned oracle.
+failure, GC, protected-resume and append-vararg cases. Three further cases cover
+a local receiver changed after suspension, an upvalue receiver, and a parenthesized
+local receiver, bringing the total to 31. The complete extended fixture returns `ok`, `0`, `pass` through the pinned oracle.

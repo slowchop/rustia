@@ -148,3 +148,14 @@ The method fixture now contains 31 cases, including a local receiver changed
 after argument suspension, an upvalue control, and a parenthesized local. All
 four profiles pass it before and after reset. The broader diagnostic findings
 are tracked here because GitHub Issues is disabled for this repository.
+
+Independent reviews of the compiler/VM changes and conformance evidence found
+no blocking issue. Eight additional receiver/argument probes matched the pinned
+oracle; both complete fixtures returned `ok / 0 / pass`, and the diagnostic audit
+reproduced 14 matches and 13 differences. The review corrected an outdated case
+count in the prose provenance record. These reviews do not replace final CI.
+
+Preflight also exposed stale benchmark queue metadata and its rendered HTML.
+Both were regenerated without changing measurements or speed claims. The
+benchmark runner has reconnected and PR screening is running; the full fresh
+cross-engine comparison remains pending.
