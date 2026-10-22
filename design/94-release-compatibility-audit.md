@@ -159,3 +159,33 @@ Preflight also exposed stale benchmark queue metadata and its rendered HTML.
 Both were regenerated without changing measurements or speed claims. The
 benchmark runner has reconnected and PR screening is running; the full fresh
 cross-engine comparison remains pending.
+
+
+## Dense-table regression investigation
+
+All release checks passed on `897bfddb`. Its stronger
+[CI acceptance comparison](https://github.com/slowchop/rustia/actions/runs/39694175435)
+against `07f3ee7a` confirmed dense tables at +4.62% (99% interval +4.17% to
++5.04%), beyond the calibrated 2.08% screening threshold. Closures/upvalues
+improved by 7.64%; the other three workload intervals include zero. A successful
+workflow is not performance acceptance. Keep the compatibility batch unmerged
+while investigating this result.
+
+Static compilation found identical dense-workload bytecode and identical
+normalized Linux LLVM IR for its sort and table-access helpers. The shared
+interpreter gained register-slice selection and call arguments for deferred
+method receivers. This is a code-generation hypothesis, not a measured cause.
+The candidate stores the receiver binding in continuation state: a traced cell
+for captured locals, or the stable value for uncaptured locals. Late read fuel,
+collection and method lookup order remain unchanged. It removes the caller
+register parameters from the continuation driver. Remote comparison is required
+before claiming this candidate fixes the regression.
+
+The application review found one concrete client correction: WOTS ignored its
+per-feed fuel argument. [WOTS #9](https://github.com/slowchop/wots/pull/9), merged
+as `7960b5af6621f8af49ca399da270a6463e014a57`, uses existing invocation limits;
+zero keeps its established default, and explicit limits stay below the engine
+ceiling. All 33 BBS tests, strict Clippy and independent review passed, including
+exhaustion, preserved immediate writes and same-session recovery. No public
+Rustia API addition or dependency change was needed. Grabby and civfun retain
+the accepted application contracts recorded in document 93.

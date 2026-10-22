@@ -11,7 +11,9 @@ The next release audit is in progress in
 compatibility first, fresh remote benchmarks second, then an API review using
 the three applications. The working audit branch fixes pinned-oracle gaps in
 method-selection order, local receiver reads, missing-method errors, rejected-yield
-prefixes and table-constructor method varargs. Final CI/review remain pending.
+prefixes and table-constructor method varargs. CI and independent review passed
+on `897bfddb`, but remote acceptance confirmed a 4.62% dense-table slowdown.
+The batch remains unmerged while a continuation-state candidate is measured.
 The private acceptance below remains historical evidence, not closure of these
 broader parity gates.
 
