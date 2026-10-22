@@ -20,6 +20,9 @@ and alias coverage. Final CI, review and remote screening remain delivery gates.
 The numeric-index follow-up specifies checked signed-64 conversion and corrects
 the rounded upper-bound bug; native regression coverage passes and cross-target
 CI remains a delivery gate. See [95](95-numeric-index-contract.md).
+Real Firefox correctness passed in both feature modes; Safari and additional
+native execution remain open. The prepared platform workflows and evidence are
+recorded in [96](96-browser-platform-acceptance.md).
 The broader public-release audit remains open; this is not full Luau parity or
 authorization to publish packages.
 

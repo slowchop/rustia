@@ -165,6 +165,17 @@ const RUNNER_CLASSES = new Map([
     },
   ],
   [
+    "general-windows",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-windows",
+        "      labels: [self-hosted, Windows, X64, general-windows]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+  [
     // The owned benchmark host's runner group. Targeted by group alone: the
     // group has exactly one runner, so naming labels as well would add a
     // second thing to keep in sync with the machine for no extra guarantee.
@@ -182,6 +193,8 @@ const RUNNER_CLASSES = new Map([
 const WORKFLOW_RUNNER_CLASS = new Map([
   ["error-fuzz.yml", "general-linux"],
   ["ci.yml", "general-linux"],
+  ["browser-correctness.yml", "general-linux"],
+  ["windows-correctness.yml", "general-windows"],
   ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
@@ -190,8 +203,11 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["rustia-memory.yml", "bench-solo"],
 ]);
 
-// Only this native correctness job may leave CI's ordinary Linux pool.
-const JOB_RUNNER_CLASS = new Map([["ci.yml:macos-arm64-runtime", "general-macos"]]);
+// Explicit native/browser correctness jobs may use the Mac pool.
+const JOB_RUNNER_CLASS = new Map([
+  ["ci.yml:macos-arm64-runtime", "general-macos"],
+  ["browser-correctness.yml:safari-runtime", "general-macos"],
+]);
 
 // Commands that take a timing. Until now only the first three were forbidden,
 // and the four on-host runners were forbidden nowhere -- a workflow on the

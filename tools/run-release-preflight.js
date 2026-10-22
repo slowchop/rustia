@@ -112,6 +112,7 @@ node("tools/check-release-notes.js");
 node("tools/check-crate-metadata.js", "--check");
 node("tools/check-workflows.js");
 node("tools/check-workflows.js", "--self-test");
+run("python3", ["tools/check-browser-correctness.py"]);
 node("tools/check-package-files.js", "--check");
 node("tools/check-publishability.js", "--check");
 node("tools/check-package-dry-runs.js");
