@@ -201,7 +201,8 @@ record; the broader public matrix below remains open.
   Cross-compiling alone does not prove runtime behavior.
 - [ ] Run the declared browser correctness tests in real Firefox and Safari,
   including the supported JavaScript adapters. Existing Node/V8 coverage remains
-  part of the gate.
+  part of the gate. [The browser record](96-browser-platform-acceptance.md)
+  documents the passing Firefox run; Safari remains open.
 - [ ] Repeat the bounded fuzz and long-running memory/reload/reset checks on the
   final candidate. Record exact commits and CI links.
 - [ ] Keep the public workspace free of unsafe code and all required correctness,

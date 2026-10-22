@@ -333,8 +333,10 @@ registry installation, public release, or complete platform matrix is implied.
   macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
   Android arm64, and `wasm32-unknown-unknown`. It also executes the bare and
   default web-live wasm adapters through the matching wasm-bindgen test runner
-  on Node 22/V8. These checks do not replace the still-open non-Linux real-host
-  and Firefox/Safari correctness/golden gate.
+  on Node 22/V8. Native macOS arm64 also executes the shared contracts.
+  [Browser acceptance](96-browser-platform-acceptance.md) records a real Firefox
+  run in both feature modes; Safari and the remaining native platforms still
+  need execution evidence. Cross-compilation does not close those gates.
 - Release preflight formats and strictly lints the separate fuzz workspace,
   then runs its seed tests plus deterministic 2,048-case frontend and VM
   mutation sweeps. The VM decoder covers every production opcode exactly once
