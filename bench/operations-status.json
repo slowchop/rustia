@@ -76,9 +76,9 @@
     "state": "pending",
     "measured_commit": "8f8558abf361e939599d2c093614ae0776682d26",
     "measured_at_unix": 1792346749,
-    "latest_relevant_commit": "fd691ac7e1cfbc3fd278bdea7ac88b44c3c9293b",
-    "latest_relevant_committed_at_unix": 1792535874,
-    "pending_relevant_commit_count": 23,
+    "latest_relevant_commit": "4d6bf6e577322f10351d6195a6b0b5c4cc9cd9bf",
+    "latest_relevant_committed_at_unix": 1792633556,
+    "pending_relevant_commit_count": 24,
     "next_action": "Measure the newest pending performance-relevant commit on the owned benchmark host."
   },
   "landscape": {
