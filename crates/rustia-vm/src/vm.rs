@@ -26063,8 +26063,9 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
 }
 
 fn string_library_index(value: f64) -> Result<i64> {
+    // i64::MAX rounds up to 2^63 as f64; the upper bound must be exclusive.
     let value = value.trunc();
-    if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
+    if !value.is_finite() || value < i64::MIN as f64 || value >= 9_223_372_036_854_775_808.0 {
         return Err(Error::new(ErrorKind::TypeError {
             expected: "integer string library index",
         }));

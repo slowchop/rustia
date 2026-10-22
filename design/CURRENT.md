@@ -17,6 +17,9 @@ per-call fuel limit through the existing invocation API; closeout PR #72 merged.
 The next diagnostic follow-up fixes all 13 recorded differences against the
 pinned Luau oracle (27 original cases now match), with expanded validation-order
 and alias coverage. Final CI, review and remote screening remain delivery gates.
+The numeric-index follow-up specifies checked signed-64 conversion and corrects
+the rounded upper-bound bug; native regression coverage passes and cross-target
+CI remains a delivery gate. See [95](95-numeric-index-contract.md).
 The broader public-release audit remains open; this is not full Luau parity or
 authorization to publish packages.
 

@@ -108,8 +108,8 @@ jobs:
           git rev-parse HEAD
           bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin
           bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin
-          cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations
-          cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations
+          cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations --test numeric_index_contract
+          cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations --test numeric_index_contract
 
   portable-engine-build:
     name: Engine build (${{ matrix.target }})
@@ -197,7 +197,7 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test live_value_contract
-          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test yieldable_require --test callable_continuations
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test yieldable_require --test callable_continuations --test numeric_index_contract
           bash tools/run-private-platform-golden.sh wasm bare
 
       - name: Run default web-live adapter tests on Node/V8
@@ -208,5 +208,5 @@ jobs:
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test host_functions
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test typed_objects
           cargo test --locked -p rustia --target wasm32-unknown-unknown --test live_value_contract
-          cargo test --locked -p rustia --target wasm32-unknown-unknown --test yieldable_require --test callable_continuations
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test yieldable_require --test callable_continuations --test numeric_index_contract
           bash tools/run-private-platform-golden.sh wasm default
