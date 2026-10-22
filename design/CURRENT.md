@@ -13,7 +13,7 @@ the three applications. The working audit branch fixes pinned-oracle gaps in
 method-selection order, local receiver reads, missing-method errors, rejected-yield
 prefixes and table-constructor method varargs. CI and independent review passed
 on `897bfddb`, but remote acceptance confirmed a 4.62% dense-table slowdown.
-The batch remains unmerged while a descriptor-validation candidate is measured.
+The batch remains unmerged while the receiver-binding candidate completes full acceptance.
 The private acceptance below remains historical evidence, not closure of these
 broader parity gates.
 

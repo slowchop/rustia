@@ -201,3 +201,18 @@ in favor of a smaller isolation candidate that prevents expanded-call constructi
 dispatch code. The descriptor helper was already out of line; its annotation
 alone left dispatch unchanged in static inspection. All validation remains enabled.
 Its performance effect remains unproven until remote measurement completes.
+
+
+The constructor-only candidate `53ec889a` did not fix the regression:
+[eight-leg acceptance](https://github.com/slowchop/rustia/actions/runs/39709187008)
+measured dense tables +4.43% (99% interval +4.04% to +6.14%). Static dispatch
+size is not performance evidence. That candidate is withdrawn.
+
+The receiver-binding candidate `b13e9914` had
+[screened at +0.04%](https://github.com/slowchop/rustia/actions/runs/39707621551)
+for dense tables (interval -0.40% to +0.69%). Its reviewed implementation is
+restored for full acceptance: retain a traced capture cell or stable uncaptured
+value in the continuation and remove caller-register arguments from resumed
+calls. The clone/root regression, existing method-order and malformed-descriptor
+tests, and strict Clippy pass. Do not claim acceptance from the screening run
+alone; the stronger comparison and final CI remain required.
