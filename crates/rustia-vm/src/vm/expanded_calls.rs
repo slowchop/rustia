@@ -682,7 +682,6 @@ mod tests {
 
     #[test]
     fn cloned_method_continuation_keeps_its_receiver_cell_rooted() {
-        let cell = Value::capture_cell(21);
         let mut pending = state(ExpandedFinish::WriteFixed { base: 0, count: 1 });
         pending.calls.push(PendingExpandedCall {
             callee: ExpandedCallee::Method {
@@ -700,10 +699,14 @@ mod tests {
         drop(original);
         let mut roots = Vec::new();
         extend_bytecode_continuation_roots(&mut roots, &copy);
-        assert!(roots.contains(&cell));
+        assert!(roots
+            .iter()
+            .any(|value| value.as_capture_cell() == Some(21)));
         let mut heap_roots = Vec::new();
         extend_bytecode_continuation_heap_roots(&mut heap_roots, &copy);
-        assert!(heap_roots.contains(&cell));
+        assert!(heap_roots
+            .iter()
+            .any(|value| value.as_capture_cell() == Some(21)));
     }
 
     #[test]
