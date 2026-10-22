@@ -265,7 +265,8 @@ ranking. Compilation, first-call costs and JIT variants remain in the full repor
 The matrix is a cross-engine snapshot, not a paired regression experiment;
 the eight-leg comparison above remains the regression acceptance evidence.
 
-The three requested follow-up tracks now have evidence:
+The three requested follow-up tracks had the following evidence at closeout
+PR #72, before the diagnostic follow-up below:
 
 | Track | Evidence | Remaining gate |
 |---|---|---|
