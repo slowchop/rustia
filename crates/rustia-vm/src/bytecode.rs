@@ -184,6 +184,10 @@ pub struct CallDescriptorCall {
     pub fixed_args: u8,
     /// Import constant resolved after this level's arguments have completed.
     pub deferred_import: Option<u32>,
+    /// Method-name string resolved on the first argument after argument execution.
+    pub deferred_method: Option<u32>,
+    /// Local receiver read at lookup time; other receivers are captured in arguments.
+    pub method_receiver_register: Option<u8>,
 }
 
 pub(crate) fn supports_call_descriptor(op: Opcode) -> bool {

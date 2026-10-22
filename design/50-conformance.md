@@ -385,7 +385,7 @@
 | `select(0, ...)` / out-of-range index | error | `0` and too-negative adjusted indices raise "index out of range"; positive `n > #values` returns no values. | Same. | both | Upstream `vararg.luau` asserts `select(4, 10, 20, 30)` is nil/no results. |
 | `table.pack(...)` | specified | Returns table with positional values + field `n` = total count (incl. nils). | Same; `n` set; implemented in the P1 VM native stdlib subset. | both | — |
 | `table.unpack(t, i, j)` / global `unpack` | specified | `table.unpack` returns `t[i..j]`; defaults i=1, j=`#t`. Global `unpack` alias is still a target-version question. | P1 provides `table.unpack` as a variable-result native; global `unpack` remains c5 pending. | both | VERIFY global `unpack` presence in target Luau version. |
-| `{...}` table constructor with trailing varargs | specified | Last `...` expands into the array part; embedded nils create holes affecting `#`. A final call field such as `{select(n, ...)}` expands the call results after passing all varargs to that call. | P1 implements direct trailing varargs in table constructors, direct plain appended calls whose final argument is `...`, and one nested trailing call argument in a table-constructor final call such as `{select(3, unpack(t))}`. Deeper nested call chains and method-call constructor expansion shapes such as `{obj:m(...)}` remain pending. | both | — |
+| `{...}` table constructor with trailing varargs | specified | Last `...` expands into the array part; embedded nils create holes affecting `#`. A final call field such as `{select(n, ...)}` expands the call results after passing all varargs to that call. | P1 implements direct trailing varargs in table constructors, direct plain appended calls whose final argument is `...`, and one nested trailing call argument in a table-constructor final call such as `{select(3, unpack(t))}`. Final method calls with trailing varargs such as `{obj:m(...)}` also expand their results, with receiver and method-selection order covered by the oracle-derived method-order fixture. Deeper nested call chains remain pending. | both | — |
 | Main chunk is vararg | specified | Top-level chunk is compiled as a vararg function; `...` = chunk args. | Same; `...` = host-supplied args (empty by default). | both | Deterministic profile: args fixed/empty for reproducibility. |
 | Implicit `arg` table | n/a (removed) | Not present (removed after Lua 5.0). | Not present. | n/a | Use `...`/`table.pack`. |
 | Upvalue capture by reference | specified | Closures capture the *variable* (cell), not a copy; mutations are visible across closures sharing it. | Captured cells; shared mutable upvalue. | both | Core closure semantics. |
@@ -1089,3 +1089,28 @@ loading and transactional installation/reload behavior.
 - **[c10]** newproxy: keep it (Luau parity) or treat as a deferred/optional userdata feature, given userdata lands at P4. Decide whether Deterministic gates it.
 - **[c10]** Exact error-message wording parity (e.g. 'cannot resume dead coroutine', 'attempt to yield across metamethod/C-call boundary', 'attempt to compare X with Y'): commit to byte-exact match vs semantically-equivalent. Differential tests will pin these; decide tolerance.
 - **[c10]** Whether host-fn (native) frames should ever be made yieldable beyond the Luau-blessed set (pcall/xpcall/resume/wrap) via the embedding API, and how that interacts with the C-call boundary error.
+
+### Rejected metamethod yields
+
+`runtime.metamethod-yield-error` checks ten lookup, operator and native callback
+contexts against Luau 0.709. A forbidden yield produces the exact unprefixed
+`attempt to yield across metamethod/C-call boundary` error. The coroutine is
+dead afterward. The four-profile facade regression also verifies subsequent VM
+execution. This does not change typed invocation hard-abort rules.
+
+### Colon-call evaluation order
+
+`runtime.method-callee-evaluation-order` captures computed receivers and upvalues
+first, evaluates arguments, then reads a local receiver and selects/checks the
+method. This follows pinned Luau `getExprLocalReg`, including parenthesized locals. Ordinary dot calls still capture
+the callee before arguments. Expanded colon calls retain the method-name constant
+as validated call metadata, resolving it only after nested arguments complete,
+including suspension. This uses the existing continuation driver and roots the
+computed receiver with the argument list. For a deferred local receiver, the
+continuation retains its capture cell, or its value when uncaptured. Argument
+code can reassign the caller local only through a capture cell; uncaptured caller
+registers remain unchanged until the expanded call finishes. The cell is traced
+and read after nested execution, including suspension. Table-constructor method
+calls preserve trailing varargs. The checked lookup charges three fuel units
+and three logical steps, matching a checked `NameCall`. A deferred local read
+charges the existing one-unit register/cell read separately.

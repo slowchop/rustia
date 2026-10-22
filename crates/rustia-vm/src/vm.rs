@@ -4623,6 +4623,7 @@ impl Vm {
                                 program,
                                 instruction,
                                 &registers,
+                                &register_cells,
                                 &varargs,
                                 context.depth.saturating_add(stackless_self_calls.len()),
                                 call_site,
@@ -20294,7 +20295,7 @@ fn validate_hardened_leaf_program(program: &Program) -> Result<()> {
         }
         for (pc, instruction) in function.code.iter().enumerate() {
             if instruction.aux < 0 && crate::bytecode::supports_call_descriptor(instruction.op) {
-                expanded_calls::descriptor(program, *instruction)
+                expanded_calls::descriptor(program, *instruction, function.max_registers)
                     .map_err(|e| attach_instruction_source(program, function, pc, e))?;
             }
             let feature = match instruction.op {
@@ -23804,7 +23805,9 @@ fn error_is_out_of_memory(error: &Error) -> bool {
 }
 
 fn non_yieldable_boundary_error() -> Error {
-    Error::new(ErrorKind::YieldAcrossBoundary)
+    // Luau 0.709 raises this VM boundary error without a source prefix, even
+    // when the caller has debug locations (see metamethod_yield_errors).
+    Error::new(ErrorKind::YieldAcrossBoundary).without_source_location()
 }
 
 fn attach_instruction_source(

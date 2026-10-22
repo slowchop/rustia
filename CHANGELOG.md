@@ -18,6 +18,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Match Luau method selection after arguments, including local receiver changes,
+  expanded results and coroutine suspension. Preserve trailing varargs in
+  table-constructor method calls and name missing methods consistently.
+- Omit source prefixes from rejected metamethod-yield errors, matching Luau.
+
 - Charge repeated-string output work before allocation in specialized calls,
   matching ordinary builtin calls when fuel and memory limits overlap.
 - Keep ordinary callable receivers on VM continuations through recursion and

@@ -24,6 +24,8 @@ fn expanded_program(op: Opcode) -> Program {
         .map(|level| CallDescriptorCall {
             fixed_args: 0,
             deferred_import: (level + 1 < levels).then_some(1),
+            deferred_method: None,
+            method_receiver_register: None,
         })
         .collect();
     let aux = if append {
@@ -185,17 +187,21 @@ fn deferred_lookup_fuel_is_charged_after_argument_effects() {
 
 #[test]
 fn malformed_call_descriptors_reject_before_running_arguments() {
-    let descriptors = [
+    let mut descriptors = vec![
         CallDescriptor {
             aux: -1,
             calls: vec![
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: Some(1),
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
             ],
             append_varargs: false,
@@ -206,10 +212,14 @@ fn malformed_call_descriptors_reject_before_running_arguments() {
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: Some(99),
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
             ],
             append_varargs: false,
@@ -220,10 +230,14 @@ fn malformed_call_descriptors_reject_before_running_arguments() {
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: Some(0),
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
                 CallDescriptorCall {
                     fixed_args: 0,
                     deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
                 },
             ],
             append_varargs: false,
@@ -233,10 +247,58 @@ fn malformed_call_descriptors_reject_before_running_arguments() {
             calls: vec![CallDescriptorCall {
                 fixed_args: 0,
                 deferred_import: Some(1),
+                deferred_method: None,
+                method_receiver_register: None,
             }],
             append_varargs: false,
         },
     ];
+    for (fixed_args, deferred_import, deferred_method) in [
+        (0, None, Some(0)),        // no receiver
+        (1, Some(1), Some(0)),     // conflicting lookup metadata
+        (1, None, Some(1)),        // import descriptor, not a string
+        (1, None, Some(99)),       // missing constant
+        (1, None, Some(u32::MAX)), // index overflow
+    ] {
+        descriptors.push(CallDescriptor {
+            aux: 1,
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args,
+                    deferred_import,
+                    deferred_method,
+                    method_receiver_register: None,
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
+                },
+            ],
+            append_varargs: false,
+        });
+    }
+    for (deferred_method, method_receiver_register) in [(None, Some(0)), (Some(0), Some(255))] {
+        descriptors.push(CallDescriptor {
+            aux: 1,
+            calls: vec![
+                CallDescriptorCall {
+                    fixed_args: 1,
+                    deferred_import: None,
+                    deferred_method,
+                    method_receiver_register,
+                },
+                CallDescriptorCall {
+                    fixed_args: 0,
+                    deferred_import: None,
+                    deferred_method: None,
+                    method_receiver_register: None,
+                },
+            ],
+            append_varargs: false,
+        });
+    }
     for descriptor in descriptors {
         let original = expanded_program(Opcode::CallExpand);
         let mut constants = original.constants().to_vec();
@@ -332,10 +394,14 @@ fn recursive_expanded_program(depth: f64) -> Program {
                     CallDescriptorCall {
                         fixed_args: 1,
                         deferred_import: Some(7),
+                        deferred_method: None,
+                        method_receiver_register: None,
                     },
                     CallDescriptorCall {
                         fixed_args: 1,
                         deferred_import: None,
+                        deferred_method: None,
+                        method_receiver_register: None,
                     },
                 ],
                 append_varargs: false,
@@ -431,6 +497,8 @@ fn general_descriptor_preserves_results_through_many_call_levels() {
             .map(|level| CallDescriptorCall {
                 fixed_args: 0,
                 deferred_import: (level != 99).then_some(1),
+                deferred_method: None,
+                method_receiver_register: None,
             })
             .collect(),
         append_varargs: false,
