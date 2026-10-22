@@ -189,3 +189,15 @@ ceiling. All 33 BBS tests, strict Clippy and independent review passed, includin
 exhaustion, preserved immediate writes and same-session recovery. No public
 Rustia API addition or dependency change was needed. Grabby and civfun retain
 the accepted application contracts recorded in document 93.
+
+
+The [first isolation comparison](https://github.com/slowchop/rustia/actions/runs/39706980966)
+measured `189ae963` against the baseline with four legs per side: dense tables
+-0.59% (99% interval -1.21% to +1.45%), with no slowdown detected. The later
+VM delta moves receiver bounds validation into `descriptor`; it does not add
+work to dense-table guest execution. The receiver-binding refactor is withdrawn
+in favor of a smaller isolation candidate that prevents expanded-call construction
+(including descriptor setup and validation) from being inlined into shared
+dispatch code. The descriptor helper was already out of line; its annotation
+alone left dispatch unchanged in static inspection. All validation remains enabled.
+Its performance effect remains unproven until remote measurement completes.

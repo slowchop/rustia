@@ -1106,11 +1106,8 @@ method. This follows pinned Luau `getExprLocalReg`, including parenthesized loca
 the callee before arguments. Expanded colon calls retain the method-name constant
 as validated call metadata, resolving it only after nested arguments complete,
 including suspension. This uses the existing continuation driver and roots the
-computed receiver with the argument list. For a deferred local receiver, the
-continuation retains its capture cell, or its value when uncaptured. Argument
-code can reassign the caller local only through a capture cell; uncaptured caller
-registers remain unchanged until the expanded call finishes. The cell is traced
-and read after nested execution, including suspension. Table-constructor method
+computed receiver with the argument list; deferred local receivers read the
+restored caller registers/cells after nested execution. Table-constructor method
 calls preserve trailing varargs. The checked lookup charges three fuel units
 and three logical steps, matching a checked `NameCall`. A deferred local read
 charges the existing one-unit register/cell read separately.

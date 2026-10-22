@@ -4313,7 +4313,14 @@ impl Vm {
                     let (continuation, resume_results) = match continuation {
                         BytecodeContinuation::ExpandedCalls(mut state) => {
                             let outcome = self
-                                .continue_expanded_calls(program, &mut state, resume_results, fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    resume_results,
+                                    &registers,
+                                    &mut register_cells,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(
                                         program,
@@ -4623,14 +4630,20 @@ impl Vm {
                                 program,
                                 instruction,
                                 &registers,
-                                &register_cells,
                                 &varargs,
                                 context.depth.saturating_add(stackless_self_calls.len()),
                                 call_site,
                             )
                             .map_err(|e| attach_instruction_source(program, function, pc - 1, e))?;
                             let results = match self
-                                .continue_expanded_calls(program, &mut state, Vec::new(), fuel)
+                                .continue_expanded_calls(
+                                    program,
+                                    &mut state,
+                                    Vec::new(),
+                                    &registers,
+                                    &mut register_cells,
+                                    fuel,
+                                )
                                 .map_err(|e| {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })? {

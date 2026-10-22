@@ -9,8 +9,7 @@ enum ExpandedCallee {
     Import(u32),
     Method {
         name: u32,
-        late_receiver: bool,
-        receiver_cell: Option<u32>,
+        receiver_register: Option<u8>,
     },
 }
 
@@ -209,11 +208,12 @@ fn legacy_descriptor(
 }
 
 impl ExpandedCallState {
+    // Keep descriptor setup and validation out of the shared opcode dispatch.
+    #[inline(never)]
     pub(super) fn new(
         program: &Program,
         instruction: Instruction,
         registers: &[Value],
-        register_cells: &[Option<u32>],
         varargs: &[Value],
         depth: usize,
         call_site: Option<ErrorLocation>,
@@ -297,31 +297,11 @@ impl ExpandedCallState {
                 (Some(index), _) => ExpandedCallee::Import(index),
                 (_, Some(index)) => ExpandedCallee::Method {
                     name: index,
-                    late_receiver: call.method_receiver_register.is_some(),
-                    receiver_cell: call.method_receiver_register.and_then(|register| {
-                        register_cells.get(usize::from(register)).copied().flatten()
-                    }),
+                    receiver_register: call.method_receiver_register,
                 },
                 _ => ExpandedCallee::Early(values[0]),
             };
             let mut args = try_copy_vec(&values[1..])?;
-            if let ExpandedCallee::Method {
-                late_receiver: true,
-                receiver_cell: None,
-                ..
-            } = callee
-            {
-                // An argument can reassign a caller local only through a capture
-                // cell. Uncaptured registers stay unchanged until this expanded
-                // call finishes; save their value without charging the late read.
-                let register = call
-                    .method_receiver_register
-                    .ok_or_else(|| invalid("late method receiver is missing its register"))?;
-                *args
-                    .first_mut()
-                    .ok_or_else(|| invalid("missing method receiver"))? =
-                    get_register(registers, register)?;
-            }
             if append_varargs && level + 1 == count {
                 args.try_reserve(varargs.len())
                     .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
@@ -378,15 +358,8 @@ impl ExpandedCallState {
 
     pub(super) fn roots(&self, roots: &mut Vec<Value>) {
         for call in &self.calls {
-            match call.callee {
-                ExpandedCallee::Early(value) => roots.push(value),
-                ExpandedCallee::Method {
-                    receiver_cell: Some(cell),
-                    ..
-                } => {
-                    roots.push(Value::capture_cell(cell));
-                }
-                _ => {}
+            if let ExpandedCallee::Early(value) = call.callee {
+                roots.push(value);
             }
             roots.extend_from_slice(&call.args);
         }
@@ -399,15 +372,8 @@ impl ExpandedCallState {
 
     pub(super) fn heap_roots(&self, roots: &mut Vec<Value>) {
         for call in &self.calls {
-            match call.callee {
-                ExpandedCallee::Early(value) => extend_heap_backed_roots(roots, &[value]),
-                ExpandedCallee::Method {
-                    receiver_cell: Some(cell),
-                    ..
-                } => {
-                    roots.push(Value::capture_cell(cell));
-                }
-                _ => {}
+            if let ExpandedCallee::Early(value) = call.callee {
+                extend_heap_backed_roots(roots, &[value]);
             }
             extend_heap_backed_roots(roots, &call.args);
         }
@@ -471,6 +437,8 @@ impl Vm {
         program: &Program,
         state: &mut ExpandedCallState,
         mut results: Vec<Value>,
+        registers: &[Value],
+        register_cells: &mut [Option<u32>],
         fuel: &mut Execution<'_>,
     ) -> Result<ExpandedCallFlow> {
         while !state.calls.is_empty() {
@@ -495,23 +463,26 @@ impl Vm {
                     ExpandedCallee::Early(value) => value,
                     ExpandedCallee::Method {
                         name: index,
-                        late_receiver,
-                        receiver_cell,
+                        receiver_register,
                     } => {
-                        if late_receiver {
+                        if let Some(register) = receiver_register {
                             charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, 1)?;
                             self.executed_instructions = self.executed_instructions.wrapping_add(1);
-                            let receiver = call
-                                .args
-                                .first_mut()
-                                .ok_or_else(|| invalid("missing method receiver"))?;
-                            if let Some(cell) = receiver_cell {
-                                *receiver = self
+                            let value = match register_cells
+                                .get(usize::from(register))
+                                .copied()
+                                .flatten()
+                            {
+                                Some(cell) => self
                                     .heap
                                     .upvalue_get(cell)
-                                    .ok_or_else(|| invalid("local receiver cell is missing"))?;
-                            }
-                            let value = *receiver;
+                                    .ok_or_else(|| invalid("local receiver cell is missing"))?,
+                                None => get_register(registers, register)?,
+                            };
+                            *call
+                                .args
+                                .first_mut()
+                                .ok_or_else(|| invalid("missing method receiver"))? = value;
                             self.mutate_last_call_stack_frame(|frame| {
                                 extend_heap_backed_roots(&mut frame.stackless_roots, &[value]);
                             });
@@ -678,35 +649,6 @@ mod tests {
         );
         assert!(usage.reserved_bytes >= usage.live_bytes);
         shrink_bytecode_continuation_capacity(&mut copy);
-    }
-
-    #[test]
-    fn cloned_method_continuation_keeps_its_receiver_cell_rooted() {
-        let mut pending = state(ExpandedFinish::WriteFixed { base: 0, count: 1 });
-        pending.calls.push(PendingExpandedCall {
-            callee: ExpandedCallee::Method {
-                name: 0,
-                late_receiver: true,
-                receiver_cell: Some(21),
-            },
-            args: vec![Value::nil()],
-        });
-        let original = BytecodeContinuation::ExpandedCalls(pending);
-        let copy = try_clone_bytecode_continuation(&original).unwrap();
-        // A coroutine snapshot owns its roots even after the original pending
-        // call is consumed. Both tracing paths must retain the cell itself,
-        // since argument execution may replace the value held in that cell.
-        drop(original);
-        let mut roots = Vec::new();
-        extend_bytecode_continuation_roots(&mut roots, &copy);
-        assert!(roots
-            .iter()
-            .any(|value| value.as_capture_cell() == Some(21)));
-        let mut heap_roots = Vec::new();
-        extend_bytecode_continuation_heap_roots(&mut heap_roots, &copy);
-        assert!(heap_roots
-            .iter()
-            .any(|value| value.as_capture_cell() == Some(21)));
     }
 
     #[test]
