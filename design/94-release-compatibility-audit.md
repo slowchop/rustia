@@ -113,7 +113,7 @@ This is a rejected yield, not a successful suspended metamethod continuation.
 
 The rejected-yield prefix fix now passes the four-profile facade regression for
 ten contexts. Its new conformance fixture was independently run through the
-pinned oracle (`ok / 0 / pass`). Full CI and independent review remain pending.
+pinned oracle (`ok / 0 / pass`). These were initial local results; final review and runtime acceptance are recorded below.
 
 Method ordering now passes 14 oracle-derived call shapes, eight missing-method
 error shapes and nine failure/GC/receiver/vararg cases across four profiles,
@@ -122,18 +122,15 @@ lookups use validated continuation metadata; fixed calls select after arguments.
 Missing-method messages now use checked lookup in these paths. Malformed metadata is rejected before argument execution. Explicit GC cases,
 argument failure, protected-call recovery and repetition after reset pass.
 The differential smoke passed before the local-receiver/append-vararg follow-up
-and must be rerun for the final source. Compiler unit tests (124), VM unit tests (244), existing
+and was rerun successfully for runtime candidate `8b8bc17b`. Compiler unit tests (124), VM unit tests (244), existing
 builtin expansion/order tests, ten deferred-call tests and strict workspace
 Clippy pass. The initial full corpus passed (725 fixtures / 519 refs); it predates the
 local-receiver/append-vararg follow-up and is not final-candidate evidence.
 
 ## Completion evidence still required
 
-- Conformance fixtures derived from the oracle and passing implementation tests.
-- A broader error-phase/order audit beyond the three initial reproductions.
 - Fresh remote benchmark results, with comparisons updated only where supported.
-- Application-based API review and any resulting migrations.
-- Required CI and independent review on the final changes.
+- Required CI on the final documentation changes. Independent runtime review is complete.
 
 ## Delivery status
 
@@ -157,7 +154,7 @@ count in the prose provenance record. These reviews do not replace final CI.
 
 Preflight also exposed stale benchmark queue metadata and its rendered HTML.
 Both were regenerated without changing measurements or speed claims. The
-benchmark runner has reconnected and PR screening is running; the full fresh
+benchmark runner reconnected and runtime screening passed; the full fresh
 cross-engine comparison remains pending.
 
 
@@ -168,18 +165,18 @@ All release checks passed on `897bfddb`. Its stronger
 against `07f3ee7a` confirmed dense tables at +4.62% (99% interval +4.17% to
 +5.04%), beyond the calibrated 2.08% screening threshold. Closures/upvalues
 improved by 7.64%; the other three workload intervals include zero. A successful
-workflow is not performance acceptance. Keep the compatibility batch unmerged
-while investigating this result.
+workflow was not performance acceptance, so the compatibility batch was held
+unmerged while this result was investigated.
 
 Static compilation found identical dense-workload bytecode and identical
 normalized Linux LLVM IR for its sort and table-access helpers. The shared
 interpreter gained register-slice selection and call arguments for deferred
 method receivers. This is a code-generation hypothesis, not a measured cause.
-The candidate stores the receiver binding in continuation state: a traced cell
+The receiver-state candidate stores the receiver binding in continuation state: a traced cell
 for captured locals, or the stable value for uncaptured locals. Late read fuel,
 collection and method lookup order remain unchanged. It removes the caller
-register parameters from the continuation driver. Remote comparison is required
-before claiming this candidate fixes the regression.
+register parameters from the continuation driver. The final remote comparison
+below establishes its performance acceptance.
 
 The application review found one concrete client correction: WOTS ignored its
 per-feed fuel argument. [WOTS #9](https://github.com/slowchop/wots/pull/9), merged
@@ -195,18 +192,18 @@ The [first isolation comparison](https://github.com/slowchop/rustia/actions/runs
 measured `189ae963` against the baseline with four legs per side: dense tables
 -0.59% (99% interval -1.21% to +1.45%), with no slowdown detected. The later
 VM delta moves receiver bounds validation into `descriptor`; it does not add
-work to dense-table guest execution. The receiver-binding refactor is withdrawn
-in favor of a smaller isolation candidate that prevents expanded-call construction
+work to dense-table guest execution. The receiver-binding refactor was temporarily withdrawn
+to test a smaller isolation candidate that prevented expanded-call construction
 (including descriptor setup and validation) from being inlined into shared
 dispatch code. The descriptor helper was already out of line; its annotation
 alone left dispatch unchanged in static inspection. All validation remains enabled.
-Its performance effect remains unproven until remote measurement completes.
+The following remote measurement rejected that candidate.
 
 
 The constructor-only candidate `53ec889a` did not fix the regression:
 [eight-leg acceptance](https://github.com/slowchop/rustia/actions/runs/39709187008)
 measured dense tables +4.43% (99% interval +4.04% to +6.14%). Static dispatch
-size is not performance evidence. That candidate is withdrawn.
+size is not performance evidence. That candidate was withdrawn.
 
 The receiver-binding candidate `b13e9914` had
 [screened at +0.04%](https://github.com/slowchop/rustia/actions/runs/39707621551)
@@ -214,5 +211,36 @@ for dense tables (interval -0.40% to +0.69%). Its reviewed implementation is
 restored for full acceptance: retain a traced capture cell or stable uncaptured
 value in the continuation and remove caller-register arguments from resumed
 calls. The clone/root regression, existing method-order and malformed-descriptor
-tests, and strict Clippy pass. Do not claim acceptance from the screening run
-alone; the stronger comparison and final CI remain required.
+tests, and strict Clippy passed. Screening alone was insufficient; the stronger
+comparison below supplies the final performance evidence.
+
+
+## Accepted receiver-state measurements
+
+The [final eight-leg comparison](https://github.com/slowchop/rustia/actions/runs/39712053958)
+measured runtime candidate `8b8bc17bd9008a8e9d0a540146e4c0f7ad5b3828`
+against baseline `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
+All measurements are remote CI results; local compilation supplied only static
+code-inspection and correctness evidence.
+
+| Workload | Change | 99% interval |
+|---|---:|---:|
+| Dense tables | +0.04% | -0.22% to +0.76% |
+| Sparse tables | -0.46% | -2.04% to +2.31% |
+| Closures/upvalues | -0.63% | -1.68% to +0.10% |
+| Generic iteration | -0.39% | -1.95% to +0.92% |
+| Standard library/math/table | +1.11% | -0.86% to +2.92% |
+
+Every interval includes zero. The dense-table interval is below its calibrated
+2.08% screening threshold, resolving the earlier +4.62% regression. This is
+acceptance of the compatibility change against the old Rustia baseline, not a
+new comparison with other engines. The README's cross-engine table must wait
+for a fresh full matrix.
+
+The implementation retains receiver bindings in continuation state, preserving
+late reads, fuel and GC roots while avoiding caller-register arguments through
+the continuation driver. It is the same reviewed VM source that screened at
+`b13e9914`; the constructor-only alternative is absent. Method-order regressions,
+malformed-metadata checks, continuation cloning/root coverage, full VM tests and
+strict Clippy pass. Required CI gates final PR delivery; its status is available
+on [PR #70](https://github.com/slowchop/rustia/pull/70).

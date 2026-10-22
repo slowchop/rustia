@@ -9,11 +9,13 @@
 The next release audit is in progress in
 [`94-release-compatibility-audit.md`](94-release-compatibility-audit.md): language
 compatibility first, fresh remote benchmarks second, then an API review using
-the three applications. The working audit branch fixes pinned-oracle gaps in
+the three applications. The compatibility batch fixes pinned-oracle gaps in
 method-selection order, local receiver reads, missing-method errors, rejected-yield
-prefixes and table-constructor method varargs. CI and independent review passed
-on `897bfddb`, but remote acceptance confirmed a 4.62% dense-table slowdown.
-The batch remains unmerged while the receiver-binding candidate completes full acceptance.
+prefixes and table-constructor method varargs. Its receiver-state implementation
+passed eight-leg remote acceptance at `8b8bc17b`: dense tables +0.04%, with the
+99% interval spanning zero, and no clear change across the five workloads. The
+previous 4.62% dense-table regression is resolved. Required CI gates delivery in
+PR #70; the fresh cross-engine comparison remains the next benchmark step.
 The private acceptance below remains historical evidence, not closure of these
 broader parity gates.
 
