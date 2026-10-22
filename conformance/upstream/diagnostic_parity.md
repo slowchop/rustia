@@ -48,3 +48,9 @@ Relevant pinned source definitions:
 - `VM/src/lvmutils.cpp` and `VM/src/ltable.cpp`: invalid length and next-key errors.
 
 These tests cover observed diagnostics, not exhaustive language parity.
+
+The older `table_freeze_rejects_already_frozen.luau` manifest expectation was
+incorrectly a generic readonly-write message. The diagnostic follow-up corrects
+it to `invalid argument #1 to 'freeze' (table is already frozen)`, independently
+captured by the `freeze_twice` case above. Freezing an already frozen table and
+writing to a frozen table are distinct failures; write expectations are unchanged.
