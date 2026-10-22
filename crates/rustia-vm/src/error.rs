@@ -93,11 +93,13 @@ pub enum ErrorKind {
 impl Error {
     #[inline]
     pub fn new(kind: ErrorKind) -> Self {
+        // Luau luaH_next raises a bare VM error, without a source prefix.
+        let location_suppressed = matches!(kind, ErrorKind::InvalidKeyToNext);
         Self {
             kind,
             pc: None,
             location: None,
-            location_suppressed: false,
+            location_suppressed,
             diagnostic: None,
             span: None,
         }

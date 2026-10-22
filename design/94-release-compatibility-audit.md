@@ -34,7 +34,7 @@ Only the oracle vehicle's source-name wrapper is normalized. No line number,
 argument detail or message text is removed. Successful object addresses are
 excluded by guest-side type labels.
 
-| Case | Remaining difference |
+| Case | Difference observed at the audit baseline |
 |---|---|
 | Length of nil | Generic type error rather than Luau's length error |
 | Missing `rawget`, `rawset`, `type` arguments | Missing numbered argument diagnostics |
@@ -44,7 +44,8 @@ excluded by guest-side type labels.
 | Invalid `coroutine.create` / `coroutine.resume` argument | Missing function/argument/type details |
 | Freezing an already frozen or protected-metatable table | Wrong diagnostic text |
 
-These are known gaps, not deliberate differences. Follow-up fixtures must test
+These were confirmed gaps, not deliberate differences. The diagnostic follow-up
+below fixes them; regression fixtures test
 direct and aliased calls, argument side effects and validation precedence.
 Structured host errors and resource-exhaustion rules must remain intact. The
 pending-free manifest describes its executable inventory; it does not erase
@@ -286,3 +287,32 @@ matching the accepted baseline. The README's 20 numeric cells match history,
 its three executable examples pass, and project-status and generated benchmark
 report checks pass. Required CI on publication merge `7a1b6764` also passed
 ([run 39721705546](https://github.com/slowchop/rustia/actions/runs/39721705546)).
+
+
+## Diagnostic parity follow-up
+
+The 13 differences above reproduced on the merged closeout baseline. The fix
+uses shared typed-argument diagnostics for the affected builtins, including
+missing versus explicit-nil arguments, native names through aliases, and numeric
+coercions. Specialized string and table instructions use the same checks.
+Validation retains Luau's order: table type before arity, insert position before
+mutation, sort readonly state before comparator type, and frozen state before
+metatable protection. Invalid `next` keys and native table-mutation errors retain
+the oracle's bare messages; script-origin errors keep their source locations.
+
+The original 27-case audit now reports 27 matches and zero differences. The
+historical JSON observations remain unchanged so the original failures remain
+reviewable. CI reruns the audit against the pinned oracle and fails on any new
+difference. The expanded 85-case diagnostic fixture also checks aliases, source prefixes,
+argument side effects and competing validation failures across all four profiles
+and after reset. Final review, full CI and remote screening gate delivery.
+This closes the enumerated findings, not the wider public-release parity gate.
+
+Independent runtime review found no blocker and checked additional competing
+errors and thread/buffer type names. It also identified a separate, pre-existing
+numeric-conversion difference: `return string.sub(12,0/0)` and
+`return string.sub(12,1,math.huge)` return `12` in the local pinned oracle, while
+Rustia rejects the nonfinite index through the unchanged `string_library_index`.
+This remains a public-release follow-up: establish the pinned cross-architecture
+conversion contract before changing deterministic numeric behavior. It is not
+covered by the claim that the 13 diagnostic findings are fixed.

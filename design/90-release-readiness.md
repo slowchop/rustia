@@ -45,7 +45,11 @@ Remote screening remains part of final PR validation; no new speed claim is made
    small typed facade as the simple layer. Full mlua-style `UserData`/`Scope`,
    async, and an mlua migration shim remain later optional layers unless a
    concrete release consumer promotes them.
-2. Finish the wider compiler/runtime error-phase audit, preserve the implemented
+2. Finish the wider compiler/runtime error-phase audit. The 13 enumerated
+   diagnostic findings now match the pinned oracle in the diagnostic follow-up
+   ([94](94-release-compatibility-audit.md#diagnostic-parity-follow-up)); its final
+   CI and remote screening gate delivery. The newly recorded nonfinite
+   `string.sub` index conversion difference remains open. Preserve the implemented
    yieldable `require` contract, and retain differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact

@@ -518,3 +518,4 @@ runtime.builtin-callee-evaluation-order	runtime	upstream-luau-0.709:Compiler/src
 runtime.expanded-call-recursion	runtime	upstream-luau-0.709:VM/src/lvmexecute.cpp	luau-0.709	Recursive expanded calls preserve complete results and unwind through structured VM continuations.
 runtime.metamethod-yield-error	runtime	upstream-luau-0.709:VM/src/ldo.cpp	luau-0.709	Forbidden metamethod and native callback yields return the exact unprefixed boundary error and leave the coroutine dead.
 runtime.method-callee-evaluation-order	runtime	upstream-luau-0.709:Compiler/src/Compiler.cpp	luau-0.709	Colon calls select methods after arguments; computed receivers are captured early, locals are read late, and expansion/suspension preserve this ordering.
+runtime.diagnostic-parity	runtime	upstream-luau-0.709:VM/src/laux.cpp	luau-0.709	Exact diagnostic text, validation precedence and source prefixes for release audit builtins and length/next errors.
