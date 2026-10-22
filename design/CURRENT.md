@@ -6,18 +6,17 @@
 
 ## One-paragraph state
 
-The next release audit is in progress in
-[`94-release-compatibility-audit.md`](94-release-compatibility-audit.md): language
-compatibility first, fresh remote benchmarks second, then an API review using
-the three applications. The compatibility batch fixes pinned-oracle gaps in
-method-selection order, local receiver reads, missing-method errors, rejected-yield
-prefixes and table-constructor method varargs. Its receiver-state implementation
-passed eight-leg remote acceptance at `8b8bc17b`: dense tables +0.04%, with the
-99% interval spanning zero, and no clear change across the five workloads. The
-previous 4.62% dense-table regression is resolved. Required CI gates delivery in
-PR #70; the fresh cross-engine comparison remains the next benchmark step.
-The private acceptance below remains historical evidence, not closure of these
-broader parity gates.
+The follow-up compatibility, benchmark and application API audit is recorded in
+[`94-release-compatibility-audit.md`](94-release-compatibility-audit.md).
+The compatibility fixes merged in PR #70 as `9b12a5a8` after required CI passed.
+Eight-leg remote acceptance resolved the dense-table regression: +0.04%, with
+its 99% interval spanning zero. The fresh 13-engine comparison measured that
+merge and landed in PR #71; the README now cites its immutable cohort.
+Application review retained the accepted API and corrected WOTS's ignored
+per-call fuel limit through the existing invocation API. Final documentation
+checks and review gate this closeout. The 13 diagnostic differences listed in
+document 94 and the broader public-release gates remain open; this audit does
+not claim full Luau parity or authorize package publication.
 
 **Current milestone:** private 0.x API and real-application readiness, tracked in
 [`92-first-release.md`](92-first-release.md). The immutable acceptance candidate is

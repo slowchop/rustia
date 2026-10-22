@@ -1,8 +1,9 @@
 # Release compatibility and API audit
 
-Status: in progress. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
+Status: implementation and measurement complete; documentation delivery pending. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
 This follows the private acceptance recorded in [93](93-private-api-acceptance.md).
-It does not authorize publication or a version change.
+Public benchmark dashboard updates were approved on 2026-10-22. Package
+publication and version changes remain outside this milestone.
 
 ## Delivery order
 
@@ -129,17 +130,17 @@ local-receiver/append-vararg follow-up and is not final-candidate evidence.
 
 ## Completion evidence still required
 
-- Fresh remote benchmark results, with comparisons updated only where supported.
 - Required CI on the final documentation changes. Independent runtime review is complete.
 
 ## Delivery status
 
-The method/vararg/yield batch is in [PR #70](https://github.com/slowchop/rustia/pull/70).
+The method/vararg/yield batch merged in [PR #70](https://github.com/slowchop/rustia/pull/70).
 Its initial head passed eight target builds, native macOS arm64, Node/V8 and
 differential CI. Preflight found stale generated publishability file counts;
 those counts have been regenerated. A subsequent malformed-metadata regression
 also made hardened-program validation reject out-of-range late receiver registers
-at construction, matching runtime validation. Final-head checks remain required.
+at construction, matching runtime validation. Final-head checks passed in
+[CI run 39715901379](https://github.com/slowchop/rustia/actions/runs/39715901379).
 
 The method fixture now contains 31 cases, including a local receiver changed
 after argument suspension, an upvalue control, and a parenthesized local. All
@@ -155,7 +156,7 @@ count in the prose provenance record. These reviews do not replace final CI.
 Preflight also exposed stale benchmark queue metadata and its rendered HTML.
 Both were regenerated without changing measurements or speed claims. The
 benchmark runner reconnected and runtime screening passed; the full fresh
-cross-engine comparison remains pending.
+cross-engine comparison is recorded below.
 
 
 ## Dense-table regression investigation
@@ -244,3 +245,44 @@ the continuation driver. It is the same reviewed VM source that screened at
 malformed-metadata checks, continuation cloning/root coverage, full VM tests and
 strict Clippy pass. Required CI gates final PR delivery; its status is available
 on [PR #70](https://github.com/slowchop/rustia/pull/70).
+
+
+## Fresh cross-engine comparison and closeout
+
+[Matrix run 39719875275](https://github.com/slowchop/rustia/actions/runs/39719875275)
+measured the merged runtime `9b12a5a8540f69fe7c0f6daebe467c795bb576c3`.
+The accepted cohort contains 65 native rows (13 engine variants, five workloads)
+and 15 WebAssembly adapter rows. Publication [PR #71](https://github.com/slowchop/rustia/pull/71)
+merged as `7a1b67640a71b5e987260aab0dba27c936f47ec5`.
+The native measurement window is 2026-10-22 04:09:41–04:14:05 UTC.
+
+The README uses the four interpreter columns from that immutable native cohort,
+with checked units and three-decimal microsecond values. Rustia trails upstream
+Luau on all five workloads; it beats Koto and Rhai on four, with generic iteration
+slower than both. These are workload-specific observations, not a universal speed
+ranking. Compilation, first-call costs and JIT variants remain in the full report.
+The matrix is a cross-engine snapshot, not a paired regression experiment;
+the eight-leg comparison above remains the regression acceptance evidence.
+
+The three requested follow-up tracks now have evidence:
+
+| Track | Evidence | Remaining gate |
+|---|---|---|
+| Compatibility audit | Oracle fixtures, four-profile regressions, bounded differential tests and required CI in merged PR #70; broader 27-case diagnostic inventory | Thirteen diagnostic differences remain explicitly tracked for further parity work; no full-parity claim |
+| Fresh benchmarks and README | Accepted matrix on the merged runtime; immutable history and publication; README comparison verifier | Closeout documentation CI and review |
+| Application API review | Grabby/civfun contracts in document 93; WOTS fuel correction in merged PR #9, 33 BBS tests, Clippy and independent review | No new API or client migration required |
+
+The private API baseline in document 93 remains the common application pin;
+this runtime-only follow-up does not claim that all applications were repinned.
+Public package publication, a version bump, exhaustive Luau parity and the wider
+public platform execution matrix remain separate release gates in documents 90
+and 92.
+
+Closeout verification rechecked that Grabby #1083 (`79240f45`), civfun #53
+(`074b2e16`), WOTS #8 (`aabfde94`) and the WOTS fuel fix #9 (`7960b5af`)
+are merged. The facade inventory still has SHA-256
+`9dab65d93ef3d4da1058cfec5dc8ee80ce39c77653729704187afc4971b27842`,
+matching the accepted baseline. The README's 20 numeric cells match history,
+its three executable examples pass, and project-status and generated benchmark
+report checks pass. Required CI on publication merge `7a1b6764` also passed
+([run 39721705546](https://github.com/slowchop/rustia/actions/runs/39721705546)).
