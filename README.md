@@ -141,29 +141,42 @@ and async host calls remain future work.
 
 **Microseconds per work unit; lower is better.** These are best observed
 steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
-2026-10-11 UTC at source commit `343c261`. Compilation and first-call costs are separate.
+2026-10-22 UTC at source commit `9b12a5a`. Compilation and first-call costs are separate.
 
 <!-- rustia-benchmark-snapshot
 {
-  "commit": "343c2615e6f2a38b918258c86c5c7dac0f2ca7fe",
-  "target": "linux-x86_64", "start": 1791747073, "end": 1791747336,
-  "engines": ["rustia", "mlua-luau", "koto", "rhai"],
-  "workloads": ["dense_tables", "sparse_tables", "closures_upvalues", "generic_iteration", "stdlib_math_table"]
+  "commit": "9b12a5a8540f69fe7c0f6daebe467c795bb576c3",
+  "target": "linux-x86_64",
+  "start": 1792642181,
+  "end": 1792642445,
+  "engines": [
+    "rustia",
+    "mlua-luau",
+    "koto",
+    "rhai"
+  ],
+  "workloads": [
+    "dense_tables",
+    "sparse_tables",
+    "closures_upvalues",
+    "generic_iteration",
+    "stdlib_math_table"
+  ]
 }
 -->
 | Work unit | Rustia | mlua + Luau | Koto | Rhai |
 |---|---:|---:|---:|---:|
-| Build, sum, and sort a 256-item array | 51.980 | 19.158 | 263.146 | 327.449 |
-| Fill and read 128 hash entries | 87.426 | 21.581 | 144.268 | 351.553 |
-| One closure call updating a captured value | 0.176 | 0.051 | 0.341 | 1.468 |
-| Custom, keyed, and array iteration pass | 13.166 | 4.297 | 7.393 | 9.580 |
-| Math library calls and buffered appends | 1.200 | 0.237 | 1.517 | 3.196 |
+| Build, sum, and sort a 256-item array | 51.657 | 18.919 | 262.217 | 313.191 |
+| Fill and read 128 hash entries | 87.555 | 22.485 | 146.082 | 348.085 |
+| One closure call updating a captured value | 0.197 | 0.051 | 0.346 | 1.478 |
+| Custom, keyed, and array iteration pass | 14.035 | 4.170 | 7.391 | 9.566 |
+| Math library calls and buffered appends | 1.421 | 0.237 | 1.536 | 3.174 |
 
 These workloads exercise different languages and runtime features, so they don't
 provide a universal ranking. Rustia trails the upstream Luau interpreter in each
-of these tests. The [full results](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/RESULTS.md) include more engines, JIT modes,
-startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/current-results.json).
-See the [benchmark limitations](https://github.com/slowchop/rustia/blob/72fc97845ca82dabe473ddf994a8d66d6aa05b06/bench/CLAIMS.md) for the scope of these comparisons.
+of these tests. The [full results](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/RESULTS.md) include more engines, JIT modes,
+startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/current-results.json).
+See the [benchmark limitations](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/CLAIMS.md) for the scope of these comparisons.
 
 ## Examples and API reference
 
