@@ -154,6 +154,17 @@ const RUNNER_CLASSES = new Map([
     },
   ],
   [
+    "general-linux-docker",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-linux",
+        "      labels: [self-hosted, Linux, X64, general-linux, docker]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+  [
     "general-macos",
     {
       block: [
@@ -202,10 +213,10 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["rustia-memory.yml", "bench-solo"],
 ]);
 
-// Explicit native/browser correctness jobs may use the Mac pool.
+// Explicit correctness jobs select the platform and capabilities they need.
 const JOB_RUNNER_CLASS = new Map([
   ["ci.yml:macos-arm64-runtime", "general-macos"],
-  ["ci.yml:webkit-runtime", "general-macos"],
+  ["ci.yml:webkit-runtime", "general-linux-docker"],
   ["ci.yml:windows-runtime", "general-windows"],
   ["browser-correctness.yml:safari-runtime", "general-macos"],
 ]);

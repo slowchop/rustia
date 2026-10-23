@@ -2,9 +2,11 @@
 
 ## PR checks and release candidates
 
-Every PR runs the same browser suites in headless Playwright WebKit on the Mac
-CI pool. Playwright is pinned to 1.64.1 in `tools/browser/package-lock.json`;
-its matching browser build is installed into the job temporary directory. This
+Every PR runs the same browser suites in headless Playwright WebKit on Docker-capable
+Linux runners. Playwright is pinned to 1.64.1 in `tools/browser/package-lock.json`;
+the matching official container is pinned by digest and includes its browser and
+system libraries. A macOS service-account trial timed out launching WebKit, so
+PR execution does not depend on a logged-in Mac desktop. This
 uses no Safari window or Safari automation permission. The required Release
 preflight status also waits for this job and rejects failure or skipped execution.
 

@@ -286,32 +286,34 @@ jobs:
   webkit-runtime:
     name: Browser runtime (headless WebKit)
     runs-on:
-      group: general-macos
-      labels: [self-hosted, macOS, ARM64, general-macos]
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux, docker]
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     env:
       RUSTUP_TOOLCHAIN: 1.95.0
     steps:
+      - name: Install Rust build dependencies
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          cache: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - name: Install pinned Wasm and browser tools
         run: |
           set -euo pipefail
-          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-          test -x "$cargo_bin/rustup"
-          export PATH="$cargo_bin:$PATH"
-          echo "$cargo_bin" >> "$GITHUB_PATH"
-          rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown --no-self-update
-          if [ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen 0.2.126" ]; then
-            cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
-          fi
-          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/rustia-playwright"
-          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
           npm ci --prefix tools/browser --ignore-scripts
-          node tools/browser/node_modules/playwright/cli.js install webkit
       - name: Execute both feature modes in headless WebKit
         run: bash tools/run-browser-correctness.sh webkit 1.64.1
