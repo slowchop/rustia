@@ -5,6 +5,7 @@ const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const root = path.resolve(__dirname, "..");
 const packageName = "rustia-conformance";
@@ -33,7 +34,7 @@ function runCargo(args) {
       stdio: ["ignore", "inherit", "inherit"],
     });
   } catch (_error) {
-    fail(`cargo ${args.join(" ")} failed`);
+    throw new Error(`cargo ${args.join(" ")} failed`);
   }
 }
 
@@ -120,14 +121,23 @@ for (const file of sourceFiles) {
   }
 }
 
-runCargo([
-  "test",
-  "--locked",
-  "--offline",
-  "--manifest-path",
-  path.join(unpacked, "Cargo.toml"),
-  ...patches,
-]);
+// An extracted archive nested beneath an alternate target directory can be
+// mistaken for a workspace member. Test an unchanged copy outside the source
+// workspace, as a package consumer would; retain Cargo's configured build cache.
+const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-conformance-consumer-"));
+try {
+  fs.cpSync(unpacked, consumer, { recursive: true });
+  runCargo([
+    "test",
+    "--locked",
+    "--offline",
+    "--manifest-path",
+    path.join(consumer, "Cargo.toml"),
+    ...patches,
+  ]);
+} finally {
+  fs.rmSync(consumer, { recursive: true, force: true });
+}
 
 console.log(
   `${packageName} archive verified with ${packagedFiles.length} self-contained corpus files`,
