@@ -247,12 +247,20 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned Rust and verify native host
+        shell: pwsh
         run: |
-          set -euo pipefail
-          test "$RUNNER_OS" = Windows
-          test "$RUNNER_ARCH" = X64
-          rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc --no-self-update
-          rustc -vV | tr -d '\r' | grep -Fx 'host: x86_64-pc-windows-msvc'
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ARCH -ne 'X64') { throw 'Expected native Windows x86-64' }
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+          $cargoBin = Join-Path $cargoHome 'bin'
+          $rustup = Join-Path $cargoBin 'rustup.exe'
+          if (!(Test-Path $rustup)) { throw 'Native rustup.exe is missing from Cargo home' }
+          $env:PATH = "$cargoBin;$env:PATH"
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust installation failed' }
+          $version = & (Join-Path $cargoBin 'rustc.exe') -vV
+          if ($LASTEXITCODE -ne 0 -or $version -notcontains 'host: x86_64-pc-windows-msvc') { throw 'Rust compiler host does not match Windows x86-64' }
       - name: Execute native correctness contracts
         run: |
           set -euo pipefail

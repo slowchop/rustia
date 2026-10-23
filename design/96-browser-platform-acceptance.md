@@ -44,5 +44,8 @@ and deterministic-result evidence; the current cross-compilation jobs prove
 only builds. The manually dispatched Windows job in `ci.yml` prepares native MSVC
 execution of the shared transcript and embedding contracts in both feature modes.
 Repository access to the Windows runner group was approved and verified.
-Installed native build tools remain unverified; the job has not executed yet. Keep the full matrix in documents 00, 90 and 92 until each target
+The first Windows jobs failed before tests while starting rustup through Bash.
+The follow-up invokes the native Rust tools through PowerShell and explicitly
+adds Cargo home to later steps. Windows correctness remains unverified until
+that job succeeds. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence.
