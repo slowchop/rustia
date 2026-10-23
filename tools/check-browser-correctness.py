@@ -20,6 +20,9 @@ elif name=='wasm-bindgen-test-runner': print('wasm-bindgen-test-runner '+('0.2.1
 elif name=='rustc': print('rustc 1.95.0 (stub)')
 elif name=='git': print('a'*40)
 elif name=='cargo':
+ if os.getenv('STUB_TRACE'):
+  with open(os.environ['STUB_TRACE'],'a') as trace: trace.write(('build' if '--no-run' in args else 'run')+'\\n')
+ if '--no-run' in args: sys.exit(1 if os.getenv('STUB_BUILD_FAIL') else 0)
  if 'platform_golden' in args and not os.getenv('STUB_NO_MARKER'): print('RUSTIA_PRIVATE_PLATFORM_GOLDEN stub')
  print('test result: ok. '+('0' if os.getenv('STUB_ZERO_TESTS') else '1')+' passed; 0 failed; 0 ignored;')
 '''
@@ -34,3 +37,11 @@ elif name=='cargo':
         result=run(extra,version)
         assert (result.returncode==0)==success,(label,result.stdout,result.stderr)
         print(label+': passed')
+    trace=sandbox/'cargo-trace'
+    result=run({'STUB_TRACE':str(trace)})
+    assert result.returncode==0,(result.stdout,result.stderr)
+    assert trace.read_text().splitlines()==['build']*2+['run']*16,trace.read_text()
+    trace.unlink()
+    result=run({'STUB_TRACE':str(trace),'STUB_BUILD_FAIL':'1'})
+    assert result.returncode!=0 and trace.read_text().splitlines()==['build']
+    print('build-before-browser and compile-failure: passed')

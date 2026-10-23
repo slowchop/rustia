@@ -44,7 +44,16 @@ case "$browser" in
   *) echo "expected firefox or safari" >&2; exit 2 ;;
 esac
 log=$(mktemp "${TMPDIR:-/tmp}/rustia-browser-test.XXXXXX")
-trap 'rm -f "$log"; if [[ -n "$config" ]]; then rm -f "$config"; fi' EXIT
+cleanup() {
+  status=$?
+  if [[ "$status" != 0 && "$browser" == safari ]]; then
+    echo 'Safari run did not finish. Check the WebDriver/session error above and Allow remote automation in Safari Settings > Developer.' >&2
+    echo 'This script does not change Safari permissions. A driver SIGKILL can be test-runner cleanup, not the original failure.' >&2
+  fi
+  rm -f "$log"
+  if [[ -n "$config" ]]; then rm -f "$config"; fi
+}
+trap cleanup EXIT
 [[ "$(wasm-bindgen --version)" == 'wasm-bindgen 0.2.126' ]] || fail "required platform or pinned tool version does not match"
 [[ "$(wasm-bindgen-test-runner --version)" == 'wasm-bindgen-test-runner 0.2.126' ]] || fail "Wasm test runner version does not match"
 [[ "$(rustc --version)" == 'rustc 1.95.0 '* ]] || fail "required platform or pinned tool version does not match"
@@ -54,6 +63,20 @@ export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
 export WASM_BINDGEN_USE_BROWSER=1
 export WASM_BINDGEN_TEST_TIMEOUT=120
 export WASM_BINDGEN_TEST_DRIVER_TIMEOUT=30
+# Build both modes before Safari starts taking focus for its visible windows.
+# NO_HEADLESS selects wasm-bindgen's manual server, not a Safari display mode.
+for mode in bare default; do
+  args=(test --locked -p rustia --target wasm32-unknown-unknown --no-run)
+  if [[ "$mode" == bare ]]; then args+=(--no-default-features); adapter=bare_wasm_live; else adapter=web_live; fi
+  cargo "${args[@]}" --test platform_golden --test "$adapter" --test host_functions \
+    --test typed_objects --test live_value_contract --test yieldable_require \
+    --test callable_continuations --test numeric_index_contract
+done
+if [[ "$browser" == safari ]]; then
+  echo 'Safari uses visible automation windows; it has no headless mode.'
+  echo 'The pinned test runner labels its WebDriver mode "headless" even for Safari.'
+  echo 'Leave automation enabled and avoid interacting with Safari until both modes finish.'
+fi
 for mode in bare default; do
   bash tools/run-private-platform-golden.sh wasm "$mode"
   args=(test --locked -p rustia --target wasm32-unknown-unknown)
@@ -66,3 +89,4 @@ for mode in bare default; do
     fi
   done
 done
+printf 'Browser correctness complete: %s; bare and default suites passed.\n' "$browser"

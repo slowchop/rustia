@@ -30,10 +30,23 @@ Both feature modes passed: 16 test groups, 88 executed tests, including the
 unchanged shared transcript and the new numeric-index boundary test. This was
 run using the browser script introduced in this change. No timing claim is made.
 
-Safari 26.6.2 could not create a WebDriver session: it reports that Allow Remote
-Automation is disabled. The user approved enabling automation, but the enable command requires local
-administrator authentication. No Safari test has passed; coverage remains open
-until the setting is enabled and a real run succeeds.
+Safari uses visible automation windows and requires a logged-in desktop session;
+it has no true headless mode. The pinned wasm-bindgen runner prints “headless”
+for its automatic WebDriver path, including Safari. Setting `NO_HEADLESS` would
+instead start a manual test server and is not a fix. The script compiles both
+feature modes before browser execution, announces Safari's visible behavior,
+and reports completion only after both modes pass. It never edits permissions.
+
+Safari 26.6.2 executed all 45 bare-mode tests at `bfe5a84a`, including the shared
+golden. Before the default-mode golden could start, Safari disabled automation.
+The local diagnostic log shows an AppKit UI action immediately before Safari
+wrote its WebDriver preferences and terminated the session. The log does not
+identify the control or the source of the action; the user reports no stop
+control was clicked. Do not attribute this to user interaction or automatic
+permission expiry without further evidence. The pinned runner closes the test
+window and kills its driver during cleanup; a printed SIGKILL alone is not a
+Safari crash diagnosis. Full Safari acceptance remains open until both modes
+pass in one uninterrupted run. Local diagnostic logs stay outside the repository.
 
 ## Windows execution
 
