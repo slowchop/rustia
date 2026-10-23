@@ -35,21 +35,29 @@ Automation is disabled. The user approved enabling automation, but the enable co
 administrator authentication. No Safari test has passed; coverage remains open
 until the setting is enabled and a real run succeeds.
 
+## Windows execution
+
+On 2026-10-24 (Australia/Hobart), commit
+`2bcfd4bef3f4a077008b21900f39a149118a9cc3` passed native Windows x86-64 MSVC
+in [CI run 40021456000](https://github.com/slowchop/rustia/actions/runs/40021456000/job/120647451654).
+The log contains 120 passing tests across default and bare feature modes,
+including two identical shared golden transcripts, callbacks, typed objects,
+live values, module resolution, yieldable modules, callable continuations and
+the numeric-index contract. This is correctness evidence, not a timing claim.
+
+The first Windows jobs failed before tests while starting the shared rustup
+installation. The runner also lacks PowerShell Core (`pwsh`). The working job
+uses Windows PowerShell (`powershell`) and bootstraps its own Rust installation
+under the runner temporary directory with checksum-verified rustup 1.28.2 and
+Rust 1.95.0. It exports those isolated Cargo/Rustup homes and executable path to
+later steps; the shared host installation is not modified.
+
 ## Remaining public platform gates
 
-Firefox on macOS arm64 is executed evidence, not a claim of the entire platform
-matrix. Remote Firefox and Safari execution remain unverified. Windows, Linux
+Firefox on macOS arm64 and native Windows execution do not close the entire
+platform matrix. Remote Firefox and Safari execution remain unverified. Linux
 arm64, Intel Mac and the promised mobile targets still need native correctness
-and deterministic-result evidence; the current cross-compilation jobs prove
-only builds. The manually dispatched Windows job in `ci.yml` prepares native MSVC
-execution of the shared transcript and embedding contracts in both feature modes.
-Repository access to the Windows runner group was approved and verified.
-The first Windows jobs failed before tests while starting rustup through Bash.
-The runner also lacks PowerShell Core (`pwsh`). The follow-up uses Windows
-PowerShell (`powershell`). The shared native rustup executable also exits before
-installation, so the job bootstraps its own Rust installation under the runner
-temporary directory with checksum-verified rustup 1.28.2 and Rust 1.95.0. It
-exports those isolated Cargo/Rustup homes and executable path to later steps;
-the shared host installation is not modified. Windows correctness remains unverified until
-that job succeeds. Keep the full matrix in documents 00, 90 and 92 until each target
-has actual execution evidence.
+and deterministic-result evidence; their current cross-compilation jobs prove
+only builds. Keep the full matrix in documents 00, 90 and 92 until each target
+has actual execution evidence. Windows remains a manually dispatched CI job;
+its successful run must be checked separately from ordinary pull-request CI.

@@ -20,8 +20,8 @@ oracle (27 original cases match), with expanded validation-order and alias cover
 The numeric-index follow-up specifies checked signed-64 conversion and corrects
 the rounded upper-bound bug; native regression coverage passes and cross-target
 CI remains a delivery gate. See [95](95-numeric-index-contract.md).
-Real Firefox correctness passed in both feature modes; Safari and additional
-native execution remain open. The prepared platform workflows and evidence are
+Real Firefox and native Windows x86-64 correctness passed in both feature modes;
+Safari, Linux arm64, Intel Mac and mobile execution remain open. The workflows and evidence are
 recorded in [96](96-browser-platform-acceptance.md).
 Validation now partitions the same command inventory into early checks, workspace
 tests and release checks. Local pre-push validation uses the same inventory;

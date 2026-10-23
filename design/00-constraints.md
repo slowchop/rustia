@@ -37,22 +37,24 @@ the whole cross-target golden. macOS/Windows remain correctness/build targets, n
 dedicated measurement hosts exist.
 
 The private milestone now implements a bounded shared facade golden for Linux
-x86-64, macOS arm64 and Node/V8 in default and bare feature modes. Its final CI
-execution/review is pending; see [84-private-platform-acceptance.md](84-private-platform-acceptance.md).
+x86-64, macOS arm64 and Node/V8 in default and bare feature modes. Its accepted CI
+execution/review is recorded in [93-private-api-acceptance.md](93-private-api-acceptance.md).
 The full matrix below remains the public-release contract.
 
 | native (OS × arch) | browser/wasm engine |
 |---|---|
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
-| macOS **x86_64** (Intel Mac) — build ✅ / runtime TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; browser golden still TODO |
+| macOS **x86_64** (Intel Mac) — build ✅ / runtime TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; Firefox browser golden passed on macOS arm64 |
 | Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari/iOS JSC golden still TODO |
 | Linux **arm64** — build ✅ / runtime TODO | |
-| Windows **x86_64** (msvc) — build ✅ / runtime TODO | |
+| Windows **x86_64** (msvc) — build ✅ / shared runtime contracts ✅ | |
 | iOS **arm64** + Android **arm64** — build ✅ / runtime TODO | |
 
 Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical, and retained wasm
 portability evidence covers V8, JavaScriptCore-family, and SpiderMonkey shells. The remaining native arches,
-real Firefox/Safari browser goldens, and iOS/Android targets are public-release correctness gates. They could in
+real Safari browser goldens, and iOS/Android targets are public-release correctness gates.
+[Platform acceptance](96-browser-platform-acceptance.md) records the real Firefox and Windows
+correctness runs, including the exact tested revisions and their limits. They could in
 principle expose a value-layout or platform assumption despite the portable libm/canonicalization discipline.
 
 ### C1 — Determinism, bit-for-bit, across the full matrix above
