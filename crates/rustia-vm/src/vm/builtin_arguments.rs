@@ -11,6 +11,9 @@ impl Vm {
         })
     }
 
+    // Validation failures are exceptional; keep formatting off successful builtin paths.
+    #[cold]
+    #[inline(never)]
     pub(super) fn builtin_argument_error(
         &self,
         value: Option<Value>,

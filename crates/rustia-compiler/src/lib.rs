@@ -8488,7 +8488,7 @@ return type(v) == "vector"
                 1.0,
             ),
             (
-                "local t = table.freeze({}) local ok, err = pcall(table.freeze, t) if not ok and err:find('attempt to modify a readonly table') then return 1 end return -1",
+                "local t = table.freeze({}) local ok, err = pcall(table.freeze, t) if not ok and err == \"invalid argument #1 to 'freeze' (table is already frozen)\" then return 1 end return -1",
                 1.0,
             ),
             (
