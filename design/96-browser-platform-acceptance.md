@@ -41,8 +41,8 @@ Firefox on macOS arm64 is executed evidence, not a claim of the entire platform
 matrix. Remote Firefox and Safari execution remain unverified. Windows, Linux
 arm64, Intel Mac and the promised mobile targets still need native correctness
 and deterministic-result evidence; the current cross-compilation jobs prove
-only builds. The manual `windows-correctness.yml` workflow prepares native MSVC
+only builds. The manually dispatched Windows job in `ci.yml` prepares native MSVC
 execution of the shared transcript and embedding contracts in both feature modes.
-Runner access and installed native build tools remain prerequisites; the workflow
-has not executed yet. Keep the full matrix in documents 00, 90 and 92 until each target
+Repository access to the Windows runner group was approved and verified.
+Installed native build tools remain unverified; the job has not executed yet. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence.

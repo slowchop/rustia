@@ -194,7 +194,6 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["error-fuzz.yml", "general-linux"],
   ["ci.yml", "general-linux"],
   ["browser-correctness.yml", "general-linux"],
-  ["windows-correctness.yml", "general-windows"],
   ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
@@ -206,6 +205,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
 // Explicit native/browser correctness jobs may use the Mac pool.
 const JOB_RUNNER_CLASS = new Map([
   ["ci.yml:macos-arm64-runtime", "general-macos"],
+  ["ci.yml:windows-runtime", "general-windows"],
   ["browser-correctness.yml:safari-runtime", "general-macos"],
 ]);
 
