@@ -14,9 +14,9 @@ its 99% interval spanning zero. The fresh 13-engine comparison measured that
 merge and landed in PR #71; the README now cites its immutable cohort.
 Application review retained the accepted API and corrected WOTS's ignored
 per-call fuel limit through the existing invocation API; closeout PR #72 merged.
-The next diagnostic follow-up fixes all 13 recorded differences against the
-pinned Luau oracle (27 original cases now match), with expanded validation-order
-and alias coverage. Final CI, review and remote screening remain delivery gates.
+PR #73 merged as `90bc2ae4` after required CI and remote benchmark screening
+passed. It fixes all 13 recorded diagnostic differences against the pinned Luau
+oracle (27 original cases match), with expanded validation-order and alias coverage.
 The numeric-index follow-up specifies checked signed-64 conversion and corrects
 the rounded upper-bound bug; native regression coverage passes and cross-target
 CI remains a delivery gate. See [95](95-numeric-index-contract.md).

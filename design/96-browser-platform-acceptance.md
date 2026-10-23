@@ -45,7 +45,8 @@ only builds. The manually dispatched Windows job in `ci.yml` prepares native MSV
 execution of the shared transcript and embedding contracts in both feature modes.
 Repository access to the Windows runner group was approved and verified.
 The first Windows jobs failed before tests while starting rustup through Bash.
-The follow-up invokes the native Rust tools through PowerShell and explicitly
+The runner also lacks PowerShell Core (`pwsh`). The follow-up uses Windows
+PowerShell (`powershell`) to invoke the native Rust tools and explicitly
 adds Cargo home to later steps. Windows correctness remains unverified until
 that job succeeds. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence.
