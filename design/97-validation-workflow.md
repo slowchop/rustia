@@ -20,7 +20,8 @@ work; no speedup is claimed until observed.
 CI runs the three stages independently. Every stage fetches the pinned lockfile
 dependencies it needs, including offline package consumers. The unchanged
 required status `Release preflight` succeeds only when all stages succeed;
-failure, cancellation or a skipped stage cannot pass it. Linux native goldens
+failure, cancellation or a skipped stage cannot pass it. The gate also requires
+the headless WebKit browser job; real Safari remains release-candidate acceptance. Linux native goldens
 remain in the workspace stage. Existing Mac, Node, build-matrix and benchmark
 checks remain in place.
 

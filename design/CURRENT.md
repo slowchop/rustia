@@ -23,6 +23,9 @@ CI remains a delivery gate. See [95](95-numeric-index-contract.md).
 Real Firefox, Safari and native Windows x86-64 correctness passed in both feature
 modes; Linux arm64, Intel Mac and mobile execution remain open. The workflows and evidence are
 recorded in [96](96-browser-platform-acceptance.md).
+PR CI adds headless Playwright WebKit for the same browser contracts; real Safari
+remains a separate release-candidate check. Local WebKit tests pass, with remote
+CI still required. See [96](96-browser-platform-acceptance.md).
 Validation now partitions the same command inventory into early checks, workspace
 tests and release checks. Local pre-push validation uses the same inventory;
 the required CI status waits for every stage. See [97](97-validation-workflow.md).

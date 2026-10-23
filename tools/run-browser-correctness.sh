@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Correctness only: actual Firefox or Safari; never a timing authority.
+# Correctness only: actual Firefox/Safari or explicitly labelled headless WebKit; never a timing authority.
 set -euo pipefail
 fail() { echo "browser correctness: $*" >&2; exit 1; }
-browser=${1:?expected firefox or safari}
+browser=${1:?expected firefox, safari or webkit}
 expected_browser=${2:?expected exact browser version}
 expected_driver=${3:-}
 # Reject inherited alternative engines/drivers rather than silently falling back.
@@ -13,6 +13,11 @@ unset GECKODRIVER CHROMEDRIVER SAFARIDRIVER MSEDGEDRIVER
 unset GECKODRIVER_ARGS CHROMEDRIVER_ARGS SAFARIDRIVER_ARGS MSEDGEDRIVER_ARGS
 unset WASM_BINDGEN_TEST_WEBDRIVER_JSON
 case "$browser" in
+  webkit)
+    tool_dir=$(cd "$(dirname "$0")/browser" && pwd)
+    [[ "$(node -p "require('$tool_dir/node_modules/playwright/package.json').version")" == "$expected_browser" ]] || fail "Playwright version does not match"
+    config=
+    ;;
   firefox)
     case "$(uname -s)/$(uname -m)" in
       Linux/x86_64|Darwin/arm64) ;;
@@ -41,7 +46,7 @@ case "$browser" in
     "$SAFARIDRIVER" --version
     config=
     ;;
-  *) echo "expected firefox or safari" >&2; exit 2 ;;
+  *) echo "expected firefox, safari or webkit" >&2; exit 2 ;;
 esac
 log=$(mktemp "${TMPDIR:-/tmp}/rustia-browser-test.XXXXXX")
 cleanup() {
@@ -60,6 +65,9 @@ trap cleanup EXIT
 printf 'Browser correctness: %s %s\n' "$browser" "$expected_browser"
 git rev-parse HEAD
 export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner
+if [[ "$browser" == webkit ]]; then
+  export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="node $tool_dir/webkit-runner.cjs"
+fi
 export WASM_BINDGEN_USE_BROWSER=1
 export WASM_BINDGEN_TEST_TIMEOUT=120
 export WASM_BINDGEN_TEST_DRIVER_TIMEOUT=30

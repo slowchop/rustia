@@ -1,5 +1,28 @@
 # Browser correctness acceptance
 
+## PR checks and release candidates
+
+Every PR runs the same browser suites in headless Playwright WebKit on the Mac
+CI pool. Playwright is pinned to 1.64.1 in `tools/browser/package-lock.json`;
+its matching browser build is installed into the job temporary directory. This
+uses no Safari window or Safari automation permission. The required Release
+preflight status also waits for this job and rejects failure or skipped execution.
+
+`webkit-runner.cjs` starts the pinned wasm-bindgen test server on an ephemeral
+loopback port and opens it with Playwright WebKit in headless mode. It rejects
+missing, zero-test, failed and duplicate result summaries, bounds startup and
+test waits, and closes the browser and server after each suite. The shared
+golden script still requires exactly one executed transcript. Local validation
+passed all 88 tests in 16 groups with matching bare/default golden transcripts
+on WebKit 27.2 (Playwright build 2370). Remote acceptance remains required.
+
+WebKit is not the Safari product shipped by Apple. The manually dispatched
+`browser-correctness.yml` remains release-candidate acceptance in real Firefox
+and Safari. Safari requires a prepared, logged-in desktop session and explicit
+automation permission; it is never launched by routine PR CI. Keep its version
+and execution evidence separate from Playwright WebKit.
+
+
 The first browser acceptance runs the same fixed transcript as native and Node
 checks, plus the live adapters, host callbacks, typed objects, live-value
 contract, yieldable modules, callable continuations and numeric-index contract.

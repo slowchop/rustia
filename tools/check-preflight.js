@@ -21,4 +21,6 @@ for (const args of [["--stage", "typo"], ["--stage"], ["--skip-tests"]]) {
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 assert(workflow.includes("stage: [quick, workspace, release]"));
 assert(workflow.includes('run: test "$PREFLIGHT_RESULT" = success'));
+assert(workflow.includes('needs: [release-preflight, webkit-runtime]'));
+assert(workflow.includes('&& test "$WEBKIT_RESULT" = success'));
 console.log("Preflight inventory, stage boundaries, and invalid-option rejection pass.");

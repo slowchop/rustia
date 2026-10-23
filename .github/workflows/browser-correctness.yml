@@ -1,6 +1,7 @@
-name: Browser correctness acceptance
+name: Release candidate browser acceptance
 
-# Manual until installed browser versions and Safari automation are verified.
+# Release-candidate acceptance in actual installed browsers.
+# Routine PR CI uses headless Playwright WebKit and never controls Safari.
 "on":
   workflow_dispatch:
     inputs:

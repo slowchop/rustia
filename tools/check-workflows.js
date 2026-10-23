@@ -205,6 +205,7 @@ const WORKFLOW_RUNNER_CLASS = new Map([
 // Explicit native/browser correctness jobs may use the Mac pool.
 const JOB_RUNNER_CLASS = new Map([
   ["ci.yml:macos-arm64-runtime", "general-macos"],
+  ["ci.yml:webkit-runtime", "general-macos"],
   ["ci.yml:windows-runtime", "general-windows"],
   ["browser-correctness.yml:safari-runtime", "general-macos"],
 ]);
@@ -420,9 +421,13 @@ function checkCi(text) {
   forbidIncludes(text, "rustup default stable", label);
   requireIncludes(text, 'node tools/run-release-preflight.js --stage "${{ matrix.stage }}"', label);
   requireIncludes(releasePreflightJob, 'stage: [quick, workspace, release]', label);
-  requireIncludes(text, '    name: Release preflight\n    needs: release-preflight\n    if: always()', label);
+  requireIncludes(text, '    name: Release preflight\n    needs: [release-preflight, webkit-runtime]\n    if: always()', label);
   requireIncludes(text, 'PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}', label);
   requireIncludes(text, 'run: test "$PREFLIGHT_RESULT" = success', label);
+  requireIncludes(text, 'WEBKIT_RESULT: ${{ needs.webkit-runtime.result }}', label);
+  requireIncludes(text, '&& test "$WEBKIT_RESULT" = success', label);
+  requireIncludes(text, 'bash tools/run-browser-correctness.sh webkit 1.64.1', label);
+  requireIncludes(text, 'npm ci --prefix tools/browser --ignore-scripts', label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
   // Preflight lints the benchmark adapter for wasm32. The action's `rustup
   // override` bypasses rust-toolchain.toml's target list, so the job names it.
