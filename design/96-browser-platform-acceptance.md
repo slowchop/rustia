@@ -46,7 +46,10 @@ execution of the shared transcript and embedding contracts in both feature modes
 Repository access to the Windows runner group was approved and verified.
 The first Windows jobs failed before tests while starting rustup through Bash.
 The runner also lacks PowerShell Core (`pwsh`). The follow-up uses Windows
-PowerShell (`powershell`) to invoke the native Rust tools and explicitly
-adds Cargo home to later steps. Windows correctness remains unverified until
+PowerShell (`powershell`). The shared native rustup executable also exits before
+installation, so the job bootstraps its own Rust installation under the runner
+temporary directory with checksum-verified rustup 1.28.2 and Rust 1.95.0. It
+exports those isolated Cargo/Rustup homes and executable path to later steps;
+the shared host installation is not modified. Windows correctness remains unverified until
 that job succeeds. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence.

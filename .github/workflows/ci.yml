@@ -251,14 +251,22 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ARCH -ne 'X64') { throw 'Expected native Windows x86-64' }
-          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
-          $cargoBin = Join-Path $cargoHome 'bin'
-          $rustup = Join-Path $cargoBin 'rustup.exe'
-          if (!(Test-Path $rustup)) { throw 'Native rustup.exe is missing from Cargo home' }
+          # Keep the job independent of shared Rust shims and installations.
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'rustia-windows-toolchain'
+          $env:CARGO_HOME = Join-Path $toolRoot 'cargo'
+          $env:RUSTUP_HOME = Join-Path $toolRoot 'rustup'
+          New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+          $installer = Join-Path $toolRoot 'rustup-init.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe' -OutFile $installer
+          $expected = '88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0'
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Rust installer checksum mismatch' }
+          & $installer -y --no-modify-path --profile minimal --default-host x86_64-pc-windows-msvc --default-toolchain 1.95.0
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Rust installation failed with exit code $LASTEXITCODE" }
+          $cargoBin = Join-Path $env:CARGO_HOME 'bin'
           $env:PATH = "$cargoBin;$env:PATH"
           $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          & $rustup toolchain install 1.95.0 --profile minimal --target x86_64-pc-windows-msvc --no-self-update
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust installation failed' }
+          "CARGO_HOME=$env:CARGO_HOME" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RUSTUP_HOME=$env:RUSTUP_HOME" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $version = & (Join-Path $cargoBin 'rustc.exe') -vV
           if ($LASTEXITCODE -ne 0 -or $version -notcontains 'host: x86_64-pc-windows-msvc') { throw 'Rust compiler host does not match Windows x86-64' }
       - name: Execute native correctness contracts
