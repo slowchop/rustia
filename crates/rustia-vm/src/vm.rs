@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+mod builtin_arguments;
 mod bytecode_calls;
 mod expanded_calls;
 mod host_functions;
@@ -6090,7 +6091,11 @@ impl Vm {
                             }
                             Opcode::StringLen => {
                                 let text = self
-                                    .coerce_to_string(&registers, instruction.b)
+                                    .builtin_string_arg(
+                                        Some(get_register(&registers, instruction.b)?),
+                                        0,
+                                        "len",
+                                    )
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 set_register(
                                     &mut registers,
@@ -8805,8 +8810,11 @@ impl Vm {
                     Ok(Value::number(self.raw_len_value(value)? as f64))
                 }
             }
-            _ => Err(Error::new(ErrorKind::TypeError {
-                expected: "table or string",
+            _ => Err(Error::new(ErrorKind::RuntimeError {
+                message: format!(
+                    "attempt to get length of a {} value",
+                    self.luau_type_name(value)
+                ),
             })),
         }
     }
@@ -10343,8 +10351,8 @@ impl Vm {
                 reason: "invalid table.insert arity",
             }));
         }
-        let table = get_table(registers, instruction.b)?;
-        self.ensure_table_writable(table)?;
+        let value = get_register(registers, instruction.b)?;
+        let table = self.builtin_table_arg(&[value], "insert")?;
         let (position, value) = if instruction.aux == 2 {
             let len = self.heap.array_len(table).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
@@ -10358,9 +10366,11 @@ impl Vm {
             })?;
             (position, get_register(registers, instruction.c)?)
         } else {
-            let position = table_insert_position_arg(
-                self.coerce_register_to_number(registers, instruction.c)?,
-            )?;
+            let position = table_insert_position_arg(self.builtin_number_arg(
+                Some(get_register(registers, instruction.c)?),
+                1,
+                "insert",
+            )?)?;
             let value_register = instruction.c.checked_add(1).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "table.insert value register overflow",
@@ -10368,6 +10378,8 @@ impl Vm {
             })?;
             (position, get_register(registers, value_register)?)
         };
+        self.ensure_table_writable(table)
+            .map_err(Error::without_source_location)?;
         self.heap
             .table_insert(table, position, value)
             .ok_or_else(|| {
@@ -13433,13 +13445,11 @@ impl Vm {
     }
 
     fn native_coroutine_create(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 1, 1, "coroutine.create arguments")?;
-        let callee = args[0];
-        if callee.kind() != ValueKind::Function {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "function",
-            }));
+        let callee = args.first().copied();
+        if !callee.is_some_and(|value| value.kind() == ValueKind::Function) {
+            return Err(self.builtin_argument_error(callee, 0, "create", "function"));
         }
+        let callee = callee.expect("function argument checked");
         self.alloc_coroutine(callee, false).map(Value::userdata)
     }
 
@@ -14083,8 +14093,11 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
-        validate_native_arity(args, 1, u8::MAX as usize, "coroutine.resume arguments")?;
-        let coroutine = self.coroutine_index(args[0])?;
+        let value = args.first().copied();
+        let coroutine = value
+            .and_then(|value| value.as_userdata())
+            .and_then(|handle| self.coroutine_for_handle(handle))
+            .ok_or_else(|| self.builtin_argument_error(value, 0, "resume", "thread"))?;
         if self.running_coroutines.contains(&coroutine) {
             let message = self
                 .heap
@@ -14701,7 +14714,7 @@ impl Vm {
     }
 
     fn native_typeof(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 1, usize::MAX, "type argument")?;
+        self.builtin_required_arg(args, 0)?;
         Ok(self
             .heap
             .intern_string_value_bytes(self.luau_type_name(args[0]).as_bytes()))
@@ -16035,19 +16048,21 @@ impl Vm {
     }
 
     fn native_rawget(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 2, u8::MAX as usize, "rawget arguments")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
+        let table = self.builtin_table_arg(args, "rawget")?;
+        self.builtin_required_arg(args, 1)?;
+
         self.raw_table_get(table, args[1])
     }
 
     fn native_rawset(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 3, u8::MAX as usize, "rawset arguments")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
-        self.set_table_index(table, args[1], args[2])?;
+        let table = self.builtin_table_arg(args, "rawset")?;
+        self.builtin_required_arg(args, 1)?;
+        self.builtin_required_arg(args, 2)?;
+
+        self.ensure_table_writable(table)
+            .map_err(Error::without_source_location)?;
+        self.set_table_index(table, args[1], args[2])
+            .map_err(Error::without_source_location)?;
         Ok(args[0])
     }
 
@@ -16558,10 +16573,7 @@ impl Vm {
 
     fn native_next(&mut self, args: &[Value]) -> Result<Vec<Value>> {
         let args = &args[..args.len().min(2)];
-        validate_native_arity(args, 1, 2, "next arguments")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
+        let table = self.builtin_table_arg(args, "next")?;
         let after = args.get(1).copied().unwrap_or_else(Value::nil);
         match self.table_next_after(table, after).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -17077,19 +17089,24 @@ impl Vm {
     }
 
     fn native_string_sub(&mut self, args: &[Value]) -> Result<Value> {
-        let args = &args[..args.len().min(3)];
-        validate_native_arity(args, 2, 3, "string.sub arguments")?;
-        let registers = native_registers(args)?;
-        self.string_sub(
-            &registers,
-            Instruction::with_aux(Opcode::Halt, 0, 0, 1, args.len() as i32),
-        )
+        let text = self.builtin_string_arg(args.first().copied(), 0, "sub")?;
+        let start =
+            string_library_index(self.builtin_number_arg(args.get(1).copied(), 1, "sub")?)?;
+        let end = match args
+            .get(2)
+            .copied()
+            .filter(|value| value.kind() != ValueKind::Nil)
+        {
+            Some(value) => string_library_index(self.builtin_number_arg(Some(value), 2, "sub")?)?,
+            None => -1,
+        };
+        let output = luau_string_sub(&text, start, end)?;
+        Ok(self.heap.intern_string_value_bytes(&output))
     }
 
     fn native_string_len(&mut self, args: &[Value]) -> Result<Value> {
-        let args = &args[..args.len().min(1)];
-        validate_native_arity(args, 1, 1, "string.len argument")?;
-        Ok(Value::number(self.value_to_string(args[0])?.len() as f64))
+        let text = self.builtin_string_arg(args.first().copied(), 0, "len")?;
+        Ok(Value::number(text.len() as f64))
     }
 
     fn native_string_byte(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -18689,25 +18706,28 @@ impl Vm {
     }
 
     fn native_table_freeze(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 1, u8::MAX as usize, "table.freeze argument")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
-        if self.table_has_protected_metatable(table)? {
+        let table = self.builtin_table_arg(args, "freeze")?;
+        if self.heap.table_is_readonly(table).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "table handle is missing",
+            })
+        })? {
             return Err(Error::new(ErrorKind::RuntimeError {
-                message: "cannot freeze protected metatable".to_owned(),
+                message: "invalid argument #1 to 'freeze' (table is already frozen)".to_owned(),
             }));
         }
-        let was_readonly = self.heap.table_freeze(table).ok_or_else(|| {
+        if self.table_has_protected_metatable(table)? {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "invalid argument #1 to 'freeze' (table has a protected metatable)"
+                    .to_owned(),
+            }));
+        }
+        self.heap.table_freeze(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "table handle is missing",
             })
         })?;
-        if was_readonly {
-            Err(readonly_table_error())
-        } else {
-            Ok(args[0])
-        }
+        Ok(args[0])
     }
 
     fn native_table_isfrozen(&mut self, args: &[Value]) -> Result<Value> {
@@ -18724,7 +18744,12 @@ impl Vm {
     }
 
     fn native_table_insert(&mut self, args: &[Value]) -> Result<Value> {
-        validate_native_arity(args, 2, 3, "table.insert arguments")?;
+        self.builtin_table_arg(args, "insert")?;
+        if !(2..=3).contains(&args.len()) {
+            return Err(Error::new(ErrorKind::RuntimeError {
+                message: "wrong number of arguments to 'insert'".to_owned(),
+            }));
+        }
         let registers = native_registers(args)?;
         self.table_insert(
             &registers,
@@ -18798,19 +18823,15 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
-        validate_native_arity(args, 1, u8::MAX as usize, "table.sort arguments")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
-        self.ensure_table_writable(table)?;
+        let table = self.builtin_table_arg(args, "sort")?;
+        self.ensure_table_writable(table)
+            .map_err(Error::without_source_location)?;
         let comparator = args
             .get(1)
             .copied()
             .filter(|value| value.kind() != ValueKind::Nil);
         if comparator.is_some_and(|value| value.kind() != ValueKind::Function) {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "function",
-            }));
+            return Err(self.builtin_argument_error(comparator, 1, "sort", "function"));
         }
         let len = self.heap.array_len(table).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -19207,15 +19228,23 @@ impl Vm {
                 reason: "invalid string.sub arity",
             }));
         }
-        let text = self.coerce_to_string(registers, instruction.b)?;
-        let start = string_library_index(get_number(registers, instruction.c)?)?;
+        let text =
+            self.builtin_string_arg(Some(get_register(registers, instruction.b)?), 0, "sub")?;
+        let start = string_library_index(self.builtin_number_arg(
+            Some(get_register(registers, instruction.c)?),
+            1,
+            "sub",
+        )?)?;
         let end = if instruction.aux == 3 {
             let register = instruction.c.checked_add(1).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidProgram {
                     reason: "string.sub end register overflow",
                 })
             })?;
-            string_library_index(get_number(registers, register)?)?
+            match get_register(registers, register)? {
+                value if value.kind() == ValueKind::Nil => -1,
+                value => string_library_index(self.builtin_number_arg(Some(value), 2, "sub")?)?,
+            }
         } else {
             -1
         };

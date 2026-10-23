@@ -2,7 +2,7 @@
 
 > **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-08-13).** This file began as
 > a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live executable
-> ground truth is now **723 fixtures / 517 refs / 0 pending**: 705/499 are Luau 0.709 oracle-backed and 18/18
+> ground truth is now **726 fixtures / 520 refs / 0 pending**: 708/502 are Luau 0.709 oracle-backed and 18/18
 > are offline PUC 5.1.5 oracle-backed. The corpus is
 > enforced by project-status checks. The CORRECTIONS block below still supersedes contradictory historical rows;
 > that named executable denominator does not imply a one-to-one audit of every historical inventory row. New or
@@ -56,6 +56,13 @@
 
 **Totals:** 709 behavior rows · 96 observable divergences from reference Luau · 80 open decisions.
 
+
+The release diagnostic follow-up in [94](94-release-compatibility-audit.md#diagnostic-parity-follow-up)
+closes the 13 enumerated length, raw-access, type, string, table and coroutine
+message differences. `runtime.diagnostic-parity` covers missing/nil distinctions,
+validation precedence, aliases and source-prefix rules; the original 27-case
+oracle audit is also a required differential CI step. This is scoped diagnostic
+evidence, not exhaustive parity.
 
 ## 1. Lexical, syntax & parsing (incl. type grammar)
 
