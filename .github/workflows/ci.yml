@@ -291,7 +291,6 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTUP_TOOLCHAIN: 1.95.0
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/rustia-playwright
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -310,6 +309,8 @@ jobs:
           if [ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen 0.2.126" ]; then
             cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
           fi
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/rustia-playwright"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
           npm ci --prefix tools/browser --ignore-scripts
           node tools/browser/node_modules/playwright/cli.js install webkit
       - name: Execute both feature modes in headless WebKit

@@ -382,6 +382,12 @@ function checkBenchHostQueue(files) {
 }
 
 function checkCi(text) {
+  // GitHub evaluates job env before runner/steps/job contexts exist.
+  for (const block of text.matchAll(/^    env:\n((?:^      [^\n]*\n)+)/gm)) {
+    if (/\$\{\{[^}]*\b(?:runner|steps|job)\./.test(block[1])) {
+      fail("ci.yml job env uses a context that is only available inside steps");
+    }
+  }
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
   const releasePreflightJob = text.split("\n  macos-arm64-runtime:\n", 1)[0];
@@ -1250,7 +1256,7 @@ if (process.argv?.includes("--self-test")) {
   const { spawnSync } = require("node:child_process");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-workflow-policy-"));
   try {
-    fs.cpSync(path.join(root, "tools"), path.join(temporary, "tools"), { recursive: true });
+    fs.cpSync(path.join(root, "tools"), path.join(temporary, "tools"), { recursive: true, filter: source => path.basename(source) !== "node_modules" });
     fs.cpSync(workflowDir, path.join(temporary, ".github", "workflows"), { recursive: true });
     fs.mkdirSync(path.join(temporary, "bench"));
     fs.copyFileSync(path.join(root, "bench/analyze-memory-samples.js"), path.join(temporary, "bench/analyze-memory-samples.js"));
@@ -1265,6 +1271,7 @@ if (process.argv?.includes("--self-test")) {
     const baseline = run(canonical);
     assert.equal(baseline.status, 0, baseline.stderr);
     for (const [label, changed, message] of [
+      ["runner context in job env", canonical.replace(/^    env:\n/m, "    env:\n      INVALID_PATH: ${{ runner.temp }}\n"), /job env uses a context/],
       ["Mac job in Linux pool", canonical.replace(macosBlock, linuxBlock), /job macos-arm64-runtime.*general-macos/],
       ["Linux job in Mac pool", canonical.replace(linuxBlock, macosBlock), /job release-preflight.*general-linux/],
       ["unregistered Mac job", canonical.replace("  macos-arm64-runtime:", "  another-macos-job:"), /job another-macos-job.*general-linux/],
@@ -1305,7 +1312,7 @@ if (process.argv?.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, twelve policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, thirteen policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
