@@ -418,7 +418,11 @@ function checkCi(text) {
   requireIncludes(text, "cache: false", label);
   forbidIncludes(text, "rustup toolchain install stable", label);
   forbidIncludes(text, "rustup default stable", label);
-  requireIncludes(text, "node tools/run-release-preflight.js", label);
+  requireIncludes(text, 'node tools/run-release-preflight.js --stage "${{ matrix.stage }}"', label);
+  requireIncludes(releasePreflightJob, 'stage: [quick, workspace, release]', label);
+  requireIncludes(text, '    name: Release preflight\n    needs: release-preflight\n    if: always()', label);
+  requireIncludes(text, 'PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}', label);
+  requireIncludes(text, 'run: test "$PREFLIGHT_RESULT" = success', label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
   // Preflight lints the benchmark adapter for wasm32. The action's `rustup
   // override` bypasses rust-toolchain.toml's target list, so the job names it.

@@ -23,6 +23,9 @@ CI remains a delivery gate. See [95](95-numeric-index-contract.md).
 Real Firefox correctness passed in both feature modes; Safari and additional
 native execution remain open. The prepared platform workflows and evidence are
 recorded in [96](96-browser-platform-acceptance.md).
+Validation now partitions the same command inventory into early checks, workspace
+tests and release checks. Local pre-push validation uses the same inventory;
+the required CI status waits for every stage. See [97](97-validation-workflow.md).
 The broader public-release audit remains open; this is not full Luau parity or
 authorization to publish packages.
 

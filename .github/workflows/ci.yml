@@ -22,12 +22,16 @@ concurrency:
 
 jobs:
   release-preflight:
-    name: Release preflight
+    name: Preflight (${{ matrix.stage }})
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [quick, workspace, release]
     runs-on:
       group: general-linux
       labels: [self-hosted, Linux, X64, general-linux]
-    # Packaged and workspace conformance both run here; keep the complete gate
-    # within one job without cutting correctness coverage when the corpus grows.
+    # Keep all coverage while independent stages use separate runner checkouts.
+    # The required aggregate below rejects any failed, cancelled or skipped stage.
     timeout-minutes: 60
 
     steps:
@@ -60,9 +64,10 @@ jobs:
           node --version
 
       - name: Run canonical release preflight
-        run: node tools/run-release-preflight.js
+        run: node tools/run-release-preflight.js --stage "${{ matrix.stage }}"
 
       - name: Execute shared private golden on Linux x86-64
+        if: matrix.stage == 'workspace'
         run: |
           set -euo pipefail
           test "$(uname -s)" = Linux
@@ -70,6 +75,19 @@ jobs:
           git rev-parse HEAD
           bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu
           bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu
+
+  release-gate:
+    name: Release preflight
+    needs: release-preflight
+    if: always()
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
+    steps:
+      - name: Require every preflight stage
+        env:
+          PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}
+        run: test "$PREFLIGHT_RESULT" = success
 
   macos-arm64-runtime:
     name: Native runtime (macOS arm64)

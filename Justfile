@@ -94,6 +94,14 @@ check-examples:
     cargo run --locked -p rustia --example game_objects
     cargo run --locked -p rustia --example mutable_objects
 
+# Install the full pre-push guard in this checkout.
+install-hooks:
+    node tools/install-git-hooks.js
+
+# Early failures only; the full pre-push gate still runs every check.
+check-quick:
+    node tools/run-release-preflight.js --stage quick
+
 release-preflight:
     node tools/run-release-preflight.js
 
