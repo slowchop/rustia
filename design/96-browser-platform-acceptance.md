@@ -37,16 +37,23 @@ instead start a manual test server and is not a fix. The script compiles both
 feature modes before browser execution, announces Safari's visible behavior,
 and reports completion only after both modes pass. It never edits permissions.
 
-Safari 26.6.2 executed all 45 bare-mode tests at `bfe5a84a`, including the shared
-golden. Before the default-mode golden could start, Safari disabled automation.
-The local diagnostic log shows an AppKit UI action immediately before Safari
-wrote its WebDriver preferences and terminated the session. The log does not
-identify the control or the source of the action; the user reports no stop
-control was clicked. Do not attribute this to user interaction or automatic
-permission expiry without further evidence. The pinned runner closes the test
-window and kills its driver during cleanup; a printed SIGKILL alone is not a
-Safari crash diagnosis. Full Safari acceptance remains open until both modes
-pass in one uninterrupted run. Local diagnostic logs stay outside the repository.
+On 2026-10-24 (Australia/Hobart), Safari 26.6.2 on macOS arm64 passed
+all 88 tests in 16 groups at
+`ea751050b96ca135bb592e2d7beb3150f327bc38`, including two identical shared
+golden transcripts across bare and default features. Rust 1.95.0 and wasm-bindgen 0.2.126 were used. This is local real-browser
+correctness evidence; remote runner readiness and performance are not implied.
+
+An earlier run at `bfe5a84a` passed all 45 bare-mode tests before automation was
+disabled. The diagnostic log shows an AppKit UI action immediately before Safari
+wrote its WebDriver preferences and terminated the session. It does not identify
+the control or source of the action; the user reports no stop control was clicked.
+A later attempt to enable the setting through UI automation triggered Safari's
+click-interference protection and required the user to authenticate. After that
+authentication, closing Settings and running without UI interaction completed
+both modes. This establishes a working setup, not a proven cause for the earlier
+disabling. The script never changes permissions. The pinned runner closes the
+test window and kills its driver during cleanup; a printed SIGKILL alone is not
+a Safari crash diagnosis. Local diagnostic logs stay outside the repository.
 
 ## Windows execution
 
@@ -68,7 +75,8 @@ later steps; the shared host installation is not modified.
 ## Remaining public platform gates
 
 Firefox on macOS arm64 and native Windows execution do not close the entire
-platform matrix. Remote Firefox and Safari execution remain unverified. Linux
+platform matrix. Remote Firefox and Safari execution remain unverified; local real-browser runs
+passed for both engines. Linux
 arm64, Intel Mac and the promised mobile targets still need native correctness
 and deterministic-result evidence; their current cross-compilation jobs prove
 only builds. Keep the full matrix in documents 00, 90 and 92 until each target
