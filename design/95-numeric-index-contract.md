@@ -20,7 +20,9 @@ the numeric conversion, not every builtin that accepts an integer.
 The upper comparison must be exclusive: converting `i64::MAX` to `f64` rounds
 up to `2^63`. A comparison against that rounded value using `>` admits an
 out-of-range value and Rust's saturating cast hides the error. The correct
-upper test is `>= 2^63`; `-2^63` remains representable and valid. The adjacent
+upper test is `>= 2^63`, equivalently `> (2^63 - 1024)` for f64 values;
+the implementation uses the latter to retain the original comparison form.
+`-2^63` remains representable and valid. The adjacent
 representable doubles are `2^63 - 1024` below the upper bound and
 `-2^63 - 2048` below the lower bound.
 
@@ -80,3 +82,21 @@ candidate on the existing native and Node targets. No unchecked upstream result 
 added as a Luau-parity fixture. Broader integer conversions and supported-target
 execution remain separate audit work; this scoped contract does not close the
 public-release compatibility or platform matrix gates.
+
+## Performance isolation
+
+The first eight-leg acceptance measured generic iteration +2.14% and math/table
++1.53%, with a closure outlier. Its repeat included zero in every interval but
+flagged a sparse-table outlier. The sixteen-leg comparison at `78b783c9`
+([run](https://github.com/slowchop/rustia/actions/runs/40061724219)) measured
+generic iteration +2.13% [1.68%, 2.94%] and math/table +1.85% [1.00%, 3.00%],
+with another sparse-table outlier. The separate identical-binary control
+([run](https://github.com/slowchop/rustia/actions/runs/40063636709)) failed its
+straddling comparison: math/table read -1.737% [-3.18%, -0.80%] despite identical
+code. These results do not establish clean acceptance. Thresholds are unchanged.
+
+Neither workload calls the string index helper. An equivalent strict-greater-than
+comparison against the last valid f64 is an isolation candidate for a possible
+code-generation/layout effect, not a measured performance fix. The numeric
+contract and its existing adjacent-boundary tests remain unchanged. Remote
+comparison must establish whether this candidate resolves the movement.

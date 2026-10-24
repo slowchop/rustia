@@ -19,7 +19,9 @@ passed. It fixes all 13 recorded diagnostic differences against the pinned Luau
 oracle (27 original cases match), with expanded validation-order and alias coverage.
 The numeric-index follow-up specifies checked signed-64 conversion and corrects
 the rounded upper-bound bug; native regression coverage passes and cross-target
-CI remains a delivery gate. See [95](95-numeric-index-contract.md).
+CI remains a delivery gate. Benchmark controls exposed measurement drift and
+repeated small slowdowns; an equivalent bound comparison is under isolation,
+not yet accepted as a performance fix. See [95](95-numeric-index-contract.md).
 Real Firefox, Safari and native Windows x86-64 correctness passed in both feature
 modes; Linux arm64, Intel Mac and mobile execution remain open. The workflows and evidence are
 recorded in [96](96-browser-platform-acceptance.md).
