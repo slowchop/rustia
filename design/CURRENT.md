@@ -22,14 +22,19 @@ the rounded upper-bound bug; native regression coverage passes and cross-target
 CI remains a delivery gate. Benchmark controls exposed measurement drift and
 repeated small slowdowns; the equivalent bound rewrite did not help and an out-of-line helper made
 several workloads slower. A checked cast without redundant truncation or
-finiteness operations is under isolation, not yet accepted as a performance fix. See [95](95-numeric-index-contract.md).
-Real Firefox, Safari and native Windows x86-64 correctness passed in both feature
-modes; Linux arm64, Intel Mac and mobile execution remain open. The workflows and evidence are
+finiteness operations also failed remote acceptance; investigation continues
+and PR #74 is not ready to merge. See [95](95-numeric-index-contract.md).
+Real Firefox and Safari correctness passed in both feature modes on recorded
+earlier revisions. The checked-cast candidate passes shared runtime contracts on
+native Linux arm64, macOS arm64, Windows x86-64, Node/V8 and headless WebKit,
+with identical golden transcripts. Intel Mac and mobile execution remain open.
+The workflows and evidence are
 recorded in [96](96-browser-platform-acceptance.md).
 PR CI adds headless Playwright WebKit for the same browser contracts; real Safari
 remains a separate release-candidate check. Local WebKit tests pass. PR execution
 uses the pinned Linux container after a Mac service-account launch timeout; remote
-CI is still required. See [96](96-browser-platform-acceptance.md).
+CI has verified 88 executed tests and two identical goldens on the checked-cast
+candidate. See [96](96-browser-platform-acceptance.md).
 Validation now partitions the same command inventory into early checks, workspace
 tests and release checks. Local pre-push validation uses the same inventory;
 the required CI status waits for every stage. See [97](97-validation-workflow.md).

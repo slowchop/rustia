@@ -17,6 +17,12 @@ name: Benchmark Acceptance
 "on":
   workflow_dispatch:
     inputs:
+      mode:
+        description: Acceptance comparison or instrumented hardware-counter diagnostics
+        required: false
+        default: accept
+        type: choice
+        options: [accept, profile]
       baseline:
         description: Baseline commit (must be an ancestor of the dispatched ref)
         required: true
@@ -70,11 +76,18 @@ jobs:
 
       - name: Measure the pair
         env:
+          MODE: ${{ inputs.mode }}
           BASELINE: ${{ inputs.baseline }}
           CANDIDATE: ${{ inputs.candidate }}
           PASSES: ${{ inputs.passes }}
         run: |
           set -euo pipefail
+          if [ "$MODE" = profile ]; then
+            node tools/run-dedicated-benchmark.js profile --local \
+              --baseline "$BASELINE" --candidate "$CANDIDATE"
+            exit 0
+          fi
+          test "$MODE" = accept
           work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-acceptance.XXXXXX")"
           # --local is what keeps the run on this machine: the runner otherwise
           # ships the config to a host over ssh, and the host is this one.

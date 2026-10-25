@@ -134,3 +134,35 @@ so checking the original value instead of its truncation accepts exactly the
 same inputs. Fractional values, signed zero and subnormals retain truncation
 toward zero. This removes redundant work but remains a performance candidate
 until remote baseline comparison passes; no threshold or prior evidence changes.
+
+The checked-cast candidate `f54b0774` also failed acceptance in
+[40234600209](https://github.com/slowchop/rustia/actions/runs/40234600209).
+The original baseline remained `90bc2ae4`; this run used sixteen legs per side,
+ABBA ordering, five repetitions per leg and 99% intervals:
+
+| Workload | Fixed N on both sides | Delta | 99% interval |
+|---|---:|---:|---|
+| Dense tables | 2333 | +2.69% | [2.02%, 3.17%] |
+| Sparse tables | 1298 | +2.11% | [1.31%, 3.26%] |
+| Closures/upvalues | 632142 | +2.56% | [0.13%, 4.13%] |
+| Generic iteration | 8272 | +3.70% | [3.10%, 5.06%] |
+| Math/table | 83511 | +0.68% | [-0.07%, 2.18%] |
+
+Sparse-table baseline pass p4ab was 11.6% above its side's median leg, and
+candidate pass p2ab was 11.1% above its side's median leg. Both remain included
+in the intervals. The merged weekly matrix publication updated fixed loop counts
+from 2317/1373/607654/8487/84037 to the values above; both revisions use the
+same new counts. This is not an exact protocol repeat of the earlier comparisons.
+No thresholds changed. The smaller conversion code and passing correctness
+checks do not establish performance acceptance; this result is retained as a
+failure, not rerun until green.
+
+The follow-up unique-symbol audit found eight functions shrink in the checked-cast
+binary; the named unique hot-loop instruction bodies were unchanged after
+normalizing relocations. Address changes alone do not prove the regression's
+cause. The acceptance workflow's explicit `profile` mode therefore collects
+cycles, instructions, branch and cache counters in ABBA order on the same pinned
+host, fixed harness and loop counts. It checks workload checksums and idle/steal
+gates, retains raw counters, and produces no acceptance or publication artifact.
+Counter totals include harness setup and warmup; they are diagnostic only.
+Normal acceptance and committed calibration remain unchanged.

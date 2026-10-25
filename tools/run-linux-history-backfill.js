@@ -810,7 +810,7 @@ function measurementArgs(config, build, historyFile, samplesFile) {
   ];
 }
 
-function measureOne(config, build, attemptDirectory) {
+function measureOne(config, build, attemptDirectory, profile = false) {
   const historyFile = path.join(attemptDirectory, `${build.commit}.jsonl`);
   const samplesFile = path.join(attemptDirectory, `${build.commit}-samples.json`);
   for (const workload of WORKLOADS) {
@@ -836,7 +836,13 @@ function measureOne(config, build, attemptDirectory) {
     if (!fs.existsSync(HARNESS)) {
       fail(`harness worktree ${HARNESS} is missing; cannot measure`);
     }
-    run("taskset", args, {
+    const perfFile = path.join(attemptDirectory, `${build.commit}-${workload}-perf.csv`);
+    const command = profile ? "perf" : "taskset";
+    const commandArgs = profile
+      ? ["stat", "-x", ",", "-o", perfFile, "-e",
+        "cycles,instructions,branches,branch-misses,cache-references,cache-misses", "--", "taskset", ...args]
+      : args;
+    run(command, commandArgs, {
       cwd: HARNESS,
       capture: false,
     });
@@ -1203,7 +1209,47 @@ function resetWorkingState() {
   fs.rmSync(EXPORT_ARCHIVE, { force: true });
 }
 
-async function execute(configFile, providerFile, bundle) {
+function validatePerfCounters(csv) {
+  const expected = ["cycles", "instructions", "branches", "branch-misses", "cache-references", "cache-misses"];
+  const rows = csv.split("\n").filter((line) => line && !line.startsWith("#")).map((line) => line.split(","));
+  for (const event of expected) {
+    const row = rows.find((fields) => fields[2]?.trim().split(":")[0] === event);
+    if (!row || !/^\d+(?:\.\d+)?$/.test(row[0].trim())) fail(`missing or unsupported perf counter: ${event}`);
+  }
+}
+
+// Counter totals include harness startup/compilation and warmup. Use them only
+// to locate a mechanism, never as substitutes for uninstrumented acceptance.
+async function profilePair(config, builds, startedAtMs) {
+  if (builds.length !== 2) fail("profiling requires exactly two revisions");
+  const gateFile = path.join(EVIDENCE, "profile-gate.jsonl");
+  fs.writeFileSync(gateFile, "");
+  const order = [0, 1, 1, 0];
+  for (const [leg, index] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "hardware counter diagnostics");
+    await waitForQuiet(config, gateFile, leg + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `profile-${leg}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    const output = measureOne(config, builds[index], directory, true);
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    appendJsonLine(gateFile, { phase: "profile", leg, commit: builds[index].commit,
+      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+    // Validate checksums and complete workload coverage independently per leg.
+    validateRows({ ...config, publication: { ...config.publication, rows: WORKLOADS.length } },
+      [builds[index]], parseHistory(output.historyFile));
+    for (const workload of WORKLOADS) {
+      const counters = fs.readFileSync(path.join(directory, `${builds[index].commit}-${workload}-perf.csv`), "utf8");
+      validatePerfCounters(counters);
+      log(`PROFILE leg=${leg} commit=${builds[index].commit} workload=${workload}\n` +
+        counters);
+    }
+    if (!timedGatePasses(config.host_gate, delta)) fail("profile leg failed steal gate; retained without retry");
+  }
+}
+
+async function execute(configFile, providerFile, bundle, profile = false) {
   if (process.platform !== "linux") {
     fail("history backfill runner must execute on Linux");
   }
@@ -1235,25 +1281,37 @@ async function execute(configFile, providerFile, bundle) {
       verifySource(config, bundle);
       installRust();
       log(`building ${config.source.target_commits.length} historical Rustia revisions`);
+      if (profile) run("perf", ["stat", "-e", "cycles,instructions", "--", "true"]);
       const builds = buildTargets(config, startedAtMs);
-      // The old runner also stopped and masked apt's periodic timers here.
-      // That is an unrequested, root-only side effect on a machine this
-      // project does not own exclusively for benchmarking; the host_gate
-      // idle/steal checks already reject a run a timer contaminates.
-      log("measuring fixed current workloads across the historical binaries");
-      const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
-      const repeatability = repeatabilityCheck(builds, measurement.rows);
-      publish(config, configFile, providerFile, builds, measurement, EVIDENCE, repeatability);
-      fs.copyFileSync(
-        path.join(EXPORT, "publication/bench/history/backfill.json"),
-        path.join(ROOT, "backfill-publication.json"),
-      );
-      status = {
-        ...status,
-        status: "backfill_complete",
-        detail: "fixed-harness Rustia history backfill completed",
-        finished_at: new Date().toISOString(),
-      };
+      if (profile) {
+        fs.copyFileSync(configFile, path.join(EVIDENCE, "protocol.json"));
+        fs.copyFileSync(providerFile, path.join(EVIDENCE, "provider.json"));
+        writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
+        writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));
+        await profilePair(config, builds, startedAtMs);
+        status = { ...status, status: "profile_complete",
+          detail: "instrumented diagnostic only; not acceptance or publication evidence",
+          finished_at: new Date().toISOString() };
+      } else {
+        // The old runner also stopped and masked apt's periodic timers here.
+        // That is an unrequested, root-only side effect on a machine this
+        // project does not own exclusively for benchmarking; the host_gate
+        // idle/steal checks already reject a run a timer contaminates.
+        log("measuring fixed current workloads across the historical binaries");
+        const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
+        const repeatability = repeatabilityCheck(builds, measurement.rows);
+        publish(config, configFile, providerFile, builds, measurement, EVIDENCE, repeatability);
+        fs.copyFileSync(
+          path.join(EXPORT, "publication/bench/history/backfill.json"),
+          path.join(ROOT, "backfill-publication.json"),
+        );
+        status = {
+          ...status,
+          status: "backfill_complete",
+          detail: "fixed-harness Rustia history backfill completed",
+          finished_at: new Date().toISOString(),
+        };
+      }
     } catch (error) {
       status = {
         ...status,
@@ -1265,7 +1323,7 @@ async function execute(configFile, providerFile, bundle) {
     } finally {
       exportRun(status, EVIDENCE);
     }
-    return status.status === "backfill_complete" ? 0 : 2;
+    return ["backfill_complete", "profile_complete"].includes(status.status) ? 0 : 2;
   } finally {
     releaseLock();
   }
@@ -1503,6 +1561,11 @@ async function selfTest() {
   assert.throws(() => checkRuntimeBudget(config, Date.now() - 999 * 24 * 60 * 60 * 1000, "self-test"));
   checkRuntimeBudget(config, Date.now(), "self-test");
 
+  const counterFixture = ["cycles", "instructions", "branches", "branch-misses", "cache-references", "cache-misses"]
+    .map((event) => `123,,${event},100,100.00`).join("\n");
+  validatePerfCounters(counterFixture);
+  assert.throws(() => validatePerfCounters(counterFixture.replace("123,,cycles", "<not supported>,,cycles")));
+  assert.throws(() => validatePerfCounters(counterFixture.replace(/.*cache-misses.*/, "")));
   process.stdout.write("history backfill runner self-test passed\n");
 }
 
@@ -1512,14 +1575,14 @@ async function main() {
     await selfTest();
     return;
   }
-  if (process.argv.length !== 5) {
+  if (process.argv.length !== 5 && !(process.argv.length === 6 && process.argv[5] === "--profile")) {
     process.stderr.write(
       "usage: run-linux-history-backfill.js CONFIG PROVIDER BUNDLE\n",
     );
     process.exitCode = 2;
     return;
   }
-  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4]);
+  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4], process.argv[5] === "--profile");
 }
 
 main().catch((error) => {

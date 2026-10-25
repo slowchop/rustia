@@ -416,7 +416,7 @@ function existingBackfills(exceptHarnessCommit) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
-    "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
+    "plan", "history", "main", "pr", "accept", "profile", "live-serde", "calibrate", "matrix", "memory", "fetch",
     "unlock", "host-check", "host-fingerprint", "self-test",
   ]);
   if (!known.has(command)) return null;
@@ -538,12 +538,12 @@ function parseArgs(argv) {
   for (const option of [parsed.repetitions, parsed.confidence]) {
     if (option !== undefined && command !== "calibrate" && command !== "accept") return null;
   }
-  // An acceptance run names both sides explicitly and buys legs; no other
-  // lane may, because every other lane derives its sides from the history it
-  // is measuring rather than from an argument.
-  for (const option of [parsed.baseline, parsed.candidate, parsed.passes]) {
-    if (option !== undefined && command !== "accept") return null;
+  // Acceptance and hardware-counter diagnostics name both sides explicitly.
+  // Only acceptance buys a configurable number of legs.
+  for (const option of [parsed.baseline, parsed.candidate]) {
+    if (option !== undefined && command !== "accept" && command !== "profile") return null;
   }
+  if (parsed.passes !== undefined && command !== "accept") return null;
   // `--replace` supersedes an existing artifact, which both the measuring
   // command and the re-promoting one can do; nothing else promotes.
   if (parsed.replace && command !== "history" && command !== "fetch") return null;
@@ -844,7 +844,7 @@ function fetchExport(runDirectory, lane = LANES.history) {
 // Puts the runner, the frozen config, the attestation and a bundle of this
 // checkout where the host can see them, then runs it. In local mode the host is
 // this machine, so the inbox is a directory rather than a destination.
-function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history) {
+function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history, profile = false) {
   const inbox = `$HOME/${lane.root}/inbox`;
   sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
   if (isLocal) {
@@ -871,7 +871,7 @@ function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.
       `export ${lane.rootEnv}="$HOME/${lane.root}"\n` +
       `cd "${inbox}"\n` +
       `node "${inbox}/${path.basename(lane.runner)}" "${inbox}/${path.basename(configFile)}" ` +
-      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"\n`,
+      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"${profile ? " --profile" : ""}\n`,
   );
 }
 
@@ -1331,7 +1331,7 @@ function loadScreeningThresholds() {
 // extracted export. `history`, `main` and this lane all reach the host through
 // shipAndRun and come back through fetchExport; the difference between them is
 // the config, not the transport.
-function runPass(configFile, label, isLocal) {
+function runPass(configFile, label, isLocal, profile = false) {
   const config = loadConfig(configFile);
   const provider = attestHost(config);
   const runDirectory = path.join(STATE_ROOT, "runs", label);
@@ -1341,10 +1341,10 @@ function runPass(configFile, label, isLocal) {
   writeJson(providerFile, provider);
   const bundleFile = path.join(runDirectory, "repo.bundle");
   local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
-  shipAndRun(configFile, providerFile, bundleFile, isLocal);
+  shipAndRun(configFile, providerFile, bundleFile, isLocal, LANES.history, profile);
   const extracted = fetchExport(runDirectory);
   const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
-  if (status.status !== "backfill_complete") {
+  if (status.status !== (profile ? "profile_complete" : "backfill_complete")) {
     fail(`${label} did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
   return extracted;
@@ -1881,6 +1881,18 @@ function commandPr(options) {
 // Both commits must already be ancestors of HEAD: the pair config generator
 // requires it, and the bundle shipped to the host is built from HEAD, so an
 // unreachable commit would fail on the host rather than here.
+function commandProfile(options) {
+  if (!options.baseline || !options.candidate) fail("profile requires --baseline and --candidate");
+  const commits = [options.baseline, options.candidate].map((ref) => git(["rev-parse", ref]).trim());
+  for (const commit of commits) {
+    if (!FULL_COMMIT.test(commit) || !isAncestorOfHead(commit)) fail("profile revisions must be ancestors of HEAD");
+  }
+  if (commits[0] === commits[1]) fail("profile requires two distinct revisions");
+  const label = `profile-${commits[0].slice(0, 12)}-${commits[1].slice(0, 12)}`;
+  const extracted = runPass(freezePairConfig(...commits, 5, label), label, options.local, true);
+  process.stdout.write(`Hardware counter diagnostics retained at ${extracted}; not acceptance evidence.\n`);
+}
+
 function commandAccept(options) {
   if (!options.out) fail("accept requires --out FILE to write the acceptance summary to");
   if (!options.baseline || !options.candidate) {
@@ -2644,6 +2656,9 @@ function selfTest() {
   // An acceptance run names both sides and buys legs. The pair is explicit
   // because the commits being compared are already in history and neither is
   // derivable from HEAD.
+  assert.equal(parseArgs(["profile", "--baseline", "a1", "--candidate", "b2", "--local"]).command, "profile");
+  assert.equal(parseArgs(["profile", "--passes", "8"]), null);
+  assert.equal(parseArgs(["profile", "--out", "report.md"]), null);
   const accept = parseArgs(["accept", "--baseline", "a1", "--candidate", "b2", "--out", "a.md"]);
   assert.equal(accept.baseline, "a1");
   assert.equal(accept.candidate, "b2");
@@ -2867,6 +2882,7 @@ function usage() {
       "                                         measure HEAD (or one series commit) alone\n" +
       "                                         for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  profile   --baseline C --candidate C    ABBA hardware counters; never acceptance\n" +
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
       "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
@@ -2903,6 +2919,7 @@ try {
     else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "pr") commandPr(parsed);
     else if (parsed.command === "accept") commandAccept(parsed);
+    else if (parsed.command === "profile") commandProfile(parsed);
     else if (parsed.command === "live-serde") commandLiveSerde(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "matrix") commandMatrix(parsed);

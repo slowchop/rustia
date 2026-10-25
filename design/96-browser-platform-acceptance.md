@@ -16,7 +16,8 @@ missing, zero-test, failed and duplicate result summaries, bounds startup and
 test waits, and closes the browser and server after each suite. The shared
 golden script still requires exactly one executed transcript. Local validation
 passed all 88 tests in 16 groups with matching bare/default golden transcripts
-on WebKit 27.2 (Playwright build 2370). Remote acceptance remains required.
+on WebKit 27.2 (Playwright build 2370). Remote execution is also verified
+for the checked-cast candidate in the evidence below.
 
 WebKit is not the Safari product shipped by Apple. The manually dispatched
 `browser-correctness.yml` remains release-candidate acceptance in real Firefox
@@ -97,13 +98,46 @@ under the runner temporary directory with checksum-verified rustup 1.28.2 and
 Rust 1.95.0. It exports those isolated Cargo/Rustup homes and executable path to
 later steps; the shared host installation is not modified.
 
+## Checked-cast candidate execution
+
+On 2026-10-26 (Australia/Hobart), candidate
+`f54b077427e9a332ce4f43241aa2045c31c5368f` passed the shared contracts in
+default and bare feature modes. Actual job logs, rather than workflow status
+alone, establish the counts below.
+
+| Runtime | Passing tests | Groups | Evidence |
+|---|---:|---:|---|
+| Native macOS arm64 | 120 | 16 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369338) |
+| Headless Playwright WebKit | 88 | 16 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369066) |
+| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369159) |
+| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40234679489/job/121293588462) |
+| Native Linux arm64 | 120 | 16 | Exact-source local correctness run described below |
+
+Each runtime emitted two byte-identical shared transcripts. All ten transcripts
+also match across the five runtimes. These are correctness results, not timing
+measurements or an assertion of complete target conformance.
+
+The Linux arm64 run extracted `git archive` of the exact candidate into a native
+aarch64 Linux Docker VM, without instruction-set emulation. The image was
+`rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1`.
+The run checked `uname -m` as `aarch64` and Rust 1.95.0's compiler host as
+`aarch64-unknown-linux-gnu`, then ran `platform_golden`, `host_functions`,
+`typed_objects`, `live_value_contract`, `module_resolution`, `yieldable_require`,
+`callable_continuations` and `numeric_index_contract` with explicit target
+`aarch64-unknown-linux-gnu`, in both feature modes. The retained local log is
+`/private/tmp/rustia-linux-arm64-f54b0774.log`; its evidence note is
+`/private/tmp/rustia-linux-arm64-f54b0774-acceptance.md`.
+An earlier exact-source Linux arm64 run at `78b783c9` also passed 120 tests and
+two goldens; its separate log and note remain retained. The new run supplies
+execution evidence for the changed runtime rather than inheriting that result.
+
 ## Remaining public platform gates
 
 Firefox on macOS arm64 and native Windows execution do not close the entire
 platform matrix. Remote Firefox and Safari execution remain unverified; local real-browser runs
-passed for both engines. Linux
-arm64, Intel Mac and the promised mobile targets still need native correctness
-and deterministic-result evidence; their current cross-compilation jobs prove
-only builds. Keep the full matrix in documents 00, 90 and 92 until each target
+passed for both engines. Native Linux arm64 execution is verified for the
+shared contracts above. Intel Mac and the promised mobile targets still need
+native correctness and deterministic-result evidence; their current
+cross-compilation jobs prove only builds. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence. Windows remains a manually dispatched CI job;
 its successful run must be checked separately from ordinary pull-request CI.

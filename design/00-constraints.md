@@ -46,7 +46,7 @@ The full matrix below remains the public-release contract.
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
 | macOS **x86_64** (Intel Mac) — build ✅ / runtime TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; Firefox browser golden passed on macOS arm64 |
 | Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari golden passed on macOS arm64; iOS still TODO |
-| Linux **arm64** — build ✅ / runtime TODO | |
+| Linux **arm64** — build ✅ / shared runtime contracts ✅ | |
 | Windows **x86_64** (msvc) — build ✅ / shared runtime contracts ✅ | |
 | iOS **arm64** + Android **arm64** — build ✅ / runtime TODO | |
 
