@@ -23,7 +23,10 @@ CI remains a delivery gate. Benchmark controls exposed measurement drift and
 repeated small slowdowns; the equivalent bound rewrite did not help and an out-of-line helper made
 several workloads slower. A checked cast without redundant truncation or
 finiteness operations also failed remote acceptance; investigation continues
-and PR #74 is not ready to merge. See [95](95-numeric-index-contract.md).
+and PR #74 is not ready to merge. Hardware counters found unchanged instruction
+counts but higher iteration cache references. A cold error-construction candidate
+now targets duplicated error code in the dispatch path; it remains unaccepted.
+See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on
 native Linux arm64, macOS arm64, Windows x86-64, Node/V8 and headless WebKit,

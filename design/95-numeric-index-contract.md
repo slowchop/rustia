@@ -178,3 +178,32 @@ result. The f54b0774 screening run
 also retained dense +2.36% [0.65%, 3.28%], sparse +0.93% [0.03%, 1.85%],
 closures +2.25% [-3.29%, 6.35%], iteration +3.15% [2.85%, 4.00%], and
 math/table +1.59% [-0.96%, 3.44%]; it does not overturn failed acceptance.
+
+The authorized user-space counter run
+[40242289162](https://github.com/slowchop/rustia/actions/runs/40242289162)
+completed in ABBA order on the original baseline and checked-cast candidate.
+Both sides used the same frozen workloads, loop counts and five repetitions.
+Mean counter differences (two legs per side, diagnostic only) were:
+
+| Workload | Cycles | Retired instructions | Branch misses | Cache references |
+|---|---:|---:|---:|---:|
+| Dense tables | +2.044% | +0.003% | +0.001% | +3.059% |
+| Sparse tables | +1.543% | +0.019% | +0.470% | -6.472% |
+| Closures/upvalues | +1.372% | approximately unchanged | +1.808% | -0.544% |
+| Generic iteration | +4.906% | approximately unchanged | -2.776% | +24.838% |
+| Math/table | +0.435% | approximately unchanged | -7.359% | +4.882% |
+
+Counter totals include setup and warmup. These are not acceptance intervals.
+The iteration movement is consistent with changed cache behavior, not added
+executed instructions or increased branch misses. It does not isolate a specific
+cache level or prove causation. Raw exports are retained by the workflow;
+temporary counter access was restored after the run.
+
+The next candidate keeps the checked numeric conversion and moves `Error::new`
+out of line as cold code. The constructor had an explicit inline annotation and
+hundreds of checked-access call sites, including the main dispatch function.
+This targets duplicated error-payload stores in successful execution code rather
+than adding padding or trying another equivalent numeric expression. Generated
+code size, correctness, original-baseline acceptance and protected-call workload
+cost must be checked before adoption. Error kinds, payloads and source-location
+rules remain unchanged.
