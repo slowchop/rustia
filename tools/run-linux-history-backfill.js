@@ -48,6 +48,10 @@ const WORKLOADS = Object.freeze([
   "generic_iteration",
   "stdlib_math_table",
 ]);
+const STRING_WORKLOADS = Object.freeze(["string_opcodes"]);
+const STRING_WORKLOAD_FILES = Object.freeze({
+  string_opcodes: "bench/workloads/luau/24_string_opcodes.luau",
+});
 const WORKLOAD_FILES = Object.freeze({
   dense_tables: "bench/workloads/luau/01_dense_tables.luau",
   sparse_tables: "bench/workloads/luau/02_sparse_tables.luau",
@@ -786,7 +790,7 @@ function timedGatePasses(gate, delta) {
   return delta.steal_percent <= gate.maximum_timed_steal_percent;
 }
 
-function measurementArgs(config, build, historyFile, samplesFile) {
+function measurementArgs(config, build, historyFile, samplesFile, workloads = WORKLOADS) {
   return [
     "-c",
     String(config.host_gate.benchmark_cpu),
@@ -794,7 +798,7 @@ function measurementArgs(config, build, historyFile, samplesFile) {
     "--engines",
     "rustia",
     "--workloads",
-    WORKLOADS.join(","),
+    workloads.join(","),
     "--reps",
     String(config.measurement.repetitions),
     "--history",
@@ -810,18 +814,21 @@ function measurementArgs(config, build, historyFile, samplesFile) {
   ];
 }
 
-function measureOne(config, build, attemptDirectory, profile = false) {
+function measureOne(config, build, attemptDirectory, options = {}) {
+  const workloads = options.workloads ?? WORKLOADS;
+  const fixedN = options.fixedN;
+  const profile = options.perf === true;
   const historyFile = path.join(attemptDirectory, `${build.commit}.jsonl`);
   const samplesFile = path.join(attemptDirectory, `${build.commit}-samples.json`);
-  for (const workload of WORKLOADS) {
+  for (const workload of workloads) {
     const workloadHistory = path.join(attemptDirectory, `${build.commit}-${workload}.jsonl`);
     const workloadSamples = path.join(attemptDirectory, `${build.commit}-${workload}-samples.json`);
-    const args = measurementArgs(config, build, workloadHistory, workloadSamples);
+    const args = measurementArgs(config, build, workloadHistory, workloadSamples, workloads);
     args.push(
       "--workloads",
       workload,
       "--fixed-n",
-      String(config.measurement.fixed_n[workload]),
+      String(fixedN ?? config.measurement.fixed_n[workload]),
     );
     // Measure from the harness worktree, not from a revision's build tree. The
     // harness commit is what pins the workload files, and every revision was
@@ -870,9 +877,10 @@ function parseHistory(file) {
   });
 }
 
-function validateRows(config, builds, rows) {
-  if (rows.length !== config.publication.rows) {
-    fail(`history backfill produced ${rows.length} rows, expected ${config.publication.rows}`);
+function validateWorkloadRows(config, builds, rows, workloads, fixedN, expectedChecksums) {
+  const expectedRows = builds.length * workloads.length;
+  if (rows.length !== expectedRows) {
+    fail(`history backfill produced ${rows.length} rows, expected ${expectedRows}`);
   }
   const positions = new Map(builds.map((build, index) => [build.commit, index]));
   const slots = new Set();
@@ -888,17 +896,19 @@ function validateRows(config, builds, rows) {
           `${JSON.stringify(config.provider.host.name)}`,
       );
     }
-    if (!WORKLOADS.includes(row.workload)) fail(`history row ${index + 1} has an unknown workload`);
-    if (row.n !== config.measurement.fixed_n[row.workload]) {
+    if (!workloads.includes(row.workload)) fail(`history row ${index + 1} has an unknown workload`);
+    if (row.n !== fixedN[row.workload]) {
       fail(`history row ${index + 1} has the wrong fixed N`);
     }
     if (row.reps !== config.measurement.repetitions) {
       fail(`history row ${index + 1} has the wrong repetition count`);
     }
-    if (row.checksum !== config.measurement.expected_checksums[row.workload]) {
+    requireString(row.checksum, `history row ${index + 1}.checksum`);
+    const expectedChecksum = expectedChecksums?.[row.workload];
+    if (expectedChecksum !== undefined && row.checksum !== expectedChecksum) {
       fail(
         `history row ${index + 1} checksum ${row.checksum} does not match ` +
-          config.measurement.expected_checksums[row.workload],
+          expectedChecksum,
       );
     }
     for (const field of ["ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
@@ -909,12 +919,25 @@ function validateRows(config, builds, rows) {
     slots.add(slot);
   }
   for (const build of builds) {
-    for (const workload of WORKLOADS) {
+    for (const workload of workloads) {
       if (!slots.has(`${build.commit}\0${workload}`)) {
         fail(`history backfill is missing ${build.commit}/${workload}`);
       }
     }
   }
+}
+
+function validateRows(config, builds, rows) {
+  if (rows.length !== config.publication.rows) {
+    fail(`history backfill produced ${rows.length} rows, expected ${config.publication.rows}`);
+  }
+  return validateWorkloadRows(config, builds, rows, WORKLOADS, config.measurement.fixed_n,
+    config.measurement.expected_checksums);
+}
+
+function validateStringLeg(config, build, rows) {
+  return validateWorkloadRows(config, [build], rows, STRING_WORKLOADS,
+    Object.fromEntries(STRING_WORKLOADS.map((workload) => [workload, 10_000])));
 }
 
 function median(sortedValues) {
@@ -1232,7 +1255,7 @@ async function profilePair(config, builds, startedAtMs) {
     const directory = path.join(EVIDENCE, `profile-${leg}`);
     fs.mkdirSync(directory, { recursive: true });
     const before = readCpu(config.host_gate.benchmark_cpu);
-    const output = measureOne(config, builds[index], directory, true);
+    const output = measureOne(config, builds[index], directory, { perf: true });
     const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
     appendJsonLine(gateFile, { phase: "profile", leg, commit: builds[index].commit,
       ...delta, accepted: timedGatePasses(config.host_gate, delta) });
@@ -1249,7 +1272,57 @@ async function profilePair(config, builds, startedAtMs) {
   }
 }
 
-async function execute(configFile, providerFile, bundle, profile = false) {
+function captureStringSources(config) {
+  const harnessCommit = runText("git", ["-C", HARNESS, "rev-parse", "HEAD"]);
+  if (harnessCommit !== config.source.harness_commit) {
+    fail(`string workload harness is ${harnessCommit}, expected ${config.source.harness_commit}`);
+  }
+  return {
+    schema: "rustia.bench.string-workload-sources.v1",
+    harness_commit: harnessCommit,
+    workloads: Object.fromEntries(STRING_WORKLOADS.map((workload) => {
+      const relative = STRING_WORKLOAD_FILES[workload];
+      const file = path.join(HARNESS, relative);
+      if (!fs.existsSync(file)) fail(`string workload source is missing: ${relative}`);
+      return [workload, { path: relative, sha256: sha256File(file) }];
+    })),
+  };
+}
+
+async function stringPair(config, builds, startedAtMs) {
+  if (builds.length !== 2) fail("string acceptance requires exactly two revisions");
+  const order = [0, 1, 0, 1, 0, 1, 0, 1];
+  const gateFile = path.join(EVIDENCE, "strings-gate.jsonl");
+  fs.writeFileSync(gateFile, "");
+  writeJson(path.join(EVIDENCE, "string-sources.json"), captureStringSources(config));
+  for (const [pass, firstIndex] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "string acceptance");
+    await waitForQuiet(config, gateFile, pass + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `strings-pass-${pass}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    for (const index of [firstIndex, 1 - firstIndex]) {
+      const output = measureOne(config, builds[index], directory, {
+        workloads: STRING_WORKLOADS,
+        fixedN: 10_000,
+      });
+      validateStringLeg(config, builds[index], parseHistory(output.historyFile));
+    }
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    const accepted = timedGatePasses(config.host_gate, delta);
+    appendJsonLine(gateFile, {
+      phase: "strings",
+      pass,
+      order: [firstIndex, 1 - firstIndex].map((index) => builds[index].commit),
+      ...delta,
+      accepted,
+    });
+    if (!accepted) fail(`string acceptance pass ${pass} failed steal gate; retained without retry`);
+  }
+}
+
+async function execute(configFile, providerFile, bundle, mode = "accept") {
   if (process.platform !== "linux") {
     fail("history backfill runner must execute on Linux");
   }
@@ -1281,20 +1354,23 @@ async function execute(configFile, providerFile, bundle, profile = false) {
       verifySource(config, bundle);
       installRust();
       log(`building ${config.source.target_commits.length} historical Rustia revisions`);
-      if (profile) {
+      if (mode === "profile" || mode === "strings") {
         fs.copyFileSync(configFile, path.join(EVIDENCE, "protocol.json"));
         fs.copyFileSync(providerFile, path.join(EVIDENCE, "provider.json"));
       }
-      if (profile) run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
+      if (mode === "profile") run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
       const builds = buildTargets(config, startedAtMs);
-      if (profile) {
+      if (mode === "profile" || mode === "strings") {
         writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
         writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));
-        await profilePair(config, builds, startedAtMs);
-        status = { ...status, status: "profile_complete",
-          detail: "instrumented diagnostic only; not acceptance or publication evidence",
+        if (mode === "profile") await profilePair(config, builds, startedAtMs);
+        else await stringPair(config, builds, startedAtMs);
+        status = { ...status, status: mode === "profile" ? "profile_complete" : "strings_complete",
+          detail: mode === "profile"
+            ? "instrumented diagnostic only; not acceptance or publication evidence"
+            : "supplemental string acceptance completed; not publication evidence",
           finished_at: new Date().toISOString() };
-      } else {
+      } else if (mode === "accept") {
         // The old runner also stopped and masked apt's periodic timers here.
         // That is an unrequested, root-only side effect on a machine this
         // project does not own exclusively for benchmarking; the host_gate
@@ -1325,7 +1401,7 @@ async function execute(configFile, providerFile, bundle, profile = false) {
     } finally {
       exportRun(status, EVIDENCE);
     }
-    return ["backfill_complete", "profile_complete"].includes(status.status) ? 0 : 2;
+    return ["backfill_complete", "profile_complete", "strings_complete"].includes(status.status) ? 0 : 2;
   } finally {
     releaseLock();
   }
@@ -1559,6 +1635,27 @@ async function selfTest() {
     assert.throws(() => validateRows(rowsConfig, builds, badRows));
   }
 
+  {
+    const build = { commit: commitA };
+    const row = {
+      commit: commitA,
+      engine: "rustia",
+      dialect: "luau",
+      target: "linux-x86_64",
+      host: config.provider.host.name,
+      workload: STRING_WORKLOADS[0],
+      n: 10_000,
+      reps: config.measurement.repetitions,
+      checksum: "number:123",
+      ns_per_unit_min: 1,
+      ns_per_unit_median: 1,
+      units_per_sec: 1,
+    };
+    validateStringLeg(config, build, [row]);
+    assert.throws(() => validateStringLeg(config, build, []), /expected 1/);
+    assert.throws(() => validateStringLeg(config, build, [{ ...row, n: 9999 }]), /fixed N/);
+  }
+
   // A runtime budget started in the distant past must trip; one started now must not.
   assert.throws(() => checkRuntimeBudget(config, Date.now() - 999 * 24 * 60 * 60 * 1000, "self-test"));
   checkRuntimeBudget(config, Date.now(), "self-test");
@@ -1578,14 +1675,15 @@ async function main() {
     await selfTest();
     return;
   }
-  if (process.argv.length !== 5 && !(process.argv.length === 6 && process.argv[5] === "--profile")) {
+  if (process.argv.length !== 5 && !(process.argv.length === 6 && ["--profile", "--strings"].includes(process.argv[5]))) {
     process.stderr.write(
       "usage: run-linux-history-backfill.js CONFIG PROVIDER BUNDLE\n",
     );
     process.exitCode = 2;
     return;
   }
-  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4], process.argv[5] === "--profile");
+  const mode = process.argv[5] === "--profile" ? "profile" : process.argv[5] === "--strings" ? "strings" : "accept";
+  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4], mode);
 }
 
 main().catch((error) => {

@@ -245,3 +245,14 @@ outer closure stays at 37,370 bytes. The new helper is 10,415 bytes; total binar
 size reduction is not claimed. Default/bare numeric-contract, diagnostic-parity
 and error-recovery tests pass. Remote five-workload and supplemental string
 comparisons remain required; none has been dispatched for this candidate yet.
+
+The supplemental `strings` workflow mode freezes the existing paired harness
+and measures a dedicated `string_opcodes` workload at N=10,000, five repetitions
+and eight ABBA legs per side. Nested function compilation intentionally disables builtin fast paths, so this
+supplement uses a top-level program with its loop count supplied as a global,
+rather than the normal returned-function adapter. A correctness-only compilation
+test requires all nine specialized string opcodes in that workload. The run retains source hashes,
+raw samples and host gates, and requires identical checksums across both
+revisions and all legs. Its 99% intervals are reported without inventing a
+calibrated string materiality threshold. Normal five-workload acceptance and
+the committed calibration are unchanged.

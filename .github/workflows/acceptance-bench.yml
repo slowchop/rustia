@@ -18,11 +18,11 @@ name: Benchmark Acceptance
   workflow_dispatch:
     inputs:
       mode:
-        description: Acceptance comparison or instrumented hardware-counter diagnostics
+        description: Acceptance comparison, string-opcode acceptance, or hardware-counter diagnostics
         required: false
         default: accept
         type: choice
-        options: [accept, profile]
+        options: [accept, profile, strings]
       baseline:
         description: Baseline commit (must be an ancestor of the dispatched ref)
         required: true
@@ -87,6 +87,15 @@ jobs:
               --baseline "$BASELINE" --candidate "$CANDIDATE"
             exit 0
           fi
+          if [ "$MODE" = strings ]; then
+            work_dir="$RUNNER_TEMP/rustia-strings-$GITHUB_RUN_ID"
+            mkdir -p "$work_dir"
+            node tools/run-dedicated-benchmark.js strings --local \
+              --baseline "$BASELINE" --candidate "$CANDIDATE" \
+              --out "$work_dir/strings.md" --json "$work_dir/strings.json"
+            cat "$work_dir/strings.md" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           test "$MODE" = accept
           work_dir="$(mktemp -d "$RUNNER_TEMP/rustia-acceptance.XXXXXX")"
           # --local is what keeps the run on this machine: the runner otherwise
@@ -101,11 +110,14 @@ jobs:
           cat "$work_dir/acceptance.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain diagnostic evidence, including failed runs
-        if: ${{ always() && inputs.mode == 'profile' }}
+        if: ${{ always() && (inputs.mode == 'profile' || inputs.mode == 'strings') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: benchmark-diagnostics-${{ github.run_id }}
-          path: .rustia-benchmark-state/dedicated/runs/profile-*/export.tar.gz
+          path: |
+            .rustia-benchmark-state/dedicated/runs/profile-*/export.tar.gz
+            .rustia-benchmark-state/dedicated/runs/strings-*/export.tar.gz
+            ${{ runner.temp }}/rustia-strings-${{ github.run_id }}/*
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
