@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 525,
+      "file_count": 526,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -525,6 +525,7 @@
         "workloads/luau/19_todo_steady.luau",
         "workloads/luau/20_todo_history.luau",
         "workloads/luau/21_todo_retained_control.luau",
+        "workloads/luau/24_string_opcodes.luau",
         "workloads/rhai/01_dense_tables.rhai",
         "workloads/rhai/02_sparse_tables.rhai",
         "workloads/rhai/04_closures_upvalues.rhai",
