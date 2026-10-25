@@ -78,7 +78,7 @@ a conservative-envelope verdict that is retained with accepted evidence.
 
 **Current implementation slice:** `.github/workflows/ci.yml` runs release-preflight checks on hosted Linux CI
 without fresh benchmark measurements; no benchmark-measurement workflow is present. The `bench` crate now enumerates all 12
-requested adapters, five default measured workloads, and 19 workload entries including cross-adapter source
+requested adapters, five default measured workloads, and 20 workload entries including cross-adapter source
 coverage for #15 `string_building`, portable memory probes #16–#18, and deterministic todo-app probes #19–#21.
 It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
 exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
