@@ -1291,6 +1291,7 @@ fn prepare(
         "rustia" if _workload.id == "string_opcodes" => Ok(Box::new(
             RustiaStringOpcodePrepared::new(_workload, _source)?,
         )),
+        #[cfg(feature = "rustia-engine")]
         "rustia" => Ok(Box::new(RustiaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "koto")]
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
