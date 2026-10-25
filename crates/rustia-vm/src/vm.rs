@@ -26062,6 +26062,7 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
     })
 }
 
+#[inline(never)]
 fn string_library_index(value: f64) -> Result<i64> {
     // Largest f64 below 2^63 is 2^63 - 1024; i64::MAX as f64 rounds up.
     // Comparing with that last valid value keeps the original strict-`>` form.

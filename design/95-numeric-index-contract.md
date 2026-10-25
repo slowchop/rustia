@@ -100,3 +100,19 @@ comparison against the last valid f64 is an isolation candidate for a possible
 code-generation/layout effect, not a measured performance fix. The numeric
 contract and its existing adjacent-boundary tests remain unchanged. Remote
 comparison must establish whether this candidate resolves the movement.
+
+The first isolation candidate did not improve performance: direct comparison
+[40069181372](https://github.com/slowchop/rustia/actions/runs/40069181372)
+found no change, while baseline comparison
+[40069183742](https://github.com/slowchop/rustia/actions/runs/40069183742)
+still measured iteration +2.21% [1.61%, 3.32%] and math/table +1.81%
+[0.87%, 2.65%], without flagged outliers. This is not accepted.
+
+Static Linux x86-64 compilation with Rust 1.95.0 found eight functions grew
+and 1,538 symbol addresses/sizes changed versus the original baseline. This
+shows a layout effect exists, not that it explains the measured slowdown.
+The next isolation candidate keeps the shared checked conversion out of line
+to separate its bounds/cast expansion from its callers. This may also impose
+call overhead on string operations; remote measurements, including relevant
+string workloads, are required before adopting it. No timing was collected
+from the local disassembly builds, and thresholds remain unchanged.
