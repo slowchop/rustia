@@ -24,8 +24,9 @@ repeated small slowdowns; the equivalent bound rewrite did not help and an out-o
 several workloads slower. A checked cast without redundant truncation or
 finiteness operations also failed remote acceptance; investigation continues
 and PR #74 is not ready to merge. Hardware counters found unchanged instruction
-counts but higher iteration cache references. A cold error-construction candidate
-now targets duplicated error code in the dispatch path; it remains unaccepted.
+counts but higher iteration cache references. A generic cold constructor grew the dispatch code and was rejected before
+timing. A narrow invalid-bytecode error helper now targets duplicated cold code
+in dispatch; it remains unaccepted.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

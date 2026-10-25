@@ -207,3 +207,18 @@ than adding padding or trying another equivalent numeric expression. Generated
 code size, correctness, original-baseline acceptance and protected-call workload
 cost must be checked before adoption. Error kinds, payloads and source-location
 rules remain unchanged.
+
+The generic-constructor outline was rejected by static inspection before any
+remote timing. With the same pinned Rust 1.95.0 Linux build, the large dispatch
+closure grew from 110,416 to 151,470 bytes and the outer closure from 37,370 to
+41,491 bytes. Passing the large error enum out of line materialized copies that
+inlining had eliminated. The generic constructor's original inline annotation
+is restored; this experiment supplies no performance measurement.
+
+The replacement is narrower: `Error::invalid_program` takes only the static
+reason string, constructs that specific error out of line, and serves the 59
+invalid-bytecode checks within `run_function_step`. It keeps ordinary guest
+error construction unchanged, including protected-call error handling. This
+preserves error payloads and location handling while targeting cold internal
+validation code. Static size reduction and remote acceptance are still gates;
+no source-level claim establishes a speedup.

@@ -91,11 +91,7 @@ pub enum ErrorKind {
 }
 
 impl Error {
-    // Keep structured error construction out of successful execution paths.
-    // The interpreter has many checked accesses; inlining their error payloads
-    // duplicates cold stores throughout the dispatch code.
-    #[cold]
-    #[inline(never)]
+    #[inline]
     pub fn new(kind: ErrorKind) -> Self {
         // Luau luaH_next raises a bare VM error, without a source prefix.
         let location_suppressed = matches!(kind, ErrorKind::InvalidKeyToNext);
@@ -107,6 +103,14 @@ impl Error {
             diagnostic: None,
             span: None,
         }
+    }
+
+    /// Construct an internal bytecode error without duplicating its payload in
+    /// the successful dispatch path. Ordinary guest errors keep their normal path.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn invalid_program(reason: &'static str) -> Self {
+        Self::new(ErrorKind::InvalidProgram { reason })
     }
 
     #[inline]

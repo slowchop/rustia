@@ -4082,16 +4082,16 @@ impl Vm {
         let result = (|| -> VmFlowResult<ReturnValues> {
             self.check_recursion_depth(context.depth)?;
             if function.max_registers == 0 {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "main function must have at least one register",
-                }));
+                return Err(Error::invalid_program(
+                    "main function must have at least one register",
+                ));
             }
             if function.parameter_count > function.max_registers
                 || function.parameter_count > usize::from(u8::MAX) + 1
             {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "function parameter count exceeds register file",
-                }));
+                return Err(Error::invalid_program(
+                    "function parameter count exceeds register file",
+                ));
             }
 
             // Select the execution mode once per frame. Fuel metering and
@@ -4153,9 +4153,7 @@ impl Vm {
                     .enumerate()
                 {
                     let register = u8::try_from(index).map_err(|_| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "function parameter register index overflow",
-                        })
+                        Error::invalid_program("function parameter register index overflow")
                     })?;
                     set_register(&mut registers, register, arg)?;
                 }
@@ -4269,9 +4267,9 @@ impl Vm {
                                 self.mark_control_memory_dirty();
                                 let error_value =
                                     self.error_object(error.take().ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "missing stackless protected-call error",
-                                        })
+                                        Error::invalid_program(
+                                            "missing stackless protected-call error",
+                                        )
                                     })?);
                                 write_call_results(
                                     &mut registers,
@@ -4291,9 +4289,7 @@ impl Vm {
                     }
                     if !caught {
                         return Err(error.ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "missing propagated stackless error",
-                            })
+                            Error::invalid_program("missing propagated stackless error")
                         })?);
                     }
                 }};
@@ -4429,9 +4425,9 @@ impl Vm {
                 let loop_result = (|| -> VmFlowResult<ReturnValues> {
                     loop {
                         let mut instruction = *function.code.get(pc).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "program counter ran off the end of the function",
-                            })
+                            Error::invalid_program(
+                                "program counter ran off the end of the function",
+                            )
                             .at_pc(pc)
                         })?;
 
@@ -4537,9 +4533,9 @@ impl Vm {
                                     TapeOutcome::GuardExit { pc: exit_pc } => {
                                         pc = exit_pc;
                                         instruction = *function.code.get(pc).ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "tape guard exited beyond function code",
-                                            })
+                                            Error::invalid_program(
+                                                "tape guard exited beyond function code",
+                                            )
                                             .at_pc(pc)
                                         })?;
                                         #[cfg(any(test, feature = "executor-diagnostics"))]
@@ -4714,9 +4710,9 @@ impl Vm {
                             }
                             Opcode::LoadConstWide => {
                                 if instruction.aux < 0 {
-                                    return Err(Error::new(ErrorKind::InvalidProgram {
-                                        reason: "negative wide constant index",
-                                    })
+                                    return Err(Error::invalid_program(
+                                        "negative wide constant index",
+                                    )
                                     .at_pc(pc - 1));
                                 }
                                 let value = self.load_constant(
@@ -4824,15 +4820,11 @@ impl Vm {
                                     .get(upvalue_index(instruction.aux)?)
                                     .copied()
                                     .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "upvalue index is missing",
-                                        })
+                                        Error::invalid_program("upvalue index is missing")
                                     })
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self.heap.capture_get(capture).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "upvalue handle is missing",
-                                    })
+                                    Error::invalid_program("upvalue handle is missing")
                                 })?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -4843,17 +4835,13 @@ impl Vm {
                                     .get(upvalue_index(instruction.aux)?)
                                     .copied()
                                     .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "upvalue index is missing",
-                                        })
+                                        Error::invalid_program("upvalue index is missing")
                                     })
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 self.heap.capture_set(capture, value).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "upvalue handle is missing",
-                                    })
+                                    Error::invalid_program("upvalue handle is missing")
                                 })?;
                             }
                             Opcode::Add => {
@@ -5001,10 +4989,8 @@ impl Vm {
                                 let count = usize::from(instruction.b);
                                 let first = usize::from(instruction.a);
                                 let end = first.checked_add(count).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "return register window overflow",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("return register window overflow")
+                                        .at_pc(pc - 1)
                                 })?;
                                 if end > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -5024,9 +5010,9 @@ impl Vm {
                                 let prefix_first = usize::from(instruction.a);
                                 let prefix_end =
                                     prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "return prefix register window overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                 if prefix_end > registers.len() {
@@ -5045,10 +5031,8 @@ impl Vm {
                                 let args_start = usize::from(args_start);
                                 let args_end =
                                     args_start.checked_add(usize::from(argc)).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "tail call argument window overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("tail call argument window overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                 if args_end > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -5066,10 +5050,9 @@ impl Vm {
                                     && get_register(
                                         &registers,
                                         u8::try_from(args_start).map_err(|_| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason:
-                                                    "tail call argument register index overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "tail call argument register index overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?,
                                     )
@@ -5138,9 +5121,9 @@ impl Vm {
                                     0,
                                     instruction.c,
                                     u8::try_from(args_start).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "tail call argument register index overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "tail call argument register index overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?,
                                     i32::from(argc),
@@ -5371,10 +5354,8 @@ impl Vm {
                                 let first = instruction.b as usize;
                                 let len = instruction.c as usize;
                                 let end = first.checked_add(len).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "array literal register window overflow",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("array literal register window overflow")
+                                        .at_pc(pc - 1)
                                 })?;
                                 if end > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -5389,9 +5370,9 @@ impl Vm {
                                 let table = if self.profile.is_puc51_compat() {
                                     let hash_size =
                                         usize::try_from(instruction.aux).map_err(|_| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "negative table constructor hash hint",
-                                            })
+                                            Error::invalid_program(
+                                                "negative table constructor hash hint",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                     let values = &registers[first..end];
@@ -5965,9 +5946,7 @@ impl Vm {
                                             program,
                                             function,
                                             pc - 1,
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "preloaded table-key register does not match the constant",
-                                            }),
+                                            Error::invalid_program("preloaded table-key register does not match the constant"),
                                         ));
                                     }
                                     expected_key
@@ -6056,9 +6035,7 @@ impl Vm {
                                 let key = match self
                                     .table_next_after(table, after)
                                     .ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "next table handle is missing",
-                                        })
+                                        Error::invalid_program("next table handle is missing")
                                     })
                                     .map_err(|e| e.at_pc(pc - 1))?
                                 {
@@ -6186,10 +6163,7 @@ impl Vm {
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let len = self.heap.array_len(table).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "table handle is missing",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("table handle is missing").at_pc(pc - 1)
                                 })?;
                                 set_register(
                                     &mut registers,
@@ -6202,10 +6176,7 @@ impl Vm {
                                 let table = get_table(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let max = self.heap.max_numeric_key(table).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "table handle is missing",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("table handle is missing").at_pc(pc - 1)
                                 })?;
                                 set_register(&mut registers, instruction.a, Value::number(max))
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -6273,9 +6244,7 @@ impl Vm {
                             }
                             Opcode::LoadCurrentFunction => {
                                 let value = context.current_function.ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "current function handle is missing",
-                                    })
+                                    Error::invalid_program("current function handle is missing")
                                 })?;
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
@@ -6306,18 +6275,18 @@ impl Vm {
                                         if instruction.aux < 0
                                             || instruction.aux > i32::from(u8::MAX)
                                         {
-                                            return Err(Error::new(ErrorKind::InvalidProgram {
-                                                reason: "invalid function call arity",
-                                            })
+                                            return Err(Error::invalid_program(
+                                                "invalid function call arity",
+                                            )
                                             .at_pc(pc - 1));
                                         }
                                         let args_start = usize::from(instruction.c);
                                         let args_end = args_start
                                             .checked_add(instruction.aux as usize)
                                             .ok_or_else(|| {
-                                                Error::new(ErrorKind::InvalidProgram {
-                                                    reason: "function argument window overflow",
-                                                })
+                                                Error::invalid_program(
+                                                    "function argument window overflow",
+                                                )
                                                 .at_pc(pc - 1)
                                             })?;
                                         if args_end > registers.len() {
@@ -6355,18 +6324,18 @@ impl Vm {
                                     && current_function == callee.as_function()
                                 {
                                     if instruction.aux < 0 || instruction.aux > i32::from(u8::MAX) {
-                                        return Err(Error::new(ErrorKind::InvalidProgram {
-                                            reason: "invalid function call arity",
-                                        })
+                                        return Err(Error::invalid_program(
+                                            "invalid function call arity",
+                                        )
                                         .at_pc(pc - 1));
                                     }
                                     let args_start = usize::from(instruction.c);
                                     let args_end = args_start
                                         .checked_add(instruction.aux as usize)
                                         .ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "function argument window overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "function argument window overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                     if args_end > registers.len() {
@@ -6432,10 +6401,9 @@ impl Vm {
                                         .enumerate()
                                     {
                                         let register = u8::try_from(index).map_err(|_| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason:
-                                                    "function parameter register index overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "function parameter register index overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                         set_register(&mut registers, register, arg)
@@ -6583,23 +6551,17 @@ impl Vm {
                                 let argc = usize::from(instruction.b);
                                 let result_count = usize::from(instruction.c);
                                 let args_start = base.checked_add(1).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "function argument window overflow",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("function argument window overflow")
+                                        .at_pc(pc - 1)
                                 })?;
                                 let args_end = args_start.checked_add(argc).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "function argument window overflow",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("function argument window overflow")
+                                        .at_pc(pc - 1)
                                 })?;
                                 let results_end =
                                     base.checked_add(result_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "function result window overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("function result window overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                 if args_end.max(results_end) > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -6692,10 +6654,9 @@ impl Vm {
                                         .enumerate()
                                     {
                                         let register = u8::try_from(index).map_err(|_| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason:
-                                                    "function parameter register index overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "function parameter register index overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                         set_register(&mut registers, register, arg)
@@ -6780,18 +6741,16 @@ impl Vm {
                             | Opcode::ReturnCallExpandVarargs
                             | Opcode::ReturnCallExpand2Varargs
                             | Opcode::AppendCallExpand => {
-                                return Err(Error::new(ErrorKind::InvalidProgram {
-                                    reason: "expanded call bypassed resumable dispatch",
-                                }));
+                                return Err(Error::invalid_program(
+                                    "expanded call bypassed resumable dispatch",
+                                ));
                             }
                             Opcode::LoadVarargs => {
                                 let first = usize::from(instruction.a);
                                 let count = usize::from(instruction.b);
                                 let end = first.checked_add(count).ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "vararg register window overflow",
-                                    })
-                                    .at_pc(pc - 1)
+                                    Error::invalid_program("vararg register window overflow")
+                                        .at_pc(pc - 1)
                                 })?;
                                 if end > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -6804,10 +6763,8 @@ impl Vm {
                                     let value =
                                         varargs.get(index).copied().unwrap_or_else(Value::nil);
                                     let register = u8::try_from(first + index).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "vararg register index overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("vararg register index overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                     set_register(&mut registers, register, value)
                                         .map_err(|e| e.at_pc(pc - 1))?;
@@ -6818,9 +6775,9 @@ impl Vm {
                                 let prefix_first = usize::from(instruction.a);
                                 let prefix_end =
                                     prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return vararg prefix register window overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "return vararg prefix register window overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                 if prefix_end > registers.len() {
@@ -6901,9 +6858,9 @@ impl Vm {
                                 let prefix_first = usize::from(instruction.a);
                                 let prefix_end =
                                     prefix_first.checked_add(prefix_count).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return prefix register window overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "return prefix register window overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                 if prefix_end > registers.len() {
@@ -6918,10 +6875,8 @@ impl Vm {
                                 let args_start = usize::from(args_start);
                                 let args_end =
                                     args_start.checked_add(usize::from(argc)).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "return call vararg window overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("return call vararg window overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                 if args_end > registers.len() {
                                     return Err(Error::new(ErrorKind::RegisterOutOfBounds {
@@ -6995,9 +6950,9 @@ impl Vm {
 
                             Opcode::AppendVarargs => {
                                 if instruction.aux <= 0 {
-                                    return Err(Error::new(ErrorKind::InvalidProgram {
-                                        reason: "invalid table vararg start index",
-                                    })
+                                    return Err(Error::invalid_program(
+                                        "invalid table vararg start index",
+                                    )
                                     .at_pc(pc - 1));
                                 }
                                 let table_value = get_register(&registers, instruction.a)
@@ -7009,29 +6964,23 @@ impl Vm {
                                 self.ensure_puc_table_append_presized(
                                     table,
                                     usize::try_from(instruction.aux).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table vararg index overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("table vararg index overflow")
+                                            .at_pc(pc - 1)
                                     })?,
                                     varargs.len(),
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in varargs.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table vararg index overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("table vararg index overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                     let index = usize::try_from(instruction.aux)
                                         .ok()
                                         .and_then(|start| start.checked_add(offset as usize))
                                         .ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "table vararg index overflow",
-                                            })
-                                            .at_pc(pc - 1)
+                                            Error::invalid_program("table vararg index overflow")
+                                                .at_pc(pc - 1)
                                         })?;
                                     self.set_table_array_slot(table, index, value)
                                         .map_err(|e| e.at_pc(pc - 1))?;
@@ -7039,9 +6988,9 @@ impl Vm {
                             }
                             Opcode::AppendCall => {
                                 if instruction.aux <= 0 {
-                                    return Err(Error::new(ErrorKind::InvalidProgram {
-                                        reason: "invalid table call append start index",
-                                    })
+                                    return Err(Error::invalid_program(
+                                        "invalid table call append start index",
+                                    )
                                     .at_pc(pc - 1));
                                 }
                                 let table_value = get_register(&registers, instruction.a)
@@ -7054,17 +7003,17 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let args_start =
                                     usize::from(instruction.b).checked_add(1).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table call append argument window overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "table call append argument window overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                 let args_end = args_start
                                     .checked_add(usize::from(instruction.c))
                                     .ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "table call append argument window overflow",
-                                    })
+                                    Error::invalid_program(
+                                        "table call append argument window overflow",
+                                    )
                                     .at_pc(pc - 1)
                                 })?;
                                 if args_end > registers.len() {
@@ -7101,10 +7050,9 @@ impl Vm {
                                                 table,
                                                 start_index: usize::try_from(instruction.aux)
                                                     .map_err(|_| {
-                                                        Error::new(ErrorKind::InvalidProgram {
-                                                            reason:
-                                                                "table call append index overflow",
-                                                        })
+                                                        Error::invalid_program(
+                                                            "table call append index overflow",
+                                                        )
                                                         .at_pc(pc - 1)
                                                     })?,
                                             },
@@ -7127,10 +7075,9 @@ impl Vm {
                                                 table,
                                                 start_index: usize::try_from(instruction.aux)
                                                     .map_err(|_| {
-                                                        Error::new(ErrorKind::InvalidProgram {
-                                                            reason:
-                                                                "table call append index overflow",
-                                                        })
+                                                        Error::invalid_program(
+                                                            "table call append index overflow",
+                                                        )
                                                         .at_pc(pc - 1)
                                                     })?,
                                             },
@@ -7143,28 +7090,24 @@ impl Vm {
                                 self.ensure_puc_table_append_presized(
                                     table,
                                     usize::try_from(instruction.aux).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table call append index overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("table call append index overflow")
+                                            .at_pc(pc - 1)
                                     })?,
                                     results.len(),
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table call append index overflow",
-                                        })
-                                        .at_pc(pc - 1)
+                                        Error::invalid_program("table call append index overflow")
+                                            .at_pc(pc - 1)
                                     })?;
                                     let index = usize::try_from(instruction.aux)
                                         .ok()
                                         .and_then(|start| start.checked_add(offset as usize))
                                         .ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "table call append index overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "table call append index overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                     self.set_table_array_slot(table, index, value)
@@ -7173,9 +7116,9 @@ impl Vm {
                             }
                             Opcode::AppendCallVarargs => {
                                 if instruction.aux <= 0 {
-                                    return Err(Error::new(ErrorKind::InvalidProgram {
-                                        reason: "invalid table vararg call append start index",
-                                    })
+                                    return Err(Error::invalid_program(
+                                        "invalid table vararg call append start index",
+                                    )
                                     .at_pc(pc - 1));
                                 }
                                 let table_value = get_register(&registers, instruction.a)
@@ -7188,18 +7131,17 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                                 let args_start =
                                     usize::from(instruction.b).checked_add(1).ok_or_else(|| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason:
-                                                "table vararg call append argument window overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "table vararg call append argument window overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                 let args_end = args_start
                                     .checked_add(usize::from(instruction.c))
                                     .ok_or_else(|| {
-                                    Error::new(ErrorKind::InvalidProgram {
-                                        reason: "table vararg call append argument window overflow",
-                                    })
+                                    Error::invalid_program(
+                                        "table vararg call append argument window overflow",
+                                    )
                                     .at_pc(pc - 1)
                                 })?;
                                 if args_end > registers.len() {
@@ -7237,10 +7179,7 @@ impl Vm {
                                                 table,
                                                 start_index: usize::try_from(instruction.aux)
                                                     .map_err(|_| {
-                                                        Error::new(ErrorKind::InvalidProgram {
-                                                    reason:
-                                                        "table vararg call append index overflow",
-                                                })
+                                                        Error::invalid_program("table vararg call append index overflow")
                                                 .at_pc(pc - 1)
                                                     })?,
                                             },
@@ -7263,10 +7202,7 @@ impl Vm {
                                                 table,
                                                 start_index: usize::try_from(instruction.aux)
                                                     .map_err(|_| {
-                                                        Error::new(ErrorKind::InvalidProgram {
-                                                    reason:
-                                                        "table vararg call append index overflow",
-                                                })
+                                                        Error::invalid_program("table vararg call append index overflow")
                                                 .at_pc(pc - 1)
                                                     })?,
                                             },
@@ -7279,9 +7215,9 @@ impl Vm {
                                 self.ensure_puc_table_append_presized(
                                     table,
                                     usize::try_from(instruction.aux).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table vararg call append index overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "table vararg call append index overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?,
                                     results.len(),
@@ -7289,18 +7225,18 @@ impl Vm {
                                 .map_err(|e| e.at_pc(pc - 1))?;
                                 for (offset, value) in results.iter().copied().enumerate() {
                                     let offset = u32::try_from(offset).map_err(|_| {
-                                        Error::new(ErrorKind::InvalidProgram {
-                                            reason: "table vararg call append index overflow",
-                                        })
+                                        Error::invalid_program(
+                                            "table vararg call append index overflow",
+                                        )
                                         .at_pc(pc - 1)
                                     })?;
                                     let index = usize::try_from(instruction.aux)
                                         .ok()
                                         .and_then(|start| start.checked_add(offset as usize))
                                         .ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "table vararg call append index overflow",
-                                            })
+                                            Error::invalid_program(
+                                                "table vararg call append index overflow",
+                                            )
                                             .at_pc(pc - 1)
                                         })?;
                                     self.set_table_array_slot(table, index, value)
