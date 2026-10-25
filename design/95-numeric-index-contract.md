@@ -222,3 +222,10 @@ error construction unchanged, including protected-call error handling. This
 preserves error payloads and location handling while targeting cold internal
 validation code. Static size reduction and remote acceptance are still gates;
 no source-level claim establishes a speedup.
+
+The narrow helper also failed the static footprint criterion: the large dispatch
+closure grew to 113,604 bytes and the outer closure to 39,379 bytes. It was
+removed before timing. The next static candidate retains inline construction
+and adds the cold annotation only, preserving specialization while giving the
+compiler branch-frequency information. This is still an experiment, not an
+accepted performance improvement.

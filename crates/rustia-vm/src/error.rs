@@ -91,6 +91,7 @@ pub enum ErrorKind {
 }
 
 impl Error {
+    #[cold]
     #[inline]
     pub fn new(kind: ErrorKind) -> Self {
         // Luau luaH_next raises a bare VM error, without a source prefix.
@@ -103,14 +104,6 @@ impl Error {
             diagnostic: None,
             span: None,
         }
-    }
-
-    /// Construct an internal bytecode error without duplicating its payload in
-    /// the successful dispatch path. Ordinary guest errors keep their normal path.
-    #[cold]
-    #[inline(never)]
-    pub(crate) fn invalid_program(reason: &'static str) -> Self {
-        Self::new(ErrorKind::InvalidProgram { reason })
     }
 
     #[inline]
