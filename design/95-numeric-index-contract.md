@@ -238,3 +238,10 @@ error-PC attachment in order. This tests a concrete reduction in the main
 dispatch footprint rather than another numeric expression or error annotation.
 Both original-baseline acceptance and string-workload cost must pass remotely
 before adoption; static size alone is not acceptance.
+
+The extracted candidate `c1913422` passes the static footprint gate: the large
+dispatch closure shrinks from 110,416 to 106,454 bytes (3,962 bytes), while the
+outer closure stays at 37,370 bytes. The new helper is 10,415 bytes; total binary
+size reduction is not claimed. Default/bare numeric-contract, diagnostic-parity
+and error-recovery tests pass. Remote five-workload and supplemental string
+comparisons remain required; none has been dispatched for this candidate yet.
