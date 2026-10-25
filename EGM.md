@@ -1,0 +1,68 @@
+# rustia Blueprint
+
+## System Overview
+
+Rustia implements a portable Luau interpreter in Rust. Source moves through the lexer,
+parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
+and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
+one engine. The workspace is private and unpublished; the pinned conformance corpus
+does not establish full Luau parity or release readiness.
+
+Read [AGENTS.md](./AGENTS.md), [CURRENT](./design/CURRENT.md), the
+[pillars](./design/02-pillars.md), and the relevant design documents before changes.
+These maps describe implementation boundaries and navigation. They do not supersede
+the canonical state, design contracts, or pinned Luau 0.709 oracle.
+
+## Interface
+
+The [workspace manifest](./Cargo.toml) contains seven runtime/tooling crates and the
+benchmark harness. Follow these maps from the root toward the file being edited:
+
+| Boundary | Map | Responsibility |
+| --- | --- | --- |
+| Runtime and embedding | [crates](./crates/EGM.md) | Lexer, AST/parser, compiler, VM, facade, CLI, conformance runner. |
+| Benchmark sources and artifacts | [bench](./bench/EGM.md) | Workloads, engine adapters, memory protocols, analysis, and report generation. |
+| Repository tooling | [tools](./tools/EGM.md) | Validation, release/package audits, pinned oracle tooling, and controlled benchmark operations. |
+| Fuzzing | [fuzz](./fuzz/EGM.md) | Separate workspace for bounded frontend/VM, stateful embedding, and differential fuzzing. |
+| Browser demonstration | [demos](./demos/EGM.md) | Interactive WebAssembly example using the standard preset. |
+| Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
+| Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
+
+The test-only [conformance corpus](./conformance/README.md) is indexed by
+[MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).
+Tests, fixture-only trees, vendored code, generated output, ignored directories, and
+symlinks have no separate maps. Hidden configuration is outside the bootstrap tree;
+[CI workflows](./.github/workflows/) and [justfile](./justfile) remain operational entry
+points. The ignored private sibling is a separate repository and is outside this map.
+
+## Invariants
+
+- `standard()` has reproducible defaults and permits explicit nondeterministic providers;
+  `deterministic()` enforces its replay contract; `live()` intentionally provides live
+  services. Hardened leaves narrow the deterministic guest surface.
+- Public workspace crates inherit `unsafe_code = "forbid"`. Deterministic numeric,
+  iteration, fuel, and collection rules belong to the selected contract and versioned ABI.
+- The application facade owns its settings/errors and retained handles. VM internals
+  remain separate lower-level APIs; handles must respect VM ownership and decision epochs.
+- Host-owned authoritative state and external effects are not silently rolled back with
+  guest state. Typed invocation journals and guest installation savepoints have distinct
+  boundaries.
+- Performance evidence comes only from `ci-bench`; local correctness/static checks are
+  not measurements. Do not run benchmark binaries or timing/profiling scripts locally.
+- Keep affected maps and parent links current alongside code. Preserve human-facing
+  READMEs and report disagreements with authoritative documents explicitly.
+
+## Side Effects
+
+The engine allocates and mutates VM-owned state and invokes explicitly configured host
+services. CLI and conformance tooling read files and emit output. Repository tools may
+write generated artifacts, launch processes, operate remote benchmark infrastructure,
+or publish results when specifically invoked and authorized. Reading a map grants no
+authority for those operations.
+
+## Verification
+
+Run commands from the repository root. `cargo test --locked --workspace` checks workspace
+correctness; `cargo fmt --all -- --check` checks Rust formatting. Follow each component's
+map for narrower checks. Documentation-only map changes require section, source-reference,
+link, scope, and diff validation; they do not require benchmark execution.
