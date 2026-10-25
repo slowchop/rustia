@@ -2,7 +2,13 @@
 
 Scope: all 68 generated `EGM.md` files in the eligible source tree. This is a static map-to-source and referenced-contract audit, not an exhaustive behavioral or release audit. Every map was read; source claims, file links, child-map links, and verification targets were checked. Tests, fixture-only trees, vendored/generated/ignored trees, symlinks, and hidden configuration directories were excluded from bootstrap.
 
-Map corrections below are applied. The initial bootstrap preserved authoritative design prose, added map-reading/maintenance instructions to `AGENTS.md`, and refreshed the generated `design/package-files.json` inventory for newly packaged maps. The authorized documentation follow-up now resolves all three reported disagreement themes: conformance counts, the fuzzing CI claim, and benchmark operations. `tools/EGM.md` was updated to remove its obsolete disagreement note. Application code and human-facing READMEs remain unchanged. No benchmarks or runtime tests were run.
+Map corrections below are applied. The initial bootstrap preserved authoritative design prose, added map-reading/maintenance instructions to `AGENTS.md`, and refreshed the generated `design/package-files.json` inventory for newly packaged maps. The authorized documentation follow-up now resolves all three reported disagreement themes: conformance counts, the fuzzing CI claim, and benchmark operations. `tools/EGM.md` was updated to remove its obsolete disagreement note. Application code and human-facing READMEs remain unchanged. No benchmarks or runtime tests were run during the static map audit; subsequent PR validation runs in CI.
+
+## CI integration follow-up
+
+- Integrated the benchmark publication already on `main` and regenerated the combined package inventory: the benchmark package contains 534 files, including the new maps and published evidence. Refreshed the dependent `design/publishability.json` counts.
+- Regenerated `bench/operations-status.json` and its HTML display from the merged Git history. The existing path-based policy counts maps under crate `src/` directories as relevant commits; the pending status does not indicate an application-code change.
+- Package, publishability, project-status, benchmark-artifact, and report checks validate the generated outputs. Existing measurements, application code, and human-facing READMEs remain unchanged relative to `main`.
 
 ## EGM.md
 
