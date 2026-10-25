@@ -1,0 +1,27 @@
+{
+ "schema": "rustia.bench.dedicated-provider.v1",
+ "host": "ci-bench",
+ "class": "dedicated physical machine",
+ "attested_at": "2026-10-25T18:17:51.012Z",
+ "cpu_model": "AMD Ryzen 5 3600X 6-Core Processor",
+ "logical_cpus": 6,
+ "smt": "notsupported",
+ "isolated_cpus": "4-5",
+ "kernel": "6.8.0-147-generic",
+ "microcode": "0x8701034",
+ "packages_sha256": "75d5d551faccba24e1c80830c40834ab999b888c73b6587be5e9471ade4e4230",
+ "host_fingerprint": "6d127ddd05f0837c3c471010ec937278d8e88563b3b537f4e28a2c8e76a1fa4c",
+ "free_gib": 148.6,
+ "cpu_isolation": "isolcpus=4,5 nohz_full=4,5 rcu_nocbs=4,5",
+ "pinned_cpus": "4",
+ "pinned_cpu_frequency_policy": {
+  "4": {
+   "governor": "performance",
+   "min_khz": 2200000,
+   "max_khz": 3800000,
+   "boost": "0"
+  }
+ },
+ "node_version": "v22.23.2",
+ "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)"
+}
