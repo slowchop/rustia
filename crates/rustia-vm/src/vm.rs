@@ -6082,105 +6082,21 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, string)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::StringSub => {
-                                let value = self
-                                    .string_sub(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringLen => {
-                                let text = self
-                                    .builtin_string_arg(
-                                        Some(get_register(&registers, instruction.b)?),
-                                        0,
-                                        "len",
-                                    )
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(
+                            Opcode::StringSub
+                            | Opcode::StringLen
+                            | Opcode::StringByte
+                            | Opcode::StringUpper
+                            | Opcode::StringLower
+                            | Opcode::StringReverse
+                            | Opcode::StringRep
+                            | Opcode::StringFind
+                            | Opcode::StringSplit => {
+                                self.execute_string_opcode(
                                     &mut registers,
-                                    instruction.a,
-                                    Value::number(text.len() as f64),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringByte => {
-                                let value = self
-                                    .string_byte(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringUpper => {
-                                let mut text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                text.make_ascii_uppercase();
-                                let string = self.heap.intern_string_value_bytes(&text);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringLower => {
-                                let mut text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                text.make_ascii_lowercase();
-                                let string = self.heap.intern_string_value_bytes(&text);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringReverse => {
-                                let text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let reversed =
-                                    reverse_string_bytes(&text).map_err(|e| e.at_pc(pc - 1))?;
-                                let string = self.heap.intern_string_value_bytes(&reversed);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringRep => {
-                                let args = [
-                                    get_register(&registers, instruction.b)
-                                        .map_err(|e| e.at_pc(pc - 1))?,
-                                    get_register(&registers, instruction.c)
-                                        .map_err(|e| e.at_pc(pc - 1))?,
-                                ];
-                                let extra_fuel = self.native_string_rep_fuel(&args);
-                                charge_fuel(
-                                    &mut fuel.state.fuel,
-                                    fuel.state.fuel_limit,
-                                    extra_fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self
-                                    .string_rep(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringFind => {
-                                let extra_fuel = self
-                                    .string_find_opcode_fuel(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                charge_fuel(
-                                    &mut fuel.state.fuel,
-                                    fuel.state.fuel_limit,
-                                    extra_fuel,
-                                )
-                                .map_err(|error| error.at_pc(pc - 1))?;
-                                let value = self
-                                    .string_find(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringSplit => {
-                                let value = self
-                                    .string_split(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                    instruction,
+                                    pc - 1,
+                                    fuel,
+                                )?;
                             }
                             Opcode::TableGetN => {
                                 let table = get_table(&registers, instruction.b)
@@ -20091,6 +20007,95 @@ impl Vm {
         for _ in 0..steps {
             self.executed_instructions = self.executed_instructions.wrapping_add(1);
             self.maybe_collect_with_roots(&[root])?;
+        }
+        Ok(())
+    }
+
+    // Keep string-library implementation bodies outside the main dispatch loop.
+    // Fuel charges and error locations stay in their original order.
+    #[inline(never)]
+    fn execute_string_opcode(
+        &mut self,
+        registers: &mut [Value],
+        instruction: Instruction,
+        pc: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        match instruction.op {
+            Opcode::StringSub => {
+                let value = self
+                    .string_sub(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringLen => {
+                let text = self
+                    .builtin_string_arg(Some(get_register(registers, instruction.b)?), 0, "len")
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, Value::number(text.len() as f64))
+                    .map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringByte => {
+                let value = self
+                    .string_byte(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringUpper => {
+                let mut text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                text.make_ascii_uppercase();
+                let string = self.heap.intern_string_value_bytes(&text);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringLower => {
+                let mut text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                text.make_ascii_lowercase();
+                let string = self.heap.intern_string_value_bytes(&text);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringReverse => {
+                let text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                let reversed = reverse_string_bytes(&text).map_err(|e| e.at_pc(pc))?;
+                let string = self.heap.intern_string_value_bytes(&reversed);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringRep => {
+                let args = [
+                    get_register(registers, instruction.b).map_err(|e| e.at_pc(pc))?,
+                    get_register(registers, instruction.c).map_err(|e| e.at_pc(pc))?,
+                ];
+                let extra_fuel = self.native_string_rep_fuel(&args);
+                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)
+                    .map_err(|e| e.at_pc(pc))?;
+                let value = self
+                    .string_rep(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringFind => {
+                let extra_fuel = self
+                    .string_find_opcode_fuel(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)
+                    .map_err(|error| error.at_pc(pc))?;
+                let value = self
+                    .string_find(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringSplit => {
+                let value = self
+                    .string_split(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            _ => unreachable!("string opcode dispatch is exhaustive"),
         }
         Ok(())
     }

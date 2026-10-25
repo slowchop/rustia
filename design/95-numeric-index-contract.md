@@ -229,3 +229,12 @@ removed before timing. The next static candidate retains inline construction
 and adds the cold annotation only, preserving specialization while giving the
 compiler branch-frequency information. This is still an experiment, not an
 accepted performance improvement.
+
+The cold-inline annotation also failed the static footprint check (dispatch
+closures 38,483 and 111,940 bytes), and is removed. No cold-constructor variant
+was timed. The replacement extracts the nine string-opcode bodies into one
+non-inlined dispatch helper, preserving every register access, fuel charge and
+error-PC attachment in order. This tests a concrete reduction in the main
+dispatch footprint rather than another numeric expression or error annotation.
+Both original-baseline acceptance and string-workload cost must pass remotely
+before adoption; static size alone is not acceptance.

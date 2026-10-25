@@ -91,7 +91,6 @@ pub enum ErrorKind {
 }
 
 impl Error {
-    #[cold]
     #[inline]
     pub fn new(kind: ErrorKind) -> Self {
         // Luau luaH_next raises a bare VM error, without a source prefix.

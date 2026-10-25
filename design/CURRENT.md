@@ -26,8 +26,8 @@ finiteness operations also failed remote acceptance; investigation continues
 and PR #74 is not ready to merge. Hardware counters found unchanged instruction
 counts but higher iteration cache references. A generic cold constructor grew the dispatch code and was rejected before
 timing. A narrow invalid-bytecode helper also grew code and was rejected. Cold
-annotations with inline construction are now under static investigation;
-performance acceptance remains open.
+inline annotations were rejected as well. Extracted string-opcode bodies are
+now under static investigation; performance acceptance remains open.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on
