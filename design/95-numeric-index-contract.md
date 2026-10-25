@@ -21,7 +21,7 @@ The upper comparison must be exclusive: converting `i64::MAX` to `f64` rounds
 up to `2^63`. A comparison against that rounded value using `>` admits an
 out-of-range value and Rust's saturating cast hides the error. The correct
 upper test is `>= 2^63`, equivalently `> (2^63 - 1024)` for f64 values;
-the implementation uses the latter to retain the original comparison form.
+the implementation uses a half-open range check before the truncating cast.
 `-2^63` remains representable and valid. The adjacent
 representable doubles are `2^63 - 1024` below the upper bound and
 `-2^63 - 2048` below the lower bound.
@@ -116,3 +116,21 @@ to separate its bounds/cast expansion from its callers. This may also impose
 call overhead on string operations; remote measurements, including relevant
 string workloads, are required before adopting it. No timing was collected
 from the local disassembly builds, and thresholds remain unchanged.
+
+The out-of-line experiment was rejected after
+[40231066927](https://github.com/slowchop/rustia/actions/runs/40231066927):
+against `4ca0b13b`, `5ddfdd76` measured dense tables +0.81% [0.05%, 1.68%],
+sparse tables +2.33% [0.79%, 3.89%], closures +4.53% [2.50%, 5.78%],
+iteration +1.36% [0.34%, 2.66%], and math/table -0.11% [-1.44%, 3.82%].
+These are eight-leg, 99% intervals; no outlier was flagged. The no-inline
+attribute is removed rather than retained as an unproven optimization.
+
+Disassembly of the earlier inline candidate shows an explicit truncation call
+and a separate finiteness check in each conversion. The next candidate uses
+only the half-open signed-64 range check and Rust's truncating cast. NaN fails
+range containment and infinities lie outside the range. Every representable
+f64 near either signed-64 boundary is already integral (spacing at least 1024),
+so checking the original value instead of its truncation accepts exactly the
+same inputs. Fractional values, signed zero and subnormals retain truncation
+toward zero. This removes redundant work but remains a performance candidate
+until remote baseline comparison passes; no threshold or prior evidence changes.

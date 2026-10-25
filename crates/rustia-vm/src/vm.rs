@@ -26062,12 +26062,11 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
     })
 }
 
-#[inline(never)]
 fn string_library_index(value: f64) -> Result<i64> {
-    // Largest f64 below 2^63 is 2^63 - 1024; i64::MAX as f64 rounds up.
-    // Comparing with that last valid value keeps the original strict-`>` form.
-    let value = value.trunc();
-    if !value.is_finite() || value < i64::MIN as f64 || value > 9_223_372_036_854_774_784.0 {
+    // The half-open range also rejects NaN and infinities. At either boundary,
+    // f64 spacing exceeds one, so checking before truncation is equivalent.
+    // The checked cast below supplies truncation without a separate operation.
+    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
         return Err(Error::new(ErrorKind::TypeError {
             expected: "integer string library index",
         }));
