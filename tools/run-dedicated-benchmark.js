@@ -844,6 +844,12 @@ function fetchExport(runDirectory, lane = LANES.history) {
 // Puts the runner, the frozen config, the attestation and a bundle of this
 // checkout where the host can see them, then runs it. In local mode the host is
 // this machine, so the inbox is a directory rather than a destination.
+// The runner archives an expected diagnostic failure before returning 2.
+// Fetch that archive before reporting failure; never suppress transport errors.
+function runnerExitSuffix(profile) {
+  return profile ? ' || test "$?" -eq 2' : "";
+}
+
 function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history, profile = false) {
   const inbox = `$HOME/${lane.root}/inbox`;
   sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
@@ -871,7 +877,7 @@ function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.
       `export ${lane.rootEnv}="$HOME/${lane.root}"\n` +
       `cd "${inbox}"\n` +
       `node "${inbox}/${path.basename(lane.runner)}" "${inbox}/${path.basename(configFile)}" ` +
-      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"${profile ? " --profile" : ""}\n`,
+      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"${profile ? " --profile" : ""}${runnerExitSuffix(profile)}\n`,
   );
 }
 
@@ -2659,6 +2665,11 @@ function selfTest() {
   assert.equal(parseArgs(["profile", "--baseline", "a1", "--candidate", "b2", "--local"]).command, "profile");
   assert.equal(parseArgs(["profile", "--passes", "8"]), null);
   assert.equal(parseArgs(["profile", "--out", "report.md"]), null);
+  for (const code of [0, 1, 2, 255]) {
+    const result = spawnSync("sh", ["-c", `sh -c 'exit ${code}'${runnerExitSuffix(true)}`]);
+    assert.equal(result.status === 0, code === 0 || code === 2);
+  }
+  assert.equal(runnerExitSuffix(false), "");
   const accept = parseArgs(["accept", "--baseline", "a1", "--candidate", "b2", "--out", "a.md"]);
   assert.equal(accept.baseline, "a1");
   assert.equal(accept.candidate, "b2");

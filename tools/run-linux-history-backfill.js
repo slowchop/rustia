@@ -840,7 +840,7 @@ function measureOne(config, build, attemptDirectory, profile = false) {
     const command = profile ? "perf" : "taskset";
     const commandArgs = profile
       ? ["stat", "-x", ",", "-o", perfFile, "-e",
-        "cycles,instructions,branches,branch-misses,cache-references,cache-misses", "--", "taskset", ...args]
+        "cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u,cache-misses:u", "--", "taskset", ...args]
       : args;
     run(command, commandArgs, {
       cwd: HARNESS,
@@ -1281,11 +1281,13 @@ async function execute(configFile, providerFile, bundle, profile = false) {
       verifySource(config, bundle);
       installRust();
       log(`building ${config.source.target_commits.length} historical Rustia revisions`);
-      if (profile) run("perf", ["stat", "-e", "cycles,instructions", "--", "true"]);
-      const builds = buildTargets(config, startedAtMs);
       if (profile) {
         fs.copyFileSync(configFile, path.join(EVIDENCE, "protocol.json"));
         fs.copyFileSync(providerFile, path.join(EVIDENCE, "provider.json"));
+      }
+      if (profile) run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
+      const builds = buildTargets(config, startedAtMs);
+      if (profile) {
         writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
         writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));
         await profilePair(config, builds, startedAtMs);
@@ -1564,6 +1566,7 @@ async function selfTest() {
   const counterFixture = ["cycles", "instructions", "branches", "branch-misses", "cache-references", "cache-misses"]
     .map((event) => `123,,${event},100,100.00`).join("\n");
   validatePerfCounters(counterFixture);
+  validatePerfCounters(counterFixture.replace(/,100,100.00/g, ":u,100,100.00"));
   assert.throws(() => validatePerfCounters(counterFixture.replace("123,,cycles", "<not supported>,,cycles")));
   assert.throws(() => validatePerfCounters(counterFixture.replace(/.*cache-misses.*/, "")));
   process.stdout.write("history backfill runner self-test passed\n");

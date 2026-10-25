@@ -166,3 +166,15 @@ host, fixed harness and loop counts. It checks workload checksums and idle/steal
 gates, retains raw counters, and produces no acceptance or publication artifact.
 Counter totals include harness setup and warmup; they are diagnostic only.
 Normal acceptance and committed calibration remain unchanged.
+
+The first diagnostic dispatch
+[40241006935](https://github.com/slowchop/rustia/actions/runs/40241006935)
+failed the counter-access probe before compilation or measurement. The runner
+host denied perf events. Diagnostics now request only user-space counters and
+fetch failed exports before reporting failure; workflow artifacts retain those
+exports for review. This is an infrastructure prerequisite, not a performance
+result. The f54b0774 screening run
+[40234604744](https://github.com/slowchop/rustia/actions/runs/40234604744)
+also retained dense +2.36% [0.65%, 3.28%], sparse +0.93% [0.03%, 1.85%],
+closures +2.25% [-3.29%, 6.35%], iteration +3.15% [2.85%, 4.00%], and
+math/table +1.59% [-0.96%, 3.44%]; it does not overturn failed acceptance.

@@ -99,3 +99,13 @@ jobs:
             --out "$work_dir/acceptance.md" \
             --json "$work_dir/acceptance.json"
           cat "$work_dir/acceptance.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain diagnostic evidence, including failed runs
+        if: ${{ always() && inputs.mode == 'profile' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-diagnostics-${{ github.run_id }}
+          path: .rustia-benchmark-state/dedicated/runs/profile-*/export.tar.gz
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
