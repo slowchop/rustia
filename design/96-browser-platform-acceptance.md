@@ -141,3 +141,11 @@ native correctness and deterministic-result evidence; their current
 cross-compilation jobs prove only builds. Keep the full matrix in documents 00, 90 and 92 until each target
 has actual execution evidence. Windows remains a manually dispatched CI job;
 its successful run must be checked separately from ordinary pull-request CI.
+
+The string-dispatch extraction candidate `c1913422` independently passed the
+same native Linux arm64 contract suite: 120 tests across 16 groups, default and
+bare modes, with two byte-identical golden transcripts. This used an exact
+source archive and the same pinned image above. The log and evidence note are
+`/private/tmp/rustia-linux-arm64-c1913422.log` and
+`/private/tmp/rustia-linux-arm64-c1913422-acceptance.md`. Other platforms still
+require the new candidate's CI; the checked-cast evidence remains historical.
