@@ -744,3 +744,30 @@ outcome executor shrinks from 1,045 to 992 bytes; main dispatch retains its
 and bare VM suites each pass 251 tests; focused continuation, numeric-index,
 metamethod-yield and golden checks pass nine tests total per feature mode.
 These correctness and code-shape checks do not establish a speed improvement.
+
+
+The combined-boundary runtime `dc2adfd2`, delivered as `7b450eb3`, completes
+[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40369557729)
+against `c754371f`. Both audits validate all 96 sidecars, full identities,
+fixed work, repetitions, checksums, aggregate copies and forty ABBA workload
+pairs. No outliers are flagged. The 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -0.10% | [-1.20%, 0.78%] |
+| Sparse tables | -0.44% | [-1.04%, 0.90%] |
+| Closures/upvalues | +0.87% | [-1.00%, 4.04%] |
+| Generic iteration | -0.13% | [-0.90%, 3.25%] |
+| Math/table | -0.08% | [-1.69%, 2.70%] |
+
+No workload establishes improvement. Closure and math/table material verdicts
+remain inconclusive. The production experiment is reverted while retaining its
+four-profile guard regression and all evidence. No original-baseline acceptance
+is run for this unproven candidate and no thresholds or samples change.
+
+A fresh [remote counter diagnostic](https://github.com/slowchop/rustia/actions/runs/40374618824)
+compares retained `c754371f` with original `90bc2ae4`. It uses the existing fixed
+five-workload profile and four ABBA legs. Counters include startup, compilation
+and warmup; instrumented elapsed times are not acceptance evidence. Results
+remain pending. Further corrections must follow this diagnostic rather than
+accumulating unrelated small runtime rewrites.

@@ -11659,7 +11659,10 @@ impl Vm {
                 // Both `#items` and `items[index]` are only primitive when no
                 // metatable can intercept them. This guard precedes the index
                 // mutation, so any metamethod-capable case falls back cleanly.
-                let Some(len) = self.heap.array_len_without_metatable(items) else {
+                if self.heap.table_metatable(items) != Some(None) {
+                    return Ok(None);
+                }
+                let Some(len) = self.heap.array_len(items) else {
                     return Ok(None);
                 };
                 let next_number = binary(NumericOp::Add, index, increment);

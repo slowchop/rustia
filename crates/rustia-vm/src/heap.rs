@@ -3217,15 +3217,6 @@ impl VmCell {
         self.tables.get(table).map(table_array_boundary_len)
     }
 
-    /// Read the primitive boundary only when no metatable can intercept it.
-    pub(crate) fn array_len_without_metatable(&self, table: u32) -> Option<usize> {
-        let table = self.tables.get(table)?;
-        if table.metatable.is_some() {
-            return None;
-        }
-        Some(table_array_boundary_len(table))
-    }
-
     pub fn table_storage_len(&mut self, table: u32) -> Option<usize> {
         let table = self.tables.get(table)?;
         let hash_len = match &table.hash {

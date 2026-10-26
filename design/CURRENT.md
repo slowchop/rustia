@@ -79,10 +79,12 @@ two baseline outliers remain included. The next correction isolates the
 redundant non-vector table-write probe alone against `c754371f`, preserving
 all surrounding key and quota behavior. That isolated probe fails to establish
 a sparse-table improvement and slows iteration another 0.51% [0.11%, 0.97%];
-it is reverted. The next correction combines the iterator leaf's metatable
-guard and boundary lookup into one validated table read, preserving the
-existing boundary calculation and mutation ordering. Its direct baseline is
-`c754371f`; sparse-table and iteration acceptance remain unresolved.
+it is reverted. Combining the iterator leaf's metatable guard and boundary
+lookup also fails to establish improvement in eight-pair isolation. That
+production experiment is reverted, retaining its guard regression and results.
+Fresh remote hardware-counter diagnostics compare retained `c754371f` with
+original `90bc2ae4` before another runtime correction. Sparse-table and iteration
+acceptance remain unresolved; instrumented timings are not acceptance.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

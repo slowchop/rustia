@@ -1025,8 +1025,9 @@ results remain in [95](95-numeric-index-contract.md).
 
 ### Primitive iterator boundary guard
 
-The recognized array-iterator leaf reads the table once to validate its handle,
-reject any metatable, and compute the existing boundary. The same
+The combined table-validation/boundary experiment did not establish a remote
+improvement and is reverted. The recognized array-iterator leaf retains its
+separate metatable guard and existing length query. The same
 `table_array_boundary_len` function preserves Log and PUC boundary rules. A
 missing table or any metatable returns fallback before number calculation or
 index-cell mutation. General length queries and numeric table lookup remain

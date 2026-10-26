@@ -15,7 +15,7 @@
 
 ## Invariants
 
-- Recognized array-iterator leaves validate the table handle and reject metatables in the same read used for the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
+- Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.
 - Successful scalar leaf calls skip caller-register synchronization only when loader analysis of actual bytecode proves the caller cannot attach local capture cells. `GetLocalCell`, `SetLocalCell`, or `LoadFunction` keeps the scan; unknown frames fall back conservatively. The proof is read with the existing caller-site cache lookup on eligible scalar calls, rather than at every frame entry. Optional capture hints do not establish this proof ([VM design](../../../design/58-vm-core2.md)).
