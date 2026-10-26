@@ -16550,6 +16550,7 @@ impl Vm {
         Ok(Value::number(binary(NumericOp::Abs, value, 0.0)))
     }
 
+    #[inline(never)]
     fn native_math_unary(&mut self, args: &[Value], op: MathUnary) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "math argument")?;
         self.math_unary(args, Instruction::with_aux(Opcode::Halt, 0, 0, 0, 1), op)

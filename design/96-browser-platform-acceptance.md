@@ -297,3 +297,32 @@ Windows job `121466967072` lost runner communication during checkout; toolchain
 installation and tests never began, and its log endpoint returns BlobNotFound.
 The failure annotation and job metadata are retained. This is not current-head
 Windows correctness evidence: successful Windows execution remains required.
+
+
+## Isolated unary math argument borrowing
+
+Runtime `ecbd774d`, delivered as `6b06808b`, reverts the table-probe and
+fresh-frame scan experiments while retaining borrowed unary math arguments.
+Native Linux arm64 correctness from its exact Git source archive passes 122
+tests across sixteen groups with zero failures and two matching golden
+transcripts, retained in `/private/tmp/rustia-linux-arm64-ecbd774d.log`.
+
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40305528112) passes all
+fifteen applicable jobs and [manual CI](https://github.com/slowchop/rustia/actions/runs/40305723455)
+passes all sixteen. Windows job `121514224792` executes 122 tests across sixteen
+groups with zero failures and two matching goldens; the earlier checkout
+infrastructure failure remains historical evidence. Both runs independently
+verify macOS 122 tests/16 groups, Node 92/18 and WebKit 90/16, with zero failures
+and two matching goldens each. All eight target-build logs verify successful
+`cargo check` commands.
+
+Workspace jobs `121513566983` and `121514224844` each report 1,023 passes across
+63 groups. Release jobs `121513567046` and `121514224779` each report 313 across
+36 groups, including twelve reused external archived facade suites in default
+and bare modes. Both stages have zero failures and two matching goldens. Both
+aggregate jobs explicitly receive successful preflight and WebKit inputs.
+[Differential smoke](https://github.com/slowchop/rustia/actions/runs/40305528187)
+matches all 27 cases with zero differences and passes its execution test.
+These results establish correctness evidence for this candidate, not performance
+acceptance. Intel Mac and mobile runtime execution remain open release gates;
+real Safari remains a release-candidate check.

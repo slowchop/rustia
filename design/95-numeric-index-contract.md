@@ -462,3 +462,41 @@ measures `4846cd1e` at -0.18% [-1.39%, 0.92%], a 99% interval spanning zero.
 The retained export validates all sixteen raw legs and aggregate copies, full
 identities, frozen source hash, fixed N=10,000, five repetitions, checksums and
 ABBA order. This does not resolve its failed five-workload acceptance.
+
+
+The unary-math-only candidate `ecbd774d`, delivered as `6b06808b`, fails its
+[direct eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40305656584)
+against `6b0122bd`. All 96 sidecars independently validate full identities,
+fixed N, five repetitions, checksums, sixteen aggregate copies and forty ABBA
+workload pairs. Recomputed 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +4.27% | [3.16%, 6.59%] |
+| Sparse tables | -0.26% | [-3.75%, 1.28%] |
+| Closures/upvalues | +8.13% | [6.28%, 9.97%] |
+| Generic iteration | +7.38% | [2.48%, 8.59%] |
+| Math/table | -5.66% | [-6.58%, -4.69%] |
+
+Sparse baseline pass p4ab is 6.87% above its side median and remains included.
+Dense tables and closures exceed the unchanged material thresholds; iteration
+is directionally slower with an inconclusive material verdict. The green
+workflow means measurement completed, not acceptance. Original-baseline
+acceptance is not dispatched for this failed candidate.
+
+Static Linux x86-64 builds, never executed for timing, show shared native-call
+dispatch growing from 8,016 to 8,148 bytes. Main interpreter function sizes
+remain unchanged but addresses shift sixteen bytes. The largest inner dispatch
+has 19,793 identical normalized instruction lines after relocation normalization.
+The remote isolation establishes that this code change shifts unrelated workload
+timings; these static observations do not prove code-layout causality.
+
+
+The next bounded experiment marks only the existing `native_math_unary`
+wrapper `inline(never)`, retaining borrowed arguments and unchanged semantics.
+A static build reduces shared native-call dispatch from 8,148 to 8,092 bytes
+and emits a 98-byte wrapper; the shared math implementation remains 742 bytes.
+This confirms the intended separation, not a speedup: the additional call
+boundary may offset allocation savings on cheap math operations. A fresh
+remote eight-pair comparison against `6b0122bd` must test the combined isolated
+math change before any original-baseline acceptance is warranted.

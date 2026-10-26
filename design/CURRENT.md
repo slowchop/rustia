@@ -53,7 +53,11 @@ but still measures dense tables +1.86%, sparse tables +1.04%, and iteration
 also fails: dense tables +1.85%, closures +2.25%, and iteration +5.50% have
 positive intervals without flagged outliers. Both table-probe and fresh-frame
 scan changes are now reverted to isolate the unary math argument-copy removal
-against `6b0122bd`. Fresh original-baseline acceptance remains required.
+against `6b0122bd`. That direct eight-pair isolation also fails: dense tables
++4.27%, closures +8.13%, and iteration +7.38% have positive 99% intervals,
+while math/table improves 5.66%. A single non-inlined unary-math wrapper
+reduces shared native-call dispatch by 56 bytes in static inspection and awaits
+remote measurement; fresh original-baseline acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on
