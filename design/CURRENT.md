@@ -39,7 +39,14 @@ transcripts. Delivery head `4be30aca` passed full
 pre-push validation and all CI. Its complete acceptance still measured dense
 tables +1.14% and iteration +4.00% with positive intervals. The next correction
 reads the caller proof alongside its existing call cache, removing the extra
-lookup from unrelated frame entries. Fresh remote acceptance remains required.
+lookup from unrelated frame entries. Delivery head `6b0122bd` passes PR and
+manual platform CI: native Linux arm64, macOS arm64 and Windows x86-64 each
+pass 120 shared-contract tests, Node passes 90, and WebKit passes 88, with
+matching golden transcripts. Its sixteen-leg comparison improves dense tables,
+closures and iteration but still measures sparse tables +2.02% [0.58%, 3.60%]
+and math/table +1.66% [0.78%, 2.26%]. The next candidate removes a redundant
+non-vector table-key probe and an argument-vector copy in unary math calls.
+Fresh remote performance acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

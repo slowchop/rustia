@@ -200,3 +200,42 @@ and [differential smoke](https://github.com/slowchop/rustia/actions/runs/4025480
 match. All eight target builds and the required aggregate passed. These results
 remain historical after the caller-proof lookup correction; final-runtime
 correctness and performance gates must be checked again.
+
+
+## Caller-proof lookup correction
+
+Runtime `6fd0e482`, delivered as `6b0122bd`, passed native Linux arm64
+correctness from an exact source archive with the same pinned Rust 1.95.0
+image. Default and bare modes executed 120 tests across sixteen groups with
+zero failures and two byte-identical golden transcripts. The retained log is
+`/private/tmp/rustia-linux-arm64-6fd0e482.log`; the corresponding acceptance
+note records the source archive and image digest.
+
+Both [PR CI](https://github.com/slowchop/rustia/actions/runs/40259959422) and
+[manual platform CI](https://github.com/slowchop/rustia/actions/runs/40260017553)
+passed on delivery head `6b0122bd`. Actual platform logs establish:
+
+| Runtime | Manual CI job | Tests | Groups | Goldens |
+|---|---:|---:|---:|---:|
+| macOS arm64 | 121370153631 | 120 | 16 | 2 |
+| Windows x86-64 | 121370153909 | 120 | 16 | 2 |
+| Node/V8 | 121370153944 | 90 | 18 | 2 |
+| Headless WebKit | 121370153877 | 88 | 16 | 2 |
+
+Every group passed with zero failures; every golden matches native Linux
+arm64 byte-for-byte. Both runs passed all eight target builds. PR workspace
+job `121369974430` records 1,022 passes across 63 groups; release job
+`121369974428` records 311 passes across 36 groups, including packaged facade
+acceptance in default and bare modes. Required aggregate `121375169183`
+verified successful preflight and WebKit inputs. Manual CI also passed all
+sixteen jobs, including aggregate `121376187277`.
+
+[Current-head differential smoke](https://github.com/slowchop/rustia/actions/runs/40259959466)
+matched all 27 oracle cases with zero differences and passed its execution
+test. These correctness results do not establish performance acceptance.
+Intel Mac and mobile runtime execution remain open; real Safari remains a
+release-candidate gate.
+
+The subsequent non-vector table-probe and unary-math argument-copy removals
+change runtime code again. The evidence above remains tied to `6fd0e482`; the
+new candidate must re-establish native ARM and final-head platform gates.

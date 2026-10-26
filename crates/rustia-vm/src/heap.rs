@@ -2922,7 +2922,9 @@ impl VmCell {
                 puc_store(root, table, table_key, key_value, value, false);
             });
         }
-        let creates_hash_entry = !value.is_nil() && {
+        // Only vector keys need an owned visible copy for a new hash entry.
+        // Other keys are normalized without probing the hash part twice.
+        let creates_hash_entry = matches!(table_key, TableKey::Vector(_)) && !value.is_nil() && {
             let table = self.tables.get(table)?;
             let HashPart::Log { entries, index } = &table.hash else {
                 debug_assert!(false, "table layout changed between checks");

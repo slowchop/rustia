@@ -16552,12 +16552,7 @@ impl Vm {
 
     fn native_math_unary(&mut self, args: &[Value], op: MathUnary) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "math argument")?;
-        let registers = native_registers(args)?;
-        self.math_unary(
-            &registers,
-            Instruction::with_aux(Opcode::Halt, 0, 0, 0, 1),
-            op,
-        )
+        self.math_unary(args, Instruction::with_aux(Opcode::Halt, 0, 0, 0, 1), op)
     }
 
     fn native_math_binary(&mut self, args: &[Value], op: MathBinary) -> Result<Value> {

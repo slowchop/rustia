@@ -337,3 +337,47 @@ caller's proof; unknown caller identities conservatively keep synchronization.
 This removes the added per-frame lookup without weakening the proof or
 changing fuel, mutation, GC guards or numeric conversion. Fresh remote
 acceptance is required; this inspection is not a performance claim.
+
+
+The retained caller-cell candidate's supplemental string comparison
+[40253020172](https://github.com/slowchop/rustia/actions/runs/40253020172)
+completed after its failed five-workload comparison. Against original baseline
+`90bc2ae4`, delivery head `4be30aca` measured -1.43%, with a 99% interval of
+[-2.67%, 0.12%]. All sixteen individual raw legs and their aggregate copies
+validate the frozen source hash, full commit identities, N=10,000, five
+repetitions, matching checksums and ABBA timestamp order. Independent raw-sample
+analysis exactly reproduces the reported interval. The largest absolute leg
+median deviation is 1.63%; no string materiality threshold is introduced.
+This historical string result does not overturn the candidate's failed
+five-workload acceptance or establish acceptance for the corrected lookup.
+
+
+The lookup correction `6fd0e482`, delivered as `6b0122bd`, failed complete
+[sixteen-leg acceptance](https://github.com/slowchop/rustia/actions/runs/40259998147)
+despite the workflow completing successfully. Independently recomputed 99%
+intervals from all 192 retained sidecars are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -3.38% | [-4.60%, -2.86%] |
+| Sparse tables | +2.02% | [0.58%, 3.60%] |
+| Closures/upvalues | -5.34% | [-6.38%, -3.15%] |
+| Generic iteration | -1.21% | [-1.89%, -0.43%] |
+| Math/table | +1.66% | [0.78%, 2.26%] |
+
+All 160 individual sidecars and 32 aggregate copies validate full identities,
+fixed N, five repetitions, checksums and ABBA timestamp order. Sparse baseline
+pass p10ab is 5.30% above its side median and candidate p12ab is 8.60% above;
+both remain included. Math/table has no flagged outlier. The two positive
+intervals remain unresolved; material-regression verdicts are inconclusive,
+not exclusions. Thresholds and all earlier evidence are unchanged.
+
+Inspection identified two redundant operations in the affected paths. Every
+Log-table write did a preliminary hash lookup whose result was used only to
+decide whether a vector key needs an owned visible copy; non-vector keys now
+skip that preliminary lookup. Ordinary unary math calls copied already
+validated arguments into a temporary vector before a shared helper only read
+them; they now borrow the original slice. Existing validation, numeric coercion,
+libm operations, key normalization, vector behavior, quota staging, journaling
+and mutation accounting remain unchanged. These concrete work reductions are
+candidates, not performance claims, until fresh remote acceptance succeeds.

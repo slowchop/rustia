@@ -386,6 +386,14 @@ the existing caller-site cache lookup on eligible scalar calls; frames without
 such calls do not perform an extra program/prototype lookup. This is a candidate
 for the measured PR #74 closure regression; remote acceptance is still required.
 
+The PR #74 table/math follow-up removes two redundant operations: ordinary
+unary math calls pass their validated argument slice directly to the shared
+math implementation, and Log-table writes perform the preliminary hash probe
+only for vector keys that may need a new visible-key allocation. Other keys
+still use the same normalization and insertion path. Vector behavior, PUC
+layout, quota staging, journaling, mutation accounting and argument validation
+remain unchanged. These are measured candidates until remote acceptance passes.
+
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
 
