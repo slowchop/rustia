@@ -71,7 +71,13 @@ leaf admission now borrows function kind and captures from one validated slot.
 Its isolation improves closures 5.81% but slows iteration 3.06% with a positive
 99% interval. It remains provisional. The next correction removes a separately
 confirmed duplicate function-kind lookup between iterator builtin rejection and
-ordinary dispatch, preserving shared fallback and error order.
+ordinary dispatch, preserving shared fallback and error order. Delivery
+`c754371f` passes full CI and all recorded platform goldens, but its direct
+sixteen-pair original-baseline comparison still measures iteration +2.59%
+[1.59%, 3.30%] and sparse tables +0.97% [0.14%, 1.73%]. Acceptance fails;
+two baseline outliers remain included. The next correction isolates the
+redundant non-vector table-write probe alone against `c754371f`, preserving
+all surrounding key and quota behavior. Iteration remains unresolved.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

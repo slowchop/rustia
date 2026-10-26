@@ -663,3 +663,54 @@ tradeoff, not performance evidence. Independent review found no semantic issue.
 Default and bare VM suites each pass 250 tests, including error precedence.
 The coroutine regression covers direct and callable-table iterators, yields,
 deferred calls and synchronization of captured caller state across four profiles.
+
+
+The scoped iterator-resolution runtime `e292ef2b`, delivered as `c754371f`,
+completes [eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40341946265)
+against `7cbdd866`. All 96 raw sidecars and forty ABBA workload pairs validate,
+with no outliers. Dense tables measure +0.65% [0.05%, 1.77%], sparse tables
++0.16% [-1.47%, 1.33%], closures +0.78% [-1.69%, 2.67%], iteration
+-1.59% [-5.97%, 0.03%], and math/table -2.45% [-4.38%, -0.41%].
+Iteration's improvement is indistinguishable at 99%; this is not acceptance.
+
+The direct [sixteen-pair original-baseline comparison](https://github.com/slowchop/rustia/actions/runs/40347110048)
+against `90bc2ae4` avoids combining deltas from separate runs. All 192 sidecars,
+full identities, fixed N, repetitions, checksums, aggregate copies and eighty
+ABBA workload pairs independently validate. Its 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -2.69% | [-3.18%, -1.79%] |
+| Sparse tables | +0.97% | [0.14%, 1.73%] |
+| Closures/upvalues | -6.44% | [-7.41%, -5.88%] |
+| Generic iteration | +2.59% | [1.59%, 3.30%] |
+| Math/table | -7.09% | [-9.85%, -5.69%] |
+
+Acceptance fails the persistent sparse-table and iteration slowdowns. The sparse
+material verdict is inconclusive. Baseline pass 6 outliers, sparse +7.816803%
+and math/table +6.201187%, remain included; no samples or thresholds change.
+
+Static inspection confirms an unconditional non-nil hash vacancy lookup inside
+ordinary `table_set`, before its vector-key decision and subsequent store. Only
+vector keys need that vacancy result. The next isolated change gates that probe
+by vector kind, preserving normalization, short-string interning, readonly checks,
+vector replacement/nil behavior, PUC routing and quota-specific writes. The same
+expression appeared in the earlier bundled `550d9b1b` experiment, but that run
+also changed unary math and never isolated this probe. The new direct comparison
+uses `c754371f` and changes only this guard; it does not repeat an unchanged run.
+Iteration remains separately unresolved. No broader capture-admission refactor
+or annotation sweep is bundled into this correction.
+
+
+The same `c754371f` candidate's [eight-pair string comparison](https://github.com/slowchop/rustia/actions/runs/40347116567)
+measures -3.17% [-4.09%, -2.07%]. All sixteen individual legs and sixteen
+aggregate copies validate against the pinned source hash, N=10,000, five
+repetitions, checksums and ABBA timestamps. This improvement does not resolve the
+sparse-table or iteration blockers.
+
+For the isolated vector-probe guard, pinned Linux static output moves the vector
+check before the vacancy lookup; non-vector writes skip that call. `table_set`
+grows from 3,348 to 3,397 bytes. Main dispatch keeps its 106,805-byte size and
+starting address. These are code-shape observations, not performance claims.
+Default and bare VM suites each pass 250 tests; focused numeric-index, array
+mutation and golden facade suites each pass eight tests in both feature modes.

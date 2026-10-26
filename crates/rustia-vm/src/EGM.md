@@ -15,10 +15,11 @@
 
 ## Invariants
 
+- Log-layout table writes probe for a new visible-key copy only for non-nil vector keys. Other keys retain normalization and the ordinary store without the redundant probe; PUC and quota-specific writes are unchanged.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.
 - Successful scalar leaf calls skip caller-register synchronization only when loader analysis of actual bytecode proves the caller cannot attach local capture cells. `GetLocalCell`, `SetLocalCell`, or `LoadFunction` keeps the scan; unknown frames fall back conservatively. The proof is read with the existing caller-site cache lookup on eligible scalar calls, rather than at every frame entry. Optional capture hints do not establish this proof ([VM design](../../../design/58-vm-core2.md)).
-- Iterator steps reuse a resolved function kind after built-in rejection through shared call dispatch; no guest execution or heap mutation crosses that reuse, and invalid handles/nonfunctions keep ordinary fallback and error precedence.
+- Iterator steps reuse a resolved function kind after built-in rejection through existing shared executors with iterator-specific entry glue; no guest execution or heap mutation crosses that reuse, and invalid handles/nonfunctions keep ordinary fallback and error precedence.
 - Scalar leaf-call admission borrows function kind and captures from one generation-checked arena access. It copies only the selected capture pair before cache mutation, without caching capture values or changing fallback diagnostics.
 - Native and opcode unary math entries validate their own call shape, then share value coercion and the numeric operation. Native calls do not copy arguments into a temporary register vector or fabricate an opcode instruction.
 - Program logical-unit schedules must cover instructions with units of at least one; VM accounting uses them to preserve logical fuel/collection schedule when present.

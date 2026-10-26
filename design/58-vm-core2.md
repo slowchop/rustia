@@ -395,6 +395,7 @@ The PR #74 math follow-up passes validated unary arguments directly to the share
 math implementation, avoiding a temporary copy. Argument validation and numeric
 operations are unchanged. The separate table-probe and fresh-frame scan changes
 were reverted after failed remote acceptance; their tests and evidence remain.
+The vector-only table-probe guard is now isolated separately, as described below.
 The isolated math change still requires remote acceptance.
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
@@ -1012,3 +1013,15 @@ not cross guest execution or heap mutation. Leaf replay, yielding, deferred call
 caller-cell synchronization and result application remain in their existing paths.
 The error-precedence regression covers invalid state/control registers, missing
 handles, depth exhaustion and built-in table errors without capture mutation.
+
+
+### Visible vector-key insertion probe
+
+The ordinary Log-layout table setter checks whether a key needs a newly owned
+visible copy only for non-nil vector keys. For all other key kinds, the previous
+vacancy probe did not affect the visible key; normal key conversion and the
+ordinary store are unchanged. Readonly and table-layout checks precede this
+choice. Vector insertion, replacement and nil writes retain their prior behavior;
+PUC writes and quota-specific staged writes retain their separate paths. This
+single change is isolated against `c754371f` after that candidate's persistent
+sparse-table and iteration slowdowns. It does not establish performance acceptance.

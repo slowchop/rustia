@@ -323,6 +323,6 @@ No drift detected.
 
 ## design/80-bench-suite.md
 
-- Resolved: current tracking and automation now name the owned `ci-bench` host, its [coordinator](tools/run-dedicated-benchmark.js), and the implemented per-commit, PR, weekly-matrix, acceptance, and memory workflows. The contradictory assertion that no measurement workflow exists was removed. The current engine/workload inventory now includes separate Luau interpreter/JIT modes and the 19 source-covered workload entries in [the harness](bench/src/main.rs).
+- Resolved: current tracking and automation now name the owned `ci-bench` host, its [coordinator](tools/run-dedicated-benchmark.js), and the implemented per-commit, PR, weekly-matrix, acceptance, and memory workflows. The contradictory assertion that no measurement workflow exists was removed. The current engine/workload inventory now includes separate Luau interpreter/JIT modes and the 20 source-covered workload entries in [the harness](bench/src/main.rs), including the supplemental string-opcode probe.
 - Resolved: cloud results and their retired recipes are explicitly historical; `just bench-vultr` is no longer presented as available. Current A/B acceptance links to the [owned-host contract](design/81-benchmark-operations.md#ab-acceptance-on-the-owned-host) and is distinguished from historical three-run publication rules. Existing historical measurements were not recomputed or promoted.
 - No remaining drift detected for the reported disagreement.

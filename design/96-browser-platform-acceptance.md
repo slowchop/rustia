@@ -414,3 +414,23 @@ ARM64 executes 122 tests in 16 groups. All audited logs have zero failures and
 two matching goldens. Differential smoke matches 27 cases without differences.
 Candidate-only serde screening is not acceptance. The failed performance
 isolation and pending iterator correction remain recorded in [95](95-numeric-index-contract.md).
+
+
+## Iterator-resolution candidate (historical after probe correction)
+
+Runtime `e292ef2b67e8497bac9bb399d80b9d7bd2e7d59a`, delivery
+`c754371f0b7622a4ab811ff0c4ed97bae7e6fbc2`, passes
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40341828709) and
+[manual CI](https://github.com/slowchop/rustia/actions/runs/40341952742).
+Each workspace log executes 1,028 tests in 63 groups; each release log executes
+315 tests in 36 groups, including twelve archived facade suites in both feature
+modes. Both aggregate gates explicitly receive successful preflight and WebKit
+inputs. All sixteen target-build logs across the two runs verify successful checks.
+
+Each macOS and Windows run executes 124 tests in 16 groups; each Node run
+executes 94 in 18; each WebKit run executes 92 in 16. Exact-source native Linux
+ARM64 independently executes 124 tests in 16 groups. Every audited runtime log
+has zero failures and two matching goldens, including the new iterator coroutine
+regression in both feature modes. Differential smoke matches 27 cases without
+differences. Candidate-only screening is not acceptance. Failed original-baseline
+performance and the next isolated probe correction remain recorded in [95](95-numeric-index-contract.md).

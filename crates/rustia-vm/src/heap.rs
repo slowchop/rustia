@@ -2939,7 +2939,8 @@ impl VmCell {
                 puc_store(root, table, table_key, key_value, value, false);
             });
         }
-        let creates_hash_entry = !value.is_nil() && {
+        // Only new vector keys require an owned visible copy.
+        let creates_hash_entry = matches!(table_key, TableKey::Vector(_)) && !value.is_nil() && {
             let table = self.tables.get(table)?;
             let HashPart::Log { entries, index } = &table.hash else {
                 debug_assert!(false, "table layout changed between checks");
