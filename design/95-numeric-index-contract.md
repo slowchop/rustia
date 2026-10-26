@@ -882,3 +882,62 @@ correction assigns the returned PC and falls directly into existing canonical
 admission. It preserves HotIR/scalar-call ownership, guard-exit accounting and
 collection refusal. This removes the extra handoff without adding another cache
 or executor; a fresh isolation comparison is required before any speed claim.
+
+
+### Direct completion handoff and original-baseline acceptance
+
+The corrected completion handoff, runtime `f116e727` delivered as `b5982752`,
+passes independent correctness review. Both VM configurations pass 319 tests
+(251 unit tests and 68 integration tests), three executor-ownership tests pass,
+and each facade configuration passes eight focused numeric, continuation and
+golden tests. `Complete` returns an unaccounted scalar boundary or policy refusal;
+direct admission preserves its accounting and does not change guard exits.
+
+Eight-pair isolation [40402802516](https://github.com/slowchop/rustia/actions/runs/40402802516)
+compares `c754371f` directly with `b5982752`. All 96 sidecars and 40 workload
+pairs pass independent identity, checksum, fixed-work and ABBA audits. At 99%
+confidence, closures improve 4.74% [-6.35%, -1.23%], iteration improves 4.41%
+[-8.85%, -3.75%], sparse tables improve 2.59% [-4.25%, -0.28%] and math/table
+improves 5.90% [-7.12%, -4.07%]. Dense tables slow 3.01% [1.89%, 4.11%]
+against this intermediate baseline. No flagged outliers occur. This restores
+closure performance relative to the intermediate candidate but is not final
+acceptance; dense behavior must be measured against the original baseline.
+
+The distinct sixteen-pair original-baseline comparison
+[40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841)
+compares `90bc2ae4c397f6e2bbb1af687cc8e30688010123` directly with
+`b5982752df3711c593b5249908bea01651f4364e`. It passes the frozen acceptance
+criteria. Independent audits validate all 192 sidecars (160 individual records,
+32 exact aggregate copies), eighty workload pairs, full commit identities,
+fixed work, five repetitions, checksums and ABBA timestamp order. No deltas from
+separate comparisons are combined.
+
+| Workload | Candidate change | 99% interval | Interpretation |
+| --- | ---: | ---: | --- |
+| Dense tables | +0.45% | [-0.12%, +1.08%] | Indistinguishable; material regression excluded |
+| Sparse tables | -1.62% | [-3.18%, +0.49%] | Indistinguishable; material regression excluded |
+| Closures/upvalues | -9.92% | [-11.30%, -7.99%] | Faster |
+| Generic iteration | -1.46% | [-1.97%, -0.89%] | Faster |
+| Math/table | -11.14% | [-13.12%, -9.90%] | Faster |
+
+Baseline pass 2 contains sparse-table +6.20% and math/table +8.18% deviations
+from their respective side medians. Both flagged outliers remain included.
+Every workload excludes its unchanged material-regression threshold and no
+positive directional interval remains. Earlier failed controls and experiments
+remain evidence; this result does not reinterpret them as passing. Supplemental
+original-baseline string acceptance also passes as recorded below.
+
+
+Eight-pair string comparison
+[40407374105](https://github.com/slowchop/rustia/actions/runs/40407374105)
+uses the same original baseline and delivery candidate. Strings improve 2.11%
+with a 99% interval of [-4.19%, -1.33%]. All sixteen individual legs and sixteen
+aggregate copies match; full commits, ABBA order, source hash
+`59367a09e7a701f22784cdd78ea5f4b3d322fb601f2a31edbfe5b0e8d4ffa847`,
+`N=10000`, five repetitions and checksum
+`number:1646669.00000000000000000` are verified against the export and log.
+The largest absolute within-side median deviation is 2.77%; every leg remains
+included. No new string material-regression threshold is introduced. Together
+with the direct main-workload comparison, this resolves PR #74 performance
+acceptance for the declared protocols. Exact-runtime platform evidence is in
+[96](96-browser-platform-acceptance.md); public-release gates remain separate.

@@ -504,3 +504,28 @@ goldens from the exact `7478e426286bbdb3762315f33d533097c9dd9b19` runtime archiv
 Differential run 40394468203 verifies 27 matches and zero differences plus smoke.
 These are historical correctness results once the tape-handoff correction changes
 runtime code; performance rejection remains recorded in design 95.
+
+
+## Direct tape-completion runtime evidence
+
+Runtime `f116e72731004af43bdee8fafefc40a05fd3a7ad`, delivered as
+`b5982752df3711c593b5249908bea01651f4364e`, passes
+[PR CI 40402650611](https://github.com/slowchop/rustia/actions/runs/40402650611)
+and [manual CI 40402811341](https://github.com/slowchop/rustia/actions/runs/40402811341).
+Independent audits verify all 33 completed job artifacts. Each workspace stage
+passes 1,029 tests in 63 groups, each release stage passes 315 tests in 36 groups
+with twelve archived facade suites, and both aggregate gates receive successful
+preflight and WebKit inputs. All sixteen target-build jobs (eight per run) finish
+successfully on the exact delivery head.
+
+Mac and Windows each pass 124 shared-contract tests in sixteen groups; Node
+passes 94 in eighteen groups and WebKit passes 92 in sixteen. All runtime jobs
+have zero failures and two matching golden transcripts. Native Linux ARM64
+passes 124 tests in sixteen groups and two matching goldens from a source archive
+byte-for-byte equal to `git archive f116e727`; its SHA-256 is
+`68f0d60476385afbbf4ff08847127d616366f1f62195baaf36b8fedf119b8a9b`.
+Differential run 40402650266 verifies 27 matches, zero differences and generated
+smoke. Screening 40402650245 remains candidate-only. The completed mandatory
+pre-push inventory has 98 summaries and 1,466 passes with zero failures.
+Intel Mac and mobile runtime execution remain public-release gates; these target
+builds do not claim those runtime checks. Real Safari remains RC-only.

@@ -6,13 +6,19 @@
 
 ## One-paragraph state
 
-Latest PR #74 tape-first isolation [40394564242](https://github.com/slowchop/rustia/actions/runs/40394564242)
-rejects delivery `60077eaf`: iteration and sparse tables improve, but closures
-slow 8.12% [6.11%, 10.12%] at 99% confidence, with no flagged outliers.
-All exact-head correctness and platform gates pass. The next narrow correction
-removes redundant tape re-admission at completed tape-to-scalar boundaries;
-it remains unmeasured. Performance acceptance is open and every earlier result
-is retained in [95](95-numeric-index-contract.md).
+PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
+sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).
+Iteration, closures and math/table improve; dense and sparse tables have 99%
+intervals spanning zero. All unchanged material-regression thresholds are
+excluded, with flagged baseline outliers retained. Independent raw-data and
+exact-head correctness audits pass, including native Linux ARM64 and manual
+Windows contracts with matching goldens. Supplemental eight-pair string acceptance
+[40407374105](https://github.com/slowchop/rustia/actions/runs/40407374105) also
+passes, measuring -2.11% [-4.19%, -1.33%] at 99% confidence. Performance and
+exact-runtime correctness are accepted. Delivery uses current-head CI and
+required merge gates. Earlier failures, the rejected first tape handoff,
+and the final direct comparison remain in [95](95-numeric-index-contract.md);
+platform evidence is in [96](96-browser-platform-acceptance.md).
 
 
 The follow-up compatibility, benchmark and application API audit is recorded in
@@ -26,91 +32,21 @@ per-call fuel limit through the existing invocation API; closeout PR #72 merged.
 PR #73 merged as `90bc2ae4` after required CI and remote benchmark screening
 passed. It fixes all 13 recorded diagnostic differences against the pinned Luau
 oracle (27 original cases match), with expanded validation-order and alias coverage.
-The numeric-index follow-up specifies checked signed-64 conversion and corrects
-the rounded upper-bound bug; native regression coverage passes and cross-target
-CI remains a delivery gate. Benchmark controls exposed measurement drift and
-repeated small slowdowns; the equivalent bound rewrite did not help and an out-of-line helper made
-several workloads slower. A checked cast without redundant truncation or
-finiteness operations also failed remote acceptance; investigation continues
-and PR #74 is not ready to merge. Hardware counters found unchanged instruction
-counts but higher iteration cache references. A generic cold constructor grew the dispatch code and was rejected before
-timing. A narrow invalid-bytecode helper also grew code and was rejected. Cold
-inline annotations were rejected as well. Extracted string-opcode bodies reduce the main dispatch footprint and pass
-correctness checks. Its sixteen-leg comparison resolves iteration and math/table
-movement but measures closures +2.98% [1.74%, 5.22%]; acceptance remains open.
-Its supplemental string-opcode comparison measured -1.57% [-2.46%, -0.41%]
-at 99% confidence; that result does not resolve the closure regression.
-The next candidate skips leaf-call register synchronization only when loader
-analysis proves the caller cannot create local capture cells. Focused correctness
-and instruction-count parity pass, as do 120 shared-contract tests on each of
-native Linux arm64, macOS arm64, and Windows x86-64, with matching golden
-transcripts. Delivery head `4be30aca` passed full
-pre-push validation and all CI. Its complete acceptance still measured dense
-tables +1.14% and iteration +4.00% with positive intervals. The next correction
-reads the caller proof alongside its existing call cache, removing the extra
-lookup from unrelated frame entries. Delivery head `6b0122bd` passes PR and
-manual platform CI: native Linux arm64, macOS arm64 and Windows x86-64 each
-pass 120 shared-contract tests, Node passes 90, and WebKit passes 88, with
-matching golden transcripts. Its sixteen-leg comparison improves dense tables,
-closures and iteration but still measures sparse tables +2.02% [0.58%, 3.60%]
-and math/table +1.66% [0.78%, 2.26%]. The next candidate removes a redundant
-non-vector table-key probe and an argument-vector copy in unary math calls.
-Delivery head `8c96cf24` passes both full CI runs and all recorded platform
-contracts, with matching goldens. Its sixteen-leg comparison improves math/table
-but still measures dense tables +1.86%, sparse tables +1.04%, and iteration
-+5.89%, each with a positive 99% interval. Acceptance fails. Removing an empty fresh-frame cell scan in `4846cd1e`
-also fails: dense tables +1.85%, closures +2.25%, and iteration +5.50% have
-positive intervals without flagged outliers. Both table-probe and fresh-frame
-scan changes are now reverted to isolate the unary math argument-copy removal
-against `6b0122bd`. That direct eight-pair isolation also fails: dense tables
-+4.27%, closures +8.13%, and iteration +7.38% have positive 99% intervals,
-while math/table improves 5.66%. A single non-inlined unary-math wrapper
-reduces shared native-call dispatch by 56 bytes in static inspection. Its
-eight-pair isolation resolves dense/closure movement but still measures
-iteration +5.28% [2.38%, 6.18%]; it is not accepted. Fresh original-baseline
-acceptance remains required after resolving the persistent slowdown. The failed
-wrapper annotation is removed; a shared unary-math value operation now separates
-native argument validation from opcode arity/register validation. Its isolation
-improves math/table 6.77% but still measures iteration +3.42% and closures
-+4.51% with positive intervals; the closure outlier remains included. The next
-numeric array-slot correction fails isolation: closures +4.68% [3.30%, 6.44%]
-with no flagged outliers, while iteration does not establish an improvement.
-That production lookup change is reverted; its regression remains. Scalar
-leaf admission now borrows function kind and captures from one validated slot.
-Its isolation improves closures 5.81% but slows iteration 3.06% with a positive
-99% interval. It remains provisional. The next correction removes a separately
-confirmed duplicate function-kind lookup between iterator builtin rejection and
-ordinary dispatch, preserving shared fallback and error order. Delivery
-`c754371f` passes full CI and all recorded platform goldens, but its direct
-sixteen-pair original-baseline comparison still measures iteration +2.59%
-[1.59%, 3.30%] and sparse tables +0.97% [0.14%, 1.73%]. Acceptance fails;
-two baseline outliers remain included. The next correction isolates the
-redundant non-vector table-write probe alone against `c754371f`, preserving
-all surrounding key and quota behavior. That isolated probe fails to establish
-a sparse-table improvement and slows iteration another 0.51% [0.11%, 0.97%];
-it is reverted. Combining the iterator leaf's metatable guard and boundary
-lookup also fails to establish improvement in eight-pair isolation. That
-production experiment is reverted, retaining its guard regression and results.
-Fresh remote hardware counters compare retained `c754371f` with original
-`90bc2ae4`: iteration executes 0.89% fewer instructions but uses 2.86% more
-cycles. The specific cause remains unproven. Both fixed-period user-space cycle diagnostics were rejected for actual
-throttling; their raw recordings are retained. The subsequent frequency-mode diagnostic
-completes with period-weighted locations and no loss or throttling, without
-changing host settings or acceptance thresholds. Its dispatch-fetch lead motivates
-the tape-first candidate described above. Sparse-table and iteration
-acceptance remain unresolved; instrumented timings are not acceptance.
-See [95](95-numeric-index-contract.md).
-Real Firefox and Safari correctness passed in both feature modes on recorded
-earlier revisions. The checked-cast candidate passes shared runtime contracts on
-native Linux arm64, macOS arm64, Windows x86-64, Node/V8 and headless WebKit,
-with identical golden transcripts. Intel Mac and mobile execution remain open.
-The workflows and evidence are
-recorded in [96](96-browser-platform-acceptance.md).
-PR CI adds headless Playwright WebKit for the same browser contracts; real Safari
-remains a separate release-candidate check. Local WebKit tests pass. PR execution
-uses the pinned Linux container after a Mac service-account launch timeout; remote
-CI has verified 88 executed tests and two identical goldens on the checked-cast
-candidate. See [96](96-browser-platform-acceptance.md).
+PR #74 corrects signed-64 string-index conversion at `2^63` while retaining
+fraction truncation and all four profile contracts. Its final runtime extracts
+string-opcode bodies, reads the caller-cell proof with the existing call cache,
+shares unary math value operations, borrows scalar-leaf metadata, reuses iterator
+function resolution, and admits the predecoded tape before canonical fetching
+with a direct completion handoff. These use the existing executors and preserve
+fuel, collection, error and continuation contracts. Rejected experiments and superseded
+candidates, including their retained regression coverage, remain documented in
+[95](95-numeric-index-contract.md).
+The direct original-baseline main-workload and supplemental string comparisons
+pass. Delivery uses current-head CI and required merge gates. All exact-runtime
+platform contracts pass on Linux ARM64, Mac ARM64, Windows x86-64, Node and headless WebKit
+with matching goldens. Intel Mac and mobile runtime execution remain open release
+gates, and real Safari is checked for release candidates rather than each PR.
+See [96](96-browser-platform-acceptance.md) for exact revisions and test counts.
 Validation now partitions the same command inventory into early checks, workspace
 tests and release checks. Local pre-push validation uses the same inventory;
 the required CI status waits for every stage. See [97](97-validation-workflow.md).

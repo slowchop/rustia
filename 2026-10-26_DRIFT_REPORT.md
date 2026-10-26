@@ -326,3 +326,19 @@ No drift detected.
 - Resolved: current tracking and automation now name the owned `ci-bench` host, its [coordinator](tools/run-dedicated-benchmark.js), and the implemented per-commit, PR, weekly-matrix, acceptance, and memory workflows. The contradictory assertion that no measurement workflow exists was removed. The current engine/workload inventory now includes separate Luau interpreter/JIT modes and the 20 source-covered workload entries in [the harness](bench/src/main.rs), including the supplemental string-opcode probe.
 - Resolved: cloud results and their retired recipes are explicitly historical; `just bench-vultr` is no longer presented as available. Current A/B acceptance links to the [owned-host contract](design/81-benchmark-operations.md#ab-acceptance-on-the-owned-host) and is distinguished from historical three-run publication rules. Existing historical measurements were not recomputed or promoted.
 - No remaining drift detected for the reported disagreement.
+
+
+## PR #74 runtime-map refresh
+
+Reviewed map changes from the merged EGM baseline `212a5d63` through runtime
+`f116e727` (delivery `b5982752`). The repository contains 69 maintained maps;
+all 393 local Markdown file/directory targets exist. VM maps now describe checked numeric
+indices, extracted string dispatch, caller-cell proof, shared unary math
+operations, iterator function resolution, and tape-first dispatch with direct
+completion handoff. Tool maps describe the string acceptance lane and diagnostic
+frequency sampling, including period weights, private raw-record retention,
+and its separation from performance acceptance. No additional map-to-source
+disagreement was found in these changed boundaries. This was a static review
+of changed maps and all map links, not a renewed exhaustive behavioral audit.
+Performance results and platform evidence remain authoritative in design/95
+and design/96; prior failed experiments are retained.
