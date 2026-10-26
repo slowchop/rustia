@@ -308,3 +308,32 @@ and [manual platform CI](https://github.com/slowchop/rustia/actions/runs/4025302
 were dispatched for that candidate. Their completed evidence remains a gate;
 neither the earlier string result nor passing correctness tests establishes
 performance acceptance for the new runtime.
+
+
+The caller-cell candidate failed its completed sixteen-leg comparison
+[40253017402](https://github.com/slowchop/rustia/actions/runs/40253017402).
+All 192 raw sidecars and the complete workflow log are retained locally. Five
+repetitions per leg and unchanged 99% analysis produced:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +1.14% | [0.69%, 1.81%] |
+| Sparse tables | +0.24% | [-0.65%, 1.46%] |
+| Closures/upvalues | -1.04% | [-2.01%, 0.07%] |
+| Generic iteration | +4.00% | [2.81%, 5.28%] |
+| Math/table | +1.32% | [0.00%, 3.38%] |
+
+The math/table lower bound rounds to zero but is positive in the unrounded
+analysis. Sparse baseline pass p9ba is 5.3% above its side's median and remains
+included. Resolving the closure interval does not justify the other slowdowns;
+thresholds remain unchanged and this result is not accepted.
+
+Inspection found an avoidable cost introduced by the caller-cell candidate:
+it looked up the caller proof on every function-frame entry, including frames
+that never execute a successful scalar leaf call. The correction reads the
+proof from the same function cache already consulted by an eligible scalar
+call and returns it alongside a successful outcome. Cache misses retain the
+caller's proof; unknown caller identities conservatively keep synchronization.
+This removes the added per-frame lookup without weakening the proof or
+changing fuel, mutation, GC guards or numeric conversion. Fresh remote
+acceptance is required; this inspection is not a performance claim.

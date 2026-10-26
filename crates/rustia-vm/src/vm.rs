@@ -1135,6 +1135,7 @@ impl LoadedProgram {
         caches.set_native_call_inline_cache(pc, entry)
     }
 
+    #[cfg(test)]
     fn may_attach_local_cells(&self, prototype: Option<u32>) -> Option<bool> {
         let caches = match prototype {
             Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
@@ -1155,12 +1156,17 @@ impl LoadedProgram {
         pc: usize,
         callee_program: u32,
         callee_prototype: u32,
-    ) -> Option<ClosureCallCacheEntry> {
-        let caches = match caller_prototype {
-            Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
-            None => &self.main_inline_caches,
+    ) -> (Option<ClosureCallCacheEntry>, bool) {
+        let Some(caches) = (match caller_prototype {
+            Some(prototype) => self.function_inline_caches.get(prototype as usize),
+            None => Some(&self.main_inline_caches),
+        }) else {
+            return (None, true);
         };
-        caches.closure_call_inline_cache(pc, callee_program, callee_prototype)
+        (
+            caches.closure_call_inline_cache(pc, callee_program, callee_prototype),
+            caches.may_attach_local_cells,
+        )
     }
 
     fn set_closure_call_inline_cache(
@@ -4110,15 +4116,6 @@ impl Vm {
                 }));
             }
 
-            // Only these bytecode operations can attach a local capture cell.
-            // A conservative loader proof lets leaf calls skip an otherwise
-            // empty alias scan. Unretained or unknown frames keep the scan;
-            // resumed/self-call frames use the same immutable function proof.
-            let may_attach_local_cells = program_id
-                .and_then(|id| self.dynamic_programs.get(id))
-                .and_then(|program| program.may_attach_local_cells(context.prototype))
-                .unwrap_or(true);
-
             // Select the execution mode once per frame. Fuel metering and
             // coverage/census instrumentation cannot appear mid-frame, so a
             // plain (unmetered, uninstrumented) frame resolves its
@@ -4498,7 +4495,7 @@ impl Vm {
                                 // scalar charge below would before opening the
                                 // callee frame.
                                 let call_units = logical_unit_at(frame_logical_units, pc);
-                                if let Some(outcome) = self
+                                if let Some((outcome, may_attach_local_cells)) = self
                                     .try_closure_call_scalar(
                                         program_id,
                                         context.prototype,
@@ -11155,10 +11152,17 @@ impl Vm {
         pc: usize,
         callee_program: u32,
         callee_prototype: u32,
-    ) -> Option<ClosureCallCacheEntry> {
+    ) -> (Option<ClosureCallCacheEntry>, bool) {
         self.dynamic_programs
-            .get(caller_program)?
-            .closure_call_inline_cache(caller_prototype, pc, callee_program, callee_prototype)
+            .get(caller_program)
+            .map_or((None, true), |program| {
+                program.closure_call_inline_cache(
+                    caller_prototype,
+                    pc,
+                    callee_program,
+                    callee_prototype,
+                )
+            })
     }
 
     fn set_closure_call_inline_cache(
@@ -11477,7 +11481,7 @@ impl Vm {
         depth: usize,
         call_units: u64,
         fuel: &mut Execution<'_>,
-    ) -> Result<Option<LeafCallOutcome>> {
+    ) -> Result<Option<(LeafCallOutcome, bool)>> {
         if instruction.op != Opcode::Call
             || !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
@@ -11513,7 +11517,7 @@ impl Vm {
             return Ok(None);
         };
 
-        let cached = self.closure_call_inline_cache(
+        let (cached, may_attach_local_cells) = self.closure_call_inline_cache(
             caller_program,
             caller_prototype,
             pc,
@@ -11569,7 +11573,7 @@ impl Vm {
         };
         #[cfg(any(test, feature = "executor-diagnostics"))]
         self.record_closure_call_fast_entry(caller_program);
-        Ok(Some(outcome))
+        Ok(Some((outcome, may_attach_local_cells)))
     }
 
     #[cfg(test)]
@@ -30458,6 +30462,11 @@ mod inline_cache_tests {
         assert_eq!(loaded.may_attach_local_cells(Some(2)), Some(true));
         assert_eq!(loaded.may_attach_local_cells(Some(3)), Some(true));
         assert_eq!(loaded.may_attach_local_cells(Some(usize::MAX as u32)), None);
+        assert!(!loaded.closure_call_inline_cache(Some(0), 0, 0, 0).1);
+        assert!(loaded.closure_call_inline_cache(Some(3), 0, 0, 0).1);
+        assert!(loaded.closure_call_inline_cache(Some(u32::MAX), 0, 0, 0).1);
+        let vm = Vm::new(Profile::ReproducibleStandard);
+        assert!(vm.closure_call_inline_cache(u32::MAX, None, 0, 0, 0).1);
     }
 
     #[test]
@@ -30945,7 +30954,7 @@ mod inline_cache_tests {
         for round in 2..=3 {
             for (index, closure) in closures.iter().copied().enumerate() {
                 let registers = [Value::nil(), closure];
-                let outcome = vm
+                let (outcome, may_attach_local_cells) = vm
                     .try_closure_call_scalar(
                         program_id,
                         None,
@@ -30962,6 +30971,7 @@ mod inline_cache_tests {
                     outcome.first.as_number(),
                     Some(f64::from(round * (index as i32 + 1)))
                 );
+                assert!(!may_attach_local_cells);
             }
         }
 
@@ -31005,6 +31015,7 @@ mod inline_cache_tests {
             )
             .unwrap()
             .unwrap()
+            .0
             .first
             .as_number(),
             Some(11.0)
@@ -31023,6 +31034,7 @@ mod inline_cache_tests {
             )
             .unwrap()
             .unwrap()
+            .0
             .first
             .as_number(),
             Some(16.0)
@@ -31047,8 +31059,8 @@ mod inline_cache_tests {
         sync_leaf_mutation_to_registers(
             &mut alias_registers,
             &alias_cells,
-            outcome.mutation_cell,
-            outcome.first,
+            outcome.0.mutation_cell,
+            outcome.0.first,
         );
         assert_eq!(alias_registers[0].as_number(), Some(4.0));
         assert_eq!(alias_registers[1].as_number(), Some(4.0));
@@ -31227,7 +31239,7 @@ mod inline_cache_tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(
-                    outcome.first.as_number(),
+                    outcome.0.first.as_number(),
                     Some((index as f64 + 1.0) * 10.0 + f64::from(round))
                 );
             }

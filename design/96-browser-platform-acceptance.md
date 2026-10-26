@@ -187,3 +187,16 @@ to the Linux arm64 result. Node/V8 job `121348804515` executed ninety tests in
 eighteen groups with zero failures and the same two goldens. All eight target
 build jobs also passed. Aggregate CI and headless WebKit are still pending;
 this evidence does not establish performance acceptance.
+
+
+The same runtime's manual CI completed successfully. WebKit job `121348804132`
+executed 88 tests across sixteen groups with zero failures and two identical
+goldens, matching all ten transcripts across the five recorded runtimes.
+Documentation-only integration `c4185197` preserved runtime and build inputs
+and passed [PR CI](https://github.com/slowchop/rustia/actions/runs/40254807221)
+and [differential smoke](https://github.com/slowchop/rustia/actions/runs/40254807181)
+(27 matches, zero differences). Its Mac, Node and WebKit logs re-established
+120/16, 90/18 and 88/16 tests/groups respectively; workspace Linux goldens also
+match. All eight target builds and the required aggregate passed. These results
+remain historical after the caller-proof lookup correction; final-runtime
+correctness and performance gates must be checked again.

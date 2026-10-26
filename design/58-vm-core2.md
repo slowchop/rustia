@@ -381,7 +381,9 @@ without those operations cannot attach a local capture cell, so their leaf calls
 skip the register-alias scan. The proof does not trust `captured_registers`
 hints, and unknown/unretained frames retain the scan. Resume and stackless
 self-calls retain the same immutable function proof. Fuel, collection guards,
-mutation and logical instruction accounting are unchanged. This is a candidate
+mutation and logical instruction accounting are unchanged. The proof travels with
+the existing caller-site cache lookup on eligible scalar calls; frames without
+such calls do not perform an extra program/prototype lookup. This is a candidate
 for the measured PR #74 closure regression; remote acceptance is still required.
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through

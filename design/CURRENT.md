@@ -36,7 +36,10 @@ analysis proves the caller cannot create local capture cells. Focused correctnes
 and instruction-count parity pass, as do 120 shared-contract tests on each of
 native Linux arm64, macOS arm64, and Windows x86-64, with matching golden
 transcripts. Delivery head `4be30aca` passed full
-pre-push validation; fresh remote acceptance and final CI remain required.
+pre-push validation and all CI. Its complete acceptance still measured dense
+tables +1.14% and iteration +4.00% with positive intervals. The next correction
+reads the caller proof alongside its existing call cache, removing the extra
+lookup from unrelated frame entries. Fresh remote acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on
