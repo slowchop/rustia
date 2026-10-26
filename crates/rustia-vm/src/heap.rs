@@ -2138,6 +2138,23 @@ impl VmCell {
         self.functions.get(handle).map(|function| function.kind)
     }
 
+    /// Borrow retained bytecode call metadata without cloning captures.
+    #[inline]
+    pub(crate) fn bytecode_function_captures(
+        &self,
+        handle: u32,
+    ) -> Option<(u32, u32, &[FunctionCapture])> {
+        let function = self.functions.get(handle)?;
+        let FunctionKind::Bytecode {
+            program: Some(program),
+            prototype,
+        } = function.kind
+        else {
+            return None;
+        };
+        Some((program, prototype, &function.captures))
+    }
+
     pub(crate) fn host_function(&self, handle: u32) -> Option<&HostFunctionOp> {
         self.functions.get(handle)?.host_function.as_deref()
     }

@@ -572,3 +572,48 @@ array values, holes, exhaustion, fractional/negative/zero keys and a verified
 PUC hash-backed numeric slot across the applicable profiles. A direct eight-pair
 comparison against `6a8b61b1` will isolate this lookup change. Final acceptance
 still requires the original `90bc2ae4` baseline and the string workload.
+
+
+The numeric-slot candidate `cd1071cf`, delivered as `2eaf304e`, fails its
+[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40324770013)
+against `6a8b61b1`. All 96 raw sidecars, full identities, fixed N, repetitions,
+checksums, aggregate copies and forty ABBA workload pairs independently validate.
+No outliers were flagged. The 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +1.52% | [-0.65%, 2.77%] |
+| Sparse tables | -0.95% | [-2.30%, 0.15%] |
+| Closures/upvalues | +4.68% | [3.30%, 6.44%] |
+| Generic iteration | -0.56% | [-3.69%, 0.40%] |
+| Math/table | -0.82% | [-2.59%, 0.68%] |
+
+The closure slowdown is statistically clear; iteration does not establish a
+win. The production slot-read change is reverted, retaining its semantic
+regression. No samples or thresholds are changed and no final original-baseline
+acceptance is dispatched for this failed candidate. Inspection of the prior
+pinned Linux binary shows the two selected capture reads already share one
+function-arena lookup, so a pair accessor alone is not justified by source-level
+repetition. The separate function-kind lookup remains under investigation.
+
+
+The next isolated correction borrows function kind and captures from one
+validated arena slot during scalar leaf admission. Only the selected capture
+pair is copied before cache mutation. Existing admission checks, cache counts,
+missing-capture fallback and guard-before-upvalue-write behavior remain intact.
+This targets the separately emitted function-kind and selected-capture lookups,
+not the already-coalesced reads within capture selection. Direct isolation uses
+`6a8b61b1`, with the failed slot read reverted, so its only production difference
+is this metadata access. Original-baseline and string acceptance remain required.
+
+
+Static inspection rejected a generic kind-and-captures tuple because it loaded
+capture metadata before rejecting native calls. The narrowed accessor rejects
+non-retained-bytecode kinds first. Its pinned Linux output removes the scalar
+path's second validated function lookup, but introduces a 119-byte helper call
+and grows the main inner dispatch from 106,297 to 106,805 bytes. These are
+explicit code-shape tradeoffs, not speed claims. Remote isolation must establish
+whether the removed lookup offsets those costs; no inline-annotation sweep or
+threshold change is used. Default and bare VM suites each pass 249 tests,
+including incomplete captures on a warmed cache with unchanged mutation and
+diagnostic counts.

@@ -373,3 +373,23 @@ WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/r
 verifies 27 matches, zero differences and a passing execution test. This is
 correctness evidence, not performance acceptance; public-release platform
 gates remain open as above.
+
+
+## Iterator-slot candidate (historical after revert)
+
+Runtime `cd1071cfaf626959bcec0120d0c8806b442a3e61`, delivery
+`2eaf304e24bde9e0bccf304106c11b561a343df9`, passes
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40324655813) and
+[manual CI](https://github.com/slowchop/rustia/actions/runs/40324774754).
+Both workspace logs execute 1,026 tests in 63 groups, including the new iterator
+regression. Both release logs execute 313 tests in 36 groups, including twelve
+archived facade suites in each feature mode. Both aggregate gates receive
+successful preflight and WebKit inputs. All eight target builds pass in each run.
+
+Each macOS and Windows run executes 122 tests in 16 groups; each Node run
+executes 92 in 18; each WebKit run executes 90 in 16. All have zero failures
+and two matching goldens. Exact-source native Linux ARM64 independently executes
+122 tests in 16 groups with two matching goldens. The differential run matches
+all 27 cases without differences. Candidate-only serde screening is not
+performance acceptance. The failed performance isolation and ensuing production
+revert are retained in [95](95-numeric-index-contract.md).

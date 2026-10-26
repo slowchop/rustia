@@ -11509,10 +11509,8 @@ impl Vm {
         let Some(handle) = callee.as_function() else {
             return Ok(None);
         };
-        let Some(FunctionKind::Bytecode {
-            program: Some(callee_program),
-            prototype: callee_prototype,
-        }) = self.heap.function_kind(handle)
+        let Some((callee_program, callee_prototype, captures)) =
+            self.heap.bytecode_function_captures(handle)
         else {
             return Ok(None);
         };
@@ -11543,6 +11541,9 @@ impl Vm {
         {
             return Ok(None);
         }
+        // Copy only the selected pair before mutating call-cache diagnostics.
+        // No heap mutation or guest execution occurs while metadata is borrowed.
+        let selected_captures = selected_leaf_captures(plan, |index| captures.get(index).copied());
         if cache_hit {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_prototype_hit(caller_program);
@@ -11559,9 +11560,7 @@ impl Vm {
             );
         }
 
-        let Some((first_capture, second_capture)) =
-            selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
-        else {
+        let Some((first_capture, second_capture)) = selected_captures else {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_guard_exit(caller_program);
             return Ok(None);
@@ -11671,10 +11670,7 @@ impl Vm {
                 if next_number <= len as f64 {
                     LeafCallOutcome {
                         first: next,
-                        second: array_iterator_index(next_number)
-                            .and_then(|index| self.heap.read_numeric_array_slot(items, index))
-                            .or_else(|| self.heap.table_get(items, next))
-                            .unwrap_or_else(Value::nil),
+                        second: self.heap.table_get(items, next).unwrap_or_else(Value::nil),
                         mutation_cell: index_cell,
                         result_count: 2,
                         instruction_count: 19,
@@ -31306,6 +31302,37 @@ mod inline_cache_tests {
         assert_eq!(loaded.closure_call_cache_fills, 1);
         assert_eq!(loaded.closure_call_fast_entries, 0);
         assert_eq!(loaded.closure_call_guard_exits, 1);
+
+        // A warmed prototype cache must still read this closure's captures.
+        // Missing captures leave the cell untouched and retain hit/guard counts.
+        for captures in [vec![], vec![FunctionCapture::from_cell(value_cell)]] {
+            let incomplete = vm
+                .heap
+                .alloc_function(Some(program_id), 0, captures, vm.globals)
+                .unwrap();
+            assert!(vm
+                .try_closure_call_scalar(
+                    program_id,
+                    None,
+                    0,
+                    &[Value::nil(), Value::function(incomplete)],
+                    instruction,
+                    0,
+                    1,
+                    &mut fuel,
+                )
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+                Some(7.0)
+            );
+        }
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.closure_call_cache_fills, 1);
+        assert_eq!(loaded.closure_call_prototype_hits, 2);
+        assert_eq!(loaded.closure_call_fast_entries, 0);
+        assert_eq!(loaded.closure_call_guard_exits, 3);
 
         let mut fuelled = Vm::with_settings(
             Profile::ReproducibleStandard,

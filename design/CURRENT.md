@@ -64,8 +64,11 @@ wrapper annotation is removed; a shared unary-math value operation now separates
 native argument validation from opcode arity/register validation. Its isolation
 improves math/table 6.77% but still measures iteration +3.42% and closures
 +4.51% with positive intervals; the closure outlier remains included. The next
-correction reuses existing numeric array-slot reads inside recognized iterator
-leaves, preserving general lookup fallback and awaiting remote isolation.
+numeric array-slot correction fails isolation: closures +4.68% [3.30%, 6.44%]
+with no flagged outliers, while iteration does not establish an improvement.
+That production lookup change is reverted; its regression remains. Scalar
+leaf admission now borrows function kind and captures from one validated slot,
+with existing guards and diagnostics preserved; remote isolation is pending.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

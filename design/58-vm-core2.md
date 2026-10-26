@@ -981,12 +981,21 @@ measurement outcome, not an architectural assertion.
 
 ### Numeric reads inside recognized array-iterator leaves
 
-The existing `ArrayIterator` replay uses the existing exact-positive-i32 index
-check and already-materialized array-slot reader before general table lookup.
-A present nil slot remains nil; non-array, fractional, negative and zero keys
-retain general lookup. Metatable and boundary-length guards, upvalue mutation,
-returned-value counts and instruction charges are unchanged. A forced-leaf
-versus scalar test covers numeric array values, holes and fractional/negative/
-zero hash keys across all four profiles, including PUC51, and checks mutation,
-actual leaf entry and equal instruction counts. Performance remains subject to
-remote acceptance; see [95](95-numeric-index-contract.md).
+The `ArrayIterator` replay retains general table lookup. An attempted direct
+materialized-slot read failed remote isolation and was reverted; see
+[95](95-numeric-index-contract.md). Its forced-leaf versus scalar regression
+remains: numeric array values, holes, exhaustion and fractional/negative/zero
+keys across all four profiles, including a PUC51 hash-backed positive key.
+The test verifies mutation, actual leaf entry and equal instruction counts.
+
+### Scalar leaf-call metadata
+
+Scalar leaf admission reads function kind and a borrowed capture slice from one
+generation-checked function-arena lookup. After the existing plan, fuel,
+collection and recursion checks, it copies only the selected pair before any
+cache mutation. Capture selection failure is handled at the original guard-exit
+point, preserving cache-fill/hit diagnostics. Captures are never cached across
+calls, and malformed incomplete captures fall back without changing upvalues.
+The polymorphic-handle/live-step and incomplete-capture regressions cover these
+invariants. This removes a second handle lookup; performance is unaccepted until
+remote comparison, as recorded in [95](95-numeric-index-contract.md).
