@@ -4450,95 +4450,9 @@ impl Vm {
 
                 let loop_result = (|| -> VmFlowResult<ReturnValues> {
                     loop {
-                        let mut instruction = *function.code.get(pc).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "program counter ran off the end of the function",
-                            })
-                            .at_pc(pc)
-                        })?;
-
-                        if instruction.op == Opcode::ForLoop
-                            && self.hot_ir_enabled()
-                            && fuel.state.fuel.is_none()
-                            && !self.scalar_instrumentation_forced()
-                            && !self.heap.has_allocation_debt()
-                            && !self.weak_collection_due_within(1)
-                        {
-                            if let Some(program_id) = program_id {
-                                if let Some(hot_ir) = self.hot_ir(program_id, context.prototype, pc)
-                                {
-                                    if let Some(next_pc) = self.try_hot_ir(
-                                        program_id,
-                                        &hot_ir,
-                                        &mut registers,
-                                        &mut register_cells,
-                                    ) {
-                                        pc = next_pc;
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Ordinary scalar calls get a caller-site prototype PIC
-                        // before generic CALL bookkeeping. A committed leaf is
-                        // guaranteed not to allocate, collect, invoke guest code,
-                        // or throw, so it can skip root refresh, source-location
-                        // materialization, capture-vector cloning, and result
-                        // packing while retaining exact logical instruction
-                        // accounting.
-                        if instruction.op == Opcode::Call {
-                            if let Some(program_id) = program_id {
-                                // The `Call` instruction itself charges its own
-                                // units (one on an identity schedule) on top of
-                                // the plan's fixed callee charge, exactly as the
-                                // scalar charge below would before opening the
-                                // callee frame.
-                                let call_units = logical_unit_at(frame_logical_units, pc);
-                                if let Some((outcome, may_attach_local_cells)) = self
-                                    .try_closure_call_scalar(
-                                        program_id,
-                                        context.prototype,
-                                        pc,
-                                        &registers,
-                                        instruction,
-                                        context.depth,
-                                        call_units,
-                                        fuel,
-                                    )
-                                    .map_err(|error| {
-                                        attach_instruction_source(program, function, pc, error)
-                                    })?
-                                {
-                                    self.executed_instructions =
-                                        self.executed_instructions.wrapping_add(
-                                            u64::from(outcome.instruction_count)
-                                                .saturating_add(call_units),
-                                        );
-                                    if may_attach_local_cells {
-                                        sync_leaf_mutation_to_registers(
-                                            &mut registers,
-                                            &register_cells,
-                                            outcome.mutation_cell,
-                                            outcome.first,
-                                        );
-                                    }
-                                    let scalar_result = if outcome.result_count == 0 {
-                                        Value::nil()
-                                    } else {
-                                        outcome.first
-                                    };
-                                    set_register(&mut registers, instruction.a, scalar_result)
-                                        .map_err(|error| error.at_pc(pc))?;
-                                    pc += 1;
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // The single plain-mode executor decision: one dense
-                        // per-PC tape entry instead of the retired per-PC
-                        // Region/receipt selection ladder.
+                        // Tape-covered instructions need no canonical fetch. Calls and
+                        // HotIR-owned backedges are tape boundaries established by the
+                        // loader, so their existing admission still runs below.
                         let mut tape_guard_exit = false;
                         if let Some(tape) = execution_tape {
                             if tape.run_from(pc) != 0 {
@@ -4560,21 +4474,107 @@ impl Vm {
                                     }
                                     TapeOutcome::GuardExit { pc: exit_pc } => {
                                         pc = exit_pc;
-                                        instruction = *function.code.get(pc).ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "tape guard exited beyond function code",
-                                            })
-                                            .at_pc(pc)
-                                        })?;
-                                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                                        self.note_root_refresh_trigger(instruction.op, true);
-                                        self.update_current_gc_roots(
-                                            &registers,
-                                            &register_cells,
-                                            &varargs,
-                                            &pending_return_prefixes,
-                                        );
                                         tape_guard_exit = true;
+                                    }
+                                }
+                            }
+                        }
+                        let instruction = *function.code.get(pc).ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: if tape_guard_exit {
+                                    "tape guard exited beyond function code"
+                                } else {
+                                    "program counter ran off the end of the function"
+                                },
+                            })
+                            .at_pc(pc)
+                        })?;
+                        if tape_guard_exit {
+                            #[cfg(any(test, feature = "executor-diagnostics"))]
+                            self.note_root_refresh_trigger(instruction.op, true);
+                            self.update_current_gc_roots(
+                                &registers,
+                                &register_cells,
+                                &varargs,
+                                &pending_return_prefixes,
+                            );
+                        } else {
+                            if instruction.op == Opcode::ForLoop
+                                && self.hot_ir_enabled()
+                                && fuel.state.fuel.is_none()
+                                && !self.scalar_instrumentation_forced()
+                                && !self.heap.has_allocation_debt()
+                                && !self.weak_collection_due_within(1)
+                            {
+                                if let Some(program_id) = program_id {
+                                    if let Some(hot_ir) =
+                                        self.hot_ir(program_id, context.prototype, pc)
+                                    {
+                                        if let Some(next_pc) = self.try_hot_ir(
+                                            program_id,
+                                            &hot_ir,
+                                            &mut registers,
+                                            &mut register_cells,
+                                        ) {
+                                            pc = next_pc;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Ordinary scalar calls get a caller-site prototype PIC
+                            // before generic CALL bookkeeping. A committed leaf is
+                            // guaranteed not to allocate, collect, invoke guest code,
+                            // or throw, so it can skip root refresh, source-location
+                            // materialization, capture-vector cloning, and result
+                            // packing while retaining exact logical instruction
+                            // accounting.
+                            if instruction.op == Opcode::Call {
+                                if let Some(program_id) = program_id {
+                                    // The `Call` instruction itself charges its own
+                                    // units (one on an identity schedule) on top of
+                                    // the plan's fixed callee charge, exactly as the
+                                    // scalar charge below would before opening the
+                                    // callee frame.
+                                    let call_units = logical_unit_at(frame_logical_units, pc);
+                                    if let Some((outcome, may_attach_local_cells)) = self
+                                        .try_closure_call_scalar(
+                                            program_id,
+                                            context.prototype,
+                                            pc,
+                                            &registers,
+                                            instruction,
+                                            context.depth,
+                                            call_units,
+                                            fuel,
+                                        )
+                                        .map_err(|error| {
+                                            attach_instruction_source(program, function, pc, error)
+                                        })?
+                                    {
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(
+                                                u64::from(outcome.instruction_count)
+                                                    .saturating_add(call_units),
+                                            );
+                                        if may_attach_local_cells {
+                                            sync_leaf_mutation_to_registers(
+                                                &mut registers,
+                                                &register_cells,
+                                                outcome.mutation_cell,
+                                                outcome.first,
+                                            );
+                                        }
+                                        let scalar_result = if outcome.result_count == 0 {
+                                            Value::nil()
+                                        } else {
+                                            outcome.first
+                                        };
+                                        set_register(&mut registers, instruction.a, scalar_result)
+                                            .map_err(|error| error.at_pc(pc))?;
+                                        pc += 1;
+                                        continue;
                                     }
                                 }
                             }
@@ -30517,6 +30517,7 @@ mod inline_cache_tests {
 
         let mut interpreted = Vm::new(Profile::ReproducibleStandard);
         interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        interpreted.tape_mode = TapeTestMode::Off;
         let interpreted_result = interpreted.run(&program).unwrap();
 
         assert_eq!(fast_result.as_number(), Some(16.0));
@@ -30528,6 +30529,10 @@ mod inline_cache_tests {
         assert!(program.main.captured_registers.is_empty());
         let fast_loaded = &fast.dynamic_programs[0];
         assert_eq!(fast_loaded.may_attach_local_cells(None), Some(true));
+        assert!(
+            fast_loaded.tape_entries > 0,
+            "tape hands off to scalar leaf calls"
+        );
         assert_eq!(fast_loaded.closure_call_cache_fills, 1);
         assert_eq!(fast_loaded.closure_call_prototype_hits, 15);
         assert_eq!(fast_loaded.closure_call_fast_entries, 16);

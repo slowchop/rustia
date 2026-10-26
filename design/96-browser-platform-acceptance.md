@@ -473,3 +473,20 @@ failures and two matching goldens. Differential smoke matches 27 cases without
 differences. Candidate-only screening is not acceptance. The inconclusive
 performance isolation and production revert remain recorded in
 [95](95-numeric-index-contract.md); these checks do not validate a later runtime.
+
+
+## Cycle-diagnostic tooling deliveries (historical after tape-first correction)
+
+Tooling heads `e4985396`, `b840a94d` and `844df778` pass their respective
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40378938461),
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40382863978) and
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40387282169).
+Each independently audited workspace log executes 1,029 tests in 63 groups;
+each release log executes 315 tests in 36 groups, including twelve archived
+facade suites across both feature modes. All eight target builds per run pass;
+the aggregate gates receive successful preflight and WebKit inputs.
+Each macOS run passes 124 tests in 16 groups, Node passes 94 in 18 and WebKit
+passes 92 in 16, with zero failures and two matching goldens. Differential
+checks match 27 cases without differences. Screening is candidate-only.
+These tooling deliveries retain the previous runtime and do not validate the
+next tape-first runtime correction. Its exact-head platform checks remain pending.

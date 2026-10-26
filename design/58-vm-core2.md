@@ -1035,3 +1035,18 @@ unchanged; no boundary is cached. The four-profile regression verifies rejected
 guards leave the index and instruction count untouched, then verifies ordinary
 results after metatable removal. Existing forced-leaf versus scalar coverage
 retains holes, fractional/negative/zero keys and PUC hash-backed reads.
+
+
+### Tape admission before canonical fetch
+
+Plain-mode dispatch attempts its existing predecoded tape before loading the
+canonical instruction. A completed tape run continues at its returned PC;
+allocation-debt or collection-boundary refusal at the same PC falls through to
+the existing scalar path. Calls and HotIR-owned backedges remain loader-established
+tape boundaries, so their existing admission retains ownership. A guard exit
+fetches the failing canonical instruction, preserves the original invalid-PC
+reason, refreshes roots and bypasses fast admission and repeated accounting.
+No new executor, opcode, cache or policy is added. Existing guard-error, collection,
+HotIR and instruction-parity tests cover these boundaries; the scalar-leaf test
+also verifies a real tape-to-call handoff against both optimizations disabled.
+Remote performance acceptance remains pending; see [95](95-numeric-index-contract.md).

@@ -15,6 +15,8 @@
 
 ## Invariants
 
+- Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
+
 - Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.

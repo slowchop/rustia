@@ -832,3 +832,34 @@ format before delivery: rendering symbols requires the IP field. The parser
 consumes and discards that absolute address, retaining only allowlisted relative
 locations and weights. All 4,145 retained records parse with the expected total
 period sum; this is a parser check, not interpretation of the throttled data.
+
+
+The frequency diagnostic [40387592920](https://github.com/slowchop/rustia/actions/runs/40387592920)
+completes all four counter legs and four sampled legs. Independent audits reconcile
+32 measurement sidecars, twenty counter files, four location summaries, fixed work,
+checksums, exact source/binary identities and all raw records. Every timed gate has
+zero steal; counters report 99–100% running. All recordings contain zero actual
+throttle, unthrottle or lost-record events. The 1,114 / 1,140 / 1,140 / 1,113 samples
+carry total period weights 4,164,591,587 / 4,260,569,514 / 4,262,717,685 /
+4,157,732,690 in ABBA order. Unassigned weights of 12.6–15.1% remain included.
+
+The main dispatch function carries the largest mean positive weight difference:
+baseline legs 1,015.6 and 915.7 million, candidate legs 1,152.0 and 1,048.0 million.
+Individual-function variance and sampling skid prevent a precise causal claim.
+Exact-binary offsets identify canonical instruction fetching and loop-back checks
+among repeated hot locations. Source inspection finds a concrete redundant load:
+canonical bytecode is fetched before successful predecoded tape execution, even
+when the tape completes without using that instruction.
+
+The next isolated candidate moves existing tape admission ahead of canonical
+fetching. Calls and HotIR-owned backedges remain tape boundaries. Guard exits
+retain root refresh, diagnostic location and their already-charged instruction;
+same-PC refusal retains scalar fallback. Successful scalar calls now also test
+tape eligibility, so closure performance must be checked alongside iteration and
+sparse tables. This is an evidence-directed experiment, not a proven resolution;
+original-baseline acceptance remains failed until fresh remote evidence passes.
+
+
+The tape-first candidate passes all 251 VM unit tests in both feature modes,
+three executor-ownership checks, and the strengthened tape-to-leaf handoff test
+in both modes. These verify correctness and executor selection, not speed.

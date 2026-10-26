@@ -6,6 +6,15 @@
 
 ## One-paragraph state
 
+Latest PR #74 diagnostic [40387592920](https://github.com/slowchop/rustia/actions/runs/40387592920)
+passes independent export and raw-record audits with four clean frequency-sampled
+legs; perf permissions are restored. Main dispatch fetching is a concrete hot-path
+lead, not proven causality. The next isolated runtime candidate attempts the existing
+predecoded tape before loading canonical bytecode, preserving fast-path ownership,
+guard-exit accounting and scalar fallback. Performance acceptance is still open;
+all earlier failures and exact diagnostic evidence remain in [95](95-numeric-index-contract.md).
+
+
 The follow-up compatibility, benchmark and application API audit is recorded in
 [`94-release-compatibility-audit.md`](94-release-compatibility-audit.md).
 The compatibility fixes merged in PR #70 as `9b12a5a8` after required CI passed.
@@ -85,9 +94,10 @@ production experiment is reverted, retaining its guard regression and results.
 Fresh remote hardware counters compare retained `c754371f` with original
 `90bc2ae4`: iteration executes 0.89% fewer instructions but uses 2.86% more
 cycles. The specific cause remains unproven. Both fixed-period user-space cycle diagnostics were rejected for actual
-throttling; their raw recordings are retained. The next diagnostic uses
-frequency mode with period-weighted locations to address tick accounting,
-without changing host settings or acceptance thresholds. Sparse-table and iteration
+throttling; their raw recordings are retained. The subsequent frequency-mode diagnostic
+completes with period-weighted locations and no loss or throttling, without
+changing host settings or acceptance thresholds. Its dispatch-fetch lead motivates
+the tape-first candidate described above. Sparse-table and iteration
 acceptance remain unresolved; instrumented timings are not acceptance.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
