@@ -386,19 +386,16 @@ the existing caller-site cache lookup on eligible scalar calls; frames without
 such calls do not perform an extra program/prototype lookup. This is a candidate
 for the measured PR #74 closure regression; remote acceptance is still required.
 
-Fresh function frames initialize every register-cell slot to None, so frame
-entry does not scan them for shared-cell updates. Resumed frames synchronize
-saved registers before applying child results and rebuilding stackless roots.
-`resumed_callers_observe_mutated_capture_cells` covers mutation while suspended,
-collection, and child mutation before return, with and without fuel metering.
+Frame entry synchronizes saved register cells before applying child results and
+rebuilding stackless roots. `resumed_callers_observe_mutated_capture_cells`
+covers mutation while suspended, collection, and child mutation before return,
+with and without fuel metering.
 
-The PR #74 table/math follow-up removes two redundant operations: ordinary
-unary math calls pass their validated argument slice directly to the shared
-math implementation, and Log-table writes perform the preliminary hash probe
-only for vector keys that may need a new visible-key allocation. Other keys
-still use the same normalization and insertion path. Vector behavior, PUC
-layout, quota staging, journaling, mutation accounting and argument validation
-remain unchanged. These are measured candidates until remote acceptance passes.
+The PR #74 math follow-up passes validated unary arguments directly to the shared
+math implementation, avoiding a temporary copy. Argument validation and numeric
+operations are unchanged. The separate table-probe and fresh-frame scan changes
+were reverted after failed remote acceptance; their tests and evidence remain.
+The isolated math change still requires remote acceptance.
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:

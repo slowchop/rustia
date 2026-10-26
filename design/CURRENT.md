@@ -49,9 +49,11 @@ non-vector table-key probe and an argument-vector copy in unary math calls.
 Delivery head `8c96cf24` passes both full CI runs and all recorded platform
 contracts, with matching goldens. Its sixteen-leg comparison improves math/table
 but still measures dense tables +1.86%, sparse tables +1.04%, and iteration
-+5.89%, each with a positive 99% interval. Acceptance fails. The next correction
-skips an empty register-cell scan on fresh frames while retaining synchronization
-on resumed frames; fresh remote performance acceptance remains required.
++5.89%, each with a positive 99% interval. Acceptance fails. Removing an empty fresh-frame cell scan in `4846cd1e`
+also fails: dense tables +1.85%, closures +2.25%, and iteration +5.50% have
+positive intervals without flagged outliers. Both table-probe and fresh-frame
+scan changes are now reverted to isolate the unary math argument-copy removal
+against `6b0122bd`. Fresh original-baseline acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

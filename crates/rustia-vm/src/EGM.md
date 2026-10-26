@@ -18,8 +18,7 @@
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.
 - Successful scalar leaf calls skip caller-register synchronization only when loader analysis of actual bytecode proves the caller cannot attach local capture cells. `GetLocalCell`, `SetLocalCell`, or `LoadFunction` keeps the scan; unknown frames fall back conservatively. The proof is read with the existing caller-site cache lookup on eligible scalar calls, rather than at every frame entry. Optional capture hints do not establish this proof ([VM design](../../../design/58-vm-core2.md)).
-- Ordinary unary math calls borrow their validated argument slice; they do not copy it into a temporary register vector. Log-table writes probe for visible-key allocation only for vector keys; insertion still performs its normal lookup and preserves key normalization, journaling, and mutation accounting.
-- Frame-entry cell synchronization runs on resumed frames before child results are applied. Fresh frames initialize all cell slots to None and require no synchronization scan.
+- Ordinary unary math calls borrow their validated argument slice; they do not copy it into a temporary register vector.
 - Program logical-unit schedules must cover instructions with units of at least one; VM accounting uses them to preserve logical fuel/collection schedule when present.
 - Decision reset requires an idle VM and invalidates retained roots by epoch.
 - VM memory statistics report logical live/reserved/peak accounting, not operating-system memory.

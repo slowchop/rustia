@@ -4150,11 +4150,7 @@ impl Vm {
                 mut pc,
                 mut pending_return_prefixes,
                 mut resumed_continuation,
-            ) = if let Some(mut resumed) = resumed {
-                // A completed child may have changed shared local cells while
-                // these registers were saved. Fresh frames have only None cells.
-                // Synchronize before applying results, as on inline call return.
-                self.sync_register_cells(&mut resumed.registers, &resumed.register_cells)?;
+            ) = if let Some(resumed) = resumed {
                 stackless_self_calls = resumed.stackless_self_calls;
                 tail_call_count = resumed.tail_call_count;
                 (
@@ -4193,6 +4189,10 @@ impl Vm {
                 self.validate_conformance_native_parameter_types(function, &registers)?;
                 (registers, register_cells, varargs, 0usize, Vec::new(), None)
             };
+            // A completed child may have changed shared local cells while the
+            // caller's registers were saved. Read them before applying results,
+            // matching the ordinary inline call return order.
+            self.sync_register_cells(&mut registers, &register_cells)?;
             self.rebuild_stackless_self_call_roots(&mut stackless_self_calls);
 
             macro_rules! unwind_stackless_return {

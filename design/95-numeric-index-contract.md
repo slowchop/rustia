@@ -416,3 +416,49 @@ to None. Resumed frames still synchronize saved registers before applying child
 results and rebuilding stackless roots. This removes concrete redundant work
 from fresh calls without changing cell aliases, fuel or collection boundaries;
 fresh remote evidence is required before any performance claim.
+
+The preceding table/math candidate's supplemental string comparison
+[40282653930](https://github.com/slowchop/rustia/actions/runs/40282653930)
+measured `8c96cf24` at +0.21% [-1.43%, 1.39%]. Independent analysis validates
+all sixteen raw legs and aggregate copies, frozen source hash, full identities,
+N=10,000, five repetitions, matching checksums and ABBA order. The largest
+absolute leg deviation is 1.76%, with no apparent outlier. This interval spans
+zero but does not overturn the failed five-workload acceptance above.
+
+The fresh-frame correction is runtime `3b776b31`, delivered as `4846cd1e`
+after full pre-push validation. Its
+[original-baseline comparison](https://github.com/slowchop/rustia/actions/runs/40291359314)
+and [string comparison](https://github.com/slowchop/rustia/actions/runs/40291363030)
+were dispatched for that exact head. The completed baseline failure is recorded
+below; the completed string result follows it. The code change itself is not
+performance evidence.
+
+The fresh-frame candidate `4846cd1e` failed complete
+[sixteen-leg acceptance](https://github.com/slowchop/rustia/actions/runs/40291359314).
+All 192 sidecars are retained and independently validate identities, fixed N,
+five repetitions, checksums, aggregate copies and all 80 ABBA workload pairs.
+No outliers were flagged. Recomputed 99% intervals are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +1.85% | [0.51%, 2.47%] |
+| Sparse tables | +0.98% | [-0.06%, 2.31%] |
+| Closures/upvalues | +2.25% | [0.48%, 3.40%] |
+| Generic iteration | +5.50% | [4.83%, 6.56%] |
+| Math/table | -4.44% | [-5.19%, -3.72%] |
+
+The new scan removal did not resolve the positive dense/closure/iteration
+intervals. Both `8c96cf24` and `4846cd1e` reverse the earlier caller-proof
+candidate's direction on those workloads, while improving math/table. The next
+isolation therefore reverts the table-probe and fresh-frame scan changes and
+retains only borrowed unary math arguments relative to `6b0122bd`. All tests,
+failed comparisons and thresholds remain intact. A direct eight-pair comparison
+against `6b0122bd` will isolate that math change; it cannot substitute for final
+original-baseline acceptance or establish code-layout causality by itself.
+
+The fresh-frame candidate's completed supplemental string comparison
+[40291363030](https://github.com/slowchop/rustia/actions/runs/40291363030)
+measures `4846cd1e` at -0.18% [-1.39%, 0.92%], a 99% interval spanning zero.
+The retained export validates all sixteen raw legs and aggregate copies, full
+identities, frozen source hash, fixed N=10,000, five repetitions, checksums and
+ABBA order. This does not resolve its failed five-workload acceptance.

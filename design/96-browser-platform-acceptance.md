@@ -272,3 +272,28 @@ and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actio
 matched all 27 cases with zero differences and passed its execution test.
 Performance acceptance remains separate. Intel Mac and mobile execution and
 real Safari release-candidate checks remain open release requirements.
+
+The fresh-frame synchronization correction `3b776b31` passes native Linux
+ARM64 correctness from its exact Git source archive in the pinned Rust 1.95.0
+bookworm image. Default and bare modes execute 122 tests across 16 groups,
+with zero failures and two matching platform golden transcripts. This includes
+the new suspended-caller capture mutation regression in each feature mode.
+Remote platform evidence must still be checked for delivery head `4846cd1e`;
+these correctness results do not establish performance acceptance.
+
+Delivery `4846cd1e` passes all fifteen applicable jobs in
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40291330000).
+[Manual CI](https://github.com/slowchop/rustia/actions/runs/40291366559)
+has fifteen successes and one Windows infrastructure failure. Both runs
+independently verify macOS 122 tests/16 groups, Node 92/18, and WebKit 90/16,
+with zero test failures, the new regression twice, and two matching goldens
+each. All eight target builds pass in both runs. Workspace jobs each execute
+1,023 tests across 63 groups; release jobs each execute 313 across 36 groups,
+including archived facade acceptance in both feature modes. Both aggregates
+receive successful preflight and WebKit results. Differential smoke reports
+27 matches and zero differences.
+
+Windows job `121466967072` lost runner communication during checkout; toolchain
+installation and tests never began, and its log endpoint returns BlobNotFound.
+The failure annotation and job metadata are retained. This is not current-head
+Windows correctness evidence: successful Windows execution remains required.
