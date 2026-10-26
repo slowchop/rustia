@@ -11671,7 +11671,10 @@ impl Vm {
                 if next_number <= len as f64 {
                     LeafCallOutcome {
                         first: next,
-                        second: self.heap.table_get(items, next).unwrap_or_else(Value::nil),
+                        second: array_iterator_index(next_number)
+                            .and_then(|index| self.heap.read_numeric_array_slot(items, index))
+                            .or_else(|| self.heap.table_get(items, next))
+                            .unwrap_or_else(Value::nil),
                         mutation_cell: index_cell,
                         result_count: 2,
                         instruction_count: 19,
@@ -30775,6 +30778,117 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
         assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn array_iterator_leaf_reads_match_scalar_numeric_lookup() {
+        for profile in [
+            Profile::LuauCompat,
+            Profile::ReproducibleStandard,
+            Profile::DeterministicSim,
+            Profile::Puc51Compat,
+        ] {
+            for (start, hole, expected) in [
+                (0.0, false, Some(10.0)),
+                (0.0, true, None),
+                (-0.5, false, Some(77.0)),
+                (-2.0, false, Some(88.0)),
+                (-1.0, false, Some(99.0)),
+                (2.0, false, None),
+                (3.0, false, Some(44.0)),
+            ] {
+                if start == 3.0 && profile != Profile::Puc51Compat {
+                    continue;
+                }
+                let program = closure_call_array_iterator_closure_program();
+                let mut results = Vec::new();
+                for mode in [ClosureCallTestMode::Force, ClosureCallTestMode::Off] {
+                    let mut vm = Vm::new(profile);
+                    vm.closure_call_mode = mode;
+                    let id = vm.retain_dynamic_program(program.clone()).unwrap();
+                    let values = [
+                        if hole {
+                            Value::nil()
+                        } else {
+                            Value::number(10.0)
+                        },
+                        Value::number(20.0),
+                    ];
+                    let table = if profile == Profile::Puc51Compat {
+                        vm.heap
+                            .try_alloc_puc_table_from_parts(values.to_vec(), 8)
+                            .unwrap()
+                    } else {
+                        vm.heap.alloc_array_table(&values)
+                    };
+                    if start == 3.0 {
+                        vm.heap
+                            .table_set(table, Value::number(3.0), Value::number(33.0))
+                            .unwrap();
+                        vm.heap
+                            .table_set(table, Value::number(4.0), Value::number(44.0))
+                            .unwrap();
+                        assert!(vm.heap.read_numeric_array_slot(table, 4).is_none());
+                        assert_eq!(vm.heap.array_len(table), Some(4));
+                    }
+                    for (key, value) in [(0.5, 77.0), (-1.0, 88.0), (0.0, 99.0)] {
+                        vm.heap
+                            .table_set(table, Value::number(key), Value::number(value))
+                            .unwrap();
+                    }
+                    let cell = vm.heap.alloc_upvalue(Value::number(start)).unwrap();
+                    let handle = vm
+                        .heap
+                        .alloc_function(
+                            Some(id),
+                            0,
+                            vec![
+                                FunctionCapture::from_cell(cell),
+                                FunctionCapture::direct(Value::table(table)),
+                            ],
+                            vm.globals,
+                        )
+                        .unwrap();
+                    // Enter just after a normal collection boundary so debt
+                    // cannot turn this into a fallback-only test.
+                    vm.executed_instructions = vm.next_weak_collection_instruction;
+                    vm.maybe_collect_with_roots(&[Value::function(handle)])
+                        .unwrap();
+                    test_execution!(execution = None);
+                    let returned = vm
+                        .call_value(&program, Value::function(handle), &[], 0, &mut execution)
+                        .unwrap();
+                    if start == 2.0 {
+                        assert!(returned.is_empty());
+                    } else {
+                        assert_eq!(returned.len(), 2, "{profile:?} start={start} hole={hole}");
+                        assert_eq!(returned[0].as_number(), Some(start + 1.0));
+                        if hole {
+                            assert!(returned[1].is_nil());
+                        }
+                        assert_eq!(
+                            returned[1].as_number(),
+                            expected,
+                            "{profile:?} start={start} hole={hole}"
+                        );
+                    }
+                    assert_eq!(
+                        vm.heap
+                            .capture_get(FunctionCapture::from_cell(cell))
+                            .unwrap()
+                            .as_number(),
+                        Some(start + 1.0)
+                    );
+                    results.push((
+                        vm.executed_instructions,
+                        vm.dynamic_programs[id as usize].leaf_call_value_entries,
+                    ));
+                }
+                assert_eq!(results[0].0, results[1].0);
+                assert_eq!(results[0].1, 1, "{profile:?} start={start} hole={hole}");
+                assert_eq!(results[1].1, 0);
+            }
+        }
     }
 
     #[test]

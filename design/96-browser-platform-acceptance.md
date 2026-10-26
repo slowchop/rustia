@@ -348,3 +348,28 @@ modes. Both stages have zero failures and two matching goldens; both aggregates
 receive successful preflight and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40311547738)
 verifies 27 matches, zero differences and a passing execution test. Performance
 acceptance remains separate; the open public-release platform gates remain.
+
+
+The shared unary-math value operation is runtime `12d16851`, delivered as
+`6a8b61b1`. Exact-source Linux arm64 execution passes 122 tests across sixteen
+groups, zero failures and two matching goldens; the retained log is
+`/private/tmp/rustia-linux-arm64-12d16851.log`.
+
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40317696020) passes all
+fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia/actions/runs/40317811651)
+passes all sixteen. Independent completed-log audits verify macOS and Windows
+122 tests/16 groups, Node 92/18 and WebKit 90/16, all with zero failures,
+the suspended-capture regression twice and two matching golden transcripts.
+All sixteen target-build logs across both workflows verify successful target
+compilation.
+
+Workspace jobs `121554321268` and `121554727199` each execute 1,025 tests across
+63 groups, including the new native/opcode validation-order and public unary
+call-shape regressions. Release jobs `121554321360` and `121554727337` each
+execute 313 tests across 36 groups, including twelve archived facade suites in
+default and bare modes. All have zero failures and two matching goldens.
+Aggregates `121561950917` and `121563157648` receive successful preflight and
+WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40317695934)
+verifies 27 matches, zero differences and a passing execution test. This is
+correctness evidence, not performance acceptance; public-release platform
+gates remain open as above.

@@ -540,3 +540,35 @@ profiles for numeric-string coercion, evaluated-but-ignored extras and
 missing/invalid values. A VM entry test checks native argument-count bounds
 and opcode arity-before-register validation. Both feature modes pass these
 checks and the numeric-index and suspended-call contracts.
+
+
+The shared-value candidate `12d16851`, delivered as `6a8b61b1`, completes its
+[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40317807249)
+against `6b0122bd` without establishing acceptance. All 96 sidecars independently
+validate full identities, fixed N, repetitions, checksums, aggregate copies and
+forty ABBA workload pairs. The 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +0.01% | [-0.71%, 2.03%] |
+| Sparse tables | +0.68% | [-2.39%, 1.75%] |
+| Closures/upvalues | +4.51% | [3.09%, 12.20%] |
+| Generic iteration | +3.42% | [2.60%, 6.92%] |
+| Math/table | -6.77% | [-8.43%, -4.34%] |
+
+Candidate closure pass p7ba is 12.09% above its side median and remains included.
+Iteration and closures remain directionally slower. No thresholds or samples
+are changed, and no original-baseline acceptance is dispatched for this result.
+
+The shared math operation is retained provisionally for its concrete work
+reduction and measured math improvement, not as an accepted overall candidate.
+The next correction addresses concrete iteration work: the recognized
+`ArrayIterator` leaf reuses the existing exact-positive-i32 array-slot reader
+before general numeric table lookup. Present nil slots remain successful reads;
+all other keys or missing array slots use the original lookup. Metatable and
+length guards still precede mutation; result counts, instruction charges and
+collection/fuel admission are unchanged. Forced-leaf versus scalar tests cover
+array values, holes, exhaustion, fractional/negative/zero keys and a verified
+PUC hash-backed numeric slot across the applicable profiles. A direct eight-pair
+comparison against `6a8b61b1` will isolate this lookup change. Final acceptance
+still requires the original `90bc2ae4` baseline and the string workload.

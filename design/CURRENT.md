@@ -61,8 +61,11 @@ eight-pair isolation resolves dense/closure movement but still measures
 iteration +5.28% [2.38%, 6.18%]; it is not accepted. Fresh original-baseline
 acceptance remains required after resolving the persistent slowdown. The failed
 wrapper annotation is removed; a shared unary-math value operation now separates
-native argument validation from opcode arity/register validation and awaits
-remote isolation.
+native argument validation from opcode arity/register validation. Its isolation
+improves math/table 6.77% but still measures iteration +3.42% and closures
++4.51% with positive intervals; the closure outlier remains included. The next
+correction reuses existing numeric array-slot reads inside recognized iterator
+leaves, preserving general lookup fallback and awaiting remote isolation.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

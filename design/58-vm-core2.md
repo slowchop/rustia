@@ -977,3 +977,16 @@ VM Core 2 is complete when the ordinary safe-Rust interpreter—not a JIT or wor
 block executor and frame arena on all supported native and wasm targets, passes the semantic/determinism gates,
 and materially narrows the five-workload Luaur/reference-Luau gap on controlled Linux evidence. Parity is a
 measurement outcome, not an architectural assertion.
+
+
+### Numeric reads inside recognized array-iterator leaves
+
+The existing `ArrayIterator` replay uses the existing exact-positive-i32 index
+check and already-materialized array-slot reader before general table lookup.
+A present nil slot remains nil; non-array, fractional, negative and zero keys
+retain general lookup. Metatable and boundary-length guards, upvalue mutation,
+returned-value counts and instruction charges are unchanged. A forced-leaf
+versus scalar test covers numeric array values, holes and fractional/negative/
+zero hash keys across all four profiles, including PUC51, and checks mutation,
+actual leaf entry and equal instruction counts. Performance remains subject to
+remote acceptance; see [95](95-numeric-index-contract.md).
