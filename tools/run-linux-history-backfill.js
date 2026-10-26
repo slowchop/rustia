@@ -826,22 +826,35 @@ function summarizeCycleLocations(text) {
   const counts = new Map();
   let other = 0;
   let total = 0;
+  let totalPeriod = 0;
+  let otherPeriod = 0;
   for (const line of text.split("\n")) {
     const value = line.trim();
     if (!value) continue;
     if (/PERF_RECORD_LOST|LOST_SAMPLES/.test(value)) fail("cycle sampling lost events");
+    // perf needs the IP field to render symbols; discard the absolute address.
+    const fields = /^(\d+)\s+(?:0x)?[0-9a-f]+(?:\s+(.*))?$/.exec(value);
+    const period = fields ? Number(fields[1]) : NaN;
+    if (!Number.isSafeInteger(period) || period <= 0) fail("invalid cycle sample period");
     total += 1;
-    const match = /^((_ZN[A-Za-z0-9_$.]+E(?:\.llvm\.[0-9]+)?|_R[A-Za-z0-9_]+(?:\.llvm\.[0-9]+)?)\+0x[0-9a-f]+)$/.exec(value);
+    totalPeriod += period;
+    if (!Number.isSafeInteger(totalPeriod)) fail("cycle sample period sum overflow");
+    const match = /^((_ZN[A-Za-z0-9_$.]+E(?:\.llvm\.[0-9]+)?|_R[A-Za-z0-9_]+(?:\.llvm\.[0-9]+)?)\+0x[0-9a-f]+)$/.exec(fields[2]);
     if (!match || !match[2].includes("rustia")) {
       other += 1;
+      otherPeriod += period;
       continue;
     }
-    counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+    const count = counts.get(match[1]) ?? { samples: 0, sample_period_sum: 0 };
+    count.samples += 1;
+    count.sample_period_sum += period;
+    counts.set(match[1], count);
   }
   if (total === 0 || counts.size === 0) fail("cycle sampling has no resolved Rustia locations");
   return { total_samples: total, other_samples: other,
+    total_sample_period: totalPeriod, other_sample_period: otherPeriod,
     locations: [...counts].sort(([a], [b]) => a.localeCompare(b))
-      .map(([location, samples]) => ({ location, samples })) };
+      .map(([location, count]) => ({ location, ...count })) };
 }
 
 function measureOne(config, build, attemptDirectory, options = {}) {
@@ -879,7 +892,7 @@ function measureOne(config, build, attemptDirectory, options = {}) {
       ? path.join(options.privateSampleDirectory, `${build.commit}-${workload}.data`) : null;
     const command = profile || cycleSampling ? "perf" : "taskset";
     const commandArgs = cycleSampling
-      ? ["record", "-e", "cycles:u", "-c", "1000000", "-o", privatePerfFile,
+      ? ["record", "-e", "cycles:u", "-F", "997", "-o", privatePerfFile,
         "--", "taskset", ...args]
       : profile
       ? ["stat", "-x", ",", "-o", perfFile, "-e",
@@ -893,13 +906,13 @@ function measureOne(config, build, attemptDirectory, options = {}) {
     if (cycleSampling) process.stdout.write(measured.stdout);
     if (cycleSampling) {
       // Raw dump stays in memory; never export process/host metadata. Reject
-      // loss and throttling before comparing fixed-period sample counts.
+      // loss and throttling before comparing period-weighted locations.
       validateCycleRecords(runText("perf", ["script", "-D", "-i", privatePerfFile]));
       const locations = runText("perf", ["script", "-i", privatePerfFile,
-        "--no-demangle", "--show-lost-events", "-F", "sym,symoff"]);
+        "--no-demangle", "--show-lost-events", "-F", "period,ip,sym,symoff"]);
       writeJson(path.join(attemptDirectory, `${build.commit}-${workload}-locations.json`), {
-        schema: "rustia.bench.cycle-locations.v1", commit: build.commit, workload,
-        event: "cycles:u", period: 1000000, raw_sha256: sha256File(privatePerfFile),
+        schema: "rustia.bench.cycle-locations.v2", commit: build.commit, workload,
+        event: "cycles:u", requested_frequency_hz: 997, raw_sha256: sha256File(privatePerfFile),
         ...summarizeCycleLocations(locations),
       });
     }
@@ -1322,7 +1335,9 @@ async function profilePair(config, builds, startedAtMs) {
   }
   // Flat cycle locations target the unresolved iteration cost, including offsets
   // inside the large dispatcher. Keep original fixed N/repetitions and ABBA.
-  // Raw recordings persist outside EVIDENCE/EXPORT for private retrieval only.
+  // Frequency mode keeps perf's accounting tick active on tickless CPUs.
+  // Adaptive sample periods are retained as weights; sample counts alone are
+  // not comparable. Raw recordings stay outside EVIDENCE/EXPORT privately.
   const privateDirectory = fs.mkdtempSync(path.join(ROOT, "private-cycle-profile-"));
   for (const build of builds) {
     fs.copyFileSync(build.binary, path.join(privateDirectory, build.commit));
@@ -1774,7 +1789,7 @@ async function selfTest() {
       WORKLOADS: ["generic_iteration"], HARNESS: "/harness", path, fail,
       process: { stdout: { write: () => {} } },
       measurementArgs, run: fakeRun,
-      runText: () => "_ZN9rustia_vm2vm3runE+0x12\n",
+      runText: () => "1000000 deadbeef _ZN9rustia_vm2vm3runE+0x12\n",
       summarizeCycleLocations, validateCycleRecords, sha256File: () => "a".repeat(64),
       loadJson: (file) => JSON.parse(files.get(file)),
       writeJson: (file, value) => files.set(file, JSON.stringify(value)),
@@ -1788,7 +1803,7 @@ async function selfTest() {
     if (options.perf) assert.equal(commands[0][1][0], "stat");
     if (options.privateSampleDirectory) {
       assert.equal(commands[0][1][0], "record");
-      assert.equal(commands[0][1][commands[0][1].indexOf("-c") + 1], "1000000");
+      assert.equal(commands[0][1][commands[0][1].indexOf("-F") + 1], "997");
       const locations = JSON.parse(files.get(`/evidence/${commitA}-generic_iteration-locations.json`));
       assert.equal(locations.total_samples, 1);
       assert.equal(locations.locations[0].samples, 1);
@@ -1797,22 +1812,29 @@ async function selfTest() {
     assert.equal(aggregate.measurements.length, 1);
   }
 
-  const cycleFixture = "_ZN9rustia_vm2vm3runE+0x12\n_ZN9rustia_vm2vm3runE+0x12\n" +
-    "_ZN9rustia_vm2vm3runE+0x18\n[unknown]\nsecret/path+0x12\n";
+  const cycleFixture = "100 deadbeef _ZN9rustia_vm2vm3runE+0x12\n200 deadbeef _ZN9rustia_vm2vm3runE+0x12\n" +
+    "300 deadbeef _ZN9rustia_vm2vm3runE+0x18\n400 deadbeef [unknown]\n500 deadbeef secret/path+0x12\n";
   const cycleSummary = summarizeCycleLocations(cycleFixture);
   assert.equal(cycleSummary.total_samples, 5);
   assert.equal(cycleSummary.other_samples, 2);
+  assert.equal(cycleSummary.total_sample_period, 1500);
+  assert.equal(cycleSummary.other_sample_period, 900);
   assert.deepEqual(cycleSummary.locations.map((row) => row.samples), [2, 1]);
+  assert.deepEqual(cycleSummary.locations.map((row) => row.sample_period_sum), [300, 300]);
   assert.equal(JSON.stringify(cycleSummary).includes("secret"), false);
+  assert.equal(JSON.stringify(cycleSummary).includes("deadbeef"), false);
   const genericLocation = "_ZN4core3ptr47drop_in_place$LT$rustia_vm..heap..TableData$GT$17h02f42bfcbe0ffcfcE.llvm.11384951668729711642+0x0";
-  assert.equal(summarizeCycleLocations(genericLocation).locations[0].location, genericLocation);
+  assert.equal(summarizeCycleLocations(`100 deadbeef ${genericLocation}`).locations[0].location, genericLocation);
   validateCycleRecords("123 0x100 [0x20]: PERF_RECORD_SAMPLE");
   validateCycleRecords("PERF_RECORD_THROTTLE: 0\nPERF_RECORD_LOST: 0");
   for (const kind of ["THROTTLE", "UNTHROTTLE", "LOST", "LOST_SAMPLES"]) {
     assert.throws(() => validateCycleRecords(`123 0x100 [0x30]: PERF_RECORD_${kind}`), /lost or throttled/);
   }
-  assert.throws(() => summarizeCycleLocations("[unknown]"), /no resolved/);
+  assert.throws(() => summarizeCycleLocations("100 deadbeef [unknown]"), /no resolved/);
   assert.throws(() => summarizeCycleLocations("PERF_RECORD_LOST 10"), /lost events/);
+  for (const period of ["0", "-1", "1.5", "9007199254740992"]) {
+    assert.throws(() => summarizeCycleLocations(`${period} deadbeef ${genericLocation}`), /invalid cycle sample period/);
+  }
   process.stdout.write("history backfill runner self-test passed\n");
 }
 

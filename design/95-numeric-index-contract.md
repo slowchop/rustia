@@ -806,3 +806,29 @@ this is not an acceptance result or a usable sampled comparison. The next
 protocol uses a 1,000,000-cycle period to reduce sampling load tenfold, without
 changing runner limits or acceptance thresholds. Validation matches actual raw
 record headers so zero-count summary labels cannot trigger a false rejection.
+
+
+The lower-rate run [40383117166](https://github.com/slowchop/rustia/actions/runs/40383117166)
+also fails on its first baseline sampled leg: 40 actual throttle/unthrottle
+pairs, 4,145 samples at period 1,000,000, and no lost-record events. Its private
+recording, exact binaries and counter export remain retained. There is still no
+valid sampled baseline/candidate comparison.
+
+The next diagnostic switches from fixed-period to frequency-mode user-space
+cycles at 997 Hz, retaining each sample's actual period as a weight. Linux's
+[perf accounting](https://github.com/torvalds/linux/blob/v6.8/kernel/events/core.c)
+resets interrupt accounting on ticks and explicitly keeps ticks active for
+frequency events. This addresses a concrete possible interaction with tickless
+execution, rather than another period sweep. No host settings or acceptance
+thresholds change. Schema `rustia.bench.cycle-locations.v2` exports both counts
+and period sums per symbol-relative location, including unassigned totals;
+raw counts alone must not be compared under adaptive periods. Loss/throttling
+still invalidates the sampled comparison. Diagnostic ticks and sampling skid
+remain perturbations, so uninstrumented acceptance is still mandatory.
+
+
+Offline decoding of the retained failed recording verifies the actual perf text
+format before delivery: rendering symbols requires the IP field. The parser
+consumes and discards that absolute address, retaining only allowlisted relative
+locations and weights. All 4,145 retained records parse with the expected total
+period sum; this is a parser check, not interpretation of the throttled data.
