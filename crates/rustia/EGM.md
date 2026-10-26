@@ -1,0 +1,29 @@
+# rustia Package
+
+## Overview
+
+`rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Its API is still an unpublished 0.x contract; the broader parity and public-release audits remain open.
+
+Package metadata: [Cargo.toml](./Cargo.toml).
+
+## Interface
+
+- [`src/EGM.md`](./src/EGM.md) documents the facade implementation and exports.
+- [`examples/EGM.md`](./examples/EGM.md) documents runnable usage examples.
+- The package is built with `cargo check -p rustia`; `web-live` is enabled by default for browser WebAssembly services.
+
+## Invariants
+
+- `OwnedValue` is the acyclic, Rust-owned copy boundary. Live `Value`, `Table`, `Function`, and `Exports` handles preserve identity and belong to one VM and decision epoch.
+- `reset_decision()` requires an idle VM, advances the epoch, preserves configuration and persistent registrations, and invalidates retained guest handles.
+- Typed invocations borrow their `HostContext` for one call, share a fuel budget, and publish bounded ordered records only after successful completion.
+- `install` rolls back guest state on failure. Ordinary evaluation mutations and external host effects are not undone.
+- The facade boundary must not expose internal bytecode, raw heap identities, or collector lifetimes.
+
+## Side Effects
+
+Running a chunk mutates guest state. Installation can call module resolvers and host functions. Reset discards decision-local guest state. Host services, Rust payload mutation, and I/O remain external effects.
+
+## Verification
+
+From the repository root, run `cargo test --locked -p rustia`. To compile examples without running them, use `cargo check --locked -p rustia --examples`.
