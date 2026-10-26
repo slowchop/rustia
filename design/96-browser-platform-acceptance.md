@@ -183,5 +183,7 @@ Delivery head `4be30aca` also passed native macOS arm64 and Windows x86-64
 in the [new candidate's platform run](https://github.com/slowchop/rustia/actions/runs/40253022712).
 The actual logs for jobs `121348804463` and `121348804611` each record 120 tests
 across sixteen groups, zero failures, and two golden transcripts byte-identical
-to the Linux arm64 result. Aggregate CI and the remaining browser checks are
-still pending; this evidence does not establish performance acceptance.
+to the Linux arm64 result. Node/V8 job `121348804515` executed ninety tests in
+eighteen groups with zero failures and the same two goldens. All eight target
+build jobs also passed. Aggregate CI and headless WebKit are still pending;
+this evidence does not establish performance acceptance.
