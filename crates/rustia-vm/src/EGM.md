@@ -15,7 +15,7 @@
 
 ## Invariants
 
-- Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
+- Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Completed tape runs fall directly into canonical admission at the returned PC, without retrying tape eligibility. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
 
 - Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.

@@ -1040,9 +1040,10 @@ retains holes, fractional/negative/zero keys and PUC hash-backed reads.
 ### Tape admission before canonical fetch
 
 Plain-mode dispatch attempts its existing predecoded tape before loading the
-canonical instruction. A completed tape run continues at its returned PC;
-allocation-debt or collection-boundary refusal at the same PC falls through to
-the existing scalar path. Calls and HotIR-owned backedges remain loader-established
+canonical instruction. A completed tape run enters canonical admission at its
+returned PC without another outer-loop tape eligibility check. The tape already
+runs across blocks until an effect boundary or policy refusal; allocation-debt
+or collection-boundary refusal likewise falls through to the existing scalar path. Calls and HotIR-owned backedges remain loader-established
 tape boundaries, so their existing admission retains ownership. A guard exit
 fetches the failing canonical instruction, preserves the original invalid-PC
 reason, refreshes roots and bypasses fast admission and repeated accounting.

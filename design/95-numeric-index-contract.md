@@ -863,3 +863,22 @@ original-baseline acceptance remains failed until fresh remote evidence passes.
 The tape-first candidate passes all 251 VM unit tests in both feature modes,
 three executor-ownership checks, and the strengthened tape-to-leaf handoff test
 in both modes. These verify correctness and executor selection, not speed.
+
+
+The complete eight-pair tape-first isolation
+[40394564242](https://github.com/slowchop/rustia/actions/runs/40394564242),
+`c754371f` versus `60077eaf`, rejects the candidate despite workflow success.
+All 96 sidecars (80 individual, 16 aggregate), fixed work, checksums and ABBA
+ordering pass audit. At 99% confidence, iteration improves 6.35%
+[-9.49%, -4.07%], sparse tables improve 1.70% [-3.43%, -0.38%] and math/table
+improves 2.81% [-4.57%, -1.41%], but closures slow 8.12% [6.11%, 10.12%]
+and dense tables slow 0.90% [0.42%, 1.56%]. No flagged outliers are removed.
+This is isolation evidence, not original-baseline acceptance.
+
+Inspection identifies a redundant handoff in the new loop: after the tape has
+already reached an effect boundary or policy refusal, `Complete` restarts the
+outer loop and repeats tape eligibility before scalar call admission. The next
+correction assigns the returned PC and falls directly into existing canonical
+admission. It preserves HotIR/scalar-call ownership, guard-exit accounting and
+collection refusal. This removes the extra handoff without adding another cache
+or executor; a fresh isolation comparison is required before any speed claim.

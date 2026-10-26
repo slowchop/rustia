@@ -4467,10 +4467,10 @@ impl Vm {
                                     &mut register_cells,
                                 )? {
                                     TapeOutcome::Complete { next_pc } => {
-                                        if next_pc != pc {
-                                            pc = next_pc;
-                                            continue;
-                                        }
+                                        // The tape already reached a scalar boundary or
+                                        // policy refusal. Dispatch it without retrying
+                                        // the same tape admission on the outer loop.
+                                        pc = next_pc;
                                     }
                                     TapeOutcome::GuardExit { pc: exit_pc } => {
                                         pc = exit_pc;

@@ -6,13 +6,13 @@
 
 ## One-paragraph state
 
-Latest PR #74 diagnostic [40387592920](https://github.com/slowchop/rustia/actions/runs/40387592920)
-passes independent export and raw-record audits with four clean frequency-sampled
-legs; perf permissions are restored. Main dispatch fetching is a concrete hot-path
-lead, not proven causality. The next isolated runtime candidate attempts the existing
-predecoded tape before loading canonical bytecode, preserving fast-path ownership,
-guard-exit accounting and scalar fallback. Performance acceptance is still open;
-all earlier failures and exact diagnostic evidence remain in [95](95-numeric-index-contract.md).
+Latest PR #74 tape-first isolation [40394564242](https://github.com/slowchop/rustia/actions/runs/40394564242)
+rejects delivery `60077eaf`: iteration and sparse tables improve, but closures
+slow 8.12% [6.11%, 10.12%] at 99% confidence, with no flagged outliers.
+All exact-head correctness and platform gates pass. The next narrow correction
+removes redundant tape re-admission at completed tape-to-scalar boundaries;
+it remains unmeasured. Performance acceptance is open and every earlier result
+is retained in [95](95-numeric-index-contract.md).
 
 
 The follow-up compatibility, benchmark and application API audit is recorded in

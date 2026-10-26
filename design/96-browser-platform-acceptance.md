@@ -490,3 +490,17 @@ passes 92 in 16, with zero failures and two matching goldens. Differential
 checks match 27 cases without differences. Screening is candidate-only.
 These tooling deliveries retain the previous runtime and do not validate the
 next tape-first runtime correction. Its exact-head platform checks remain pending.
+
+
+PR #74 delivery `60077eafa66b60e217aa74a65da1c4483ce3073b` passes PR CI
+[40394468138](https://github.com/slowchop/rustia/actions/runs/40394468138)
+and manual CI [40394576399](https://github.com/slowchop/rustia/actions/runs/40394576399).
+Independent artifact audits verify 1,029 workspace tests in 63 summaries and
+315 release tests in 36 summaries per run, including twelve archived facade
+suites; all eight target builds pass in each run. Mac and Windows pass 124 shared
+contracts, Node passes 94 and WebKit passes 92, with matching goldens and zero
+failures. Native Linux ARM64 passes 124 contracts in sixteen summaries and two
+goldens from the exact `7478e426286bbdb3762315f33d533097c9dd9b19` runtime archive.
+Differential run 40394468203 verifies 27 matches and zero differences plus smoke.
+These are historical correctness results once the tape-handoff correction changes
+runtime code; performance rejection remains recorded in design 95.
