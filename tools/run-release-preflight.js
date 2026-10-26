@@ -5,8 +5,18 @@ const childProcess = require("child_process");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+for (const name of ["RUSTIA_UPDATE_C23_CENSUS", "RUSTIA_UPDATE_C23_O2_PREVIEW"]) {
+  if (process.env[name] !== undefined) {
+    throw new Error(`Validation refuses evidence-regeneration override ${name}`);
+  }
+}
 
+const plan = [];
 function run(command, args, extraEnv = {}) {
+  plan.push({ command, args, extraEnv });
+}
+
+function execute({ command, args, extraEnv }) {
   process.stdout.write(`+ ${command} ${args.join(" ")}\n`);
   try {
     childProcess.execFileSync(command, args, {
@@ -110,8 +120,12 @@ run("cargo", [
 
 node("tools/check-release-notes.js");
 node("tools/check-crate-metadata.js", "--check");
+node("tools/check-preflight.js");
+run("node", ["--test", "tools/browser/result.test.cjs"]);
+node("tools/check-pre-push.js");
 node("tools/check-workflows.js");
 node("tools/check-workflows.js", "--self-test");
+run("python3", ["tools/check-browser-correctness.py"]);
 node("tools/check-package-files.js", "--check");
 node("tools/check-publishability.js", "--check");
 node("tools/check-package-dry-runs.js");
@@ -198,3 +212,50 @@ run("cargo", [
   "--",
   "--nocapture",
 ]);
+
+// One command inventory serves local validation and every CI stage.
+const stages = ["quick", "workspace", "release"];
+const packageScripts = new Set([
+  "tools/check-package-dry-runs.js", "tools/verify-conformance-package.js",
+  "tools/check-external-facade.js", "tools/check-readme-examples.js",
+  "tools/check-facade-api.js",
+]);
+function stageOf({ command, args }) {
+  if (command === "cargo") {
+    if (args[0] === "test" && args.includes("--workspace")) return "workspace";
+    return ["fmt", "metadata", "fetch"].includes(args[0]) ? "quick" : "release";
+  }
+  return command === "node" && packageScripts.has(args[0]) ? "release" : "quick";
+}
+// Catch ordinary compiler regressions before clean-package rebuilds or long corpora.
+const compilerCheck = { command: "cargo", args: ["test", "--locked", "-p", "rustia-compiler", "--lib"], extraEnv: {} };
+plan.push(compilerCheck);
+function assignedStage(entry) {
+  return entry === compilerCheck ? "quick" : stageOf(entry);
+}
+const argv = process.argv.slice(2);
+if (argv.length === 1 && argv[0] === "--list") {
+  console.log(JSON.stringify(plan.map(entry => ({ ...entry, stage: assignedStage(entry) })), null, 2));
+} else if (argv.length === 2 && argv[0] === "--stage" && stages.includes(argv[1])) {
+  for (const entry of plan.filter(entry => assignedStage(entry) === argv[1] ||
+    (argv[1] !== "quick" && entry.command === "cargo" && ["metadata", "fetch"].includes(entry.args[0])))) execute(entry);
+} else if (argv.length === 0) {
+  for (const entry of plan.filter(entry => assignedStage(entry) === "quick")) execute(entry);
+  // Package construction/doc generation stay serialized in release; workspace
+  // execution can overlap them. Separate build trees prevent shared-artifact races.
+  const children = ["workspace", "release"].map(stage => childProcess.spawn(
+    process.execPath, [__filename, "--stage", stage], {
+      cwd: root, stdio: "inherit",
+      env: { ...process.env, CARGO_TARGET_DIR: stage === "workspace"
+        ? (process.env.CARGO_TARGET_DIR || path.join(root, "target"))
+        : path.join(root, "target", "preflight-release") },
+    },
+  ));
+  Promise.all(children.map(child => new Promise(resolve => {
+    child.on("error", error => { console.error(error.message); resolve(false); });
+    child.on("exit", code => resolve(code === 0));
+  }))).then(results => { if (results.some(ok => !ok)) process.exitCode = 1; });
+} else {
+  console.error("usage: run-release-preflight.js [--stage quick|workspace|release|--list]");
+  process.exitCode = 2;
+}

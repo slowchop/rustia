@@ -32,7 +32,7 @@ The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).
 Tests, fixture-only trees, vendored code, generated output, ignored directories, and
 symlinks have no separate maps. Hidden configuration is outside the bootstrap tree;
-[CI workflows](./.github/workflows/) and [justfile](./justfile) remain operational entry
+[CI workflows](./.github/workflows/) and [Justfile](./Justfile) remain operational entry
 points. The ignored private sibling is a separate repository and is outside this map.
 
 ## Invariants

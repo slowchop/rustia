@@ -6,7 +6,7 @@ args=(test --locked -p rustia --test platform_golden)
 case "${1:-}" in
   native)
     case "${3:-}" in
-      aarch64-apple-darwin|x86_64-unknown-linux-gnu) args+=(--target "$3") ;;
+      aarch64-apple-darwin|x86_64-unknown-linux-gnu|x86_64-pc-windows-msvc) args+=(--target "$3") ;;
       *) echo "native execution requires an explicit supported target triple" >&2; exit 2 ;;
     esac
     ;;

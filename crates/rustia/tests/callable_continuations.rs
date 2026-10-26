@@ -121,3 +121,99 @@ fn call_metamethod_must_be_a_function_in_all_call_shapes() -> rustia::Result<()>
         .eval::<bool>()?);
     Ok(())
 }
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn resumed_callers_observe_mutated_capture_cells() -> rustia::Result<()> {
+    for metered in [false, true] {
+        let builder = RustiaBuilder::standard();
+        let mut vm = if metered {
+            builder.fuel(100_000)
+        } else {
+            builder
+        }
+        .build()?;
+        assert!(vm
+            .load(
+                r#"
+            local owner = coroutine.create(function()
+                local captured = 1
+                local function set(value) captured = value end
+                local child = setmetatable({}, {__call = function()
+                    coroutine.yield(set)
+                    assert(captured == 20)
+                    set(42)
+                    return 7
+                end})
+                local result = child()
+                return captured == 42 and result == 7
+            end)
+            local ok, set = coroutine.resume(owner)
+            assert(ok and type(set) == 'function')
+            set(20)
+            collectgarbage('collect')
+            local done, result = coroutine.resume(owner)
+            return done and result and coroutine.status(owner) == 'dead'
+        "#
+            )
+            .eval::<bool>()?);
+    }
+    Ok(())
+}
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn iterator_calls_resume_and_synchronize_captured_callers() -> rustia::Result<()> {
+    for profile in [
+        rustia::Profile::LuauCompat,
+        rustia::Profile::ReproducibleStandard,
+        rustia::Profile::DeterministicSim,
+        rustia::Profile::Puc51Compat,
+    ] {
+        for callable in [false, true] {
+            let mut vm = RustiaBuilder::standard()
+                .profile(profile)
+                .fuel(100_000)
+                .build()?;
+            vm.insert_global("use_callable", callable)?;
+            let result: i64 = vm.eval(
+                r#"
+                local owner = coroutine.create(function()
+                    local calls, total = 0, 0
+                    local function step(state, control)
+                        coroutine.yield(control)
+                        calls = calls + 1
+                        if control < 2 then return control + 1, state[control + 1] end
+                    end
+                    local iterator = step
+                    if use_callable then
+                        iterator = setmetatable({}, {__call = function(_, state, control)
+                            return step(state, control)
+                        end})
+                    end
+                    for _, value in iterator, {10, 20}, 0 do
+                        total = total + value
+                    end
+                    return total, calls
+                end)
+                for expected = 0, 2 do
+                    local ok, control = coroutine.resume(owner)
+                    assert(ok and control == expected)
+                end
+                local ok, total, calls = coroutine.resume(owner)
+                assert(ok and total == 30 and calls == 3)
+                assert(coroutine.status(owner) == 'dead')
+                return total + calls
+                "#,
+            )?;
+            assert_eq!(result, 33, "{profile:?}, callable={callable}");
+        }
+    }
+    Ok(())
+}

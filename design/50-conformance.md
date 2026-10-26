@@ -64,6 +64,12 @@ validation precedence, aliases and source-prefix rules; the original 27-case
 oracle audit is also a required differential CI step. This is scoped diagnostic
 evidence, not exhaustive parity.
 
+For the shared string-index conversion, Rustia explicitly rejects nonfinite and
+out-of-signed-64-range inputs and truncates finite fractions toward zero. The
+upper bound is exclusive (`2^63`). Luau's unchecked C++ integer conversion has
+no portable contract outside its representable domain; see
+[95](95-numeric-index-contract.md) for the chosen deterministic behavior and tests.
+
 ## 1. Lexical, syntax & parsing (incl. type grammar)
 
 | Behavior | Spec status | Real Luau behavior | rustia choice | Profile | Rationale / divergence risk |

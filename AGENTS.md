@@ -117,3 +117,11 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
 - **Tasks:** public bugs/features = GitHub Issues on this repo; private/infra tasks = files (or Issues) in
   `rustia-ops`. **No Linear** (the private repo covers it).
 - Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
+
+## Before pushing
+
+Install the checkout-local guard with `just install-hooks`. Use `just check-quick`
+while iterating. Every push must pass the full `just release-preflight` inventory
+through the hook; a focused test or one stage is not a substitute. Preserve
+existing hooks when installing. Do not bypass failures or regenerate evidence
+inside validation. See `design/97-validation-workflow.md`.

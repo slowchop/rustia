@@ -48,8 +48,9 @@ Remote screening remains part of final PR validation; no new speed claim is made
 2. Finish the wider compiler/runtime error-phase audit. The 13 enumerated
    diagnostic findings now match the pinned oracle in the diagnostic follow-up
    ([94](94-release-compatibility-audit.md#diagnostic-parity-follow-up)); its final
-   CI and remote screening gate delivery. The newly recorded nonfinite
-   `string.sub` index conversion difference remains open. Preserve the implemented
+   CI and remote screening gate delivery. The nonfinite `string.sub` index finding is resolved by the explicit
+   deterministic conversion policy in [95](95-numeric-index-contract.md); the
+   exclusive signed-64 boundary fix and its cross-target checks gate delivery. Preserve the implemented
    yieldable `require` contract, and retain differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
@@ -332,8 +333,11 @@ registry installation, public release, or complete platform matrix is implied.
   macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
   Android arm64, and `wasm32-unknown-unknown`. It also executes the bare and
   default web-live wasm adapters through the matching wasm-bindgen test runner
-  on Node 22/V8. These checks do not replace the still-open non-Linux real-host
-  and Firefox/Safari correctness/golden gate.
+  on Node 22/V8. Native macOS arm64 also executes the shared contracts.
+  [Browser acceptance](96-browser-platform-acceptance.md) records real Firefox
+  and Safari runs in both feature modes and 120 native Windows correctness tests, including
+  matching default/bare golden transcripts. Linux arm64, Intel Mac and
+  mobile platforms still need execution evidence. Cross-compilation does not close those gates.
 - Release preflight formats and strictly lints the separate fuzz workspace,
   then runs its seed tests plus deterministic 2,048-case frontend and VM
   mutation sweeps. The VM decoder covers every production opcode exactly once

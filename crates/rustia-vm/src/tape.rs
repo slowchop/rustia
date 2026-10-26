@@ -657,16 +657,20 @@ mod tests {
     }
 
     #[test]
-    fn hot_ir_backedges_stay_effect_boundaries() {
+    fn hot_ir_backedges_and_calls_stay_effect_boundaries() {
         let code = vec![
             Instruction::new(Opcode::Move, 4, 0, 0),
             Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 0),
             Instruction::with_aux(Opcode::ForLoop, 0, 0, 0, 0),
+            Instruction::new(Opcode::Call, 0, 0, 1),
             Instruction::new(Opcode::Return, 0, 1, 0),
         ];
         let program = Program::new(Function::new(code, 5), Vec::new());
         let tape = FunctionTape::build(&program, &program.main, &[1]).expect("tape metadata");
         assert_eq!(tape.op(1), TapeOp::Exit);
+        assert_eq!(tape.run_from(1), 0);
+        assert_eq!(tape.op(3), TapeOp::Exit);
+        assert_eq!(tape.run_from(3), 0);
         assert_eq!(tape.op(2), TapeOp::ForLoop { base: 0, target: 0 });
         assert_eq!(tape.run_from(2), 1);
     }

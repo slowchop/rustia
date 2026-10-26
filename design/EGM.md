@@ -9,6 +9,9 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Canonical state: [CURRENT.md](./CURRENT.md).
 - Architecture: [30-architecture.md](./30-architecture.md).
 - Error and fuzzing contract: [82-error-behaviour-fuzzing.md](./82-error-behaviour-fuzzing.md).
+- Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).
+- Executed browser/native platform evidence and remaining gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
+- Staged validation and the complete pre-push inventory: [97-validation-workflow.md](./97-validation-workflow.md).
 - Progress renderer: [render-progress.js](./render-progress.js), input [progress.json](./progress.json), generated output [progress.html](./progress.html).
 
 ## Invariants

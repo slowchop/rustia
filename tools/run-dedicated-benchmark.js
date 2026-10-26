@@ -52,6 +52,11 @@ const REMOTE_RUNNER = LANES.history.runner;
 const REMOTE_ROOT = LANES.history.root;
 const SSH_ENV = "RUSTIA_BENCH_SSH";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+const STRING_WORKLOAD = "string_opcodes";
+const STRING_WORKLOAD_PATH = "bench/workloads/luau/24_string_opcodes.luau";
+const STRING_ACCEPTANCE_PASSES = 8;
+const STRING_ACCEPTANCE_REPETITIONS = 5;
+const STRING_ACCEPTANCE_N = 10_000;
 
 // Eight legs a side. The calibration measured this host at two and found its
 // spread widened by leg variation, so this is the lever that tightens an
@@ -416,7 +421,7 @@ function existingBackfills(exceptHarnessCommit) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
-    "plan", "history", "main", "pr", "accept", "live-serde", "calibrate", "matrix", "memory", "fetch",
+    "plan", "history", "main", "pr", "accept", "profile", "strings", "live-serde", "calibrate", "matrix", "memory", "fetch",
     "unlock", "host-check", "host-fingerprint", "self-test",
   ]);
   if (!known.has(command)) return null;
@@ -513,7 +518,7 @@ function parseArgs(argv) {
   }
   // --out is shared by the five lanes that write a file; --previous-binary is
   // the per-commit lane's alone.
-  if (parsed.out !== undefined && !["main", "pr", "accept", "live-serde", "calibrate"].includes(command)) {
+  if (parsed.out !== undefined && !["main", "pr", "accept", "strings", "live-serde", "calibrate"].includes(command)) {
     return null;
   }
   if (parsed.previousBinary !== undefined && command !== "main") return null;
@@ -534,16 +539,16 @@ function parseArgs(argv) {
   // promotes into this repository has any use for.
   if (parsed.plan && command !== "matrix" && command !== "memory") return null;
   if (parsed.base !== undefined && command !== "pr") return null;
-  if (parsed.json !== undefined && command !== "pr" && command !== "accept") return null;
+  if (parsed.json !== undefined && command !== "pr" && command !== "accept" && command !== "strings") return null;
   for (const option of [parsed.repetitions, parsed.confidence]) {
     if (option !== undefined && command !== "calibrate" && command !== "accept") return null;
   }
-  // An acceptance run names both sides explicitly and buys legs; no other
-  // lane may, because every other lane derives its sides from the history it
-  // is measuring rather than from an argument.
-  for (const option of [parsed.baseline, parsed.candidate, parsed.passes]) {
-    if (option !== undefined && command !== "accept") return null;
+  // Acceptance and hardware-counter diagnostics name both sides explicitly.
+  // Only acceptance buys a configurable number of legs.
+  for (const option of [parsed.baseline, parsed.candidate]) {
+    if (option !== undefined && command !== "accept" && command !== "profile" && command !== "strings") return null;
   }
+  if (parsed.passes !== undefined && command !== "accept") return null;
   // `--replace` supersedes an existing artifact, which both the measuring
   // command and the re-promoting one can do; nothing else promotes.
   if (parsed.replace && command !== "history" && command !== "fetch") return null;
@@ -844,7 +849,15 @@ function fetchExport(runDirectory, lane = LANES.history) {
 // Puts the runner, the frozen config, the attestation and a bundle of this
 // checkout where the host can see them, then runs it. In local mode the host is
 // this machine, so the inbox is a directory rather than a destination.
-function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history) {
+// The runner archives an expected diagnostic failure before returning 2.
+// Fetch that archive before reporting failure; never suppress transport errors.
+function runnerModeSuffix(mode) {
+  if (mode === true || mode === "profile") return ' --profile || test "$?" -eq 2';
+  if (mode === "strings") return ' --strings || test "$?" -eq 2';
+  return "";
+}
+
+function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history, mode = false) {
   const inbox = `$HOME/${lane.root}/inbox`;
   sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
   if (isLocal) {
@@ -871,7 +884,7 @@ function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.
       `export ${lane.rootEnv}="$HOME/${lane.root}"\n` +
       `cd "${inbox}"\n` +
       `node "${inbox}/${path.basename(lane.runner)}" "${inbox}/${path.basename(configFile)}" ` +
-      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"\n`,
+      `"${inbox}/${path.basename(providerFile)}" "${inbox}/${path.basename(bundleFile)}"${runnerModeSuffix(mode)}\n`,
   );
 }
 
@@ -1331,7 +1344,7 @@ function loadScreeningThresholds() {
 // extracted export. `history`, `main` and this lane all reach the host through
 // shipAndRun and come back through fetchExport; the difference between them is
 // the config, not the transport.
-function runPass(configFile, label, isLocal) {
+function runPass(configFile, label, isLocal, mode = "accept") {
   const config = loadConfig(configFile);
   const provider = attestHost(config);
   const runDirectory = path.join(STATE_ROOT, "runs", label);
@@ -1341,10 +1354,11 @@ function runPass(configFile, label, isLocal) {
   writeJson(providerFile, provider);
   const bundleFile = path.join(runDirectory, "repo.bundle");
   local("git", ["bundle", "create", bundleFile, "HEAD"], { capture: false });
-  shipAndRun(configFile, providerFile, bundleFile, isLocal);
+  shipAndRun(configFile, providerFile, bundleFile, isLocal, LANES.history, mode);
   const extracted = fetchExport(runDirectory);
   const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
-  if (status.status !== "backfill_complete") {
+  const expectedStatus = mode === "profile" ? "profile_complete" : mode === "strings" ? "strings_complete" : "backfill_complete";
+  if (status.status !== expectedStatus) {
     fail(`${label} did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
   return extracted;
@@ -1881,6 +1895,118 @@ function commandPr(options) {
 // Both commits must already be ancestors of HEAD: the pair config generator
 // requires it, and the bundle shipped to the host is built from HEAD, so an
 // unreachable commit would fail on the host rather than here.
+function commandProfile(options) {
+  if (!options.baseline || !options.candidate) fail("profile requires --baseline and --candidate");
+  const commits = [options.baseline, options.candidate].map((ref) => git(["rev-parse", ref]).trim());
+  for (const commit of commits) {
+    if (!FULL_COMMIT.test(commit) || !isAncestorOfHead(commit)) fail("profile revisions must be ancestors of HEAD");
+  }
+  if (commits[0] === commits[1]) fail("profile requires two distinct revisions");
+  const label = `profile-${commits[0].slice(0, 12)}-${commits[1].slice(0, 12)}`;
+  const extracted = runPass(freezePairConfig(...commits, 5, label), label, options.local, "profile");
+  process.stdout.write(`Hardware counter diagnostics retained at ${extracted}; not acceptance evidence.\n`);
+}
+
+function stringSummary(result) {
+  const lines = [
+    "## Dedicated string opcode acceptance",
+    "",
+    `Baseline \`${result.baseline.slice(0, 12)}\` vs candidate \`${result.candidate.slice(0, 12)}\` on \`${result.host}\`, pinned core ${result.pinned_core}.`,
+    `Eight ABBA legs per side; ${result.repetitions} repetitions at fixed N=${result.fixed_n}; 99% bootstrap intervals.`,
+    `Harness \`${result.harness_commit}\`; source \`${result.source.path}\` SHA-256 \`${result.source.sha256}\`.`,
+    "",
+    "This supplemental result reports intervals only; no calibrated materiality threshold is defined for this workload.",
+    "",
+    "| workload | candidate change | 99% interval |",
+    "| --- | ---: | ---: |",
+  ];
+  for (const workload of result.workloads) {
+    const sign = workload.delta_percent > 0 ? "+" : "";
+    lines.push(`| \`${workload.workload}\` | ${sign}${workload.delta_percent.toFixed(2)}% | [${workload.interval.lower.toFixed(2)}, ${workload.interval.upper.toFixed(2)}]% |`);
+  }
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+function commandStrings(options) {
+  if (!options.out) fail("strings requires --out FILE to write the interval summary to");
+  if (!options.baseline || !options.candidate) fail("strings requires --baseline and --candidate");
+  const baseline = git(["rev-parse", options.baseline]).trim();
+  const candidate = git(["rev-parse", options.candidate]).trim();
+  if (!FULL_COMMIT.test(baseline) || !FULL_COMMIT.test(candidate)) fail("could not resolve both string acceptance revisions");
+  if (baseline === candidate) fail("string acceptance requires two distinct revisions");
+  for (const commit of [baseline, candidate]) {
+    if (!isAncestorOfHead(commit)) fail(`${commit.slice(0, 12)} is not an ancestor of HEAD`);
+  }
+  const label = `strings-${baseline.slice(0, 12)}-${candidate.slice(0, 12)}`;
+  const extracted = runPass(
+    freezePairConfig(baseline, candidate, STRING_ACCEPTANCE_REPETITIONS, label),
+    label,
+    options.local,
+    "strings",
+  );
+  const config = loadConfig(path.join(STATE_ROOT, `${label}.json`));
+  const expectedSourceHash = crypto.createHash("sha256")
+    .update(git(["show", `${config.source.harness_commit}:${STRING_WORKLOAD_PATH}`]))
+    .digest("hex");
+  let sourceHash;
+  const baselineLegs = [];
+  const candidateLegs = [];
+  let expectedChecksum;
+  for (let pass = 0; pass < STRING_ACCEPTANCE_PASSES; pass += 1) {
+    const root = extracted;
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, "evidence/history-backfill/string-sources.json"), "utf8"));
+    const hash = validateStringSourceManifest(manifest, config.source.harness_commit, expectedSourceHash);
+    if (sourceHash !== undefined && hash !== sourceHash) fail("string workload source hash changed between passes");
+    sourceHash = hash;
+    for (const commit of [baseline, candidate]) {
+      const file = path.join(root, "evidence/history-backfill", `strings-pass-${pass}`, `${commit}-${STRING_WORKLOAD}-samples.json`);
+      if (!fs.existsSync(file)) fail(`missing string acceptance leg ${path.relative(STATE_ROOT, file)}`);
+      const checksum = readStringChecksum(file, commit);
+      if (expectedChecksum === undefined) expectedChecksum = checksum;
+      else {
+        try {
+          assertSameStringChecksum(expectedChecksum, checksum, `${commit.slice(0, 8)} pass ${pass}`);
+        } catch (error) {
+          fail(error.message);
+        }
+      }
+      (commit === baseline ? baselineLegs : candidateLegs).push(file);
+    }
+  }
+
+  const analysis = analyzeWorkload(STRING_WORKLOAD, baselineLegs, candidateLegs, 0, 0.99);
+  const result = {
+    schema: "rustia.bench.string-opcode-acceptance.v1",
+    baseline,
+    candidate,
+    host: config.provider.host.name,
+    pinned_core: config.host_gate.benchmark_cpu,
+    harness_commit: config.source.harness_commit,
+    source: { path: STRING_WORKLOAD_PATH, sha256: sourceHash },
+    workload: STRING_WORKLOAD,
+    fixed_n: STRING_ACCEPTANCE_N,
+    repetitions: STRING_ACCEPTANCE_REPETITIONS,
+    passes: STRING_ACCEPTANCE_PASSES,
+    legs_per_side: STRING_ACCEPTANCE_PASSES,
+    confidence: 0.99,
+    checksum: expectedChecksum,
+    workloads: [{
+      workload: STRING_WORKLOAD,
+      delta_percent: analysis.comparison.candidate_delta_percent,
+      interval: analysis.comparison.bootstrap_ci_percent,
+      leg_medians_ns_per_unit: {
+        baseline: baselineLegs.map((file) => legMedian(file, baseline, STRING_WORKLOAD)),
+        candidate: candidateLegs.map((file) => legMedian(file, candidate, STRING_WORKLOAD)),
+      },
+    }],
+  };
+  const summary = stringSummary(result);
+  fs.writeFileSync(options.out, summary);
+  if (options.json) writeJson(options.json, result);
+  process.stdout.write(summary);
+}
+
 function commandAccept(options) {
   if (!options.out) fail("accept requires --out FILE to write the acceptance summary to");
   if (!options.baseline || !options.candidate) {
@@ -2070,6 +2196,41 @@ function legMedian(file, commit, workload) {
     fail(`${path.relative(STATE_ROOT, file)} carries no ${workload} median for ${commit.slice(0, 8)}`);
   }
   return measurement.ns_per_unit_median;
+}
+
+function readStringChecksum(file, commit) {
+  const sidecar = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (sidecar.schema !== "rustia.bench.raw-samples.v1" || !Array.isArray(sidecar.measurements) || sidecar.measurements.length !== 1) {
+    throw new Error(`${file} is not a single-measurement raw-samples sidecar`);
+  }
+  const [measurement] = sidecar.measurements;
+  if (measurement.commit !== commit || measurement.engine !== "rustia" || measurement.dialect !== "luau" ||
+      measurement.target !== "linux-x86_64" || measurement.workload !== STRING_WORKLOAD ||
+      measurement.n !== STRING_ACCEPTANCE_N || measurement.n_selection !== "fixed" ||
+      measurement.reps !== STRING_ACCEPTANCE_REPETITIONS || typeof measurement.checksum !== "string" ||
+      measurement.checksum.length === 0) {
+    throw new Error(`${file} does not match the frozen string acceptance identity`);
+  }
+  return measurement.checksum;
+}
+
+function assertSameStringChecksum(expected, observed, label) {
+  if (observed !== expected) throw new Error(`${label} checksum changed: ${observed} != ${expected}`);
+}
+
+function validateStringSourceManifest(manifest, harnessCommit, expectedSha256) {
+  if (manifest.schema !== "rustia.bench.string-workload-sources.v1" || manifest.harness_commit !== harnessCommit ||
+      !manifest.workloads || Object.keys(manifest.workloads).length !== 1) {
+    throw new Error("invalid string workload source manifest");
+  }
+  const source = manifest.workloads[STRING_WORKLOAD];
+  if (source?.path !== STRING_WORKLOAD_PATH || !/^[0-9a-f]{64}$/.test(source.sha256 ?? "")) {
+    throw new Error("string workload source path or SHA-256 is invalid");
+  }
+  if (expectedSha256 !== undefined && source.sha256 !== expectedSha256) {
+    throw new Error("string workload source SHA-256 does not match the frozen harness commit");
+  }
+  return source.sha256;
 }
 
 function medianOf(values) {
@@ -2644,6 +2805,18 @@ function selfTest() {
   // An acceptance run names both sides and buys legs. The pair is explicit
   // because the commits being compared are already in history and neither is
   // derivable from HEAD.
+  assert.equal(parseArgs(["profile", "--baseline", "a1", "--candidate", "b2", "--local"]).command, "profile");
+  assert.equal(parseArgs(["profile", "--passes", "8"]), null);
+  assert.equal(parseArgs(["profile", "--out", "report.md"]), null);
+  assert.equal(parseArgs(["strings", "--baseline", "a1", "--candidate", "b2", "--out", "s.md", "--json", "s.json"]).command, "strings");
+  assert.equal(parseArgs(["strings", "--passes", "8"]), null);
+  assert.equal(parseArgs(["strings", "--repetitions", "9"]), null);
+  for (const code of [0, 1, 2, 255]) {
+    const result = spawnSync("sh", ["-c", `sh -c 'exit ${code}'${runnerModeSuffix("profile")}`]);
+    assert.equal(result.status === 0, code === 0 || code === 2);
+  }
+  assert.equal(runnerModeSuffix(false), "");
+  assert.match(runnerModeSuffix("strings"), /--strings/);
   const accept = parseArgs(["accept", "--baseline", "a1", "--candidate", "b2", "--out", "a.md"]);
   assert.equal(accept.baseline, "a1");
   assert.equal(accept.candidate, "b2");
@@ -2661,6 +2834,40 @@ function selfTest() {
   assert.equal(parseArgs(["accept", "--passes"]), null);
   assert.equal(parseArgs(["accept", "--baseline"]), null);
   assert.equal(parseArgs(["accept", "--candidate"]), null);
+  const commitA = "a".repeat(40);
+  const commitB = "b".repeat(40);
+  const stringSample = {
+    schema: "rustia.bench.raw-samples.v1",
+    measurements: [{
+      commit: commitA,
+      engine: "rustia",
+      dialect: "luau",
+      target: "linux-x86_64",
+      workload: STRING_WORKLOAD,
+      n: STRING_ACCEPTANCE_N,
+      n_selection: "fixed",
+      reps: STRING_ACCEPTANCE_REPETITIONS,
+      checksum: "number:123",
+    }],
+  };
+  const stringSampleFile = path.join(os.tmpdir(), `rustia-string-sample-${process.pid}.json`);
+  try {
+    fs.writeFileSync(stringSampleFile, JSON.stringify(stringSample));
+    assert.equal(readStringChecksum(stringSampleFile, commitA), "number:123");
+    assertSameStringChecksum("number:123", "number:123", "self-test");
+    assert.throws(() => assertSameStringChecksum("number:123", "number:456", "self-test"));
+    assert.throws(() => readStringChecksum(stringSampleFile, commitB));
+  } finally {
+    fs.rmSync(stringSampleFile, { force: true });
+  }
+  const sourceManifest = {
+    schema: "rustia.bench.string-workload-sources.v1",
+    harness_commit: commitA,
+    workloads: { [STRING_WORKLOAD]: { path: STRING_WORKLOAD_PATH, sha256: "a".repeat(64) } },
+  };
+  assert.equal(validateStringSourceManifest(sourceManifest, commitA, "a".repeat(64)), "a".repeat(64));
+  assert.throws(() => validateStringSourceManifest(sourceManifest, commitB));
+  assert.throws(() => validateStringSourceManifest(sourceManifest, commitA, "b".repeat(64)));
   // The pair belongs to this lane alone; every other lane derives its sides
   // from the history it measures.
   assert.equal(parseArgs(["pr", "--baseline", "a1", "--out", "s.md"]), null);
@@ -2867,6 +3074,9 @@ function usage() {
       "                                         measure HEAD (or one series commit) alone\n" +
       "                                         for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
+      "  profile   --baseline C --candidate C    ABBA hardware counters; never acceptance\n" +
+      "  strings   --baseline C --candidate C --out FILE [--json FILE]\n" +
+      "                                         eight ABBA legs for the dedicated string opcodes\n" +
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
       "                                         full acceptance comparison of two commits\n" +
       "  live-serde --local --out FILE             compare live and owned serde on ci-bench\n" +
@@ -2903,6 +3113,8 @@ try {
     else if (parsed.command === "main") commandMain(parsed);
     else if (parsed.command === "pr") commandPr(parsed);
     else if (parsed.command === "accept") commandAccept(parsed);
+    else if (parsed.command === "profile") commandProfile(parsed);
+    else if (parsed.command === "strings") commandStrings(parsed);
     else if (parsed.command === "live-serde") commandLiveSerde(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);
     else if (parsed.command === "matrix") commandMatrix(parsed);

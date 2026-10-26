@@ -6,7 +6,7 @@ This directory groups guest programs by source language. The direct workload set
 
 ## Interface
 
-- Each workload file supplies an internal callable workload entry to its adapter, not a public library API. The entry receives a repetition count and returns a checksum or aggregate used by its caller; language-specific details are in the child maps.
+- General workload files return callable entries that receive a repetition count and return a checksum or aggregate. The supplemental Luau `string_opcodes` source runs at top level with a harness-supplied `BENCH_N` global so builtin specialization remains active. These are internal adapter inputs; language-specific details are in the child maps.
 
 ## Invariants
 

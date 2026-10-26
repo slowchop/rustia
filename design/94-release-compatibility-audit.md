@@ -314,6 +314,7 @@ errors and thread/buffer type names. It also identified a separate, pre-existing
 numeric-conversion difference: `return string.sub(12,0/0)` and
 `return string.sub(12,1,math.huge)` return `12` in the local pinned oracle, while
 Rustia rejects the nonfinite index through the unchanged `string_library_index`.
-This remains a public-release follow-up: establish the pinned cross-architecture
-conversion contract before changing deterministic numeric behavior. It is not
+The subsequent [numeric-index contract](95-numeric-index-contract.md) resolves
+this policy question with checked signed-64 conversion and an exclusive upper
+bound; its cross-target CI and delivery checks remain required. It is not
 covered by the claim that the 13 diagnostic findings are fixed.

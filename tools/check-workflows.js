@@ -154,12 +154,34 @@ const RUNNER_CLASSES = new Map([
     },
   ],
   [
+    "general-linux-docker",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-linux",
+        "      labels: [self-hosted, Linux, X64, general-linux, docker]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+  [
     "general-macos",
     {
       block: [
         "    runs-on:",
         "      group: general-macos",
         "      labels: [self-hosted, macOS, ARM64, general-macos]",
+      ].join("\n"),
+      timingAuthority: false,
+    },
+  ],
+  [
+    "general-windows",
+    {
+      block: [
+        "    runs-on:",
+        "      group: general-windows",
+        "      labels: [self-hosted, Windows, X64, general-windows]",
       ].join("\n"),
       timingAuthority: false,
     },
@@ -182,6 +204,7 @@ const RUNNER_CLASSES = new Map([
 const WORKFLOW_RUNNER_CLASS = new Map([
   ["error-fuzz.yml", "general-linux"],
   ["ci.yml", "general-linux"],
+  ["browser-correctness.yml", "general-linux"],
   ["weekly-matrix-bench.yml", "bench-solo"],
   ["publish-benchmark-data.yml", "general-linux"],
   ["main-bench.yml", "bench-solo"],
@@ -190,8 +213,13 @@ const WORKFLOW_RUNNER_CLASS = new Map([
   ["rustia-memory.yml", "bench-solo"],
 ]);
 
-// Only this native correctness job may leave CI's ordinary Linux pool.
-const JOB_RUNNER_CLASS = new Map([["ci.yml:macos-arm64-runtime", "general-macos"]]);
+// Explicit correctness jobs select the platform and capabilities they need.
+const JOB_RUNNER_CLASS = new Map([
+  ["ci.yml:macos-arm64-runtime", "general-macos"],
+  ["ci.yml:webkit-runtime", "general-linux-docker"],
+  ["ci.yml:windows-runtime", "general-windows"],
+  ["browser-correctness.yml:safari-runtime", "general-macos"],
+]);
 
 // Commands that take a timing. Until now only the first three were forbidden,
 // and the four on-host runners were forbidden nowhere -- a workflow on the
@@ -365,6 +393,12 @@ function checkBenchHostQueue(files) {
 }
 
 function checkCi(text) {
+  // GitHub evaluates job env before runner/steps/job contexts exist.
+  for (const block of text.matchAll(/^    env:\n((?:^      [^\n]*\n)+)/gm)) {
+    if (/\$\{\{[^}]*\b(?:runner|steps|job)\./.test(block[1])) {
+      fail("ci.yml job env uses a context that is only available inside steps");
+    }
+  }
   const label = ".github/workflows/ci.yml";
   const rustChannel = pinnedRustChannel();
   const releasePreflightJob = text.split("\n  macos-arm64-runtime:\n", 1)[0];
@@ -402,7 +436,15 @@ function checkCi(text) {
   requireIncludes(text, "cache: false", label);
   forbidIncludes(text, "rustup toolchain install stable", label);
   forbidIncludes(text, "rustup default stable", label);
-  requireIncludes(text, "node tools/run-release-preflight.js", label);
+  requireIncludes(text, 'node tools/run-release-preflight.js --stage "${{ matrix.stage }}"', label);
+  requireIncludes(releasePreflightJob, 'stage: [quick, workspace, release]', label);
+  requireIncludes(text, '    name: Release preflight\n    needs: [release-preflight, webkit-runtime]\n    if: always()', label);
+  requireIncludes(text, 'PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}', label);
+  requireIncludes(text, 'run: test "$PREFLIGHT_RESULT" = success', label);
+  requireIncludes(text, 'WEBKIT_RESULT: ${{ needs.webkit-runtime.result }}', label);
+  requireIncludes(text, '&& test "$WEBKIT_RESULT" = success', label);
+  requireIncludes(text, 'bash tools/run-browser-correctness.sh webkit 1.64.1', label);
+  requireIncludes(text, 'npm ci --prefix tools/browser --ignore-scripts', label);
   requireIncludes(releasePreflightJob, "fetch-depth: 0", `${label} release-preflight job`);
   // Preflight lints the benchmark adapter for wasm32. The action's `rustup
   // override` bypasses rust-toolchain.toml's target list, so the job names it.
@@ -1225,7 +1267,7 @@ if (process.argv?.includes("--self-test")) {
   const { spawnSync } = require("node:child_process");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-workflow-policy-"));
   try {
-    fs.cpSync(path.join(root, "tools"), path.join(temporary, "tools"), { recursive: true });
+    fs.cpSync(path.join(root, "tools"), path.join(temporary, "tools"), { recursive: true, filter: source => path.basename(source) !== "node_modules" });
     fs.cpSync(workflowDir, path.join(temporary, ".github", "workflows"), { recursive: true });
     fs.mkdirSync(path.join(temporary, "bench"));
     fs.copyFileSync(path.join(root, "bench/analyze-memory-samples.js"), path.join(temporary, "bench/analyze-memory-samples.js"));
@@ -1240,6 +1282,7 @@ if (process.argv?.includes("--self-test")) {
     const baseline = run(canonical);
     assert.equal(baseline.status, 0, baseline.stderr);
     for (const [label, changed, message] of [
+      ["runner context in job env", canonical.replace(/^    env:\n/m, "    env:\n      INVALID_PATH: ${{ runner.temp }}\n"), /job env uses a context/],
       ["Mac job in Linux pool", canonical.replace(macosBlock, linuxBlock), /job macos-arm64-runtime.*general-macos/],
       ["Linux job in Mac pool", canonical.replace(linuxBlock, macosBlock), /job release-preflight.*general-linux/],
       ["unregistered Mac job", canonical.replace("  macos-arm64-runtime:", "  another-macos-job:"), /job another-macos-job.*general-linux/],
@@ -1280,7 +1323,7 @@ if (process.argv?.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, twelve policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, thirteen policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

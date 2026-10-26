@@ -200,6 +200,12 @@ const WORKLOADS: &[Workload] = &[
         unit: "one seeded todo operation with intentionally unbounded history",
         default: false,
     },
+    Workload {
+        id: "string_opcodes",
+        file_stem: "24_string_opcodes",
+        unit: "one pass through the nine dedicated string-library operations",
+        default: false,
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -1282,6 +1288,10 @@ fn prepare(
 ) -> Result<Box<dyn PreparedWorkload>> {
     match engine.id {
         #[cfg(feature = "rustia-engine")]
+        "rustia" if _workload.id == "string_opcodes" => Ok(Box::new(
+            RustiaStringOpcodePrepared::new(_workload, _source)?,
+        )),
+        #[cfg(feature = "rustia-engine")]
         "rustia" => Ok(Box::new(RustiaPrepared::new(_workload, _source)?)),
         #[cfg(feature = "koto")]
         "koto" => Ok(Box::new(KotoPrepared::new(_workload, _source)?)),
@@ -1481,6 +1491,43 @@ impl PreparedWorkload for RustiaPrepared {
             .vm
             .call_function(&self.program, self.function, &[Value::number(n as f64)])
             .map_err(|error| Error::new(format!("rustia workload call failed: {error}")))?;
+        value_checksum(&mut self.vm, result)
+    }
+}
+
+#[cfg(feature = "rustia-engine")]
+struct RustiaStringOpcodePrepared {
+    program: Program,
+    vm: Vm,
+}
+
+#[cfg(feature = "rustia-engine")]
+impl RustiaStringOpcodePrepared {
+    fn new(workload: &Workload, source: &str) -> Result<Self> {
+        let chunk = parse_source(source)
+            .map_err(|error| Error::new(format!("parse {} failed: {error}", workload.id)))?;
+        let program = compile_with_options(
+            &chunk,
+            rustia_compiler::CompileOptions::default().with_source(workload.id, source),
+        )
+        .map_err(|error| Error::new(format!("compile {} failed: {error}", workload.id)))?;
+        Ok(Self {
+            program,
+            vm: Vm::new(Profile::ReproducibleStandard),
+        })
+    }
+}
+
+#[cfg(feature = "rustia-engine")]
+impl PreparedWorkload for RustiaStringOpcodePrepared {
+    fn run(&mut self, n: u64) -> Result<String> {
+        self.vm
+            .set_global_value("BENCH_N", Value::number(n as f64))
+            .map_err(|error| Error::new(format!("set string workload N failed: {error}")))?;
+        let result = self
+            .vm
+            .run(&self.program)
+            .map_err(|error| Error::new(format!("rustia string workload run failed: {error}")))?;
         value_checksum(&mut self.vm, result)
     }
 }
@@ -3016,7 +3063,7 @@ mod tests {
             .get("workloads")
             .and_then(serde_json::Value::as_array)
             .expect("workloads array");
-        assert_eq!(workloads.len(), 19);
+        assert_eq!(workloads.len(), 20);
 
         let defaults = workloads
             .iter()
@@ -3041,6 +3088,44 @@ mod tests {
         for workload in WORKLOADS.iter().filter(|workload| workload.default) {
             assert_sources_for_all_benchmark_dialects(&repo, workload);
         }
+    }
+
+    #[cfg(feature = "rustia-engine")]
+    #[test]
+    fn supplemental_string_opcode_workload_compiles_all_specialized_operations() {
+        let source = include_str!("../workloads/luau/24_string_opcodes.luau");
+        let chunk = parse_source(source).expect("string opcode workload parses");
+        let program = compile_with_options(
+            &chunk,
+            rustia_compiler::CompileOptions::default().with_source("string_opcodes", source),
+        )
+        .expect("string opcode workload compiles");
+        let observed = std::iter::once(&program.main)
+            .chain(program.functions.iter())
+            .flat_map(|function| function.code.iter())
+            .map(|instruction| instruction.op)
+            .collect::<Vec<_>>();
+        for opcode in [
+            rustia_vm::bytecode::Opcode::StringSub,
+            rustia_vm::bytecode::Opcode::StringLen,
+            rustia_vm::bytecode::Opcode::StringByte,
+            rustia_vm::bytecode::Opcode::StringUpper,
+            rustia_vm::bytecode::Opcode::StringLower,
+            rustia_vm::bytecode::Opcode::StringReverse,
+            rustia_vm::bytecode::Opcode::StringRep,
+            rustia_vm::bytecode::Opcode::StringFind,
+            rustia_vm::bytecode::Opcode::StringSplit,
+        ] {
+            assert!(
+                observed.contains(&opcode),
+                "workload does not compile to {opcode:?}; observed {observed:?}"
+            );
+        }
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.set_global_value("BENCH_N", rustia_vm::Value::number(2.0))
+            .expect("set small correctness iteration count");
+        let result = vm.run(&program).expect("string opcode workload executes");
+        assert_eq!(result.kind(), rustia_vm::ValueKind::Number);
     }
 
     /// `array_mutation` covers every dialect that can express an in-place

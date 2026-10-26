@@ -15,6 +15,14 @@ Map corrections below are applied. The initial bootstrap preserved authoritative
 - Corrected the browser-demo boundary: it uses the standard preset with stdout disabled, not the live-services preset ([runner source](demos/live-wasm/wasm-runner/src/lib.rs), line 7).
 - No remaining map drift detected after correction.
 
+## PR #74 integration follow-up
+
+- Preserved the map-maintenance rules while integrating staged preflight and the complete pre-push guard. Corrected map links to the tracked `Justfile` casing.
+- Updated workload maps for twenty Luau sources and the top-level `string_opcodes` exception: it reads `BENCH_N` and returns a checksum rather than returning a callable workload.
+- Added `tools/browser/EGM.md`, bringing the maintained map count to 69, and linked its parent map. Documented the pinned headless WebKit runner, result validation, and process cleanup.
+- Updated VM and design navigation for checked numeric indices, extracted string dispatch, and conservative bytecode-derived caller-cell analysis. Runtime and benchmark-source files are unchanged by this integration.
+- Preserved all failed performance experiments. Recorded the completed supplemental string result and verified Linux arm64, macOS arm64, and Windows x86-64 correctness evidence; new candidate acceptance and final CI remain pending.
+
 ## bench/EGM.md
 
 No drift detected.
@@ -315,6 +323,22 @@ No drift detected.
 
 ## design/80-bench-suite.md
 
-- Resolved: current tracking and automation now name the owned `ci-bench` host, its [coordinator](tools/run-dedicated-benchmark.js), and the implemented per-commit, PR, weekly-matrix, acceptance, and memory workflows. The contradictory assertion that no measurement workflow exists was removed. The current engine/workload inventory now includes separate Luau interpreter/JIT modes and the 19 source-covered workload entries in [the harness](bench/src/main.rs).
+- Resolved: current tracking and automation now name the owned `ci-bench` host, its [coordinator](tools/run-dedicated-benchmark.js), and the implemented per-commit, PR, weekly-matrix, acceptance, and memory workflows. The contradictory assertion that no measurement workflow exists was removed. The current engine/workload inventory now includes separate Luau interpreter/JIT modes and the 20 source-covered workload entries in [the harness](bench/src/main.rs), including the supplemental string-opcode probe.
 - Resolved: cloud results and their retired recipes are explicitly historical; `just bench-vultr` is no longer presented as available. Current A/B acceptance links to the [owned-host contract](design/81-benchmark-operations.md#ab-acceptance-on-the-owned-host) and is distinguished from historical three-run publication rules. Existing historical measurements were not recomputed or promoted.
 - No remaining drift detected for the reported disagreement.
+
+
+## PR #74 runtime-map refresh
+
+Reviewed map changes from the merged EGM baseline `212a5d63` through runtime
+`f116e727` (delivery `b5982752`). The repository contains 69 maintained maps;
+all 393 local Markdown file/directory targets exist. VM maps now describe checked numeric
+indices, extracted string dispatch, caller-cell proof, shared unary math
+operations, iterator function resolution, and tape-first dispatch with direct
+completion handoff. Tool maps describe the string acceptance lane and diagnostic
+frequency sampling, including period weights, private raw-record retention,
+and its separation from performance acceptance. No additional map-to-source
+disagreement was found in these changed boundaries. This was a static review
+of changed maps and all map links, not a renewed exhaustive behavioral audit.
+Performance results and platform evidence remain authoritative in design/95
+and design/96; prior failed experiments are retained.

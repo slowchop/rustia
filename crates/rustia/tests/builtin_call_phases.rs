@@ -251,3 +251,38 @@ fn builtin_output_work_checks_fuel_before_allocation_across_call_shapes() {
         }
     }
 }
+
+#[test]
+fn unary_math_call_shapes_preserve_coercion_and_validation() {
+    for profile in profiles() {
+        let mut vm = vm(profile);
+        for (name, input, expected) in [
+            ("floor", "2.75", 2.0),
+            ("sqrt", "4", 2.0),
+            ("sin", "0", 0.0),
+            ("sign", "-3", -1.0),
+        ] {
+            for callee in [format!("math.{name}"), "alias".to_owned()] {
+                let source = format!("local alias=math.{name}; return {callee}('{input}')");
+                assert_eq!(
+                    vm.eval::<f64>(&source).unwrap(),
+                    expected,
+                    "{profile:?}: {source}"
+                );
+                let source = format!(
+                    "local alias=math.{name}; local seen=0; \
+                     local function extra() seen=seen+1; return {{}} end; \
+                     local result={callee}('{input}',extra()); return result=={expected} and seen==1"
+                );
+                assert!(vm.eval::<bool>(&source).unwrap(), "{profile:?}: {source}");
+                for args in ["", "nil", "true", "'not a number'", "{}"] {
+                    let source = format!(
+                        "local alias=math.{name}; local ok,err=pcall(function() return {callee}({args}) end); \
+                         return not ok and type(err)=='string'"
+                    );
+                    assert!(vm.eval::<bool>(&source).unwrap(), "{profile:?}: {source}");
+                }
+            }
+        }
+    }
+}

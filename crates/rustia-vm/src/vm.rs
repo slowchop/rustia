@@ -1135,6 +1135,15 @@ impl LoadedProgram {
         caches.set_native_call_inline_cache(pc, entry)
     }
 
+    #[cfg(test)]
+    fn may_attach_local_cells(&self, prototype: Option<u32>) -> Option<bool> {
+        let caches = match prototype {
+            Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
+            None => &self.main_inline_caches,
+        };
+        Some(caches.may_attach_local_cells)
+    }
+
     fn leaf_call_plan(&self, prototype: u32) -> Option<LeafCallPlan> {
         self.function_inline_caches
             .get(prototype as usize)?
@@ -1147,12 +1156,17 @@ impl LoadedProgram {
         pc: usize,
         callee_program: u32,
         callee_prototype: u32,
-    ) -> Option<ClosureCallCacheEntry> {
-        let caches = match caller_prototype {
-            Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
-            None => &self.main_inline_caches,
+    ) -> (Option<ClosureCallCacheEntry>, bool) {
+        let Some(caches) = (match caller_prototype {
+            Some(prototype) => self.function_inline_caches.get(prototype as usize),
+            None => Some(&self.main_inline_caches),
+        }) else {
+            return (None, true);
         };
-        caches.closure_call_inline_cache(pc, callee_program, callee_prototype)
+        (
+            caches.closure_call_inline_cache(pc, callee_program, callee_prototype),
+            caches.may_attach_local_cells,
+        )
     }
 
     fn set_closure_call_inline_cache(
@@ -1252,6 +1266,8 @@ struct FunctionInlineCaches {
     #[allow(clippy::box_collection)]
     closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
+    // Derived from executable bytecode, not optional captured-register hints.
+    may_attach_local_cells: bool,
     execution_tape: Option<Arc<FunctionTape>>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
@@ -1330,6 +1346,12 @@ impl FunctionInlineCaches {
             native_call_entries: Vec::new(),
             closure_call_entries: None,
             leaf_call_plan,
+            may_attach_local_cells: function.code.iter().any(|instruction| {
+                matches!(
+                    instruction.op,
+                    Opcode::GetLocalCell | Opcode::SetLocalCell | Opcode::LoadFunction
+                )
+            }),
             execution_tape,
             hot_ir_by_pc,
             hot_irs,
@@ -4428,93 +4450,9 @@ impl Vm {
 
                 let loop_result = (|| -> VmFlowResult<ReturnValues> {
                     loop {
-                        let mut instruction = *function.code.get(pc).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidProgram {
-                                reason: "program counter ran off the end of the function",
-                            })
-                            .at_pc(pc)
-                        })?;
-
-                        if instruction.op == Opcode::ForLoop
-                            && self.hot_ir_enabled()
-                            && fuel.state.fuel.is_none()
-                            && !self.scalar_instrumentation_forced()
-                            && !self.heap.has_allocation_debt()
-                            && !self.weak_collection_due_within(1)
-                        {
-                            if let Some(program_id) = program_id {
-                                if let Some(hot_ir) = self.hot_ir(program_id, context.prototype, pc)
-                                {
-                                    if let Some(next_pc) = self.try_hot_ir(
-                                        program_id,
-                                        &hot_ir,
-                                        &mut registers,
-                                        &mut register_cells,
-                                    ) {
-                                        pc = next_pc;
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Ordinary scalar calls get a caller-site prototype PIC
-                        // before generic CALL bookkeeping. A committed leaf is
-                        // guaranteed not to allocate, collect, invoke guest code,
-                        // or throw, so it can skip root refresh, source-location
-                        // materialization, capture-vector cloning, and result
-                        // packing while retaining exact logical instruction
-                        // accounting.
-                        if instruction.op == Opcode::Call {
-                            if let Some(program_id) = program_id {
-                                // The `Call` instruction itself charges its own
-                                // units (one on an identity schedule) on top of
-                                // the plan's fixed callee charge, exactly as the
-                                // scalar charge below would before opening the
-                                // callee frame.
-                                let call_units = logical_unit_at(frame_logical_units, pc);
-                                if let Some(outcome) = self
-                                    .try_closure_call_scalar(
-                                        program_id,
-                                        context.prototype,
-                                        pc,
-                                        &registers,
-                                        instruction,
-                                        context.depth,
-                                        call_units,
-                                        fuel,
-                                    )
-                                    .map_err(|error| {
-                                        attach_instruction_source(program, function, pc, error)
-                                    })?
-                                {
-                                    self.executed_instructions =
-                                        self.executed_instructions.wrapping_add(
-                                            u64::from(outcome.instruction_count)
-                                                .saturating_add(call_units),
-                                        );
-                                    sync_leaf_mutation_to_registers(
-                                        &mut registers,
-                                        &register_cells,
-                                        outcome.mutation_cell,
-                                        outcome.first,
-                                    );
-                                    let scalar_result = if outcome.result_count == 0 {
-                                        Value::nil()
-                                    } else {
-                                        outcome.first
-                                    };
-                                    set_register(&mut registers, instruction.a, scalar_result)
-                                        .map_err(|error| error.at_pc(pc))?;
-                                    pc += 1;
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // The single plain-mode executor decision: one dense
-                        // per-PC tape entry instead of the retired per-PC
-                        // Region/receipt selection ladder.
+                        // Tape-covered instructions need no canonical fetch. Calls and
+                        // HotIR-owned backedges are tape boundaries established by the
+                        // loader, so their existing admission still runs below.
                         let mut tape_guard_exit = false;
                         if let Some(tape) = execution_tape {
                             if tape.run_from(pc) != 0 {
@@ -4529,28 +4467,114 @@ impl Vm {
                                     &mut register_cells,
                                 )? {
                                     TapeOutcome::Complete { next_pc } => {
-                                        if next_pc != pc {
+                                        // The tape already reached a scalar boundary or
+                                        // policy refusal. Dispatch it without retrying
+                                        // the same tape admission on the outer loop.
+                                        pc = next_pc;
+                                    }
+                                    TapeOutcome::GuardExit { pc: exit_pc } => {
+                                        pc = exit_pc;
+                                        tape_guard_exit = true;
+                                    }
+                                }
+                            }
+                        }
+                        let instruction = *function.code.get(pc).ok_or_else(|| {
+                            Error::new(ErrorKind::InvalidProgram {
+                                reason: if tape_guard_exit {
+                                    "tape guard exited beyond function code"
+                                } else {
+                                    "program counter ran off the end of the function"
+                                },
+                            })
+                            .at_pc(pc)
+                        })?;
+                        if tape_guard_exit {
+                            #[cfg(any(test, feature = "executor-diagnostics"))]
+                            self.note_root_refresh_trigger(instruction.op, true);
+                            self.update_current_gc_roots(
+                                &registers,
+                                &register_cells,
+                                &varargs,
+                                &pending_return_prefixes,
+                            );
+                        } else {
+                            if instruction.op == Opcode::ForLoop
+                                && self.hot_ir_enabled()
+                                && fuel.state.fuel.is_none()
+                                && !self.scalar_instrumentation_forced()
+                                && !self.heap.has_allocation_debt()
+                                && !self.weak_collection_due_within(1)
+                            {
+                                if let Some(program_id) = program_id {
+                                    if let Some(hot_ir) =
+                                        self.hot_ir(program_id, context.prototype, pc)
+                                    {
+                                        if let Some(next_pc) = self.try_hot_ir(
+                                            program_id,
+                                            &hot_ir,
+                                            &mut registers,
+                                            &mut register_cells,
+                                        ) {
                                             pc = next_pc;
                                             continue;
                                         }
                                     }
-                                    TapeOutcome::GuardExit { pc: exit_pc } => {
-                                        pc = exit_pc;
-                                        instruction = *function.code.get(pc).ok_or_else(|| {
-                                            Error::new(ErrorKind::InvalidProgram {
-                                                reason: "tape guard exited beyond function code",
-                                            })
-                                            .at_pc(pc)
-                                        })?;
-                                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                                        self.note_root_refresh_trigger(instruction.op, true);
-                                        self.update_current_gc_roots(
+                                }
+                            }
+
+                            // Ordinary scalar calls get a caller-site prototype PIC
+                            // before generic CALL bookkeeping. A committed leaf is
+                            // guaranteed not to allocate, collect, invoke guest code,
+                            // or throw, so it can skip root refresh, source-location
+                            // materialization, capture-vector cloning, and result
+                            // packing while retaining exact logical instruction
+                            // accounting.
+                            if instruction.op == Opcode::Call {
+                                if let Some(program_id) = program_id {
+                                    // The `Call` instruction itself charges its own
+                                    // units (one on an identity schedule) on top of
+                                    // the plan's fixed callee charge, exactly as the
+                                    // scalar charge below would before opening the
+                                    // callee frame.
+                                    let call_units = logical_unit_at(frame_logical_units, pc);
+                                    if let Some((outcome, may_attach_local_cells)) = self
+                                        .try_closure_call_scalar(
+                                            program_id,
+                                            context.prototype,
+                                            pc,
                                             &registers,
-                                            &register_cells,
-                                            &varargs,
-                                            &pending_return_prefixes,
-                                        );
-                                        tape_guard_exit = true;
+                                            instruction,
+                                            context.depth,
+                                            call_units,
+                                            fuel,
+                                        )
+                                        .map_err(|error| {
+                                            attach_instruction_source(program, function, pc, error)
+                                        })?
+                                    {
+                                        self.executed_instructions =
+                                            self.executed_instructions.wrapping_add(
+                                                u64::from(outcome.instruction_count)
+                                                    .saturating_add(call_units),
+                                            );
+                                        if may_attach_local_cells {
+                                            sync_leaf_mutation_to_registers(
+                                                &mut registers,
+                                                &register_cells,
+                                                outcome.mutation_cell,
+                                                outcome.first,
+                                            );
+                                        }
+                                        let scalar_result = if outcome.result_count == 0 {
+                                            Value::nil()
+                                        } else {
+                                            outcome.first
+                                        };
+                                        set_register(&mut registers, instruction.a, scalar_result)
+                                            .map_err(|error| error.at_pc(pc))?;
+                                        pc += 1;
+                                        continue;
                                     }
                                 }
                             }
@@ -6082,105 +6106,21 @@ impl Vm {
                                 set_register(&mut registers, instruction.a, string)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::StringSub => {
-                                let value = self
-                                    .string_sub(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringLen => {
-                                let text = self
-                                    .builtin_string_arg(
-                                        Some(get_register(&registers, instruction.b)?),
-                                        0,
-                                        "len",
-                                    )
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(
+                            Opcode::StringSub
+                            | Opcode::StringLen
+                            | Opcode::StringByte
+                            | Opcode::StringUpper
+                            | Opcode::StringLower
+                            | Opcode::StringReverse
+                            | Opcode::StringRep
+                            | Opcode::StringFind
+                            | Opcode::StringSplit => {
+                                self.execute_string_opcode(
                                     &mut registers,
-                                    instruction.a,
-                                    Value::number(text.len() as f64),
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringByte => {
-                                let value = self
-                                    .string_byte(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringUpper => {
-                                let mut text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                text.make_ascii_uppercase();
-                                let string = self.heap.intern_string_value_bytes(&text);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringLower => {
-                                let mut text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                text.make_ascii_lowercase();
-                                let string = self.heap.intern_string_value_bytes(&text);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringReverse => {
-                                let text = self
-                                    .coerce_to_string(&registers, instruction.b)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                let reversed =
-                                    reverse_string_bytes(&text).map_err(|e| e.at_pc(pc - 1))?;
-                                let string = self.heap.intern_string_value_bytes(&reversed);
-                                set_register(&mut registers, instruction.a, string)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringRep => {
-                                let args = [
-                                    get_register(&registers, instruction.b)
-                                        .map_err(|e| e.at_pc(pc - 1))?,
-                                    get_register(&registers, instruction.c)
-                                        .map_err(|e| e.at_pc(pc - 1))?,
-                                ];
-                                let extra_fuel = self.native_string_rep_fuel(&args);
-                                charge_fuel(
-                                    &mut fuel.state.fuel,
-                                    fuel.state.fuel_limit,
-                                    extra_fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                                let value = self
-                                    .string_rep(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringFind => {
-                                let extra_fuel = self
-                                    .string_find_opcode_fuel(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                charge_fuel(
-                                    &mut fuel.state.fuel,
-                                    fuel.state.fuel_limit,
-                                    extra_fuel,
-                                )
-                                .map_err(|error| error.at_pc(pc - 1))?;
-                                let value = self
-                                    .string_find(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::StringSplit => {
-                                let value = self
-                                    .string_split(&registers, instruction)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                    instruction,
+                                    pc - 1,
+                                    fuel,
+                                )?;
                             }
                             Opcode::TableGetN => {
                                 let table = get_table(&registers, instruction.b)
@@ -11212,10 +11152,17 @@ impl Vm {
         pc: usize,
         callee_program: u32,
         callee_prototype: u32,
-    ) -> Option<ClosureCallCacheEntry> {
+    ) -> (Option<ClosureCallCacheEntry>, bool) {
         self.dynamic_programs
-            .get(caller_program)?
-            .closure_call_inline_cache(caller_prototype, pc, callee_program, callee_prototype)
+            .get(caller_program)
+            .map_or((None, true), |program| {
+                program.closure_call_inline_cache(
+                    caller_prototype,
+                    pc,
+                    callee_program,
+                    callee_prototype,
+                )
+            })
     }
 
     fn set_closure_call_inline_cache(
@@ -11534,7 +11481,7 @@ impl Vm {
         depth: usize,
         call_units: u64,
         fuel: &mut Execution<'_>,
-    ) -> Result<Option<LeafCallOutcome>> {
+    ) -> Result<Option<(LeafCallOutcome, bool)>> {
         if instruction.op != Opcode::Call
             || !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
@@ -11562,15 +11509,13 @@ impl Vm {
         let Some(handle) = callee.as_function() else {
             return Ok(None);
         };
-        let Some(FunctionKind::Bytecode {
-            program: Some(callee_program),
-            prototype: callee_prototype,
-        }) = self.heap.function_kind(handle)
+        let Some((callee_program, callee_prototype, captures)) =
+            self.heap.bytecode_function_captures(handle)
         else {
             return Ok(None);
         };
 
-        let cached = self.closure_call_inline_cache(
+        let (cached, may_attach_local_cells) = self.closure_call_inline_cache(
             caller_program,
             caller_prototype,
             pc,
@@ -11596,6 +11541,9 @@ impl Vm {
         {
             return Ok(None);
         }
+        // Copy only the selected pair before mutating call-cache diagnostics.
+        // No heap mutation or guest execution occurs while metadata is borrowed.
+        let selected_captures = selected_leaf_captures(plan, |index| captures.get(index).copied());
         if cache_hit {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_prototype_hit(caller_program);
@@ -11612,9 +11560,7 @@ impl Vm {
             );
         }
 
-        let Some((first_capture, second_capture)) =
-            selected_leaf_captures(plan, |index| self.heap.function_capture(handle, index))
-        else {
+        let Some((first_capture, second_capture)) = selected_captures else {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             self.record_closure_call_guard_exit(caller_program);
             return Ok(None);
@@ -11626,7 +11572,7 @@ impl Vm {
         };
         #[cfg(any(test, feature = "executor-diagnostics"))]
         self.record_closure_call_fast_entry(caller_program);
-        Ok(Some(outcome))
+        Ok(Some((outcome, may_attach_local_cells)))
     }
 
     #[cfg(test)]
@@ -16605,12 +16551,7 @@ impl Vm {
 
     fn native_math_unary(&mut self, args: &[Value], op: MathUnary) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "math argument")?;
-        let registers = native_registers(args)?;
-        self.math_unary(
-            &registers,
-            Instruction::with_aux(Opcode::Halt, 0, 0, 0, 1),
-            op,
-        )
+        self.math_unary_value(args[0], op)
     }
 
     fn native_math_binary(&mut self, args: &[Value], op: MathBinary) -> Result<Value> {
@@ -19373,7 +19314,13 @@ impl Vm {
         op: MathUnary,
     ) -> Result<Value> {
         validate_math_arity(instruction, 1, "invalid one-argument math arity")?;
-        let value = self.coerce_register_to_number(registers, instruction.b)?;
+        self.math_unary_value(get_register(registers, instruction.b)?, op)
+    }
+
+    fn math_unary_value(&mut self, value: Value, op: MathUnary) -> Result<Value> {
+        let value = self
+            .coerce_to_number(value)?
+            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         let result = match op {
             MathUnary::Floor => libm::floor(value),
             MathUnary::Ceil => libm::ceil(value),
@@ -19899,8 +19846,11 @@ impl Vm {
         }
         let state = get_register(registers, window.state)?;
         let control = get_register(registers, window.control)?;
+        let function = iterator
+            .as_function()
+            .and_then(|handle| self.heap.function_kind(handle).map(|kind| (handle, kind)));
         if let Some(advanced) = self.try_builtin_iterator_step(
-            iterator,
+            function,
             state,
             control,
             registers,
@@ -19911,14 +19861,43 @@ impl Vm {
         )? {
             return Ok(CallIteratorStep::Complete(advanced));
         }
-        let results = match self.call_value_with_site_resumable(
-            program,
-            iterator,
-            &[state, control],
-            depth,
-            None,
-            fuel,
-        )? {
+        let flow = if let Some((handle, kind)) = function {
+            self.check_recursion_depth(depth)?;
+            // Builtin rejection does not execute guests or mutate the heap.
+            // Reuse its resolution, but keep ordinary non-iterator calls on
+            // their existing entry path. Both routes use the same executors.
+            if let Some(results) = self.try_leaf_bytecode_handle(kind, handle, depth, fuel)? {
+                VmFlow::Return(results)
+            } else {
+                let (kind, bytecode_data) =
+                    self.heap.function_dispatch_data(handle).ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "function handle is missing",
+                        })
+                    })?;
+                self.call_function_kind_with_site_resumable(
+                    program,
+                    iterator,
+                    handle,
+                    kind,
+                    bytecode_data,
+                    &[state, control],
+                    depth,
+                    None,
+                    fuel,
+                )?
+            }
+        } else {
+            self.call_value_with_site_resumable(
+                program,
+                iterator,
+                &[state, control],
+                depth,
+                None,
+                fuel,
+            )?
+        };
+        let results = match flow {
             VmFlow::Call(request) => return Ok(CallIteratorStep::Call(request)),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
@@ -19933,7 +19912,7 @@ impl Vm {
     #[allow(clippy::too_many_arguments)]
     fn try_builtin_iterator_step(
         &mut self,
-        iterator: Value,
+        function: Option<(u32, FunctionKind)>,
         state: Value,
         control: Value,
         registers: &mut [Value],
@@ -19942,11 +19921,10 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Option<bool>> {
-        let Some(handle) = iterator.as_function() else {
-            return Ok(None);
-        };
-        let Some(FunctionKind::Native(native @ (NativeFunction::Next | NativeFunction::INext))) =
-            self.heap.function_kind(handle)
+        let Some((
+            handle,
+            FunctionKind::Native(native @ (NativeFunction::Next | NativeFunction::INext)),
+        )) = function
         else {
             return Ok(None);
         };
@@ -20091,6 +20069,95 @@ impl Vm {
         for _ in 0..steps {
             self.executed_instructions = self.executed_instructions.wrapping_add(1);
             self.maybe_collect_with_roots(&[root])?;
+        }
+        Ok(())
+    }
+
+    // Keep string-library implementation bodies outside the main dispatch loop.
+    // Fuel charges and error locations stay in their original order.
+    #[inline(never)]
+    fn execute_string_opcode(
+        &mut self,
+        registers: &mut [Value],
+        instruction: Instruction,
+        pc: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<()> {
+        match instruction.op {
+            Opcode::StringSub => {
+                let value = self
+                    .string_sub(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringLen => {
+                let text = self
+                    .builtin_string_arg(Some(get_register(registers, instruction.b)?), 0, "len")
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, Value::number(text.len() as f64))
+                    .map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringByte => {
+                let value = self
+                    .string_byte(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringUpper => {
+                let mut text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                text.make_ascii_uppercase();
+                let string = self.heap.intern_string_value_bytes(&text);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringLower => {
+                let mut text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                text.make_ascii_lowercase();
+                let string = self.heap.intern_string_value_bytes(&text);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringReverse => {
+                let text = self
+                    .coerce_to_string(registers, instruction.b)
+                    .map_err(|e| e.at_pc(pc))?;
+                let reversed = reverse_string_bytes(&text).map_err(|e| e.at_pc(pc))?;
+                let string = self.heap.intern_string_value_bytes(&reversed);
+                set_register(registers, instruction.a, string).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringRep => {
+                let args = [
+                    get_register(registers, instruction.b).map_err(|e| e.at_pc(pc))?,
+                    get_register(registers, instruction.c).map_err(|e| e.at_pc(pc))?,
+                ];
+                let extra_fuel = self.native_string_rep_fuel(&args);
+                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)
+                    .map_err(|e| e.at_pc(pc))?;
+                let value = self
+                    .string_rep(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringFind => {
+                let extra_fuel = self
+                    .string_find_opcode_fuel(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)
+                    .map_err(|error| error.at_pc(pc))?;
+                let value = self
+                    .string_find(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            Opcode::StringSplit => {
+                let value = self
+                    .string_split(registers, instruction)
+                    .map_err(|e| e.at_pc(pc))?;
+                set_register(registers, instruction.a, value).map_err(|e| e.at_pc(pc))?;
+            }
+            _ => unreachable!("string opcode dispatch is exhaustive"),
         }
         Ok(())
     }
@@ -26063,8 +26130,10 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
 }
 
 fn string_library_index(value: f64) -> Result<i64> {
-    let value = value.trunc();
-    if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
+    // The half-open range also rejects NaN and infinities. At either boundary,
+    // f64 spacing exceeds one, so checking before truncation is equivalent.
+    // The checked cast below supplies truncation without a separate operation.
+    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
         return Err(Error::new(ErrorKind::TypeError {
             expected: "integer string library index",
         }));
@@ -29439,6 +29508,127 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn unary_math_entries_validate_before_reading_values() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for args in [Vec::new(), vec![Value::nil(); 256]] {
+            let error = vm.native_math_unary(&args, MathUnary::Floor).unwrap_err();
+            assert!(matches!(
+                error.kind,
+                ErrorKind::TypeError {
+                    expected: "math argument"
+                }
+            ));
+        }
+        let mut args = vec![Value::nil(); 255];
+        args[0] = Value::number(2.75);
+        assert_eq!(
+            vm.native_math_unary(&args, MathUnary::Floor)
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+        let error = vm
+            .math_unary(
+                &[],
+                Instruction::with_aux(Opcode::MathFloor, 0, 7, 0, 0),
+                MathUnary::Floor,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error.kind,
+            ErrorKind::InvalidProgram {
+                reason: "invalid one-argument math arity"
+            }
+        ));
+        let error = vm
+            .math_unary(
+                &[],
+                Instruction::with_aux(Opcode::MathFloor, 0, 7, 0, 1),
+                MathUnary::Floor,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RegisterOutOfBounds {
+                register: 7,
+                max: 0
+            }
+        ));
+    }
+
+    #[test]
+    fn iterator_function_resolution_preserves_error_precedence() {
+        let program = closure_call_counter_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm.retain_dynamic_program(program.clone()).unwrap();
+        let cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let bytecode = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(1.0)),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let next = native_function_value(&mut vm.heap, NativeFunction::Next, vm.globals);
+        let missing = Value::function(u32::MAX);
+        let too_deep = vm.settings.recursion_limit + 1;
+        for (callee, count, depth, expected) in [
+            (missing, 1, too_deep, 1),
+            (Value::function(bytecode), 2, too_deep, 2),
+            (missing, 4, too_deep, 3),
+            (Value::function(bytecode), 4, too_deep, 3),
+            (next, 4, too_deep, 3),
+            (Value::boolean(false), 4, too_deep, 3),
+            (missing, 4, 0, 4),
+            (next, 4, 0, 5),
+        ] {
+            let mut registers = vec![Value::nil(); count];
+            registers[0] = callee;
+            let mut cells = vec![None; count];
+            test_execution!(fuel = None);
+            let error = vm
+                .call_iterator_step(CallIteratorStepContext {
+                    program: &program,
+                    registers: &mut registers,
+                    register_cells: &mut cells,
+                    window: CallIteratorRegisters::generic(0, 1).unwrap(),
+                    depth,
+                    fuel: &mut fuel,
+                    invalid_callee: InvalidIteratorCallee::Call,
+                    sync_caller_cells: true,
+                })
+                .err()
+                .expect("invalid iterator call must fail");
+            match expected {
+                1 | 2 => assert!(matches!(error.kind,
+                    ErrorKind::RegisterOutOfBounds { register, max }
+                    if register == expected && max == count)),
+                3 => assert!(matches!(error.kind, ErrorKind::RecursionLimit { .. })),
+                4 => assert!(matches!(
+                    error.kind,
+                    ErrorKind::InvalidProgram {
+                        reason: "function handle is missing"
+                    }
+                )),
+                5 => assert!(matches!(
+                    error.kind,
+                    ErrorKind::TypeError { expected: "table" }
+                )),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                vm.heap.upvalue_get(cell).and_then(Value::as_number),
+                Some(7.0)
+            );
+        }
+    }
+
+    #[test]
     fn array_iterator_index_uses_exact_i32_round_trip_bounds() {
         assert_eq!(array_iterator_index(1.0), Some(1));
         assert_eq!(
@@ -30160,6 +30350,46 @@ mod inline_cache_tests {
         program
     }
 
+    fn closure_call_with_cell_free_caller_program() -> Program {
+        let mut program = closure_call_counter_program();
+        program.functions.push(Function::with_params_and_upvalues(
+            vec![
+                Instruction::with_aux(Opcode::Call, 1, 0, 0, 0),
+                Instruction::new(Opcode::Return, 1, 1, 0),
+                Instruction::new(Opcode::Return, 0, 0, 0),
+            ],
+            2,
+            1,
+            Vec::new(),
+            Vec::new(),
+        ));
+        program
+    }
+
+    fn call_cell_free_caller(program: &Program, vm: &mut Vm) -> Value {
+        let program_id = vm.retain_dynamic_program(program.clone()).unwrap();
+        let cell = vm.heap.alloc_upvalue(Value::number(0.0)).unwrap();
+        let leaf = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(1.0)),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let caller = vm
+            .heap
+            .alloc_function(Some(program_id), 1, Vec::new(), vm.globals)
+            .unwrap();
+        vm.maybe_collect().unwrap();
+        vm.call_function(program, Value::function(caller), &[Value::function(leaf)])
+            .unwrap()
+    }
+
     /// The `ArrayIterator` leaf shape: `i = i + 1; if i <= #items then return
     /// i, items[i] end`, with `i` a parent cell (upvalue 0) and `items` a
     /// parent value (upvalue 1).
@@ -30287,6 +30517,7 @@ mod inline_cache_tests {
 
         let mut interpreted = Vm::new(Profile::ReproducibleStandard);
         interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        interpreted.tape_mode = TapeTestMode::Off;
         let interpreted_result = interpreted.run(&program).unwrap();
 
         assert_eq!(fast_result.as_number(), Some(16.0));
@@ -30295,7 +30526,13 @@ mod inline_cache_tests {
             fast.executed_instructions,
             interpreted.executed_instructions
         );
+        assert!(program.main.captured_registers.is_empty());
         let fast_loaded = &fast.dynamic_programs[0];
+        assert_eq!(fast_loaded.may_attach_local_cells(None), Some(true));
+        assert!(
+            fast_loaded.tape_entries > 0,
+            "tape hands off to scalar leaf calls"
+        );
         assert_eq!(fast_loaded.closure_call_cache_fills, 1);
         assert_eq!(fast_loaded.closure_call_prototype_hits, 15);
         assert_eq!(fast_loaded.closure_call_fast_entries, 16);
@@ -30305,6 +30542,88 @@ mod inline_cache_tests {
         assert_eq!(interpreted_loaded.closure_call_prototype_hits, 0);
         assert_eq!(interpreted_loaded.closure_call_fast_entries, 0);
         assert_eq!(interpreted_loaded.closure_call_guard_exits, 0);
+    }
+
+    #[test]
+    fn cell_free_caller_skips_leaf_register_scan_without_changing_results_or_units() {
+        let program = closure_call_with_cell_free_caller_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = call_cell_free_caller(&program, &mut fast);
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = call_cell_free_caller(&program, &mut interpreted);
+
+        assert_eq!(fast_result.as_number(), Some(1.0));
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(
+            fast.dynamic_programs[0].may_attach_local_cells(Some(1)),
+            Some(false)
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 1);
+        assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn local_cell_scan_proof_uses_bytecode_and_treats_load_function_conservatively() {
+        let main = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let no_cell = Function::with_params_and_upvalues(
+            vec![Instruction::new(Opcode::Halt, 0, 0, 0)],
+            1,
+            0,
+            Vec::new(),
+            vec![0],
+        );
+        let get_cell = Function::new(
+            vec![
+                Instruction::new(Opcode::GetLocalCell, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let set_cell = Function::new(
+            vec![
+                Instruction::new(Opcode::SetLocalCell, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let bad_load = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, i32::MAX),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let program = Program::with_functions(
+            main,
+            Vec::new(),
+            vec![no_cell, get_cell, set_cell, bad_load],
+        );
+        let loaded = LoadedProgram::new(program);
+
+        assert_eq!(loaded.may_attach_local_cells(None), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(0)), Some(false));
+        assert_eq!(loaded.may_attach_local_cells(Some(1)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(2)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(3)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(usize::MAX as u32)), None);
+        assert!(!loaded.closure_call_inline_cache(Some(0), 0, 0, 0).1);
+        assert!(loaded.closure_call_inline_cache(Some(3), 0, 0, 0).1);
+        assert!(loaded.closure_call_inline_cache(Some(u32::MAX), 0, 0, 0).1);
+        let vm = Vm::new(Profile::ReproducibleStandard);
+        assert!(vm.closure_call_inline_cache(u32::MAX, None, 0, 0, 0).1);
     }
 
     #[test]
@@ -30566,6 +30885,185 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn array_iterator_table_guard_precedes_index_mutation() {
+        for profile in [
+            Profile::LuauCompat,
+            Profile::ReproducibleStandard,
+            Profile::DeterministicSim,
+            Profile::Puc51Compat,
+        ] {
+            let mut vm = Vm::new(profile);
+            let items = if profile == Profile::Puc51Compat {
+                vm.heap
+                    .try_alloc_puc_table_from_parts(vec![Value::number(10.0)], 8)
+                    .unwrap()
+            } else {
+                vm.heap.alloc_array_table(&[Value::number(10.0)])
+            };
+            let metatable = vm.heap.alloc_array_table(&[]);
+            vm.heap.table_set_metatable(items, Some(metatable)).unwrap();
+            let index_cell = vm.heap.alloc_upvalue(Value::number(0.0)).unwrap();
+            let items_cell = vm.heap.alloc_upvalue(Value::table(items)).unwrap();
+            let index_capture = FunctionCapture::from_cell(index_cell);
+            let items_capture = FunctionCapture::from_cell(items_cell);
+            let plan = LeafCallPlan::ArrayIterator {
+                index_upvalue: 0,
+                items_upvalue: 1,
+                increment: 1.0,
+            };
+            let before = vm.executed_instructions;
+            assert!(vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(0.0)
+            );
+            vm.heap
+                .upvalue_set(items_cell, Value::table(u32::MAX))
+                .unwrap();
+            assert!(vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(0.0)
+            );
+            assert_eq!(vm.executed_instructions, before);
+
+            vm.heap.table_set_metatable(items, None).unwrap();
+            vm.heap
+                .upvalue_set(items_cell, Value::table(items))
+                .unwrap();
+            let outcome = vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .unwrap();
+            assert_eq!(outcome.first.as_number(), Some(1.0));
+            assert_eq!(outcome.second.as_number(), Some(10.0));
+            assert_eq!(outcome.result_count, 2);
+            assert_eq!(outcome.instruction_count, 19);
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn array_iterator_leaf_reads_match_scalar_numeric_lookup() {
+        for profile in [
+            Profile::LuauCompat,
+            Profile::ReproducibleStandard,
+            Profile::DeterministicSim,
+            Profile::Puc51Compat,
+        ] {
+            for (start, hole, expected) in [
+                (0.0, false, Some(10.0)),
+                (0.0, true, None),
+                (-0.5, false, Some(77.0)),
+                (-2.0, false, Some(88.0)),
+                (-1.0, false, Some(99.0)),
+                (2.0, false, None),
+                (3.0, false, Some(44.0)),
+            ] {
+                if start == 3.0 && profile != Profile::Puc51Compat {
+                    continue;
+                }
+                let program = closure_call_array_iterator_closure_program();
+                let mut results = Vec::new();
+                for mode in [ClosureCallTestMode::Force, ClosureCallTestMode::Off] {
+                    let mut vm = Vm::new(profile);
+                    vm.closure_call_mode = mode;
+                    let id = vm.retain_dynamic_program(program.clone()).unwrap();
+                    let values = [
+                        if hole {
+                            Value::nil()
+                        } else {
+                            Value::number(10.0)
+                        },
+                        Value::number(20.0),
+                    ];
+                    let table = if profile == Profile::Puc51Compat {
+                        vm.heap
+                            .try_alloc_puc_table_from_parts(values.to_vec(), 8)
+                            .unwrap()
+                    } else {
+                        vm.heap.alloc_array_table(&values)
+                    };
+                    if start == 3.0 {
+                        vm.heap
+                            .table_set(table, Value::number(3.0), Value::number(33.0))
+                            .unwrap();
+                        vm.heap
+                            .table_set(table, Value::number(4.0), Value::number(44.0))
+                            .unwrap();
+                        assert!(vm.heap.read_numeric_array_slot(table, 4).is_none());
+                        assert_eq!(vm.heap.array_len(table), Some(4));
+                    }
+                    for (key, value) in [(0.5, 77.0), (-1.0, 88.0), (0.0, 99.0)] {
+                        vm.heap
+                            .table_set(table, Value::number(key), Value::number(value))
+                            .unwrap();
+                    }
+                    let cell = vm.heap.alloc_upvalue(Value::number(start)).unwrap();
+                    let handle = vm
+                        .heap
+                        .alloc_function(
+                            Some(id),
+                            0,
+                            vec![
+                                FunctionCapture::from_cell(cell),
+                                FunctionCapture::direct(Value::table(table)),
+                            ],
+                            vm.globals,
+                        )
+                        .unwrap();
+                    // Enter just after a normal collection boundary so debt
+                    // cannot turn this into a fallback-only test.
+                    vm.executed_instructions = vm.next_weak_collection_instruction;
+                    vm.maybe_collect_with_roots(&[Value::function(handle)])
+                        .unwrap();
+                    test_execution!(execution = None);
+                    let returned = vm
+                        .call_value(&program, Value::function(handle), &[], 0, &mut execution)
+                        .unwrap();
+                    if start == 2.0 {
+                        assert!(returned.is_empty());
+                    } else {
+                        assert_eq!(returned.len(), 2, "{profile:?} start={start} hole={hole}");
+                        assert_eq!(returned[0].as_number(), Some(start + 1.0));
+                        if hole {
+                            assert!(returned[1].is_nil());
+                        }
+                        assert_eq!(
+                            returned[1].as_number(),
+                            expected,
+                            "{profile:?} start={start} hole={hole}"
+                        );
+                    }
+                    assert_eq!(
+                        vm.heap
+                            .capture_get(FunctionCapture::from_cell(cell))
+                            .unwrap()
+                            .as_number(),
+                        Some(start + 1.0)
+                    );
+                    results.push((
+                        vm.executed_instructions,
+                        vm.dynamic_programs[id as usize].leaf_call_value_entries,
+                    ));
+                }
+                assert_eq!(results[0].0, results[1].0);
+                assert_eq!(results[0].1, 1, "{profile:?} start={start} hole={hole}");
+                assert_eq!(results[1].1, 0);
+            }
+        }
+    }
+
+    #[test]
     fn leaf_call_value_path_records_census_and_matches_interpreter() {
         let program = closure_call_array_iterator_closure_program();
         let mut fast = Vm::new(Profile::ReproducibleStandard);
@@ -30792,7 +31290,7 @@ mod inline_cache_tests {
         for round in 2..=3 {
             for (index, closure) in closures.iter().copied().enumerate() {
                 let registers = [Value::nil(), closure];
-                let outcome = vm
+                let (outcome, may_attach_local_cells) = vm
                     .try_closure_call_scalar(
                         program_id,
                         None,
@@ -30809,6 +31307,7 @@ mod inline_cache_tests {
                     outcome.first.as_number(),
                     Some(f64::from(round * (index as i32 + 1)))
                 );
+                assert!(!may_attach_local_cells);
             }
         }
 
@@ -30852,6 +31351,7 @@ mod inline_cache_tests {
             )
             .unwrap()
             .unwrap()
+            .0
             .first
             .as_number(),
             Some(11.0)
@@ -30870,6 +31370,7 @@ mod inline_cache_tests {
             )
             .unwrap()
             .unwrap()
+            .0
             .first
             .as_number(),
             Some(16.0)
@@ -30894,8 +31395,8 @@ mod inline_cache_tests {
         sync_leaf_mutation_to_registers(
             &mut alias_registers,
             &alias_cells,
-            outcome.mutation_cell,
-            outcome.first,
+            outcome.0.mutation_cell,
+            outcome.0.first,
         );
         assert_eq!(alias_registers[0].as_number(), Some(4.0));
         assert_eq!(alias_registers[1].as_number(), Some(4.0));
@@ -30977,6 +31478,37 @@ mod inline_cache_tests {
         assert_eq!(loaded.closure_call_cache_fills, 1);
         assert_eq!(loaded.closure_call_fast_entries, 0);
         assert_eq!(loaded.closure_call_guard_exits, 1);
+
+        // A warmed prototype cache must still read this closure's captures.
+        // Missing captures leave the cell untouched and retain hit/guard counts.
+        for captures in [vec![], vec![FunctionCapture::from_cell(value_cell)]] {
+            let incomplete = vm
+                .heap
+                .alloc_function(Some(program_id), 0, captures, vm.globals)
+                .unwrap();
+            assert!(vm
+                .try_closure_call_scalar(
+                    program_id,
+                    None,
+                    0,
+                    &[Value::nil(), Value::function(incomplete)],
+                    instruction,
+                    0,
+                    1,
+                    &mut fuel,
+                )
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+                Some(7.0)
+            );
+        }
+        let loaded = &vm.dynamic_programs[program_id as usize];
+        assert_eq!(loaded.closure_call_cache_fills, 1);
+        assert_eq!(loaded.closure_call_prototype_hits, 2);
+        assert_eq!(loaded.closure_call_fast_entries, 0);
+        assert_eq!(loaded.closure_call_guard_exits, 3);
 
         let mut fuelled = Vm::with_settings(
             Profile::ReproducibleStandard,
@@ -31074,7 +31606,7 @@ mod inline_cache_tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(
-                    outcome.first.as_number(),
+                    outcome.0.first.as_number(),
                     Some((index as f64 + 1.0) * 10.0 + f64::from(round))
                 );
             }

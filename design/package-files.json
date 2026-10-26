@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 534,
+      "file_count": 535,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -533,6 +533,7 @@
         "workloads/luau/19_todo_steady.luau",
         "workloads/luau/20_todo_history.luau",
         "workloads/luau/21_todo_retained_control.luau",
+        "workloads/luau/24_string_opcodes.luau",
         "workloads/luau/EGM.md",
         "workloads/rhai/01_dense_tables.rhai",
         "workloads/rhai/02_sparse_tables.rhai",
@@ -1455,7 +1456,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 77,
+      "file_count": 78,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1523,6 +1524,7 @@
         "tests/method_callee_order.rs",
         "tests/mixed_heap_pressure.rs",
         "tests/module_resolution.rs",
+        "tests/numeric_index_contract.rs",
         "tests/platform_golden.rs",
         "tests/puc51_compat.rs",
         "tests/settings_api.rs",

@@ -2,9 +2,24 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-26.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-27.)
 
 ## One-paragraph state
+
+PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
+sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).
+Iteration, closures and math/table improve; dense and sparse tables have 99%
+intervals spanning zero. All unchanged material-regression thresholds are
+excluded, with flagged baseline outliers retained. Independent raw-data and
+exact-head correctness audits pass, including native Linux ARM64 and manual
+Windows contracts with matching goldens. Supplemental eight-pair string acceptance
+[40407374105](https://github.com/slowchop/rustia/actions/runs/40407374105) also
+passes, measuring -2.11% [-4.19%, -1.33%] at 99% confidence. Performance and
+exact-runtime correctness are accepted. Delivery uses current-head CI and
+required merge gates. Earlier failures, the rejected first tape handoff,
+and the final direct comparison remain in [95](95-numeric-index-contract.md);
+platform evidence is in [96](96-browser-platform-acceptance.md).
+
 
 The follow-up compatibility, benchmark and application API audit is recorded in
 [`94-release-compatibility-audit.md`](94-release-compatibility-audit.md).
@@ -14,9 +29,27 @@ its 99% interval spanning zero. The fresh 13-engine comparison measured that
 merge and landed in PR #71; the README now cites its immutable cohort.
 Application review retained the accepted API and corrected WOTS's ignored
 per-call fuel limit through the existing invocation API; closeout PR #72 merged.
-The next diagnostic follow-up fixes all 13 recorded differences against the
-pinned Luau oracle (27 original cases now match), with expanded validation-order
-and alias coverage. Final CI, review and remote screening remain delivery gates.
+PR #73 merged as `90bc2ae4` after required CI and remote benchmark screening
+passed. It fixes all 13 recorded diagnostic differences against the pinned Luau
+oracle (27 original cases match), with expanded validation-order and alias coverage.
+PR #74 corrects signed-64 string-index conversion at `2^63` while retaining
+fraction truncation and all four profile contracts. Its final runtime extracts
+string-opcode bodies, reads the caller-cell proof with the existing call cache,
+shares unary math value operations, borrows scalar-leaf metadata, reuses iterator
+function resolution, and admits the predecoded tape before canonical fetching
+with a direct completion handoff. These use the existing executors and preserve
+fuel, collection, error and continuation contracts. Rejected experiments and superseded
+candidates, including their retained regression coverage, remain documented in
+[95](95-numeric-index-contract.md).
+The direct original-baseline main-workload and supplemental string comparisons
+pass. Delivery uses current-head CI and required merge gates. All exact-runtime
+platform contracts pass on Linux ARM64, Mac ARM64, Windows x86-64, Node and headless WebKit
+with matching goldens. Intel Mac and mobile runtime execution remain open release
+gates, and real Safari is checked for release candidates rather than each PR.
+See [96](96-browser-platform-acceptance.md) for exact revisions and test counts.
+Validation now partitions the same command inventory into early checks, workspace
+tests and release checks. Local pre-push validation uses the same inventory;
+the required CI status waits for every stage. See [97](97-validation-workflow.md).
 The broader public-release audit remains open; this is not full Luau parity or
 authorization to publish packages.
 
@@ -245,7 +278,7 @@ headline. All 8 architecture axes are decided
 ([`30-architecture.md`](30-architecture.md) v3), 10 conformance-verified improvements are adopted
 ([`55-improvements.md`](55-improvements.md)), the no-unsafe SotA performance research stack is now captured in
 [`56-performance-research.md`](56-performance-research.md), and the standalone benchmark harness has the engine/workload/history
-shell, generated current-results HTML report, 19 workload entries including cross-adapter `string_building` source coverage and
+shell, generated current-results HTML report, 20 workload entries including cross-adapter `string_building` source coverage and
 six synthetic/realistic memory workloads, and
 the `rustia`/`boa`/`koto`/`luaur`/`mlua-lua54`/`mlua-luau`/`rhai`/`roto`/`ruau`/`rquickjs`/`wasmi`/`wasmtime` native adapters in
 place.
@@ -683,7 +716,7 @@ unreachable suspended-coroutine frames.
    The run used a simplified protocol without the paired qualification, idle gate or cooldowns; those
    should be wired into a runner workflow before it becomes the standing protocol.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   The runner already exposes the requested engine matrix, five default workloads, 19 workload entries including
+   The runner already exposes the requested engine matrix, five default workloads, 20 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
    versus `br_table` dispatch microbench, and an explicit dedicated-Linode native-plus-wasm matrix lifecycle.

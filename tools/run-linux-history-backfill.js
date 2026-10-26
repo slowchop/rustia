@@ -48,6 +48,10 @@ const WORKLOADS = Object.freeze([
   "generic_iteration",
   "stdlib_math_table",
 ]);
+const STRING_WORKLOADS = Object.freeze(["string_opcodes"]);
+const STRING_WORKLOAD_FILES = Object.freeze({
+  string_opcodes: "bench/workloads/luau/24_string_opcodes.luau",
+});
 const WORKLOAD_FILES = Object.freeze({
   dense_tables: "bench/workloads/luau/01_dense_tables.luau",
   sparse_tables: "bench/workloads/luau/02_sparse_tables.luau",
@@ -786,7 +790,7 @@ function timedGatePasses(gate, delta) {
   return delta.steal_percent <= gate.maximum_timed_steal_percent;
 }
 
-function measurementArgs(config, build, historyFile, samplesFile) {
+function measurementArgs(config, build, historyFile, samplesFile, workloads = WORKLOADS) {
   return [
     "-c",
     String(config.host_gate.benchmark_cpu),
@@ -794,7 +798,7 @@ function measurementArgs(config, build, historyFile, samplesFile) {
     "--engines",
     "rustia",
     "--workloads",
-    WORKLOADS.join(","),
+    workloads.join(","),
     "--reps",
     String(config.measurement.repetitions),
     "--history",
@@ -810,18 +814,65 @@ function measurementArgs(config, build, historyFile, samplesFile) {
   ];
 }
 
-function measureOne(config, build, attemptDirectory) {
+// Only Rustia symbol-relative locations leave the private perf recording.
+// No absolute IPs, process names, paths, or raw perf metadata are exported.
+function validateCycleRecords(text) {
+  if (/^\d+ 0x[0-9a-f]+ \[0x[0-9a-f]+\]: PERF_RECORD_(?:THROTTLE|UNTHROTTLE|LOST|LOST_SAMPLES)\b/m.test(text)) {
+    fail("cycle sampling lost or throttled events; raw recording retained");
+  }
+}
+
+function summarizeCycleLocations(text) {
+  const counts = new Map();
+  let other = 0;
+  let total = 0;
+  let totalPeriod = 0;
+  let otherPeriod = 0;
+  for (const line of text.split("\n")) {
+    const value = line.trim();
+    if (!value) continue;
+    if (/PERF_RECORD_LOST|LOST_SAMPLES/.test(value)) fail("cycle sampling lost events");
+    // perf needs the IP field to render symbols; discard the absolute address.
+    const fields = /^(\d+)\s+(?:0x)?[0-9a-f]+(?:\s+(.*))?$/.exec(value);
+    const period = fields ? Number(fields[1]) : NaN;
+    if (!Number.isSafeInteger(period) || period <= 0) fail("invalid cycle sample period");
+    total += 1;
+    totalPeriod += period;
+    if (!Number.isSafeInteger(totalPeriod)) fail("cycle sample period sum overflow");
+    const match = /^((_ZN[A-Za-z0-9_$.]+E(?:\.llvm\.[0-9]+)?|_R[A-Za-z0-9_]+(?:\.llvm\.[0-9]+)?)\+0x[0-9a-f]+)$/.exec(fields[2]);
+    if (!match || !match[2].includes("rustia")) {
+      other += 1;
+      otherPeriod += period;
+      continue;
+    }
+    const count = counts.get(match[1]) ?? { samples: 0, sample_period_sum: 0 };
+    count.samples += 1;
+    count.sample_period_sum += period;
+    counts.set(match[1], count);
+  }
+  if (total === 0 || counts.size === 0) fail("cycle sampling has no resolved Rustia locations");
+  return { total_samples: total, other_samples: other,
+    total_sample_period: totalPeriod, other_sample_period: otherPeriod,
+    locations: [...counts].sort(([a], [b]) => a.localeCompare(b))
+      .map(([location, count]) => ({ location, ...count })) };
+}
+
+function measureOne(config, build, attemptDirectory, options = {}) {
+  const workloads = options.workloads ?? WORKLOADS;
+  const fixedN = options.fixedN;
+  const profile = options.perf === true;
+  const cycleSampling = options.privateSampleDirectory !== undefined;
   const historyFile = path.join(attemptDirectory, `${build.commit}.jsonl`);
   const samplesFile = path.join(attemptDirectory, `${build.commit}-samples.json`);
-  for (const workload of WORKLOADS) {
+  for (const workload of workloads) {
     const workloadHistory = path.join(attemptDirectory, `${build.commit}-${workload}.jsonl`);
     const workloadSamples = path.join(attemptDirectory, `${build.commit}-${workload}-samples.json`);
-    const args = measurementArgs(config, build, workloadHistory, workloadSamples);
+    const args = measurementArgs(config, build, workloadHistory, workloadSamples, workloads);
     args.push(
       "--workloads",
       workload,
       "--fixed-n",
-      String(config.measurement.fixed_n[workload]),
+      String(fixedN ?? config.measurement.fixed_n[workload]),
     );
     // Measure from the harness worktree, not from a revision's build tree. The
     // harness commit is what pins the workload files, and every revision was
@@ -836,10 +887,35 @@ function measureOne(config, build, attemptDirectory) {
     if (!fs.existsSync(HARNESS)) {
       fail(`harness worktree ${HARNESS} is missing; cannot measure`);
     }
-    run("taskset", args, {
+    const perfFile = path.join(attemptDirectory, `${build.commit}-${workload}-perf.csv`);
+    const privatePerfFile = cycleSampling
+      ? path.join(options.privateSampleDirectory, `${build.commit}-${workload}.data`) : null;
+    const command = profile || cycleSampling ? "perf" : "taskset";
+    const commandArgs = cycleSampling
+      ? ["record", "-e", "cycles:u", "-F", "997", "-o", privatePerfFile,
+        "--", "taskset", ...args]
+      : profile
+      ? ["stat", "-x", ",", "-o", perfFile, "-e",
+        "cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u,cache-misses:u", "--", "taskset", ...args]
+      : args;
+    const measured = run(command, commandArgs, {
       cwd: HARNESS,
-      capture: false,
+      capture: cycleSampling,
     });
+    // perf record's success diagnostics include the private raw-file path.
+    if (cycleSampling) process.stdout.write(measured.stdout);
+    if (cycleSampling) {
+      // Raw dump stays in memory; never export process/host metadata. Reject
+      // loss and throttling before comparing period-weighted locations.
+      validateCycleRecords(runText("perf", ["script", "-D", "-i", privatePerfFile]));
+      const locations = runText("perf", ["script", "-i", privatePerfFile,
+        "--no-demangle", "--show-lost-events", "-F", "period,ip,sym,symoff"]);
+      writeJson(path.join(attemptDirectory, `${build.commit}-${workload}-locations.json`), {
+        schema: "rustia.bench.cycle-locations.v2", commit: build.commit, workload,
+        event: "cycles:u", requested_frequency_hz: 997, raw_sha256: sha256File(privatePerfFile),
+        ...summarizeCycleLocations(locations),
+      });
+    }
     fs.appendFileSync(historyFile, fs.readFileSync(workloadHistory));
     const sample = loadJson(workloadSamples, `${build.commit}/${workload} samples`);
     const combined = fs.existsSync(samplesFile)
@@ -864,9 +940,10 @@ function parseHistory(file) {
   });
 }
 
-function validateRows(config, builds, rows) {
-  if (rows.length !== config.publication.rows) {
-    fail(`history backfill produced ${rows.length} rows, expected ${config.publication.rows}`);
+function validateWorkloadRows(config, builds, rows, workloads, fixedN, expectedChecksums) {
+  const expectedRows = builds.length * workloads.length;
+  if (rows.length !== expectedRows) {
+    fail(`history backfill produced ${rows.length} rows, expected ${expectedRows}`);
   }
   const positions = new Map(builds.map((build, index) => [build.commit, index]));
   const slots = new Set();
@@ -882,17 +959,19 @@ function validateRows(config, builds, rows) {
           `${JSON.stringify(config.provider.host.name)}`,
       );
     }
-    if (!WORKLOADS.includes(row.workload)) fail(`history row ${index + 1} has an unknown workload`);
-    if (row.n !== config.measurement.fixed_n[row.workload]) {
+    if (!workloads.includes(row.workload)) fail(`history row ${index + 1} has an unknown workload`);
+    if (row.n !== fixedN[row.workload]) {
       fail(`history row ${index + 1} has the wrong fixed N`);
     }
     if (row.reps !== config.measurement.repetitions) {
       fail(`history row ${index + 1} has the wrong repetition count`);
     }
-    if (row.checksum !== config.measurement.expected_checksums[row.workload]) {
+    requireString(row.checksum, `history row ${index + 1}.checksum`);
+    const expectedChecksum = expectedChecksums?.[row.workload];
+    if (expectedChecksum !== undefined && row.checksum !== expectedChecksum) {
       fail(
         `history row ${index + 1} checksum ${row.checksum} does not match ` +
-          config.measurement.expected_checksums[row.workload],
+          expectedChecksum,
       );
     }
     for (const field of ["ns_per_unit_min", "ns_per_unit_median", "units_per_sec"]) {
@@ -903,12 +982,25 @@ function validateRows(config, builds, rows) {
     slots.add(slot);
   }
   for (const build of builds) {
-    for (const workload of WORKLOADS) {
+    for (const workload of workloads) {
       if (!slots.has(`${build.commit}\0${workload}`)) {
         fail(`history backfill is missing ${build.commit}/${workload}`);
       }
     }
   }
+}
+
+function validateRows(config, builds, rows) {
+  if (rows.length !== config.publication.rows) {
+    fail(`history backfill produced ${rows.length} rows, expected ${config.publication.rows}`);
+  }
+  return validateWorkloadRows(config, builds, rows, WORKLOADS, config.measurement.fixed_n,
+    config.measurement.expected_checksums);
+}
+
+function validateStringLeg(config, build, rows) {
+  return validateWorkloadRows(config, [build], rows, STRING_WORKLOADS,
+    Object.fromEntries(STRING_WORKLOADS.map((workload) => [workload, 10_000])));
 }
 
 function median(sortedValues) {
@@ -1203,7 +1295,126 @@ function resetWorkingState() {
   fs.rmSync(EXPORT_ARCHIVE, { force: true });
 }
 
-async function execute(configFile, providerFile, bundle) {
+function validatePerfCounters(csv) {
+  const expected = ["cycles", "instructions", "branches", "branch-misses", "cache-references", "cache-misses"];
+  const rows = csv.split("\n").filter((line) => line && !line.startsWith("#")).map((line) => line.split(","));
+  for (const event of expected) {
+    const row = rows.find((fields) => fields[2]?.trim().split(":")[0] === event);
+    if (!row || !/^\d+(?:\.\d+)?$/.test(row[0].trim())) fail(`missing or unsupported perf counter: ${event}`);
+  }
+}
+
+// Counter totals include harness startup/compilation and warmup. Use them only
+// to locate a mechanism, never as substitutes for uninstrumented acceptance.
+async function profilePair(config, builds, startedAtMs) {
+  if (builds.length !== 2) fail("profiling requires exactly two revisions");
+  const gateFile = path.join(EVIDENCE, "profile-gate.jsonl");
+  fs.writeFileSync(gateFile, "");
+  const order = [0, 1, 1, 0];
+  for (const [leg, index] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "hardware counter diagnostics");
+    await waitForQuiet(config, gateFile, leg + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `profile-${leg}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    const output = measureOne(config, builds[index], directory, { perf: true });
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    appendJsonLine(gateFile, { phase: "profile", leg, commit: builds[index].commit,
+      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+    // Validate checksums and complete workload coverage independently per leg.
+    validateRows({ ...config, publication: { ...config.publication, rows: WORKLOADS.length } },
+      [builds[index]], parseHistory(output.historyFile));
+    for (const workload of WORKLOADS) {
+      const counters = fs.readFileSync(path.join(directory, `${builds[index].commit}-${workload}-perf.csv`), "utf8");
+      validatePerfCounters(counters);
+      log(`PROFILE leg=${leg} commit=${builds[index].commit} workload=${workload}\n` +
+        counters);
+    }
+    if (!timedGatePasses(config.host_gate, delta)) fail("profile leg failed steal gate; retained without retry");
+  }
+  // Flat cycle locations target the unresolved iteration cost, including offsets
+  // inside the large dispatcher. Keep original fixed N/repetitions and ABBA.
+  // Frequency mode keeps perf's accounting tick active on tickless CPUs.
+  // Adaptive sample periods are retained as weights; sample counts alone are
+  // not comparable. Raw recordings stay outside EVIDENCE/EXPORT privately.
+  const privateDirectory = fs.mkdtempSync(path.join(ROOT, "private-cycle-profile-"));
+  for (const build of builds) {
+    fs.copyFileSync(build.binary, path.join(privateDirectory, build.commit));
+  }
+  for (const [leg, index] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "cycle location diagnostics");
+    await waitForQuiet(config, gateFile, leg + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `cycle-locations-${leg}`);
+    const privateLeg = path.join(privateDirectory, String(leg));
+    fs.mkdirSync(directory, { recursive: true });
+    fs.mkdirSync(privateLeg, { recursive: true, mode: 0o700 });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    const output = measureOne(config, builds[index], directory, {
+      workloads: ["generic_iteration"], privateSampleDirectory: privateLeg,
+    });
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    appendJsonLine(gateFile, { phase: "cycle-locations", leg, commit: builds[index].commit,
+      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+    const rows = parseHistory(output.historyFile);
+    validateWorkloadRows(config, [builds[index]], rows, ["generic_iteration"],
+      config.measurement.fixed_n, config.measurement.expected_checksums);
+    if (!timedGatePasses(config.host_gate, delta)) fail("sampled leg failed steal gate; retained without retry");
+  }
+}
+
+function captureStringSources(config) {
+  const harnessCommit = runText("git", ["-C", HARNESS, "rev-parse", "HEAD"]);
+  if (harnessCommit !== config.source.harness_commit) {
+    fail(`string workload harness is ${harnessCommit}, expected ${config.source.harness_commit}`);
+  }
+  return {
+    schema: "rustia.bench.string-workload-sources.v1",
+    harness_commit: harnessCommit,
+    workloads: Object.fromEntries(STRING_WORKLOADS.map((workload) => {
+      const relative = STRING_WORKLOAD_FILES[workload];
+      const file = path.join(HARNESS, relative);
+      if (!fs.existsSync(file)) fail(`string workload source is missing: ${relative}`);
+      return [workload, { path: relative, sha256: sha256File(file) }];
+    })),
+  };
+}
+
+async function stringPair(config, builds, startedAtMs) {
+  if (builds.length !== 2) fail("string acceptance requires exactly two revisions");
+  const order = [0, 1, 0, 1, 0, 1, 0, 1];
+  const gateFile = path.join(EVIDENCE, "strings-gate.jsonl");
+  fs.writeFileSync(gateFile, "");
+  writeJson(path.join(EVIDENCE, "string-sources.json"), captureStringSources(config));
+  for (const [pass, firstIndex] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "string acceptance");
+    await waitForQuiet(config, gateFile, pass + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `strings-pass-${pass}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    for (const index of [firstIndex, 1 - firstIndex]) {
+      const output = measureOne(config, builds[index], directory, {
+        workloads: STRING_WORKLOADS,
+        fixedN: 10_000,
+      });
+      validateStringLeg(config, builds[index], parseHistory(output.historyFile));
+    }
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    const accepted = timedGatePasses(config.host_gate, delta);
+    appendJsonLine(gateFile, {
+      phase: "strings",
+      pass,
+      order: [firstIndex, 1 - firstIndex].map((index) => builds[index].commit),
+      ...delta,
+      accepted,
+    });
+    if (!accepted) fail(`string acceptance pass ${pass} failed steal gate; retained without retry`);
+  }
+}
+
+async function execute(configFile, providerFile, bundle, mode = "accept") {
   if (process.platform !== "linux") {
     fail("history backfill runner must execute on Linux");
   }
@@ -1235,25 +1446,42 @@ async function execute(configFile, providerFile, bundle) {
       verifySource(config, bundle);
       installRust();
       log(`building ${config.source.target_commits.length} historical Rustia revisions`);
+      if (mode === "profile" || mode === "strings") {
+        fs.copyFileSync(configFile, path.join(EVIDENCE, "protocol.json"));
+        fs.copyFileSync(providerFile, path.join(EVIDENCE, "provider.json"));
+      }
+      if (mode === "profile") run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
       const builds = buildTargets(config, startedAtMs);
-      // The old runner also stopped and masked apt's periodic timers here.
-      // That is an unrequested, root-only side effect on a machine this
-      // project does not own exclusively for benchmarking; the host_gate
-      // idle/steal checks already reject a run a timer contaminates.
-      log("measuring fixed current workloads across the historical binaries");
-      const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
-      const repeatability = repeatabilityCheck(builds, measurement.rows);
-      publish(config, configFile, providerFile, builds, measurement, EVIDENCE, repeatability);
-      fs.copyFileSync(
-        path.join(EXPORT, "publication/bench/history/backfill.json"),
-        path.join(ROOT, "backfill-publication.json"),
-      );
-      status = {
-        ...status,
-        status: "backfill_complete",
-        detail: "fixed-harness Rustia history backfill completed",
-        finished_at: new Date().toISOString(),
-      };
+      if (mode === "profile" || mode === "strings") {
+        writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
+        writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));
+        if (mode === "profile") await profilePair(config, builds, startedAtMs);
+        else await stringPair(config, builds, startedAtMs);
+        status = { ...status, status: mode === "profile" ? "profile_complete" : "strings_complete",
+          detail: mode === "profile"
+            ? "instrumented diagnostic only; not acceptance or publication evidence"
+            : "supplemental string acceptance completed; not publication evidence",
+          finished_at: new Date().toISOString() };
+      } else if (mode === "accept") {
+        // The old runner also stopped and masked apt's periodic timers here.
+        // That is an unrequested, root-only side effect on a machine this
+        // project does not own exclusively for benchmarking; the host_gate
+        // idle/steal checks already reject a run a timer contaminates.
+        log("measuring fixed current workloads across the historical binaries");
+        const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
+        const repeatability = repeatabilityCheck(builds, measurement.rows);
+        publish(config, configFile, providerFile, builds, measurement, EVIDENCE, repeatability);
+        fs.copyFileSync(
+          path.join(EXPORT, "publication/bench/history/backfill.json"),
+          path.join(ROOT, "backfill-publication.json"),
+        );
+        status = {
+          ...status,
+          status: "backfill_complete",
+          detail: "fixed-harness Rustia history backfill completed",
+          finished_at: new Date().toISOString(),
+        };
+      }
     } catch (error) {
       status = {
         ...status,
@@ -1265,7 +1493,7 @@ async function execute(configFile, providerFile, bundle) {
     } finally {
       exportRun(status, EVIDENCE);
     }
-    return status.status === "backfill_complete" ? 0 : 2;
+    return ["backfill_complete", "profile_complete", "strings_complete"].includes(status.status) ? 0 : 2;
   } finally {
     releaseLock();
   }
@@ -1499,10 +1727,114 @@ async function selfTest() {
     assert.throws(() => validateRows(rowsConfig, builds, badRows));
   }
 
+  {
+    const build = { commit: commitA };
+    const row = {
+      commit: commitA,
+      engine: "rustia",
+      dialect: "luau",
+      target: "linux-x86_64",
+      host: config.provider.host.name,
+      workload: STRING_WORKLOADS[0],
+      n: 10_000,
+      reps: config.measurement.repetitions,
+      checksum: "number:123",
+      ns_per_unit_min: 1,
+      ns_per_unit_median: 1,
+      units_per_sec: 1,
+    };
+    validateStringLeg(config, build, [row]);
+    assert.throws(() => validateStringLeg(config, build, []), /expected 1/);
+    assert.throws(() => validateStringLeg(config, build, [{ ...row, n: 9999 }]), /fixed N/);
+  }
+
   // A runtime budget started in the distant past must trip; one started now must not.
   assert.throws(() => checkRuntimeBudget(config, Date.now() - 999 * 24 * 60 * 60 * 1000, "self-test"));
   checkRuntimeBudget(config, Date.now(), "self-test");
 
+  const counterFixture = ["cycles", "instructions", "branches", "branch-misses", "cache-references", "cache-misses"]
+    .map((event) => `123,,${event},100,100.00`).join("\n");
+  validatePerfCounters(counterFixture);
+  validatePerfCounters(counterFixture.replace(/,100,100.00/g, ":u,100,100.00"));
+  assert.throws(() => validatePerfCounters(counterFixture.replace("123,,cycles", "<not supported>,,cycles")));
+  assert.throws(() => validatePerfCounters(counterFixture.replace(/.*cache-misses.*/, "")));
+  {
+    const row = { commit: commitA, engine: "rustia", dialect: "luau",
+      target: "linux-x86_64", host: config.provider.host.name,
+      workload: "generic_iteration", n: config.measurement.fixed_n.generic_iteration,
+      reps: config.measurement.repetitions,
+      checksum: config.measurement.expected_checksums.generic_iteration,
+      ns_per_unit_min: 1, ns_per_unit_median: 1, units_per_sec: 1 };
+    const validate = (rows) => validateWorkloadRows(config, [{ commit: commitA }], rows,
+      ["generic_iteration"], config.measurement.fixed_n, config.measurement.expected_checksums);
+    validate([row]);
+    assert.throws(() => validate([]));
+    assert.throws(() => validate([{ ...row, n: row.n + 1 }]));
+    assert.throws(() => validate([{ ...row, checksum: "wrong" }]));
+  }
+
+  // Exercise the actual measurement plumbing with in-memory files and a fake
+  // process runner. No benchmark, taskset, or perf process executes locally.
+  for (const options of [{}, { perf: true }, { privateSampleDirectory: "/private-raw" }]) {
+    const files = new Map();
+    const commands = [];
+    const fakeRun = (command, args) => {
+      commands.push([command, args]);
+      const at = (flag) => args[args.indexOf(flag) + 1];
+      files.set(at("--history"), "{}\n");
+      files.set(at("--samples-json"), JSON.stringify({ measurements: [{ workload: "generic_iteration" }] }));
+      return { stdout: "", stderr: "", status: 0 };
+    };
+    const measure = require("node:vm").runInNewContext(`(${measureOne.toString()})`, {
+      WORKLOADS: ["generic_iteration"], HARNESS: "/harness", path, fail,
+      process: { stdout: { write: () => {} } },
+      measurementArgs, run: fakeRun,
+      runText: () => "1000000 deadbeef _ZN9rustia_vm2vm3runE+0x12\n",
+      summarizeCycleLocations, validateCycleRecords, sha256File: () => "a".repeat(64),
+      loadJson: (file) => JSON.parse(files.get(file)),
+      writeJson: (file, value) => files.set(file, JSON.stringify(value)),
+      fs: { existsSync: (file) => file === "/harness" || files.has(file),
+        readFileSync: (file) => files.get(file),
+        appendFileSync: (file, value) => files.set(file, (files.get(file) ?? "") + value) },
+    });
+    measure(config, { commit: commitA, binary: "/binary" }, "/evidence", options);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0][0], options.perf || options.privateSampleDirectory ? "perf" : "taskset");
+    if (options.perf) assert.equal(commands[0][1][0], "stat");
+    if (options.privateSampleDirectory) {
+      assert.equal(commands[0][1][0], "record");
+      assert.equal(commands[0][1][commands[0][1].indexOf("-F") + 1], "997");
+      const locations = JSON.parse(files.get(`/evidence/${commitA}-generic_iteration-locations.json`));
+      assert.equal(locations.total_samples, 1);
+      assert.equal(locations.locations[0].samples, 1);
+    }
+    const aggregate = JSON.parse(files.get(`/evidence/${commitA}-samples.json`));
+    assert.equal(aggregate.measurements.length, 1);
+  }
+
+  const cycleFixture = "100 deadbeef _ZN9rustia_vm2vm3runE+0x12\n200 deadbeef _ZN9rustia_vm2vm3runE+0x12\n" +
+    "300 deadbeef _ZN9rustia_vm2vm3runE+0x18\n400 deadbeef [unknown]\n500 deadbeef secret/path+0x12\n";
+  const cycleSummary = summarizeCycleLocations(cycleFixture);
+  assert.equal(cycleSummary.total_samples, 5);
+  assert.equal(cycleSummary.other_samples, 2);
+  assert.equal(cycleSummary.total_sample_period, 1500);
+  assert.equal(cycleSummary.other_sample_period, 900);
+  assert.deepEqual(cycleSummary.locations.map((row) => row.samples), [2, 1]);
+  assert.deepEqual(cycleSummary.locations.map((row) => row.sample_period_sum), [300, 300]);
+  assert.equal(JSON.stringify(cycleSummary).includes("secret"), false);
+  assert.equal(JSON.stringify(cycleSummary).includes("deadbeef"), false);
+  const genericLocation = "_ZN4core3ptr47drop_in_place$LT$rustia_vm..heap..TableData$GT$17h02f42bfcbe0ffcfcE.llvm.11384951668729711642+0x0";
+  assert.equal(summarizeCycleLocations(`100 deadbeef ${genericLocation}`).locations[0].location, genericLocation);
+  validateCycleRecords("123 0x100 [0x20]: PERF_RECORD_SAMPLE");
+  validateCycleRecords("PERF_RECORD_THROTTLE: 0\nPERF_RECORD_LOST: 0");
+  for (const kind of ["THROTTLE", "UNTHROTTLE", "LOST", "LOST_SAMPLES"]) {
+    assert.throws(() => validateCycleRecords(`123 0x100 [0x30]: PERF_RECORD_${kind}`), /lost or throttled/);
+  }
+  assert.throws(() => summarizeCycleLocations("100 deadbeef [unknown]"), /no resolved/);
+  assert.throws(() => summarizeCycleLocations("PERF_RECORD_LOST 10"), /lost events/);
+  for (const period of ["0", "-1", "1.5", "9007199254740992"]) {
+    assert.throws(() => summarizeCycleLocations(`${period} deadbeef ${genericLocation}`), /invalid cycle sample period/);
+  }
   process.stdout.write("history backfill runner self-test passed\n");
 }
 
@@ -1512,14 +1844,15 @@ async function main() {
     await selfTest();
     return;
   }
-  if (process.argv.length !== 5) {
+  if (process.argv.length !== 5 && !(process.argv.length === 6 && ["--profile", "--strings"].includes(process.argv[5]))) {
     process.stderr.write(
       "usage: run-linux-history-backfill.js CONFIG PROVIDER BUNDLE\n",
     );
     process.exitCode = 2;
     return;
   }
-  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4]);
+  const mode = process.argv[5] === "--profile" ? "profile" : process.argv[5] === "--strings" ? "strings" : "accept";
+  process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4], mode);
 }
 
 main().catch((error) => {

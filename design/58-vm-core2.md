@@ -373,6 +373,32 @@ with and without a stopped collector (`crates/rustia-vm/src/vm.rs`
 `unit_charged_steps_collect_once_per_crossed_boundary`,
 `stopped_collector_still_advances_the_lattice_over_unit_charged_steps`).
 
+The closure-call fast path synchronizes a mutated capture cell back into any
+caller register aliases. The loader now caches a conservative bytecode proof:
+any `GetLocalCell`, `SetLocalCell` or `LoadFunction` makes a function potentially
+cell-producing, including unreachable or malformed instructions. Functions
+without those operations cannot attach a local capture cell, so their leaf calls
+skip the register-alias scan. The proof does not trust `captured_registers`
+hints, and unknown/unretained frames retain the scan. Resume and stackless
+self-calls retain the same immutable function proof. Fuel, collection guards,
+mutation and logical instruction accounting are unchanged. The proof travels with
+the existing caller-site cache lookup on eligible scalar calls; frames without
+such calls do not perform an extra program/prototype lookup. This is a candidate
+for the measured PR #74 closure regression; remote acceptance is still required.
+
+Frame entry synchronizes saved register cells before applying child results and
+rebuilding stackless roots. `resumed_callers_observe_mutated_capture_cells`
+covers mutation while suspended, collection, and child mutation before return,
+with and without fuel metering.
+
+The PR #74 math follow-up passes validated unary arguments directly to the shared
+math implementation, avoiding a temporary copy. Argument validation and numeric
+operations are unchanged. The separate table-probe and fresh-frame scan changes
+were reverted after failed remote acceptance; their tests and evidence remain.
+The vector-only table-probe guard was subsequently isolated and reverted again,
+as described below.
+The isolated math change still requires remote acceptance.
+
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
 
@@ -953,3 +979,75 @@ VM Core 2 is complete when the ordinary safe-Rust interpreter—not a JIT or wor
 block executor and frame arena on all supported native and wasm targets, passes the semantic/determinism gates,
 and materially narrows the five-workload Luaur/reference-Luau gap on controlled Linux evidence. Parity is a
 measurement outcome, not an architectural assertion.
+
+
+### Numeric reads inside recognized array-iterator leaves
+
+The `ArrayIterator` replay retains general table lookup. An attempted direct
+materialized-slot read failed remote isolation and was reverted; see
+[95](95-numeric-index-contract.md). Its forced-leaf versus scalar regression
+remains: numeric array values, holes, exhaustion and fractional/negative/zero
+keys across all four profiles, including a PUC51 hash-backed positive key.
+The test verifies mutation, actual leaf entry and equal instruction counts.
+
+### Scalar leaf-call metadata
+
+Scalar leaf admission reads function kind and a borrowed capture slice from one
+generation-checked function-arena lookup. After the existing plan, fuel,
+collection and recursion checks, it copies only the selected pair before any
+cache mutation. Capture selection failure is handled at the original guard-exit
+point, preserving cache-fill/hit diagnostics. Captures are never cached across
+calls, and malformed incomplete captures fall back without changing upvalues.
+The polymorphic-handle/live-step and incomplete-capture regressions cover these
+invariants. This removes a second handle lookup; performance is unaccepted until
+remote comparison, as recorded in [95](95-numeric-index-contract.md).
+
+### Reusing iterator function resolution
+
+A custom iterator's function handle/kind is resolved after the existing
+callability and state/control checks. Built-in next/inext handling consumes that
+resolution and retains its existing depth/fuel/table checks. A valid non-built-in
+function reuses the same resolution in the existing shared executors, with
+iterator-specific entry glue after checking depth;
+invalid handles and nonfunctions retain ordinary call-value fallback. Reuse does
+not cross guest execution or heap mutation. Leaf replay, yielding, deferred calls,
+caller-cell synchronization and result application remain in their existing paths.
+The error-precedence regression covers invalid state/control registers, missing
+handles, depth exhaustion and built-in table errors without capture mutation.
+
+
+### Visible vector-key insertion probe (reverted)
+
+The isolated vector-only vacancy probe failed to establish a sparse-table
+improvement and measured a directional iteration slowdown. It is reverted;
+ordinary table writes retain their existing probe and store behavior. All
+results remain in [95](95-numeric-index-contract.md).
+
+### Primitive iterator boundary guard
+
+The combined table-validation/boundary experiment did not establish a remote
+improvement and is reverted. The recognized array-iterator leaf retains its
+separate metatable guard and existing length query. The same
+`table_array_boundary_len` function preserves Log and PUC boundary rules. A
+missing table or any metatable returns fallback before number calculation or
+index-cell mutation. General length queries and numeric table lookup remain
+unchanged; no boundary is cached. The four-profile regression verifies rejected
+guards leave the index and instruction count untouched, then verifies ordinary
+results after metatable removal. Existing forced-leaf versus scalar coverage
+retains holes, fractional/negative/zero keys and PUC hash-backed reads.
+
+
+### Tape admission before canonical fetch
+
+Plain-mode dispatch attempts its existing predecoded tape before loading the
+canonical instruction. A completed tape run enters canonical admission at its
+returned PC without another outer-loop tape eligibility check. The tape already
+runs across blocks until an effect boundary or policy refusal; allocation-debt
+or collection-boundary refusal likewise falls through to the existing scalar path. Calls and HotIR-owned backedges remain loader-established
+tape boundaries, so their existing admission retains ownership. A guard exit
+fetches the failing canonical instruction, preserves the original invalid-PC
+reason, refreshes roots and bypasses fast admission and repeated accounting.
+No new executor, opcode, cache or policy is added. Existing guard-error, collection,
+HotIR and instruction-parity tests cover these boundaries; the scalar-leaf test
+also verifies a real tape-to-call handoff against both optimizations disabled.
+Remote performance acceptance remains pending; see [95](95-numeric-index-contract.md).

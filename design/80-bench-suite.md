@@ -40,7 +40,7 @@ Split by what's measurable; never use one for the other's job:
 - **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
   (LuauCompat/ReproducibleStandard/DeterministicSim). A pass/fail **correctness gate**, NOT a perf trend — a
   hash mismatch FAILS CI; never tracked as a number.
-- **workload:** 19 source-covered entries, with five default measured families (`dense_tables`, `sparse_tables`,
+- **workload:** 20 source-covered entries, with five default measured families (`dense_tables`, `sparse_tables`,
   `closures_upvalues`, `generic_iteration`, `stdlib_math_table`) and opt-in additions including
   `string_building`.
 
@@ -85,8 +85,10 @@ without fresh benchmark measurements. Separate workflows run [per-commit trackin
 [PR screening](../.github/workflows/pr-bench.yml), the [weekly matrix](../.github/workflows/weekly-matrix-bench.yml),
 [A/B acceptance](../.github/workflows/acceptance-bench.yml), and [memory cohorts](../.github/workflows/rustia-memory.yml)
 on `ci-bench` through the owned-host coordinator. The `bench` crate enumerates thirteen engine modes,
-including separate Luau interpreter/JIT modes, five default measured workloads, and 19 workload entries including cross-adapter source
-coverage for #15 `string_building`, portable memory probes #16–#18, and deterministic todo-app probes #19–#21.
+including separate Luau interpreter/JIT modes, five default measured workloads, and 20 workload entries including cross-adapter source
+coverage for #15 `string_building`, portable memory probes #16–#18, deterministic todo-app probes #19–#21,
+and the supplemental #24 `string_opcodes` probe. The string probe runs a top-level program with `BENCH_N`
+so compiler specialization reaches all nine dedicated string opcodes; it is outside the five default workloads.
 It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
 exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
 `bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` under Node/V8 in
