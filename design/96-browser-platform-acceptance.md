@@ -239,3 +239,36 @@ release-candidate gate.
 The subsequent non-vector table-probe and unary-math argument-copy removals
 change runtime code again. The evidence above remains tied to `6fd0e482`; the
 new candidate must re-establish native ARM and final-head platform gates.
+
+
+## Redundant table-probe and unary-math copy removal
+
+Runtime `550d9b1b`, delivered as `8c96cf24`, passed native Linux arm64 from
+an exact source archive with the pinned Rust 1.95.0 image above. The retained
+log `/private/tmp/rustia-linux-arm64-550d9b1b.log` establishes 120 passing tests
+in sixteen groups, zero failures, and two golden transcripts byte-identical
+to the earlier platforms. The companion acceptance note records source and
+image identity.
+
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40282602943) passed all
+fifteen applicable jobs; Windows is intentionally covered by the
+[manual CI run](https://github.com/slowchop/rustia/actions/runs/40282662208),
+which passed all sixteen jobs. Independently audited manual platform logs are:
+
+| Runtime | Job | Tests | Groups | Goldens |
+|---|---:|---:|---:|---:|
+| macOS arm64 | 121439184545 | 120 | 16 | 2 |
+| Windows x86-64 | 121439184582 | 120 | 16 | 2 |
+| Node/V8 | 121439184624 | 90 | 18 | 2 |
+| Headless WebKit | 121439184253 | 88 | 16 | 2 |
+
+All groups passed with zero failures and matching golden transcripts. Both
+runs passed all eight target builds. Workspace jobs `121439006108` and
+`121439184599` each report 1,022 passes across 63 groups; release jobs
+`121439006049` and `121439184499` each report 311 passes across 36 groups,
+including the twelve-suite archived facade checks in default and bare modes.
+Aggregates `121444811481` and `121445198112` verified successful preflight
+and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40282603016)
+matched all 27 cases with zero differences and passed its execution test.
+Performance acceptance remains separate. Intel Mac and mobile execution and
+real Safari release-candidate checks remain open release requirements.

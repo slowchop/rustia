@@ -46,7 +46,12 @@ matching golden transcripts. Its sixteen-leg comparison improves dense tables,
 closures and iteration but still measures sparse tables +2.02% [0.58%, 3.60%]
 and math/table +1.66% [0.78%, 2.26%]. The next candidate removes a redundant
 non-vector table-key probe and an argument-vector copy in unary math calls.
-Fresh remote performance acceptance remains required.
+Delivery head `8c96cf24` passes both full CI runs and all recorded platform
+contracts, with matching goldens. Its sixteen-leg comparison improves math/table
+but still measures dense tables +1.86%, sparse tables +1.04%, and iteration
++5.89%, each with a positive 99% interval. Acceptance fails. The next correction
+skips an empty register-cell scan on fresh frames while retaining synchronization
+on resumed frames; fresh remote performance acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

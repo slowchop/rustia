@@ -381,3 +381,38 @@ them; they now borrow the original slice. Existing validation, numeric coercion,
 libm operations, key normalization, vector behavior, quota staging, journaling
 and mutation accounting remain unchanged. These concrete work reductions are
 candidates, not performance claims, until fresh remote acceptance succeeds.
+
+
+The preceding lookup candidate's supplemental string run
+[40260011328](https://github.com/slowchop/rustia/actions/runs/40260011328)
+measured `6b0122bd` at +0.45% [-0.37%, 1.29%], a 99% interval spanning zero.
+Independent analysis validates all sixteen raw legs and aggregate copies,
+frozen source hash, full identities, N=10,000, five repetitions, matching
+checksums and precise ABBA order. The largest absolute leg deviation is 1.05%,
+with no apparent outlier. The raw export and full log are retained. This does
+not resolve that candidate's sparse-table and math/table regressions above.
+
+The table/math correction `550d9b1b`, delivered as `8c96cf24`, failed
+[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia/actions/runs/40282644301).
+All 192 raw sidecars are retained and independently validated for full identities,
+fixed N, repetitions, checksums, aggregate copies and ABBA timestamp order.
+The unchanged 99% analysis gives:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | +1.86% | [0.75%, 2.98%] |
+| Sparse tables | +1.04% | [0.19%, 2.93%] |
+| Closures/upvalues | +1.55% | [-0.03%, 3.06%] |
+| Generic iteration | +5.89% | [5.09%, 6.49%] |
+| Math/table | -4.00% | [-4.65%, -2.98%] |
+
+Candidate pass p11ba sparse and math/table medians are respectively 6.84% and
+7.15% above their side medians; both flagged outliers remain included. Improved
+math/table does not resolve the other positive intervals. No thresholds changed.
+
+The next correction removes an unconditional register-cell synchronization scan
+on fresh function frames, whose cell vector has just been initialized entirely
+to None. Resumed frames still synchronize saved registers before applying child
+results and rebuilding stackless roots. This removes concrete redundant work
+from fresh calls without changing cell aliases, fuel or collection boundaries;
+fresh remote evidence is required before any performance claim.

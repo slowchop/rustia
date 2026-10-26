@@ -121,3 +121,45 @@ fn call_metamethod_must_be_a_function_in_all_call_shapes() -> rustia::Result<()>
         .eval::<bool>()?);
     Ok(())
 }
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn resumed_callers_observe_mutated_capture_cells() -> rustia::Result<()> {
+    for metered in [false, true] {
+        let builder = RustiaBuilder::standard();
+        let mut vm = if metered {
+            builder.fuel(100_000)
+        } else {
+            builder
+        }
+        .build()?;
+        assert!(vm
+            .load(
+                r#"
+            local owner = coroutine.create(function()
+                local captured = 1
+                local function set(value) captured = value end
+                local child = setmetatable({}, {__call = function()
+                    coroutine.yield(set)
+                    assert(captured == 20)
+                    set(42)
+                    return 7
+                end})
+                local result = child()
+                return captured == 42 and result == 7
+            end)
+            local ok, set = coroutine.resume(owner)
+            assert(ok and type(set) == 'function')
+            set(20)
+            collectgarbage('collect')
+            local done, result = coroutine.resume(owner)
+            return done and result and coroutine.status(owner) == 'dead'
+        "#
+            )
+            .eval::<bool>()?);
+    }
+    Ok(())
+}
