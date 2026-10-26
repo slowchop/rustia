@@ -393,3 +393,24 @@ and two matching goldens. Exact-source native Linux ARM64 independently executes
 all 27 cases without differences. Candidate-only serde screening is not
 performance acceptance. The failed performance isolation and ensuing production
 revert are retained in [95](95-numeric-index-contract.md).
+
+
+## Scalar metadata candidate (historical after iterator correction)
+
+Runtime `12521d6016d7810eb729520802c507ff4d0c7b44`, delivery
+`7cbdd8665f9b12ceb966039c173fc28dda425e8c`, passes
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40332537230) and
+[manual CI](https://github.com/slowchop/rustia/actions/runs/40332724032).
+Each workspace log executes 1,026 tests in 63 groups, including the retained
+array regression and expanded closure guard regression. Each release log
+executes 313 tests in 36 groups, including twelve archived facade suites in
+both feature modes. Both aggregate gates explicitly receive successful
+preflight and WebKit inputs. All sixteen target-build logs across the two runs
+show successful checks.
+
+Each macOS and Windows run executes 122 tests in 16 groups; each Node run
+executes 92 in 18; each WebKit run executes 90 in 16. Exact-source native Linux
+ARM64 executes 122 tests in 16 groups. All audited logs have zero failures and
+two matching goldens. Differential smoke matches 27 cases without differences.
+Candidate-only serde screening is not acceptance. The failed performance
+isolation and pending iterator correction remain recorded in [95](95-numeric-index-contract.md).

@@ -19846,8 +19846,11 @@ impl Vm {
         }
         let state = get_register(registers, window.state)?;
         let control = get_register(registers, window.control)?;
+        let function = iterator
+            .as_function()
+            .and_then(|handle| self.heap.function_kind(handle).map(|kind| (handle, kind)));
         if let Some(advanced) = self.try_builtin_iterator_step(
-            iterator,
+            function,
             state,
             control,
             registers,
@@ -19858,14 +19861,43 @@ impl Vm {
         )? {
             return Ok(CallIteratorStep::Complete(advanced));
         }
-        let results = match self.call_value_with_site_resumable(
-            program,
-            iterator,
-            &[state, control],
-            depth,
-            None,
-            fuel,
-        )? {
+        let flow = if let Some((handle, kind)) = function {
+            self.check_recursion_depth(depth)?;
+            // Builtin rejection does not execute guests or mutate the heap.
+            // Reuse its resolution, but keep ordinary non-iterator calls on
+            // their existing entry path. Both routes use the same executors.
+            if let Some(results) = self.try_leaf_bytecode_handle(kind, handle, depth, fuel)? {
+                VmFlow::Return(results)
+            } else {
+                let (kind, bytecode_data) =
+                    self.heap.function_dispatch_data(handle).ok_or_else(|| {
+                        Error::new(ErrorKind::InvalidProgram {
+                            reason: "function handle is missing",
+                        })
+                    })?;
+                self.call_function_kind_with_site_resumable(
+                    program,
+                    iterator,
+                    handle,
+                    kind,
+                    bytecode_data,
+                    &[state, control],
+                    depth,
+                    None,
+                    fuel,
+                )?
+            }
+        } else {
+            self.call_value_with_site_resumable(
+                program,
+                iterator,
+                &[state, control],
+                depth,
+                None,
+                fuel,
+            )?
+        };
+        let results = match flow {
             VmFlow::Call(request) => return Ok(CallIteratorStep::Call(request)),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => return Ok(CallIteratorStep::Yield(suspension)),
@@ -19880,7 +19912,7 @@ impl Vm {
     #[allow(clippy::too_many_arguments)]
     fn try_builtin_iterator_step(
         &mut self,
-        iterator: Value,
+        function: Option<(u32, FunctionKind)>,
         state: Value,
         control: Value,
         registers: &mut [Value],
@@ -19889,11 +19921,10 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Option<bool>> {
-        let Some(handle) = iterator.as_function() else {
-            return Ok(None);
-        };
-        let Some(FunctionKind::Native(native @ (NativeFunction::Next | NativeFunction::INext))) =
-            self.heap.function_kind(handle)
+        let Some((
+            handle,
+            FunctionKind::Native(native @ (NativeFunction::Next | NativeFunction::INext)),
+        )) = function
         else {
             return Ok(None);
         };
@@ -29523,6 +29554,78 @@ mod inline_cache_tests {
                 max: 0
             }
         ));
+    }
+
+    #[test]
+    fn iterator_function_resolution_preserves_error_precedence() {
+        let program = closure_call_counter_program();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let program_id = vm.retain_dynamic_program(program.clone()).unwrap();
+        let cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let bytecode = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(1.0)),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let next = native_function_value(&mut vm.heap, NativeFunction::Next, vm.globals);
+        let missing = Value::function(u32::MAX);
+        let too_deep = vm.settings.recursion_limit + 1;
+        for (callee, count, depth, expected) in [
+            (missing, 1, too_deep, 1),
+            (Value::function(bytecode), 2, too_deep, 2),
+            (missing, 4, too_deep, 3),
+            (Value::function(bytecode), 4, too_deep, 3),
+            (next, 4, too_deep, 3),
+            (Value::boolean(false), 4, too_deep, 3),
+            (missing, 4, 0, 4),
+            (next, 4, 0, 5),
+        ] {
+            let mut registers = vec![Value::nil(); count];
+            registers[0] = callee;
+            let mut cells = vec![None; count];
+            test_execution!(fuel = None);
+            let error = vm
+                .call_iterator_step(CallIteratorStepContext {
+                    program: &program,
+                    registers: &mut registers,
+                    register_cells: &mut cells,
+                    window: CallIteratorRegisters::generic(0, 1).unwrap(),
+                    depth,
+                    fuel: &mut fuel,
+                    invalid_callee: InvalidIteratorCallee::Call,
+                    sync_caller_cells: true,
+                })
+                .err()
+                .expect("invalid iterator call must fail");
+            match expected {
+                1 | 2 => assert!(matches!(error.kind,
+                    ErrorKind::RegisterOutOfBounds { register, max }
+                    if register == expected && max == count)),
+                3 => assert!(matches!(error.kind, ErrorKind::RecursionLimit { .. })),
+                4 => assert!(matches!(
+                    error.kind,
+                    ErrorKind::InvalidProgram {
+                        reason: "function handle is missing"
+                    }
+                )),
+                5 => assert!(matches!(
+                    error.kind,
+                    ErrorKind::TypeError { expected: "table" }
+                )),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                vm.heap.upvalue_get(cell).and_then(Value::as_number),
+                Some(7.0)
+            );
+        }
     }
 
     #[test]

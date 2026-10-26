@@ -999,3 +999,16 @@ calls, and malformed incomplete captures fall back without changing upvalues.
 The polymorphic-handle/live-step and incomplete-capture regressions cover these
 invariants. This removes a second handle lookup; performance is unaccepted until
 remote comparison, as recorded in [95](95-numeric-index-contract.md).
+
+### Reusing iterator function resolution
+
+A custom iterator's function handle/kind is resolved after the existing
+callability and state/control checks. Built-in next/inext handling consumes that
+resolution and retains its existing depth/fuel/table checks. A valid non-built-in
+function reuses the same resolution in the existing shared executors, with
+iterator-specific entry glue after checking depth;
+invalid handles and nonfunctions retain ordinary call-value fallback. Reuse does
+not cross guest execution or heap mutation. Leaf replay, yielding, deferred calls,
+caller-cell synchronization and result application remain in their existing paths.
+The error-precedence regression covers invalid state/control registers, missing
+handles, depth exhaustion and built-in table errors without capture mutation.

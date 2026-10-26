@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-26.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-27.)
 
 ## One-paragraph state
 
@@ -67,8 +67,11 @@ improves math/table 6.77% but still measures iteration +3.42% and closures
 numeric array-slot correction fails isolation: closures +4.68% [3.30%, 6.44%]
 with no flagged outliers, while iteration does not establish an improvement.
 That production lookup change is reverted; its regression remains. Scalar
-leaf admission now borrows function kind and captures from one validated slot,
-with existing guards and diagnostics preserved; remote isolation is pending.
+leaf admission now borrows function kind and captures from one validated slot.
+Its isolation improves closures 5.81% but slows iteration 3.06% with a positive
+99% interval. It remains provisional. The next correction removes a separately
+confirmed duplicate function-kind lookup between iterator builtin rejection and
+ordinary dispatch, preserving shared fallback and error order.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

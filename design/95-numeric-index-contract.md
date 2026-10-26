@@ -617,3 +617,49 @@ whether the removed lookup offsets those costs; no inline-annotation sweep or
 threshold change is used. Default and bare VM suites each pass 249 tests,
 including incomplete captures on a warmed cache with unchanged mutation and
 diagnostic counts.
+
+
+The retained-bytecode metadata candidate `12521d60`, delivered as `7cbdd866`,
+completes [eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40332718288)
+against `6a8b61b1`. Independent audits validate all 96 sidecars, full identities,
+fixed N, repetitions, checksums, aggregate copies and forty ABBA workload pairs.
+No outliers were flagged. The 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -0.79% | [-2.61%, 0.83%] |
+| Sparse tables | -1.89% | [-4.17%, -0.07%] |
+| Closures/upvalues | -5.81% | [-7.37%, -3.69%] |
+| Generic iteration | +3.06% | [1.72%, 4.31%] |
+| Math/table | +0.28% | [-1.84%, 2.76%] |
+
+Overall acceptance fails: the closure win does not excuse the directional
+iteration slowdown, and math/table's material verdict is inconclusive. The
+metadata change is provisionally retained for its demonstrated closure benefit,
+subject to the next compound gate, not marked accepted. No thresholds or samples
+change and no final original-baseline comparison is dispatched yet.
+
+The generic iterator route separately resolves the function kind to reject
+built-in `next`/`inext`, then resolves it again in ordinary call dispatch.
+Pinned Linux disassembly confirms both validated arena reads. The next correction
+reuses the already-resolved handle/kind through the existing shared executors
+with iterator-specific entry glue. Resolution
+remains after iterator-callability and state/control checks; built-in fuel and
+recursion handling stay unchanged. Valid non-built-in functions check recursion
+before shared leaf/fallback dispatch; invalid handles and nonfunctions use the
+original path to preserve error precedence and metamethod behavior. No guest
+execution or heap mutation occurs between resolution and reuse. Direct eight-pair
+isolation uses `7cbdd866`; original-baseline and strings remain mandatory.
+
+
+The first refactor extracted a shared resolved-call helper, but pinned static
+inspection showed an additional call boundary on unrelated ordinary calls.
+That form was rejected before timing. The scoped form restores ordinary
+call-value dispatch unchanged and reuses existing leaf and general executors
+only from the iterator entry. Its iterator function grows from 3,462 to 4,950
+bytes; ordinary call-value remains 1,356 bytes, leaf entry 611 bytes, and main
+inner dispatch 106,805 bytes. This localized size increase is an explicit
+tradeoff, not performance evidence. Independent review found no semantic issue.
+Default and bare VM suites each pass 250 tests, including error precedence.
+The coroutine regression covers direct and callable-table iterators, yields,
+deferred calls and synchronization of captured caller state across four profiles.
