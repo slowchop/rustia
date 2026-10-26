@@ -168,3 +168,20 @@ independent manual CI run completed successfully. The
 also passed all 88 tests and both goldens, and the aggregate PR CI passed.
 These results do not establish
 performance acceptance or close Intel Mac, mobile or real-browser release gates.
+
+## Caller-cell proof candidate
+
+Runtime `aa432f17` independently passed native Linux arm64 correctness from an
+exact source archive using the same pinned Rust 1.95.0 image above. Default and
+bare modes passed 120 tests across sixteen groups, with zero failures. Its two
+byte-identical golden transcripts match the earlier `c1913422` result. The log
+and evidence note are `/private/tmp/rustia-linux-arm64-aa432f17.log` and
+`/private/tmp/rustia-linux-arm64-aa432f17-acceptance.md`. This is correctness
+evidence only.
+
+Delivery head `4be30aca` also passed native macOS arm64 and Windows x86-64
+in the [new candidate's platform run](https://github.com/slowchop/rustia/actions/runs/40253022712).
+The actual logs for jobs `121348804463` and `121348804611` each record 120 tests
+across sixteen groups, zero failures, and two golden transcripts byte-identical
+to the Linux arm64 result. Aggregate CI and the remaining browser checks are
+still pending; this evidence does not establish performance acceptance.

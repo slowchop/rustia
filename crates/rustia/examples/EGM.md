@@ -1,0 +1,31 @@
+# rustia Examples
+
+## Overview
+
+These examples show the facade's supported embedding shapes: owned values and Serde, chunk builders, diagnostics, modules, live object graphs, host callbacks, typed invocation journals, deterministic object methods, hot replacement, and standard-profile mutable Rust objects.
+
+## Interface
+
+- [embedding.rs](./embedding.rs): owned conversion, extension callbacks, Serde, and decision reset.
+- [chunk_builder.rs](./chunk_builder.rs): source labels and exact lexical environments.
+- [diagnostics.rs](./diagnostics.rs): human-readable error reports.
+- [typed_invocation.rs](./typed_invocation.rs) and [game_objects.rs](./game_objects.rs): borrowed per-call host context and staged output records.
+- [live_values.rs](./live_values.rs): rooted handles and shared/cyclic table identity.
+- [module_resolution.rs](./module_resolution.rs): host-supplied module resolver.
+- [hot_reload.rs](./hot_reload.rs): candidate installation and host-owned replacement.
+- [mutable_objects.rs](./mutable_objects.rs): immediate standard-profile Rust payload mutation.
+- [leaf_lifecycle_bench.rs](./leaf_lifecycle_bench.rs) and [live_serde_bench.rs](./live_serde_bench.rs) are timing examples. Do not run them locally; benchmark policy permits evidence only from `ci-bench`.
+
+## Invariants
+
+- Deterministic effects and slot writes are staged and applied by the host only after a successful invocation.
+- A standard/live Rust-object mutation is host state and survives a later guest failure.
+- A live handle preserves identity but becomes stale after a decision reset.
+
+## Side Effects
+
+Examples may print status or diagnostics and execute guest code. The two `_bench` examples measure elapsed time if run and are intentionally excluded from local verification.
+
+## Verification
+
+From the repository root, compile examples with `cargo check --locked -p rustia --examples`. Do not run the timing examples.

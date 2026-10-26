@@ -290,3 +290,21 @@ capture cells. Any local-cell read/write or function creation conservatively
 keeps synchronization. This proof is independent of optional capture hints;
 unknown frames keep the old scan. Correctness and fresh baseline comparison
 remain required, with all preceding results retained.
+
+The completed supplemental string comparison
+[40246584665](https://github.com/slowchop/rustia/actions/runs/40246584665)
+measured `02c0b174` against original baseline `90bc2ae4`: -1.57%, with a
+99% interval of [-2.46%, -0.41%]. All sixteen raw legs use fixed N=10,000,
+five repetitions, and matching checksums. The frozen source hash is
+`59367a09e7a701f22784cdd78ea5f4b3d322fb601f2a31edbfe5b0e8d4ffa847`.
+This supports the extraction's string cost but does not resolve the separate
+closure regression above; no string materiality threshold was invented.
+
+The caller-cell proof is implemented at `aa432f17`; delivery head `4be30aca`
+passed the full pre-push inventory before remote validation. Fresh
+[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia/actions/runs/40253017402),
+[eight-leg string acceptance](https://github.com/slowchop/rustia/actions/runs/40253020172),
+and [manual platform CI](https://github.com/slowchop/rustia/actions/runs/40253022712)
+were dispatched for that candidate. Their completed evidence remains a gate;
+neither the earlier string result nor passing correctness tests establishes
+performance acceptance for the new runtime.

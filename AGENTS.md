@@ -8,6 +8,19 @@ contributed to by humans. Optimise for *both*: code an agent can reason about lo
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
 serves them.
 
+## EGM code maps
+
+- Before editing a file, read every existing ancestor `EGM.md`, starting at the repository root and
+  continuing through the file's directory. Read linked child maps when the change crosses their boundaries.
+- Maintain affected `EGM.md` maps alongside code changes: update file/module roles, interfaces, invariants,
+  side effects, verification commands, and parent links when those facts change. Create or remove maps as
+  appropriate when source directories are added, moved, or removed.
+- `EGM.md` describes the code as built and provides navigation; it does not replace the spec or grant new
+  authority. Keep `design/CURRENT.md`, the relevant design documents, and the pinned oracle as the authority
+  described above. Report code/design disagreements explicitly rather than silently resolving them in a map.
+- Preserve human-facing `README.md` files. EGM bootstrap and drift maintenance target `EGM.md`; ignored,
+  vendored, generated, and test-only trees do not need their own maps.
+
 ## Benchmark policy
 
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
@@ -49,8 +62,10 @@ serves them.
 
 5. **Mechanical enforcement over good intentions (the LLM-first lever).** rustfmt, `clippy -D warnings`, the
    determinism lints, `unsafe_code = "forbid"` for the public workspace, the golden test, the bench gate, and
-   the parser fuzz-vs-`full_moon` — all in CI. If a rule matters, make it a check, not a comment. Agents
-   forget; CI doesn't.
+   bounded frontend/VM fuzz smoke and differential checks against the pinned Luau 0.709 oracle — all in CI
+   (see [the fuzz harness](fuzz/README.md) and [oracle workflow](.github/workflows/error-fuzz.yml)).
+   Independent-frontend comparison such as `full_moon` remains planned, not an implemented CI gate.
+   If a rule matters, make it a check, not a comment. Agents forget; CI doesn't.
 
 6. **Local reasoning — explicit state, no spooky action at a distance.** No hidden globals / thread-locals /
    statics that affect behaviour; pass VM state explicitly. Host effects go through the typed effect-queue,
