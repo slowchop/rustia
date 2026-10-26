@@ -768,6 +768,31 @@ is run for this unproven candidate and no thresholds or samples change.
 A fresh [remote counter diagnostic](https://github.com/slowchop/rustia/actions/runs/40374618824)
 compares retained `c754371f` with original `90bc2ae4`. It uses the existing fixed
 five-workload profile and four ABBA legs. Counters include startup, compilation
-and warmup; instrumented elapsed times are not acceptance evidence. Results
-remain pending. Further corrections must follow this diagnostic rather than
-accumulating unrelated small runtime rewrites.
+and warmup; instrumented elapsed times are not acceptance evidence. The completed diagnostic validates all twenty counter files, 24 sample sidecars,
+full identities, frozen source hashes, fixed work, checksums and four ABBA legs.
+All timed gates pass with zero steal ticks; counter running fractions are
+99–100%. Independent analysis agrees. Mean iteration cycles increase 2.86%
+while instructions decrease 0.89% and branches decrease 0.66%. Cache references
+increase 0.67%; cache-miss totals vary substantially between same-side legs.
+This does not support added instruction work as the cause, nor establish a
+specific cache or code-layout mechanism. Sparse-table cycles decrease 1.10%
+in this diagnostic despite its failed uninstrumented acceptance; that conflict
+must not be used to overwrite the acceptance result. Closure cycles decrease
+6.84%, and math/table cycles decrease 6.99%.
+
+Further corrections require locating the remaining iteration cost, rather than
+accumulating unrelated small runtime rewrites. User-space cycle sampling through
+the existing remote diagnostic is the next investigation; sampled timing remains
+ineligible for acceptance.
+
+
+The diagnostic tooling adds four fixed ABBA user-space cycle-sampling legs for
+`generic_iteration`, at the same fixed N and five repetitions, after the existing
+counters. Sampling uses a fixed 100,000-cycle period and no call graph. Quiet
+and steal gates, expected checksums and exact revision identities still apply;
+failed legs remain evidence without retries. Only allowlisted mangled Rustia
+symbols with relative offsets, counts and raw-file hashes enter exported JSON.
+Raw recordings and copies of both exact binaries stay outside exported evidence
+for private retrieval. Flat samples include startup and warmup and can skid to
+nearby instructions; block attribution must not be treated as exact causality
+or substitute for uninstrumented performance acceptance.

@@ -814,10 +814,41 @@ function measurementArgs(config, build, historyFile, samplesFile, workloads = WO
   ];
 }
 
+// Only Rustia symbol-relative locations leave the private perf recording.
+// No absolute IPs, process names, paths, or raw perf metadata are exported.
+function validateCycleRecords(text) {
+  if (/PERF_RECORD_(?:THROTTLE|UNTHROTTLE|LOST|LOST_SAMPLES)\b/.test(text)) {
+    fail("cycle sampling lost or throttled events; raw recording retained");
+  }
+}
+
+function summarizeCycleLocations(text) {
+  const counts = new Map();
+  let other = 0;
+  let total = 0;
+  for (const line of text.split("\n")) {
+    const value = line.trim();
+    if (!value) continue;
+    if (/PERF_RECORD_LOST|LOST_SAMPLES/.test(value)) fail("cycle sampling lost events");
+    total += 1;
+    const match = /^((_ZN[A-Za-z0-9_$.]+E(?:\.llvm\.[0-9]+)?|_R[A-Za-z0-9_]+(?:\.llvm\.[0-9]+)?)\+0x[0-9a-f]+)$/.exec(value);
+    if (!match || !match[2].includes("rustia")) {
+      other += 1;
+      continue;
+    }
+    counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+  }
+  if (total === 0 || counts.size === 0) fail("cycle sampling has no resolved Rustia locations");
+  return { total_samples: total, other_samples: other,
+    locations: [...counts].sort(([a], [b]) => a.localeCompare(b))
+      .map(([location, samples]) => ({ location, samples })) };
+}
+
 function measureOne(config, build, attemptDirectory, options = {}) {
   const workloads = options.workloads ?? WORKLOADS;
   const fixedN = options.fixedN;
   const profile = options.perf === true;
+  const cycleSampling = options.privateSampleDirectory !== undefined;
   const historyFile = path.join(attemptDirectory, `${build.commit}.jsonl`);
   const samplesFile = path.join(attemptDirectory, `${build.commit}-samples.json`);
   for (const workload of workloads) {
@@ -844,8 +875,13 @@ function measureOne(config, build, attemptDirectory, options = {}) {
       fail(`harness worktree ${HARNESS} is missing; cannot measure`);
     }
     const perfFile = path.join(attemptDirectory, `${build.commit}-${workload}-perf.csv`);
-    const command = profile ? "perf" : "taskset";
-    const commandArgs = profile
+    const privatePerfFile = cycleSampling
+      ? path.join(options.privateSampleDirectory, `${build.commit}-${workload}.data`) : null;
+    const command = profile || cycleSampling ? "perf" : "taskset";
+    const commandArgs = cycleSampling
+      ? ["record", "-e", "cycles:u", "-c", "100000", "-o", privatePerfFile,
+        "--", "taskset", ...args]
+      : profile
       ? ["stat", "-x", ",", "-o", perfFile, "-e",
         "cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u,cache-misses:u", "--", "taskset", ...args]
       : args;
@@ -853,6 +889,18 @@ function measureOne(config, build, attemptDirectory, options = {}) {
       cwd: HARNESS,
       capture: false,
     });
+    if (cycleSampling) {
+      // Raw dump stays in memory; never export process/host metadata. Reject
+      // loss and throttling before comparing fixed-period sample counts.
+      validateCycleRecords(runText("perf", ["script", "-D", "-i", privatePerfFile]));
+      const locations = runText("perf", ["script", "-i", privatePerfFile,
+        "--no-demangle", "--show-lost-events", "-F", "sym,symoff"]);
+      writeJson(path.join(attemptDirectory, `${build.commit}-${workload}-locations.json`), {
+        schema: "rustia.bench.cycle-locations.v1", commit: build.commit, workload,
+        event: "cycles:u", period: 100000, raw_sha256: sha256File(privatePerfFile),
+        ...summarizeCycleLocations(locations),
+      });
+    }
     fs.appendFileSync(historyFile, fs.readFileSync(workloadHistory));
     const sample = loadJson(workloadSamples, `${build.commit}/${workload} samples`);
     const combined = fs.existsSync(samplesFile)
@@ -1270,6 +1318,33 @@ async function profilePair(config, builds, startedAtMs) {
     }
     if (!timedGatePasses(config.host_gate, delta)) fail("profile leg failed steal gate; retained without retry");
   }
+  // Flat cycle locations target the unresolved iteration cost, including offsets
+  // inside the large dispatcher. Keep original fixed N/repetitions and ABBA.
+  // Raw recordings persist outside EVIDENCE/EXPORT for private retrieval only.
+  const privateDirectory = fs.mkdtempSync(path.join(ROOT, "private-cycle-profile-"));
+  for (const build of builds) {
+    fs.copyFileSync(build.binary, path.join(privateDirectory, build.commit));
+  }
+  for (const [leg, index] of order.entries()) {
+    checkRuntimeBudget(config, startedAtMs, "cycle location diagnostics");
+    await waitForQuiet(config, gateFile, leg + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `cycle-locations-${leg}`);
+    const privateLeg = path.join(privateDirectory, String(leg));
+    fs.mkdirSync(directory, { recursive: true });
+    fs.mkdirSync(privateLeg, { recursive: true, mode: 0o700 });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    const output = measureOne(config, builds[index], directory, {
+      workloads: ["generic_iteration"], privateSampleDirectory: privateLeg,
+    });
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    appendJsonLine(gateFile, { phase: "cycle-locations", leg, commit: builds[index].commit,
+      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+    const rows = parseHistory(output.historyFile);
+    validateWorkloadRows(config, [builds[index]], rows, ["generic_iteration"],
+      config.measurement.fixed_n, config.measurement.expected_checksums);
+    if (!timedGatePasses(config.host_gate, delta)) fail("sampled leg failed steal gate; retained without retry");
+  }
 }
 
 function captureStringSources(config) {
@@ -1666,6 +1741,73 @@ async function selfTest() {
   validatePerfCounters(counterFixture.replace(/,100,100.00/g, ":u,100,100.00"));
   assert.throws(() => validatePerfCounters(counterFixture.replace("123,,cycles", "<not supported>,,cycles")));
   assert.throws(() => validatePerfCounters(counterFixture.replace(/.*cache-misses.*/, "")));
+  {
+    const row = { commit: commitA, engine: "rustia", dialect: "luau",
+      target: "linux-x86_64", host: config.provider.host.name,
+      workload: "generic_iteration", n: config.measurement.fixed_n.generic_iteration,
+      reps: config.measurement.repetitions,
+      checksum: config.measurement.expected_checksums.generic_iteration,
+      ns_per_unit_min: 1, ns_per_unit_median: 1, units_per_sec: 1 };
+    const validate = (rows) => validateWorkloadRows(config, [{ commit: commitA }], rows,
+      ["generic_iteration"], config.measurement.fixed_n, config.measurement.expected_checksums);
+    validate([row]);
+    assert.throws(() => validate([]));
+    assert.throws(() => validate([{ ...row, n: row.n + 1 }]));
+    assert.throws(() => validate([{ ...row, checksum: "wrong" }]));
+  }
+
+  // Exercise the actual measurement plumbing with in-memory files and a fake
+  // process runner. No benchmark, taskset, or perf process executes locally.
+  for (const options of [{}, { perf: true }, { privateSampleDirectory: "/private-raw" }]) {
+    const files = new Map();
+    const commands = [];
+    const fakeRun = (command, args) => {
+      commands.push([command, args]);
+      const at = (flag) => args[args.indexOf(flag) + 1];
+      files.set(at("--history"), "{}\n");
+      files.set(at("--samples-json"), JSON.stringify({ measurements: [{ workload: "generic_iteration" }] }));
+      return { stdout: "", stderr: "", status: 0 };
+    };
+    const measure = require("node:vm").runInNewContext(`(${measureOne.toString()})`, {
+      WORKLOADS: ["generic_iteration"], HARNESS: "/harness", path, fail,
+      measurementArgs, run: fakeRun,
+      runText: () => "_ZN9rustia_vm2vm3runE+0x12\n",
+      summarizeCycleLocations, validateCycleRecords, sha256File: () => "a".repeat(64),
+      loadJson: (file) => JSON.parse(files.get(file)),
+      writeJson: (file, value) => files.set(file, JSON.stringify(value)),
+      fs: { existsSync: (file) => file === "/harness" || files.has(file),
+        readFileSync: (file) => files.get(file),
+        appendFileSync: (file, value) => files.set(file, (files.get(file) ?? "") + value) },
+    });
+    measure(config, { commit: commitA, binary: "/binary" }, "/evidence", options);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0][0], options.perf || options.privateSampleDirectory ? "perf" : "taskset");
+    if (options.perf) assert.equal(commands[0][1][0], "stat");
+    if (options.privateSampleDirectory) {
+      assert.equal(commands[0][1][0], "record");
+      const locations = JSON.parse(files.get(`/evidence/${commitA}-generic_iteration-locations.json`));
+      assert.equal(locations.total_samples, 1);
+      assert.equal(locations.locations[0].samples, 1);
+    }
+    const aggregate = JSON.parse(files.get(`/evidence/${commitA}-samples.json`));
+    assert.equal(aggregate.measurements.length, 1);
+  }
+
+  const cycleFixture = "_ZN9rustia_vm2vm3runE+0x12\n_ZN9rustia_vm2vm3runE+0x12\n" +
+    "_ZN9rustia_vm2vm3runE+0x18\n[unknown]\nsecret/path+0x12\n";
+  const cycleSummary = summarizeCycleLocations(cycleFixture);
+  assert.equal(cycleSummary.total_samples, 5);
+  assert.equal(cycleSummary.other_samples, 2);
+  assert.deepEqual(cycleSummary.locations.map((row) => row.samples), [2, 1]);
+  assert.equal(JSON.stringify(cycleSummary).includes("secret"), false);
+  const genericLocation = "_ZN4core3ptr47drop_in_place$LT$rustia_vm..heap..TableData$GT$17h02f42bfcbe0ffcfcE.llvm.11384951668729711642+0x0";
+  assert.equal(summarizeCycleLocations(genericLocation).locations[0].location, genericLocation);
+  validateCycleRecords("PERF_RECORD_SAMPLE");
+  for (const kind of ["THROTTLE", "UNTHROTTLE", "LOST", "LOST_SAMPLES"]) {
+    assert.throws(() => validateCycleRecords(`PERF_RECORD_${kind}`), /lost or throttled/);
+  }
+  assert.throws(() => summarizeCycleLocations("[unknown]"), /no resolved/);
+  assert.throws(() => summarizeCycleLocations("PERF_RECORD_LOST 10"), /lost events/);
   process.stdout.write("history backfill runner self-test passed\n");
 }
 
