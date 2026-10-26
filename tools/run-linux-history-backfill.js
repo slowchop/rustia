@@ -817,7 +817,7 @@ function measurementArgs(config, build, historyFile, samplesFile, workloads = WO
 // Only Rustia symbol-relative locations leave the private perf recording.
 // No absolute IPs, process names, paths, or raw perf metadata are exported.
 function validateCycleRecords(text) {
-  if (/PERF_RECORD_(?:THROTTLE|UNTHROTTLE|LOST|LOST_SAMPLES)\b/.test(text)) {
+  if (/^\d+ 0x[0-9a-f]+ \[0x[0-9a-f]+\]: PERF_RECORD_(?:THROTTLE|UNTHROTTLE|LOST|LOST_SAMPLES)\b/m.test(text)) {
     fail("cycle sampling lost or throttled events; raw recording retained");
   }
 }
@@ -879,16 +879,18 @@ function measureOne(config, build, attemptDirectory, options = {}) {
       ? path.join(options.privateSampleDirectory, `${build.commit}-${workload}.data`) : null;
     const command = profile || cycleSampling ? "perf" : "taskset";
     const commandArgs = cycleSampling
-      ? ["record", "-e", "cycles:u", "-c", "100000", "-o", privatePerfFile,
+      ? ["record", "-e", "cycles:u", "-c", "1000000", "-o", privatePerfFile,
         "--", "taskset", ...args]
       : profile
       ? ["stat", "-x", ",", "-o", perfFile, "-e",
         "cycles:u,instructions:u,branches:u,branch-misses:u,cache-references:u,cache-misses:u", "--", "taskset", ...args]
       : args;
-    run(command, commandArgs, {
+    const measured = run(command, commandArgs, {
       cwd: HARNESS,
-      capture: false,
+      capture: cycleSampling,
     });
+    // perf record's success diagnostics include the private raw-file path.
+    if (cycleSampling) process.stdout.write(measured.stdout);
     if (cycleSampling) {
       // Raw dump stays in memory; never export process/host metadata. Reject
       // loss and throttling before comparing fixed-period sample counts.
@@ -897,7 +899,7 @@ function measureOne(config, build, attemptDirectory, options = {}) {
         "--no-demangle", "--show-lost-events", "-F", "sym,symoff"]);
       writeJson(path.join(attemptDirectory, `${build.commit}-${workload}-locations.json`), {
         schema: "rustia.bench.cycle-locations.v1", commit: build.commit, workload,
-        event: "cycles:u", period: 100000, raw_sha256: sha256File(privatePerfFile),
+        event: "cycles:u", period: 1000000, raw_sha256: sha256File(privatePerfFile),
         ...summarizeCycleLocations(locations),
       });
     }
@@ -1770,6 +1772,7 @@ async function selfTest() {
     };
     const measure = require("node:vm").runInNewContext(`(${measureOne.toString()})`, {
       WORKLOADS: ["generic_iteration"], HARNESS: "/harness", path, fail,
+      process: { stdout: { write: () => {} } },
       measurementArgs, run: fakeRun,
       runText: () => "_ZN9rustia_vm2vm3runE+0x12\n",
       summarizeCycleLocations, validateCycleRecords, sha256File: () => "a".repeat(64),
@@ -1785,6 +1788,7 @@ async function selfTest() {
     if (options.perf) assert.equal(commands[0][1][0], "stat");
     if (options.privateSampleDirectory) {
       assert.equal(commands[0][1][0], "record");
+      assert.equal(commands[0][1][commands[0][1].indexOf("-c") + 1], "1000000");
       const locations = JSON.parse(files.get(`/evidence/${commitA}-generic_iteration-locations.json`));
       assert.equal(locations.total_samples, 1);
       assert.equal(locations.locations[0].samples, 1);
@@ -1802,9 +1806,10 @@ async function selfTest() {
   assert.equal(JSON.stringify(cycleSummary).includes("secret"), false);
   const genericLocation = "_ZN4core3ptr47drop_in_place$LT$rustia_vm..heap..TableData$GT$17h02f42bfcbe0ffcfcE.llvm.11384951668729711642+0x0";
   assert.equal(summarizeCycleLocations(genericLocation).locations[0].location, genericLocation);
-  validateCycleRecords("PERF_RECORD_SAMPLE");
+  validateCycleRecords("123 0x100 [0x20]: PERF_RECORD_SAMPLE");
+  validateCycleRecords("PERF_RECORD_THROTTLE: 0\nPERF_RECORD_LOST: 0");
   for (const kind of ["THROTTLE", "UNTHROTTLE", "LOST", "LOST_SAMPLES"]) {
-    assert.throws(() => validateCycleRecords(`PERF_RECORD_${kind}`), /lost or throttled/);
+    assert.throws(() => validateCycleRecords(`123 0x100 [0x30]: PERF_RECORD_${kind}`), /lost or throttled/);
   }
   assert.throws(() => summarizeCycleLocations("[unknown]"), /no resolved/);
   assert.throws(() => summarizeCycleLocations("PERF_RECORD_LOST 10"), /lost events/);

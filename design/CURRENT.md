@@ -84,7 +84,9 @@ lookup also fails to establish improvement in eight-pair isolation. That
 production experiment is reverted, retaining its guard regression and results.
 Fresh remote hardware counters compare retained `c754371f` with original
 `90bc2ae4`: iteration executes 0.89% fewer instructions but uses 2.86% more
-cycles. The specific cause remains unproven; user-space cycle sampling is next. Sparse-table and iteration
+cycles. The specific cause remains unproven. The first user-space cycle sample
+was rejected for actual throttling; its raw recording is retained and the next
+diagnostic reduces sampling load tenfold without changing runner limits. Sparse-table and iteration
 acceptance remain unresolved; instrumented timings are not acceptance.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded

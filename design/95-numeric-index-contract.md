@@ -788,7 +788,7 @@ ineligible for acceptance.
 
 The diagnostic tooling adds four fixed ABBA user-space cycle-sampling legs for
 `generic_iteration`, at the same fixed N and five repetitions, after the existing
-counters. Sampling uses a fixed 100,000-cycle period and no call graph. Quiet
+counters. The initial sampling used a fixed 100,000-cycle period and no call graph. Quiet
 and steal gates, expected checksums and exact revision identities still apply;
 failed legs remain evidence without retries. Only allowlisted mangled Rustia
 symbols with relative offsets, counts and raw-file hashes enter exported JSON.
@@ -796,3 +796,13 @@ Raw recordings and copies of both exact binaries stay outside exported evidence
 for private retrieval. Flat samples include startup and warmup and can skid to
 nearby instructions; block attribution must not be treated as exact causality
 or substitute for uninstrumented performance acceptance.
+
+
+The first sampled run [40379229237](https://github.com/slowchop/rustia/actions/runs/40379229237)
+failed its diagnostic validity gate on the first baseline leg. Private raw audit
+finds 382 actual throttle records and 382 unthrottle records, with no lost-record
+events. The recording, exact binaries and counter-phase export are retained;
+this is not an acceptance result or a usable sampled comparison. The next
+protocol uses a 1,000,000-cycle period to reduce sampling load tenfold, without
+changing runner limits or acceptance thresholds. Validation matches actual raw
+record headers so zero-count summary labels cannot trigger a false rejection.
