@@ -27,7 +27,11 @@ and PR #74 is not ready to merge. Hardware counters found unchanged instruction
 counts but higher iteration cache references. A generic cold constructor grew the dispatch code and was rejected before
 timing. A narrow invalid-bytecode helper also grew code and was rejected. Cold
 inline annotations were rejected as well. Extracted string-opcode bodies reduce the main dispatch footprint and pass
-correctness checks; remote performance acceptance remains open.
+correctness checks. Its sixteen-leg comparison resolves iteration and math/table
+movement but measures closures +2.98% [1.74%, 5.22%]; acceptance remains open.
+The next candidate skips leaf-call register synchronization only when loader
+analysis proves the caller cannot create local capture cells. Focused correctness
+and instruction-count parity pass; fresh remote acceptance remains required.
 See [95](95-numeric-index-contract.md).
 Real Firefox and Safari correctness passed in both feature modes on recorded
 earlier revisions. The checked-cast candidate passes shared runtime contracts on

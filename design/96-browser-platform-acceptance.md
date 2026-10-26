@@ -147,5 +147,24 @@ same native Linux arm64 contract suite: 120 tests across 16 groups, default and
 bare modes, with two byte-identical golden transcripts. This used an exact
 source archive and the same pinned image above. The log and evidence note are
 `/private/tmp/rustia-linux-arm64-c1913422.log` and
-`/private/tmp/rustia-linux-arm64-c1913422-acceptance.md`. Other platforms still
-require the new candidate's CI; the checked-cast evidence remains historical.
+`/private/tmp/rustia-linux-arm64-c1913422-acceptance.md`. The same runtime, at delivery head
+`02c0b1749b68baee91463207e63ee1632794b20e`, passed the remaining shared
+platform contracts on 2026-10-26 (Australia/Hobart):
+
+| Runtime | Passing tests | Groups | Evidence |
+|---|---:|---:|---|
+| Native macOS arm64 | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330294) |
+| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330318) |
+| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40246584261/job/121329319338) |
+| Headless Playwright WebKit | 88 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330289) |
+
+Actual logs establish zero failures and two identical transcripts on each runtime.
+All ten transcripts, including native Linux arm64, match byte for byte. The
+first PR WebKit job was terminated when its runner's user service stopped;
+Docker's socket disappeared during the test. That infrastructure failure is
+retained, and the failed PR jobs were retried after Docker recovered. The
+independent manual CI run completed successfully. The
+[retried PR WebKit job](https://github.com/slowchop/rustia/actions/runs/40246584261/job/121335358325)
+also passed all 88 tests and both goldens, and the aggregate PR CI passed.
+These results do not establish
+performance acceptance or close Intel Mac, mobile or real-browser release gates.

@@ -373,6 +373,17 @@ with and without a stopped collector (`crates/rustia-vm/src/vm.rs`
 `unit_charged_steps_collect_once_per_crossed_boundary`,
 `stopped_collector_still_advances_the_lattice_over_unit_charged_steps`).
 
+The closure-call fast path synchronizes a mutated capture cell back into any
+caller register aliases. The loader now caches a conservative bytecode proof:
+any `GetLocalCell`, `SetLocalCell` or `LoadFunction` makes a function potentially
+cell-producing, including unreachable or malformed instructions. Functions
+without those operations cannot attach a local capture cell, so their leaf calls
+skip the register-alias scan. The proof does not trust `captured_registers`
+hints, and unknown/unretained frames retain the scan. Resume and stackless
+self-calls retain the same immutable function proof. Fuel, collection guards,
+mutation and logical instruction accounting are unchanged. This is a candidate
+for the measured PR #74 closure regression; remote acceptance is still required.
+
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
 

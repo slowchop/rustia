@@ -244,7 +244,12 @@ dispatch closure shrinks from 110,416 to 106,454 bytes (3,962 bytes), while the
 outer closure stays at 37,370 bytes. The new helper is 10,415 bytes; total binary
 size reduction is not claimed. Default/bare numeric-contract, diagnostic-parity
 and error-recovery tests pass. Remote five-workload and supplemental string
-comparisons remain required; none has been dispatched for this candidate yet.
+comparisons remain required. Delivery head `02c0b174` was pushed after full
+pre-push validation. Original-baseline sixteen-leg comparison
+[40246582277](https://github.com/slowchop/rustia/actions/runs/40246582277)
+and supplemental string comparison
+[40246584665](https://github.com/slowchop/rustia/actions/runs/40246584665)
+were dispatched; their completed intervals must be inspected before acceptance.
 
 The supplemental `strings` workflow mode freezes the existing paired harness
 and measures a dedicated `string_opcodes` workload at N=10,000, five repetitions
@@ -256,3 +261,32 @@ raw samples and host gates, and requires identical checksums across both
 revisions and all legs. Its 99% intervals are reported without inventing a
 calibrated string materiality threshold. Normal five-workload acceptance and
 the committed calibration are unchanged.
+
+The string-dispatch candidate failed original-baseline acceptance in
+[40246582277](https://github.com/slowchop/rustia/actions/runs/40246582277),
+although the workflow completed successfully. Sixteen ABBA legs per side and
+five repetitions produced these 99% intervals:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -0.57% | [-1.26%, 0.97%] |
+| Sparse tables | +0.49% | [-0.52%, 1.00%] |
+| Closures/upvalues | +2.98% | [1.74%, 5.22%] |
+| Generic iteration | +0.33% | [-0.04%, 1.25%] |
+| Math/table | -0.56% | [-1.29%, 0.60%] |
+
+No leg was flagged by the existing outlier rule. Every paired closure median
+was slower on the candidate. The resolved iteration and math/table intervals
+do not justify accepting the closure regression. All 192 raw sidecars across
+16 pairs were retained locally, alongside the complete job log. No thresholds
+changed, and this result will not be rerun until green.
+
+Static inspection found that LLVM already combines the two selected-capture
+lookups into one function-record access; a proposed capture-slice API was
+therefore rejected without implementation. The next candidate instead removes
+an observed full caller-register scan after successful scalar leaf calls when
+loader analysis of actual bytecode proves that caller cannot create local
+capture cells. Any local-cell read/write or function creation conservatively
+keeps synchronization. This proof is independent of optional capture hints;
+unknown frames keep the old scan. Correctness and fresh baseline comparison
+remain required, with all preceding results retained.

@@ -1135,6 +1135,14 @@ impl LoadedProgram {
         caches.set_native_call_inline_cache(pc, entry)
     }
 
+    fn may_attach_local_cells(&self, prototype: Option<u32>) -> Option<bool> {
+        let caches = match prototype {
+            Some(prototype) => self.function_inline_caches.get(prototype as usize)?,
+            None => &self.main_inline_caches,
+        };
+        Some(caches.may_attach_local_cells)
+    }
+
     fn leaf_call_plan(&self, prototype: u32) -> Option<LeafCallPlan> {
         self.function_inline_caches
             .get(prototype as usize)?
@@ -1252,6 +1260,8 @@ struct FunctionInlineCaches {
     #[allow(clippy::box_collection)]
     closure_call_entries: Option<Box<Vec<ClosureCallInlineCache>>>,
     leaf_call_plan: Option<LeafCallPlan>,
+    // Derived from executable bytecode, not optional captured-register hints.
+    may_attach_local_cells: bool,
     execution_tape: Option<Arc<FunctionTape>>,
     hot_ir_by_pc: Option<Box<[u32]>>,
     hot_irs: Vec<Arc<HotIr>>,
@@ -1330,6 +1340,12 @@ impl FunctionInlineCaches {
             native_call_entries: Vec::new(),
             closure_call_entries: None,
             leaf_call_plan,
+            may_attach_local_cells: function.code.iter().any(|instruction| {
+                matches!(
+                    instruction.op,
+                    Opcode::GetLocalCell | Opcode::SetLocalCell | Opcode::LoadFunction
+                )
+            }),
             execution_tape,
             hot_ir_by_pc,
             hot_irs,
@@ -4094,6 +4110,15 @@ impl Vm {
                 }));
             }
 
+            // Only these bytecode operations can attach a local capture cell.
+            // A conservative loader proof lets leaf calls skip an otherwise
+            // empty alias scan. Unretained or unknown frames keep the scan;
+            // resumed/self-call frames use the same immutable function proof.
+            let may_attach_local_cells = program_id
+                .and_then(|id| self.dynamic_programs.get(id))
+                .and_then(|program| program.may_attach_local_cells(context.prototype))
+                .unwrap_or(true);
+
             // Select the execution mode once per frame. Fuel metering and
             // coverage/census instrumentation cannot appear mid-frame, so a
             // plain (unmetered, uninstrumented) frame resolves its
@@ -4493,12 +4518,14 @@ impl Vm {
                                             u64::from(outcome.instruction_count)
                                                 .saturating_add(call_units),
                                         );
-                                    sync_leaf_mutation_to_registers(
-                                        &mut registers,
-                                        &register_cells,
-                                        outcome.mutation_cell,
-                                        outcome.first,
-                                    );
+                                    if may_attach_local_cells {
+                                        sync_leaf_mutation_to_registers(
+                                            &mut registers,
+                                            &register_cells,
+                                            outcome.mutation_cell,
+                                            outcome.first,
+                                        );
+                                    }
                                     let scalar_result = if outcome.result_count == 0 {
                                         Value::nil()
                                     } else {
@@ -30167,6 +30194,46 @@ mod inline_cache_tests {
         program
     }
 
+    fn closure_call_with_cell_free_caller_program() -> Program {
+        let mut program = closure_call_counter_program();
+        program.functions.push(Function::with_params_and_upvalues(
+            vec![
+                Instruction::with_aux(Opcode::Call, 1, 0, 0, 0),
+                Instruction::new(Opcode::Return, 1, 1, 0),
+                Instruction::new(Opcode::Return, 0, 0, 0),
+            ],
+            2,
+            1,
+            Vec::new(),
+            Vec::new(),
+        ));
+        program
+    }
+
+    fn call_cell_free_caller(program: &Program, vm: &mut Vm) -> Value {
+        let program_id = vm.retain_dynamic_program(program.clone()).unwrap();
+        let cell = vm.heap.alloc_upvalue(Value::number(0.0)).unwrap();
+        let leaf = vm
+            .heap
+            .alloc_function(
+                Some(program_id),
+                0,
+                vec![
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(1.0)),
+                ],
+                vm.globals,
+            )
+            .unwrap();
+        let caller = vm
+            .heap
+            .alloc_function(Some(program_id), 1, Vec::new(), vm.globals)
+            .unwrap();
+        vm.maybe_collect().unwrap();
+        vm.call_function(program, Value::function(caller), &[Value::function(leaf)])
+            .unwrap()
+    }
+
     /// The `ArrayIterator` leaf shape: `i = i + 1; if i <= #items then return
     /// i, items[i] end`, with `i` a parent cell (upvalue 0) and `items` a
     /// parent value (upvalue 1).
@@ -30302,7 +30369,9 @@ mod inline_cache_tests {
             fast.executed_instructions,
             interpreted.executed_instructions
         );
+        assert!(program.main.captured_registers.is_empty());
         let fast_loaded = &fast.dynamic_programs[0];
+        assert_eq!(fast_loaded.may_attach_local_cells(None), Some(true));
         assert_eq!(fast_loaded.closure_call_cache_fills, 1);
         assert_eq!(fast_loaded.closure_call_prototype_hits, 15);
         assert_eq!(fast_loaded.closure_call_fast_entries, 16);
@@ -30312,6 +30381,83 @@ mod inline_cache_tests {
         assert_eq!(interpreted_loaded.closure_call_prototype_hits, 0);
         assert_eq!(interpreted_loaded.closure_call_fast_entries, 0);
         assert_eq!(interpreted_loaded.closure_call_guard_exits, 0);
+    }
+
+    #[test]
+    fn cell_free_caller_skips_leaf_register_scan_without_changing_results_or_units() {
+        let program = closure_call_with_cell_free_caller_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_result = call_cell_free_caller(&program, &mut fast);
+
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        let interpreted_result = call_cell_free_caller(&program, &mut interpreted);
+
+        assert_eq!(fast_result.as_number(), Some(1.0));
+        assert_eq!(fast_result.as_number(), interpreted_result.as_number());
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(
+            fast.dynamic_programs[0].may_attach_local_cells(Some(1)),
+            Some(false)
+        );
+        assert_eq!(fast.dynamic_programs[0].closure_call_fast_entries, 1);
+        assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn local_cell_scan_proof_uses_bytecode_and_treats_load_function_conservatively() {
+        let main = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let no_cell = Function::with_params_and_upvalues(
+            vec![Instruction::new(Opcode::Halt, 0, 0, 0)],
+            1,
+            0,
+            Vec::new(),
+            vec![0],
+        );
+        let get_cell = Function::new(
+            vec![
+                Instruction::new(Opcode::GetLocalCell, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let set_cell = Function::new(
+            vec![
+                Instruction::new(Opcode::SetLocalCell, 0, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let bad_load = Function::new(
+            vec![
+                Instruction::with_aux(Opcode::LoadFunction, 0, 0, 0, i32::MAX),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ],
+            1,
+        );
+        let program = Program::with_functions(
+            main,
+            Vec::new(),
+            vec![no_cell, get_cell, set_cell, bad_load],
+        );
+        let loaded = LoadedProgram::new(program);
+
+        assert_eq!(loaded.may_attach_local_cells(None), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(0)), Some(false));
+        assert_eq!(loaded.may_attach_local_cells(Some(1)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(2)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(3)), Some(true));
+        assert_eq!(loaded.may_attach_local_cells(Some(usize::MAX as u32)), None);
     }
 
     #[test]
