@@ -713,4 +713,34 @@ check before the vacancy lookup; non-vector writes skip that call. `table_set`
 grows from 3,348 to 3,397 bytes. Main dispatch keeps its 106,805-byte size and
 starting address. These are code-shape observations, not performance claims.
 Default and bare VM suites each pass 250 tests; focused numeric-index, array
-mutation and golden facade suites each pass eight tests in both feature modes.
+mutation and golden facade checks pass eight tests total per feature mode.
+
+
+The isolated vector-probe runtime `8a1c6ac4`, delivered as `f1e6de36`, completes
+[eight-pair comparison](https://github.com/slowchop/rustia/actions/runs/40361503127)
+against `c754371f`. All 96 raw sidecars and forty ABBA workload pairs validate;
+no outliers are flagged. At 99% confidence, dense tables measure +0.32%
+[-0.62%, 0.77%], sparse tables -1.34% [-2.84%, 0.58%], closures +0.21%
+[-1.40%, 1.45%], iteration +0.51% [0.11%, 0.97%], and math/table +0.25%
+[-1.49%, 1.37%]. Sparse improvement is unestablished and iteration slows.
+The production probe guard is reverted rather than accumulated; no samples or
+thresholds change, and no original-baseline acceptance is run for this candidate.
+
+The next correction targets a separate emitted duplicate read in the iterator
+leaf: its metatable check validates the table arena slot, then `array_len`
+validates that same slot again. A crate-private primitive-boundary query performs
+one validation, rejects any metatable, and calls the existing boundary function.
+It preserves Log/PUC boundaries and guard-before-index-mutation ordering; general
+length and numeric lookup remain unchanged. The direct baseline is `c754371f`,
+with the failed probe reverted, so only this iterator guard differs in production.
+The four-profile regression explicitly covers metatable and missing-table
+fallback without mutation, followed by normal results after metatable removal.
+
+
+Pinned Linux static output inlines the combined guard and calls the existing
+boundary function directly, eliminating the second arena validation. The leaf
+outcome executor shrinks from 1,045 to 992 bytes; main dispatch retains its
+106,805-byte size and starting address. No new wrapper call remains. Default
+and bare VM suites each pass 251 tests; focused continuation, numeric-index,
+metamethod-yield and golden checks pass nine tests total per feature mode.
+These correctness and code-shape checks do not establish a speed improvement.

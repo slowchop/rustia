@@ -434,3 +434,22 @@ has zero failures and two matching goldens, including the new iterator coroutine
 regression in both feature modes. Differential smoke matches 27 cases without
 differences. Candidate-only screening is not acceptance. Failed original-baseline
 performance and the next isolated probe correction remain recorded in [95](95-numeric-index-contract.md).
+
+
+## Vector-probe candidate (historical after revert)
+
+Runtime `8a1c6ac4aa32fe9bf1aa29218ff7d86a2b20ceaa`, delivery
+`f1e6de3648a263ef1e03be2313c420f0d27b1920`, passes
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40361453671) and
+[manual CI](https://github.com/slowchop/rustia/actions/runs/40361508072).
+Each workspace log executes 1,028 tests in 63 groups; each release log executes
+315 tests in 36 groups, including twelve archived facade suites in both feature
+modes. Both aggregate gates have successful preflight and WebKit inputs. All
+sixteen target-build logs across the two runs verify successful checks.
+
+Each macOS and Windows run executes 124 tests in 16 groups; each Node run
+executes 94 in 18; each WebKit run executes 92 in 16. Exact-source native Linux
+ARM64 executes 124 tests in 16 groups. All have zero failures and two matching
+goldens. Differential smoke matches 27 cases without differences. Candidate-only
+screening is not acceptance. The failed isolated measurement, production revert
+and next boundary-guard correction remain recorded in [95](95-numeric-index-contract.md).

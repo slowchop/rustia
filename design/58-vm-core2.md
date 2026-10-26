@@ -395,7 +395,8 @@ The PR #74 math follow-up passes validated unary arguments directly to the share
 math implementation, avoiding a temporary copy. Argument validation and numeric
 operations are unchanged. The separate table-probe and fresh-frame scan changes
 were reverted after failed remote acceptance; their tests and evidence remain.
-The vector-only table-probe guard is now isolated separately, as described below.
+The vector-only table-probe guard was subsequently isolated and reverted again,
+as described below.
 The isolated math change still requires remote acceptance.
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
@@ -1015,13 +1016,21 @@ The error-precedence regression covers invalid state/control registers, missing
 handles, depth exhaustion and built-in table errors without capture mutation.
 
 
-### Visible vector-key insertion probe
+### Visible vector-key insertion probe (reverted)
 
-The ordinary Log-layout table setter checks whether a key needs a newly owned
-visible copy only for non-nil vector keys. For all other key kinds, the previous
-vacancy probe did not affect the visible key; normal key conversion and the
-ordinary store are unchanged. Readonly and table-layout checks precede this
-choice. Vector insertion, replacement and nil writes retain their prior behavior;
-PUC writes and quota-specific staged writes retain their separate paths. This
-single change is isolated against `c754371f` after that candidate's persistent
-sparse-table and iteration slowdowns. It does not establish performance acceptance.
+The isolated vector-only vacancy probe failed to establish a sparse-table
+improvement and measured a directional iteration slowdown. It is reverted;
+ordinary table writes retain their existing probe and store behavior. All
+results remain in [95](95-numeric-index-contract.md).
+
+### Primitive iterator boundary guard
+
+The recognized array-iterator leaf reads the table once to validate its handle,
+reject any metatable, and compute the existing boundary. The same
+`table_array_boundary_len` function preserves Log and PUC boundary rules. A
+missing table or any metatable returns fallback before number calculation or
+index-cell mutation. General length queries and numeric table lookup remain
+unchanged; no boundary is cached. The four-profile regression verifies rejected
+guards leave the index and instruction count untouched, then verifies ordinary
+results after metatable removal. Existing forced-leaf versus scalar coverage
+retains holes, fractional/negative/zero keys and PUC hash-backed reads.

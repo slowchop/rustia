@@ -2939,8 +2939,7 @@ impl VmCell {
                 puc_store(root, table, table_key, key_value, value, false);
             });
         }
-        // Only new vector keys require an owned visible copy.
-        let creates_hash_entry = matches!(table_key, TableKey::Vector(_)) && !value.is_nil() && {
+        let creates_hash_entry = !value.is_nil() && {
             let table = self.tables.get(table)?;
             let HashPart::Log { entries, index } = &table.hash else {
                 debug_assert!(false, "table layout changed between checks");
@@ -3216,6 +3215,15 @@ impl VmCell {
 
     pub fn array_len(&mut self, table: u32) -> Option<usize> {
         self.tables.get(table).map(table_array_boundary_len)
+    }
+
+    /// Read the primitive boundary only when no metatable can intercept it.
+    pub(crate) fn array_len_without_metatable(&self, table: u32) -> Option<usize> {
+        let table = self.tables.get(table)?;
+        if table.metatable.is_some() {
+            return None;
+        }
+        Some(table_array_boundary_len(table))
     }
 
     pub fn table_storage_len(&mut self, table: u32) -> Option<usize> {

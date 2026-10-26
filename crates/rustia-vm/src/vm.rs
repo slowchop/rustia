@@ -11659,10 +11659,7 @@ impl Vm {
                 // Both `#items` and `items[index]` are only primitive when no
                 // metatable can intercept them. This guard precedes the index
                 // mutation, so any metamethod-capable case falls back cleanly.
-                if self.heap.table_metatable(items) != Some(None) {
-                    return Ok(None);
-                }
-                let Some(len) = self.heap.array_len(items) else {
+                let Some(len) = self.heap.array_len_without_metatable(items) else {
                     return Ok(None);
                 };
                 let next_number = binary(NumericOp::Add, index, increment);
@@ -30877,6 +30874,74 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
         assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn array_iterator_table_guard_precedes_index_mutation() {
+        for profile in [
+            Profile::LuauCompat,
+            Profile::ReproducibleStandard,
+            Profile::DeterministicSim,
+            Profile::Puc51Compat,
+        ] {
+            let mut vm = Vm::new(profile);
+            let items = if profile == Profile::Puc51Compat {
+                vm.heap
+                    .try_alloc_puc_table_from_parts(vec![Value::number(10.0)], 8)
+                    .unwrap()
+            } else {
+                vm.heap.alloc_array_table(&[Value::number(10.0)])
+            };
+            let metatable = vm.heap.alloc_array_table(&[]);
+            vm.heap.table_set_metatable(items, Some(metatable)).unwrap();
+            let index_cell = vm.heap.alloc_upvalue(Value::number(0.0)).unwrap();
+            let items_cell = vm.heap.alloc_upvalue(Value::table(items)).unwrap();
+            let index_capture = FunctionCapture::from_cell(index_cell);
+            let items_capture = FunctionCapture::from_cell(items_cell);
+            let plan = LeafCallPlan::ArrayIterator {
+                index_upvalue: 0,
+                items_upvalue: 1,
+                increment: 1.0,
+            };
+            let before = vm.executed_instructions;
+            assert!(vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(0.0)
+            );
+            vm.heap
+                .upvalue_set(items_cell, Value::table(u32::MAX))
+                .unwrap();
+            assert!(vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(0.0)
+            );
+            assert_eq!(vm.executed_instructions, before);
+
+            vm.heap.table_set_metatable(items, None).unwrap();
+            vm.heap
+                .upvalue_set(items_cell, Value::table(items))
+                .unwrap();
+            let outcome = vm
+                .try_leaf_call_outcome(plan, index_capture, items_capture)
+                .unwrap()
+                .unwrap();
+            assert_eq!(outcome.first.as_number(), Some(1.0));
+            assert_eq!(outcome.second.as_number(), Some(10.0));
+            assert_eq!(outcome.result_count, 2);
+            assert_eq!(outcome.instruction_count, 19);
+            assert_eq!(
+                vm.heap.capture_get(index_capture).unwrap().as_number(),
+                Some(1.0)
+            );
+        }
     }
 
     #[test]
