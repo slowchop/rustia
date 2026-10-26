@@ -16550,10 +16550,9 @@ impl Vm {
         Ok(Value::number(binary(NumericOp::Abs, value, 0.0)))
     }
 
-    #[inline(never)]
     fn native_math_unary(&mut self, args: &[Value], op: MathUnary) -> Result<Value> {
         validate_native_arity(args, 1, u8::MAX as usize, "math argument")?;
-        self.math_unary(args, Instruction::with_aux(Opcode::Halt, 0, 0, 0, 1), op)
+        self.math_unary_value(args[0], op)
     }
 
     fn native_math_binary(&mut self, args: &[Value], op: MathBinary) -> Result<Value> {
@@ -19316,7 +19315,13 @@ impl Vm {
         op: MathUnary,
     ) -> Result<Value> {
         validate_math_arity(instruction, 1, "invalid one-argument math arity")?;
-        let value = self.coerce_register_to_number(registers, instruction.b)?;
+        self.math_unary_value(get_register(registers, instruction.b)?, op)
+    }
+
+    fn math_unary_value(&mut self, value: Value, op: MathUnary) -> Result<Value> {
+        let value = self
+            .coerce_to_number(value)?
+            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         let result = match op {
             MathUnary::Floor => libm::floor(value),
             MathUnary::Ceil => libm::ceil(value),
@@ -29470,6 +29475,55 @@ mod inline_cache_tests {
         let scalar_result = scalar.run(&program).unwrap();
         assert_eq!(tiered_result.as_number(), scalar_result.as_number());
         assert_eq!(tiered.executed_instructions, scalar.executed_instructions);
+    }
+
+    #[test]
+    fn unary_math_entries_validate_before_reading_values() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        for args in [Vec::new(), vec![Value::nil(); 256]] {
+            let error = vm.native_math_unary(&args, MathUnary::Floor).unwrap_err();
+            assert!(matches!(
+                error.kind,
+                ErrorKind::TypeError {
+                    expected: "math argument"
+                }
+            ));
+        }
+        let mut args = vec![Value::nil(); 255];
+        args[0] = Value::number(2.75);
+        assert_eq!(
+            vm.native_math_unary(&args, MathUnary::Floor)
+                .unwrap()
+                .as_number(),
+            Some(2.0)
+        );
+        let error = vm
+            .math_unary(
+                &[],
+                Instruction::with_aux(Opcode::MathFloor, 0, 7, 0, 0),
+                MathUnary::Floor,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error.kind,
+            ErrorKind::InvalidProgram {
+                reason: "invalid one-argument math arity"
+            }
+        ));
+        let error = vm
+            .math_unary(
+                &[],
+                Instruction::with_aux(Opcode::MathFloor, 0, 7, 0, 1),
+                MathUnary::Floor,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error.kind,
+            ErrorKind::RegisterOutOfBounds {
+                register: 7,
+                max: 0
+            }
+        ));
     }
 
     #[test]

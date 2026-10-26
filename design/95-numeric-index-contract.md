@@ -500,3 +500,43 @@ This confirms the intended separation, not a speedup: the additional call
 boundary may offset allocation savings on cheap math operations. A fresh
 remote eight-pair comparison against `6b0122bd` must test the combined isolated
 math change before any original-baseline acceptance is warranted.
+
+
+The wrapper candidate `2e347dad`, delivered as `457d7715`, completes its
+[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40311566683)
+against `6b0122bd` but does not resolve acceptance. All 96 sidecars independently
+validate identities, fixed work, repetitions, checksums, aggregate copies and
+forty ABBA workload pairs. No outliers were flagged. The 99% results are:
+
+| Workload | Delta | 99% interval |
+|---|---:|---|
+| Dense tables | -0.61% | [-2.94%, 1.69%] |
+| Sparse tables | +1.56% | [-0.25%, 2.49%] |
+| Closures/upvalues | -0.65% | [-3.42%, 1.41%] |
+| Generic iteration | +5.28% | [2.38%, 6.18%] |
+| Math/table | -5.27% | [-7.20%, -3.09%] |
+
+The wrapper removes the previous dense/closure directional regressions, but
+iteration remains slower. Excluding its calibrated 7.60% material threshold
+does not satisfy the requirement to resolve persistent directional slowdowns.
+Sparse-table material acceptance is inconclusive. No original-baseline run is
+dispatched for this candidate; all evidence and thresholds remain intact.
+
+
+The failed wrapper annotation is removed. The next bounded candidate separates
+unary math's value operation from opcode entry validation. Native calls validate
+the argument count, then pass the first value directly; opcode calls validate
+arity and register access before the same value coercion and libm operation.
+This removes the native temporary-register copy and synthetic instruction,
+without removing either entry's validation or changing error ordering.
+Static Linux x86-64 inspection gives a 147-byte opcode entry and a 463-byte
+shared value operation, versus the prior 742-byte opcode-oriented helper.
+Native dispatch is 8,141 bytes; the main interpreter body remains 106,297 bytes.
+These sizes are diagnostic only. Fresh remote isolation, then original-baseline
+and string acceptance if justified, remain required.
+
+Targeted regressions check direct and aliased unary calls across all four
+profiles for numeric-string coercion, evaluated-but-ignored extras and
+missing/invalid values. A VM entry test checks native argument-count bounds
+and opcode arity-before-register validation. Both feature modes pass these
+checks and the numeric-index and suspended-call contracts.

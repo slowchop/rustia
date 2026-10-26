@@ -326,3 +326,25 @@ matches all 27 cases with zero differences and passes its execution test.
 These results establish correctness evidence for this candidate, not performance
 acceptance. Intel Mac and mobile runtime execution remain open release gates;
 real Safari remains a release-candidate check.
+
+
+The subsequent out-of-line unary-math wrapper is runtime `2e347dad`, delivered
+as `457d7715`. Its exact source archive passes native Linux arm64 correctness:
+122 tests across sixteen groups, zero failures and two matching goldens,
+retained in `/private/tmp/rustia-linux-arm64-2e347dad.log`.
+
+[PR CI](https://github.com/slowchop/rustia/actions/runs/40311547800) passes all
+fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia/actions/runs/40311573884)
+passes all sixteen. Independent log audits verify macOS and Windows 122 tests
+across sixteen groups, Node 92/18 and WebKit 90/16, all with zero failures,
+two matching goldens and the suspended-capture regression in both feature modes.
+All sixteen target-build logs across the two runs verify the intended target
+commands and successful compilation.
+
+Workspace jobs `121533697826` and `121533794690` each execute 1,023 tests across
+63 groups; release jobs `121533697744` and `121533795048` each execute 313 across
+36 groups, including twelve external archived facade suites in default and bare
+modes. Both stages have zero failures and two matching goldens; both aggregates
+receive successful preflight and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40311547738)
+verifies 27 matches, zero differences and a passing execution test. Performance
+acceptance remains separate; the open public-release platform gates remain.
