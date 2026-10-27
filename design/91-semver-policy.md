@@ -4,6 +4,11 @@ This policy defines how rustia will move from the current unpublished `0.0.x`
 workspace to publishable public crates. It applies to the public rustia project
 only; grabby-specific integration code remains outside this repository.
 
+Repository visibility is separate from package versions and publication.
+Making source available for inspection does not establish a released API
+baseline, change `publish = false`, or close supported-release gates. Source
+access has its own [readiness record](98-public-source-readiness.md).
+
 ## Current Status
 
 - All public workspace crates are currently `0.0.1` and `publish = false`.

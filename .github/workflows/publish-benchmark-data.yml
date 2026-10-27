@@ -21,6 +21,8 @@ name: Publish Benchmark Data
       - bench/wasm/current-results.json
       - bench/wasm/dispatch-current-results.json
       - tools/check-benchmark-results.js
+      - tools/bench-host-control.js
+      - design/99-benchmark-host-calibration.json
       - tools/check-grabby-build-results.js
       - tools/check-wasm-gate-results.js
       - tools/render-benchmark-data-readme.js
@@ -138,6 +140,14 @@ jobs:
             install -d bench/history/series
             install -m 644 "$data_dir/bench/history/series/ci-bench-main.jsonl" \
               bench/history/series/ci-bench-main.jsonl
+          fi
+          # Controls are part of the history's meaning, not just job diagnostics.
+          # A fingerprinted series without its ledger is refused by the renderer.
+          if [ -f "$data_dir/bench/history/series/ci-bench-host-controls.jsonl" ]; then
+            install -m 644 "$data_dir/bench/history/series/ci-bench-host-controls.jsonl" \
+              bench/history/series/ci-bench-host-controls.jsonl
+          else
+            rm -f bench/history/series/ci-bench-host-controls.jsonl
           fi
 
           install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json

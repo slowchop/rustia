@@ -70,6 +70,12 @@ issue tracker is not open during the private preview; include a report with a
 pull request or bring it to a maintainer. Public bugs and features will use this
 repository's GitHub Issues when the project opens for release.
 
+Source access does not mean the crates have been released or the API is stable.
+Support and review are best-effort; a report or contribution does not guarantee
+an implementation or response date. Keep suspected credentials, private data and
+security-sensitive reproduction details out of public reports. Before opening
+the repository, maintainers must establish a private security-reporting channel.
+
 Rustia targets **standalone Luau 0.709**. It does not provide Roblox services.
 When changing language behavior, check the relevant [design document](design/)
 and [compatibility coverage](conformance/COVERAGE.md), and compare against the

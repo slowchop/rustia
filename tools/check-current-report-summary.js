@@ -643,6 +643,56 @@ function main() {
   assert.match(seriesHtml, /2 historical Rustia revisions replayed against one fixed harness/);
   assert.match(seriesHtml, /Not drawn: 1 run\(s\) measured before hosts were recorded; 1 run\(s\) measured on <code>linode-ap-southeast-g6-dedicated-4<\/code>\./);
   assert.doesNotMatch(seriesHtml, /recorded Linux matrix runs/);
+  assert.doesNotMatch(seriesHtml, /differences between points are engine changes/);
+  const control = {
+    schema: "rustia.bench.host-control.v1", host: "ci-bench", commit: "a".repeat(40),
+    timestamp_unix: 5_500, recorded_timestamp_unix: 5_000, host_fingerprint: "b".repeat(64),
+    recorded_binary_sha256: "c".repeat(64), control_binary_sha256: "c".repeat(64), moved: true,
+    workloads: Object.fromEntries(REQUIRED_COMMON_WORKLOADS.map((name) => [name, {
+      recorded_ns_per_unit_median: 100, control_ns_per_unit_median: 109,
+      change_percent: 9, threshold_percent: 2, outside_threshold: true,
+    }])),
+  };
+  const controlledSeries = { ...liveSeries("ci-bench"), controls: [control] };
+  const splitEras = rustiaBackfillEras([], eraReference, [controlledSeries]);
+  assert.equal(splitEras.length, 2);
+  assert.deepEqual(splitEras.map((era) => era.overall.map((point) => point.gain)), [[1], [1]]);
+  const controlledHtml = historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), [controlledSeries]);
+  assert.match(controlledHtml, /1 of 1 comparisons exceeded/);
+  assert.match(controlledHtml, /Same bytes/);
+  assert.match(controlledHtml, /host period 1/);
+  assert.match(controlledHtml, /host period 2/);
+  assert.match(controlledHtml, /original row, not the preceding control/);
+  const provisionalHtml = historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), [controlledSeries], {
+    status: "failed", reviewed_at: "2026-10-27", run_url: "https://github.com/slowchop/rustia/actions/runs/1",
+  });
+  assert.match(provisionalHtml, /Latest reviewed A\/A calibration: failed/);
+  assert.match(provisionalHtml, /Current repeatability is unresolved/);
+  assert.match(provisionalHtml, /no new thresholds have been adopted/);
+  assert.doesNotMatch(controlledHtml, /2\.000x/);
+  const differentBinary = structuredClone(controlledSeries);
+  differentBinary.controls[0].control_binary_sha256 = "d".repeat(64);
+  assert.match(historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), [differentBinary]), /Different bytes/);
+  const corruptedControl = structuredClone(controlledSeries);
+  corruptedControl.controls[0].moved = false;
+  assert.throws(() => rustiaBackfillEras([], eraReference, [corruptedControl]), /moved verdict/);
+  const workloadChecksums = Object.fromEntries(REQUIRED_COMMON_WORKLOADS.map((name) => [name, "number:1"]));
+  const matchingManifest = {
+    harness_commit: "1".repeat(40), host: "ci-bench", pinned_core: 4,
+    workloads: REQUIRED_COMMON_WORKLOADS, fixed_n: {}, expected_checksums: workloadChecksums,
+  };
+  const replayed = {
+    ...matchingManifest, targets: [{ commit: "old-source", committed_at_unix: 1_000 }],
+    rows: snapshot(6_000, "old-source", 100, "ci-bench").map((row) => ({ ...row, checksum: "number:1" })),
+  };
+  const measuredLater = {
+    ...controlledSeries, manifest: matchingManifest,
+    rows: snapshot(7_000, "new-source", 50, "ci-bench"),
+  };
+  const replayEras = rustiaBackfillEras([replayed], eraReference, [measuredLater]);
+  assert.equal(replayEras.length, 1, "source dates must not split rows measured after the same control");
+  assert.match(replayEras[0].label, /host period 2/);
+  assert.equal(replayEras[0].snapshotCount, 2);
   // Every point on the chart is divided into the reference, so a series or a
   // reconstruction from another machine is refused, never drawn against it.
   assert.throws(

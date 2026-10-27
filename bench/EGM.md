@@ -10,6 +10,8 @@ This directory holds the benchmark crate, workload programs, memory-analysis too
 - [`run-memory-cohort.js`](run-memory-cohort.js) accepts a protocol config and two binaries, then coordinates evidence generation. [`cgroup-delegation.js`](cgroup-delegation.js) locates the usable delegated cgroup-v2 ancestor; [`publish-memory-analysis.js`](publish-memory-analysis.js) validates and writes memory cohort artifacts.
 - The native harness and VM memory probe live in [`src/EGM.md`](src/EGM.md). Workload sources are grouped in [`workloads/EGM.md`](workloads/EGM.md). Wasm drivers and adapter code are in [`wasm/EGM.md`](wasm/EGM.md). Grabby build reporting is in [`grabby-builds/EGM.md`](grabby-builds/EGM.md).
 - Supporting direct sources include [`run-memory-supervisor.js`](run-memory-supervisor.js), [`analyze-memory-samples.js`](analyze-memory-samples.js), [`analyze-fixed-samples.js`](analyze-fixed-samples.js), [`render-current-results.js`](render-current-results.js), and [`render-claims.js`](render-claims.js). These are internal harness and report tools, not embedding APIs.
+- The results renderer consumes data-owned per-commit rows and the host-control ledger. Flagged controls break history into separate periods; reconstructed source dates position points while actual measurement times select their period. It displays retained controls and observed reference ratios without claiming that every change comes from engine code. Control validation is shared with [`../tools/bench-host-control.js`](../tools/bench-host-control.js).
+- The dated [calibration review](../design/99-benchmark-host-calibration.json) supplies the graph's reviewed repeatability notice. It is not a live health feed; a failed review marks historical observations provisional without changing measurements or thresholds.
 
 ## Invariants
 
@@ -17,6 +19,7 @@ This directory holds the benchmark crate, workload programs, memory-analysis too
 - A memory cohort is tied to one host label. `run-memory-cohort.js` validates the protocol's exact shape and label, and the publisher rejects rows from multiple hosts ([coordinator](run-memory-cohort.js), [publisher](publish-memory-analysis.js)).
 - Memory measurement fails closed without a writable cgroup-v2 ancestor whose root is empty and has the memory controller ([probe](cgroup-delegation.js)).
 - Never run performance measurements locally. Only `ci-bench` results count as benchmark evidence ([repository policy](../AGENTS.md#benchmark-policy), [current state](../design/CURRENT.md)).
+- Historical host-control percentages compare with the original recorded row and must not be added together or used to rescale measurements. A flagged boundary resets the displayed within-period change; raw results remain unchanged.
 
 ## Side Effects
 

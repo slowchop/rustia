@@ -1,0 +1,22 @@
+{
+  "schema": "rustia.bench.host-calibration-review.v1",
+  "schema_version": 1,
+  "host": "ci-bench",
+  "reviewed_at": "2026-10-27",
+  "commit": "a62ef708e63c02fdea5630c32e3f8c78d173b82a",
+  "run_url": "https://github.com/slowchop/rustia/actions/runs/40462439654",
+  "status": "failed",
+  "same_binary": true,
+  "passes": 4,
+  "repetitions": 5,
+  "confidence": 0.99,
+  "failed_comparisons": [
+    {
+      "workload": "sparse_tables",
+      "split": "1,4 vs 2,3",
+      "delta_percent": 0.920,
+      "interval_percent": { "lower": 0.30, "upper": 1.29 }
+    }
+  ],
+  "interpretation": "The balanced A/A comparison excluded zero for one workload. Current repeatability is unresolved; do not adopt new thresholds, attribute this to source changes, or treat historical graph differences as code-only performance changes."
+}

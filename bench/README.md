@@ -624,6 +624,23 @@ history on the updated host (`just bench-history replace=1`, about 35 minutes).
 Nothing re-measures or rewrites rows by itself yet: that waits until enough
 controls exist to set a threshold for it.
 
+The data step marks successful publication through a job output. A dependent
+call to the sole dashboard publisher then renders the saved rows and controls.
+The dependency uses `always()` and requires that output: a retained host-control
+finding still reaches the graph when the separate drift step fails, while a
+failed data push cannot trigger publication. This closes the race where a
+push-triggered dashboard job completed before the measurement did.
+
+The published graph includes the control ledger and breaks the line at flagged
+controls. Its change table compares only points within each displayed host
+period. Historical source dates still position reconstructed points; actual
+measurement times determine their host period. A control compares against the
+source revision's original row, not the previous control, so repeated findings
+must not be added together. The graph reports observed ratios to a separately
+measured reference, not code-only improvements or causal package diagnoses.
+Raw numbers are preserved. An unchanged fingerprint today does not clear earlier
+warnings. See [the integrity investigation](https://github.com/slowchop/rustia/blob/main/design/99-benchmark-history-integrity.md).
+
 Host steps a person looked at and left in the series:
 
 | Host change | Control | Moved | Decision |

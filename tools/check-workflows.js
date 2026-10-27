@@ -105,9 +105,14 @@ function checkActionPins(text, label) {
     // Only this success-dependent job-level local call is permitted. Do not
     // turn the exception into acceptance of arbitrary local actions/workflows.
     const publicationCall = "uses: ./.github/workflows/publish-benchmark-data.yml";
-    const reusablePublication = label === ".github/workflows/rustia-memory.yml"
+    const caller = label === ".github/workflows/rustia-memory.yml"
+      ? `\n  publish:\n    needs: benchmark\n    ${publicationCall}\n`
+      : label === ".github/workflows/main-bench.yml"
+        ? `\n  publish:\n    needs: measure\n    if: always() && needs.measure.outputs.data_published == 'true'\n    ${publicationCall}\n`
+        : null;
+    const reusablePublication = caller !== null
       && line === publicationCall
-      && text.includes(`\n  publish:\n    needs: benchmark\n    ${publicationCall}\n`)
+      && text.includes(caller)
       && usesLines(text).filter(use => use === publicationCall).length === 1;
     if (!official && !rustToolchain && !reusablePublication) {
       fail(`${label} action must be an approved action pinned to a full commit SHA: ${line}`);
@@ -550,6 +555,16 @@ function checkMainBench(text) {
   requireIncludes(text, "if: github.ref == 'refs/heads/main'", label);
   requireIncludes(text, "persist-credentials: false", label);
   requireIncludes(text, "timeout-minutes:", label);
+  requireIncludes(text, "data_published: ${{ steps.record.outputs.data_published }}", label);
+  requireIncludes(text, "      - name: Measure and publish the series row\n        id: record\n", label);
+  requireIncludes(text, "  publish:\n    needs: measure\n    if: always() && needs.measure.outputs.data_published == 'true'\n    uses: ./.github/workflows/publish-benchmark-data.yml", label);
+  requireBefore(text,
+    'node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series',
+    'echo "data_published=true" >> "$GITHUB_OUTPUT"', label);
+  requireBefore(text, 'echo "data_published=true" >> "$GITHUB_OUTPUT"', 'if [ "$verdict" = moved ]; then', label);
+  requireIncludes(text, 'echo "host_moved=true" >> "$GITHUB_OUTPUT"', label);
+  requireIncludes(text, "      - name: Report flagged host control\n        if: steps.record.outputs.host_moved == 'true'", label);
+  requireIncludes(text, "flagged_history_controls", label);
   requireIncludes(text, "node tools/run-dedicated-benchmark.js main --local", label);
   // Rows are validated against the committed protocol before they are pushed,
   // so a row that does not belong to this series never reaches published data.
@@ -1202,6 +1217,7 @@ function checkBenchmarkPublication(text) {
   requireIncludes(text, 'install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"', label);
   requireIncludes(text, 'git -C "$pages_dir" add index.html grabby-builds.json', label);
   requireIncludes(text, 'install -m 644 "$data_dir/bench/history/series/ci-bench-main.jsonl"', label);
+  requireIncludes(text, 'install -m 644 "$data_dir/bench/history/series/ci-bench-host-controls.jsonl"', label);
   requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/current-results.json" bench/memory/current-results.json', label);
   requireIncludes(text, 'install -m 644 "$data_dir/bench/memory/history/runs.jsonl" bench/memory/history/runs.jsonl', label);
   requireIncludes(text, "permissions:\n  contents: read\n", label);
@@ -1301,6 +1317,24 @@ if (process.argv?.includes("--self-test")) {
       assert.notEqual(result.status, 0, `${label}: invalid workflow passed`);
       assert.match(result.stderr, message, `${label}: failed for the wrong reason`);
     }
+    fs.writeFileSync(path.join(temporary, ".github/workflows/ci.yml"), canonical);
+    const mainPath = path.join(temporary, ".github/workflows/main-bench.yml");
+    const publicationPath = path.join(temporary, ".github/workflows/publish-benchmark-data.yml");
+    const mainWorkflow = fs.readFileSync(mainPath, "utf8");
+    const publicationWorkflow = fs.readFileSync(publicationPath, "utf8");
+    for (const [label, file, original, changed] of [
+      ["publication before saved rows", mainPath, mainWorkflow, mainWorkflow.replace('            echo "data_published=true" >> "$GITHUB_OUTPUT"\n', '').replace('            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series', '            echo "data_published=true" >> "$GITHUB_OUTPUT"\n            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series')],
+      ["drift failure hides publication", mainPath, mainWorkflow, mainWorkflow.replace("if: always() && needs.measure.outputs.data_published == 'true'", "if: success() && needs.measure.outputs.data_published == 'true'")],
+      ["publication without push confirmation", mainPath, mainWorkflow, mainWorkflow.replace("if: always() && needs.measure.outputs.data_published == 'true'", "if: always()")],
+      ["missing control ledger", publicationPath, publicationWorkflow, publicationWorkflow.replace('install -m 644 "$data_dir/bench/history/series/ci-bench-host-controls.jsonl"', 'true # omitted controls')],
+    ]) {
+      assert.notEqual(changed, original, `${label}: mutation did not apply`);
+      fs.writeFileSync(file, changed);
+      const result = spawnSync(process.execPath, [path.join(temporary, "tools/check-workflows.js")], { encoding: "utf8" });
+      fs.writeFileSync(file, original);
+      assert.notEqual(result.status, 0, `${label}: invalid workflow passed`);
+      assert.match(result.stderr, /must include|must be an approved action/, `${label}: failed for the wrong reason`);
+    }
     const fakeBin = path.join(temporary, "fake-bin");
     fs.mkdirSync(fakeBin);
     fs.writeFileSync(path.join(fakeBin, "cargo"), [
@@ -1323,7 +1357,7 @@ if (process.argv?.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, thirteen policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, seventeen policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

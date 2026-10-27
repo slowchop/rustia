@@ -68,6 +68,8 @@ jobs:
     runs-on:
       group: bench-solo
     timeout-minutes: 45
+    outputs:
+      data_published: ${{ steps.record.outputs.data_published }}
 
     steps:
       - name: Checkout the measured commit
@@ -88,6 +90,7 @@ jobs:
           node-version: 22
 
       - name: Measure and publish the series row
+        id: record
         env:
           BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
         run: |
@@ -115,6 +118,10 @@ jobs:
           # against that row rather than the one the host change sits behind.
           node tools/run-dedicated-benchmark.js host-fingerprint --local > "$work_dir/host.json"
           host_status="$(node tools/bench-host-control.js status --rows "$rows_file" --controls "$controls_file" --fingerprint "$work_dir/host.json")"
+          flagged_controls="$(node -e 'console.log(JSON.parse(process.argv[1]).flagged_history_controls ?? 0)' "$host_status")"
+          if [ "$flagged_controls" -gt 0 ]; then
+            echo "History retains $flagged_controls flagged host controls. An unchanged host today does not clear those historical warnings; see the graph's control ledger." >> "$GITHUB_STEP_SUMMARY"
+          fi
           control_commit="$(node -e 'const s=JSON.parse(process.argv[1]);console.log(s.changed ? s.control_commit : "")' "$host_status")"
           verdict=""
           if [ -n "$control_commit" ]; then
@@ -173,10 +180,28 @@ jobs:
 
           if [ -n "$verdict" ] || [ -s "$work_dir/rows.jsonl" ]; then
             node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series
+            echo "data_published=true" >> "$GITHUB_OUTPUT"
           fi
 
-          # After publishing, so the control is on record either way.
+          # Keep the data step successful so its output survives the separate
+          # drift failure and the dependent publisher can display the finding.
           if [ "$verdict" = moved ]; then
-            echo "::error title=ci-bench host change moved the series::The control re-measure of ${control_commit} moved beyond the calibrated same-host spread after a host update. See the step summary; decide whether to re-measure the history."
-            exit 1
+            echo "host_moved=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Report flagged host control
+        if: steps.record.outputs.host_moved == 'true'
+        run: |
+          echo "::error title=ci-bench host control exceeded screening limits::The retained control is outside the calibrated spread. The graph will preserve the finding and separate host periods; this is not a code-regression attribution."
+          exit 1
+
+  # Render after the data push, including a retained drift finding from a failed
+  # measurement job. A failed push never sets the output and cannot publish.
+  publish:
+    needs: measure
+    if: always() && needs.measure.outputs.data_published == 'true'
+    uses: ./.github/workflows/publish-benchmark-data.yml
+    permissions:
+      contents: read
+    secrets:
+      BENCH_DATA_DEPLOY_KEY: ${{ secrets.BENCH_DATA_DEPLOY_KEY }}
