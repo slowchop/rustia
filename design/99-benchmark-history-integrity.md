@@ -1,7 +1,7 @@
 # Benchmark graph publication and history integrity
 
 Date: 2026-10-27 (Australia/Hobart).
-Status: graph update deployed and verified; fresh A/A calibration failed; larger private control running.
+Status: graph update deployed and verified; repeatability unresolved after a larger private control.
 Baseline: `a62ef708e63c02fdea5630c32e3f8c78d173b82a`.
 
 ## Failure and evidence
@@ -144,3 +144,44 @@ coordinator's expected identical-binary skip is not a repeatability verdict:
 all raw legs must be inspected independently. This diagnostic writes no history
 rows and adopts no thresholds. Host-drift investigation continues separately;
 graph deployment does not mean the failed calibration has been resolved.
+
+### Larger control result
+
+Recovered 192 evidence files, verifying their remote byte hashes, before a later
+checkout could remove them. All 16 builds produced the same binary; software
+fingerprints, measurement protocols, fixed work and checksums match. All timed
+gates accepted with zero steal. Independently applying the committed analyzer
+to eight legs per side gives these 99% hierarchical intervals:
+
+| Workload | Observed delta | 99% interval |
+| --- | --- | --- |
+| Closures | -0.490% | -13.357% to +1.965% |
+| Dense tables | +0.187% | -0.748% to +1.290% |
+| Iteration | -0.220% | -0.685% to +0.420% |
+| Sparse tables | -0.002% | -4.267% to +1.753% |
+| Math/table | -0.624% | -3.037% to +0.735% |
+
+Every interval contains zero, meeting the predeclared indistinguishability
+criterion, but the wide intervals do not establish precise repeatability. The
+last baseline closure leg's median is 26.87% above its side's median; all five
+samples in that process are slow. Its sparse-table and math/table legs also
+shift, while dense tables and iteration do not show a matching uniform shift.
+Retain this process and all samples. Do not reinterpret the workflow's expected
+identical-binary skip as proof of stability or retry to obtain narrower results.
+
+Read-only package-log reconstruction reproduces five historical inventory
+hashes. The final fingerprint transition is exactly the `zlib1g` upgrade on
+2026-10-23 UTC. The measured binary's static ELF dependency list contains libc,
+libgcc and the loader, with no direct zlib dependency. This identifies the
+inventory change, not a causal explanation of the dense-table finding. No
+packages, governor settings or permissions were changed. A post-run policy or
+sensor snapshot cannot establish effective frequency or interrupt activity
+during the earlier timed windows. Those conditions and process/cache placement
+remain unresolved; a future diagnostic should record them during measurement.
+
+The acceptance workflow previously uploaded evidence only for profile and
+string modes. [PR #78](https://github.com/slowchop/rustia/pull/78) extends the
+existing private 30-day artifact retention to completed acceptance exports and
+summaries, including failures. Its exact-commit full pre-push inventory and
+independent workflow review passed; required CI gates and merge-commit auto-merge
+control delivery. It changes no thresholds, measurements or publication scope.

@@ -25,9 +25,12 @@ binary. Its dated result is retained and the proposed graph labels repeatability
 unresolved. No thresholds or measurements were changed. The user has authorized
 deployment to the existing benchmark graph. PR #77 merged through required checks
 as `891c29cb`; the published page was verified live with all 89 historical points,
-13 controls and the failed-calibration warning. A larger private same-binary
-control is running; no new thresholds have been adopted. This does not authorize
-public source access.
+13 controls and the failed-calibration warning. The larger private same-binary
+control completed with all five 99% intervals spanning zero, but large process
+variation widened those intervals: one closure leg was 26.87% above its side's
+median. This does not establish stability. The last package-fingerprint change
+was reconstructed as a zlib update, without evidence of a causal timing effect.
+No thresholds have been adopted. This does not authorize public source access.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).
