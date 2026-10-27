@@ -5,6 +5,12 @@ Keep the repository private and every workspace crate at `publish = false`.
 The workspace version remains `0.0.1`; this plan does not authorize publication,
 a public release candidate, or a version bump.
 
+The later source-access preparation in
+[98-public-source-readiness.md](98-public-source-readiness.md) is a separate
+track. Source inspection may precede a supported release after its own audit and
+explicit visibility approval. It does not change the package/runtime/platform
+release requirements below; the repository remains private during preparation.
+
 The future stable target remains **Rustia 1.0**, after a separate publication
 and release-candidate decision. That compatibility promise will cover the
 `rustia` embedding API and the CLI command contract. Parser, lexer, compiler,

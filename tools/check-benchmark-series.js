@@ -16,6 +16,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { readControls } = require("./bench-host-control.js");
 const { execFileSync } = require("node:child_process");
 
 const REPO = path.resolve(__dirname, "..");
@@ -255,12 +256,18 @@ function main(argv) {
       process.stdout.write(`${label}: no rows yet at ${manifest.rows_file}\n`);
       continue;
     }
+    const entries = parseRows(rowsPath, manifest.rows_file);
     const result = validateRows(
       manifest,
-      parseRows(rowsPath, manifest.rows_file),
+      entries,
       manifest.rows_file,
       { checkAncestry: true },
     );
+    const controlsPath = path.join(path.dirname(rowsPath), "ci-bench-host-controls.jsonl");
+    if (!fs.existsSync(controlsPath) && entries.some(({ row }) => row.host_fingerprint)) {
+      fail(`${label}: fingerprinted history requires its host-control ledger`);
+    }
+    readControls(controlsPath, manifest.workloads);
     total += result.rows;
     process.stdout.write(`${label}: ${result.rows} rows across ${result.commits} commits\n`);
   }

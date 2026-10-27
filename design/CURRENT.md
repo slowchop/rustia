@@ -6,6 +6,26 @@
 
 ## One-paragraph state
 
+**Source-access preparation (2026-10-27):** prepare the repository for public
+inspection separately from package publication or a supported 0.1/1.0 release.
+The user has authorized a repository/history privacy audit and local preparation
+only. Keep the repository private, all workspace packages at `publish = false`,
+and the workspace at `0.0.1` until separately authorized. Existing runtime,
+platform and package-release requirements remain in force. The source-access
+audit and remaining visibility gates are recorded in
+[98-public-source-readiness.md](98-public-source-readiness.md).
+
+**Benchmark history follow-up:** local fixes sequence graph publication after
+saved per-commit data, carry host-control records into the graph, and separate
+observations across flagged host changes. Original results are retained; this
+is not a new performance claim or package-release step. The investigation and
+delivery state are in [99-benchmark-history-integrity.md](99-benchmark-history-integrity.md).
+The fresh private A/A calibration failed its sparse-table canary on an identical
+binary. Its dated result is retained and the proposed graph labels repeatability
+unresolved. No thresholds or measurements were changed. The user has authorized
+deployment to the existing benchmark graph; required private PR/CI delivery and
+live verification remain pending. This does not authorize public source access.
+
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).
 Iteration, closures and math/table improve; dense and sparse tables have 99%

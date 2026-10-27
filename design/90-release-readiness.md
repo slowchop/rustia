@@ -8,6 +8,12 @@ The first stable release target and its acceptance checklist are in
 [`92-first-release.md`](92-first-release.md). The current workspace remains
 unpublished; passing preflight does not by itself close this checklist.
 
+This checklist gates package publication and supported releases. Public source
+inspection is a separate decision, with privacy, history, CI trust and reporting
+requirements tracked in [98-public-source-readiness.md](98-public-source-readiness.md).
+Preparing source access does not authorize visibility changes or waive this
+release checklist.
+
 These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
 caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
 providers/capabilities, and `live()` is a first-class intentionally non-reproducible builder preset. The same

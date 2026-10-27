@@ -8,6 +8,10 @@ Call Rust functions from scripts, read results as Rust types, and choose whether
 scripts use real clocks and randomness or run reproducibly for simulations and replay.
 
 Rustia is **pre-release**. The crates are not published yet, and the API can still change.
+Source availability is separate from a supported release. Compatibility claims
+cover the tested behavior in the conformance corpus, not full Luau parity on
+every platform. See the [platform evidence](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
+for executed tests and remaining gaps. Support is best-effort.
 
 ## Try it
 

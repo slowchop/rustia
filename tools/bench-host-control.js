@@ -9,8 +9,8 @@
 // same. So when the host's software fingerprint (run-dedicated-benchmark.js
 // host-fingerprint) differs from the last one recorded, the per-commit lane
 // first measures the last recorded commit again and compares it with its own
-// recorded row. Same code, same protocol, different host: whatever moved is the
-// host.
+// recorded row. Same source and protocol isolate environment/measurement effects
+// from source changes; five repetitions do not establish a particular cause.
 //
 // A move beyond the calibrated same-host spread (bench/pr-screening.json) is
 // flagged for a person, who decides whether to re-measure the history on the
@@ -26,8 +26,7 @@ const SCHEMA = "rustia.bench.host-control.v1";
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 
 function fail(message) {
-  console.error(`bench-host-control: ${message}`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function readJsonl(file) {
@@ -54,6 +53,46 @@ function readFingerprint(file) {
   return value;
 }
 
+// The graph must not silently ignore a malformed control or trust a stored
+// "steady" flag that contradicts its measurements. Values remain observations;
+// these thresholds are screening limits, not confidence intervals.
+function validateControls(controls, expectedWorkloads) {
+  let previousTime = 0;
+  for (const entry of controls) {
+    if (entry.schema !== SCHEMA || entry.host !== "ci-bench" ||
+        !/^[0-9a-f]{40}$/.test(entry.commit ?? "") ||
+        !FINGERPRINT.test(entry.host_fingerprint ?? "") ||
+        !Number.isFinite(entry.timestamp_unix) || entry.timestamp_unix <= previousTime ||
+        !Number.isFinite(entry.recorded_timestamp_unix) || entry.recorded_timestamp_unix <= 0 ||
+        entry.recorded_timestamp_unix >= entry.timestamp_unix) {
+      fail("host controls must have valid identities and strictly increasing measurement times");
+    }
+    previousTime = entry.timestamp_unix;
+    const names = Object.keys(entry.workloads ?? {}).sort();
+    if (JSON.stringify(names) !== JSON.stringify([...expectedWorkloads].sort())) {
+      fail("host control workload set does not match the history protocol");
+    }
+    for (const name of names) {
+      const value = entry.workloads[name];
+      for (const key of ["recorded_ns_per_unit_median", "control_ns_per_unit_median", "threshold_percent"]) {
+        if (!Number.isFinite(value[key]) || value[key] <= 0) fail(`invalid host control ${name}.${key}`);
+      }
+      const change = Number(((value.control_ns_per_unit_median / value.recorded_ns_per_unit_median - 1) * 100).toFixed(3));
+      if (value.change_percent !== change || value.outside_threshold !== (Math.abs(change) > value.threshold_percent)) {
+        fail(`host control ${name} verdict disagrees with its measurements`);
+      }
+    }
+    if (entry.moved !== names.some((name) => entry.workloads[name].outside_threshold)) {
+      fail("host control moved verdict disagrees with its workload verdicts");
+    }
+  }
+  return controls;
+}
+
+function readControls(file, expectedWorkloads) {
+  return validateControls(readJsonl(file), expectedWorkloads);
+}
+
 /// The fingerprint the host last measured under: the newer of the last series
 /// row and the last control. A series row from before rows carried one says
 /// nothing about the host, so it reads as unknown, and unknown counts as
@@ -70,14 +109,19 @@ function lastKnownFingerprint(rows, controls) {
 function status(rows, controls, fingerprint) {
   if (rows.length === 0) return { changed: false, reason: "no series rows yet; nothing to control against" };
   const previous = lastKnownFingerprint(rows, controls);
+  const flagged = controls.filter((entry) => entry.moved).length;
   if (previous === fingerprint.host_fingerprint) {
-    return { changed: false, reason: "host software unchanged since the last measurement" };
+    return {
+      changed: false, reason: "host software unchanged since the last measurement",
+      flagged_history_controls: flagged,
+    };
   }
   return {
     changed: true,
     reason: previous === null ? "no recorded host fingerprint" : "host software changed",
     previous_fingerprint: previous,
     control_commit: rows.at(-1).commit,
+    flagged_history_controls: flagged,
   };
 }
 
@@ -177,6 +221,7 @@ function record(options) {
     workloads,
     moved,
   };
+  validateControls([...controls, entry], recordedRows.map((row) => row.workload));
   fs.mkdirSync(path.dirname(options.controls), { recursive: true });
   fs.appendFileSync(options.controls, `${JSON.stringify(entry)}\n`);
   if (options.summary) fs.appendFileSync(options.summary, summaryMarkdown(entry, recordedRows[0].kernel));
@@ -236,6 +281,27 @@ function selfTest() {
   assert.equal(faster.workloads.w1.outside_threshold, true);
   assert.equal(faster.workloads.w2.outside_threshold, false);
 
+  const control = {
+    schema: SCHEMA, host: "ci-bench", commit: "a".repeat(40),
+    timestamp_unix: 200, recorded_timestamp_unix: 100,
+    host_fingerprint: "2".repeat(64), workloads: faster.workloads, moved: true,
+  };
+  assert.deepEqual(validateControls([control], ["w1", "w2"]), [control]);
+  const expectInvalid = (entry, message) => assert.throws(() => validateControls([entry], ["w1", "w2"]), message);
+  expectInvalid({ ...control, moved: false }, /moved verdict/);
+  expectInvalid({ ...control, workloads: { w1: control.workloads.w1 } }, /workload set/);
+  expectInvalid({ ...control, timestamp_unix: 99 }, /measurement times/);
+  const badValue = structuredClone(control);
+  badValue.workloads.w1.change_percent = 0;
+  expectInvalid(badValue, /verdict disagrees/);
+  const badLimit = structuredClone(control);
+  badLimit.workloads.w1.threshold_percent = NaN;
+  expectInvalid(badLimit, /threshold_percent/);
+  assert.throws(() => validateControls([control, control], ["w1", "w2"]), /measurement times/);
+  const persistent = status([row({ host_fingerprint: "1".repeat(64) })], [control], fp("2"));
+  assert.equal(persistent.changed, false);
+  assert.equal(persistent.flagged_history_controls, 1);
+
   const summary = summaryMarkdown(
     {
       commit: "a".repeat(40), moved: true, kernel: "6.8.0-147-generic", microcode: "0x1",
@@ -281,18 +347,31 @@ function parseArgs(argv) {
   return options;
 }
 
-if (process.argv[2] === "--self-test") {
-  selfTest();
-} else {
-  const options = parseArgs(process.argv.slice(2));
-  if (options === null) {
-    usage();
-    process.exitCode = 2;
-  } else if (options.command === "status") {
-    process.stdout.write(
-      `${JSON.stringify(status(readJsonl(options.rows), readJsonl(options.controls), readFingerprint(options.fingerprint)))}\n`,
-    );
+function main() {
+  if (process.argv[2] === "--self-test") {
+    selfTest();
   } else {
-    record(options);
+    const options = parseArgs(process.argv.slice(2));
+    if (options === null) {
+      usage();
+      process.exitCode = 2;
+    } else if (options.command === "status") {
+      const rows = readJsonl(options.rows);
+      const controls = readControls(options.controls, [...new Set(rows.map((row) => row.workload))]);
+      process.stdout.write(
+        `${JSON.stringify(status(rows, controls, readFingerprint(options.fingerprint)))}\n`,
+      );
+    } else {
+      record(options);
+    }
   }
 }
+
+if (require.main === module) {
+  try { main(); } catch (error) {
+    console.error(`bench-host-control: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+module.exports = { readControls, validateControls };

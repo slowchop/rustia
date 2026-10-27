@@ -631,6 +631,30 @@ Failure can be recovered by dispatching only the publisher; no measurement rerun
 is needed. The local page and selected-data validation are implemented; final PR
 CI, merge, publication and live verification remain delivery gates.
 
+### Per-commit publication ordering and host controls (2026-10-27)
+
+The local follow-up in [99](99-benchmark-history-integrity.md) closes the
+per-commit publication race by calling the existing reusable publisher after a
+confirmed series/control data push. Its `always()` dependency is gated by a
+successful data-publication output. A separate drift step can therefore fail
+without hiding the retained finding from the graph; a failed push cannot start
+the dependent publisher. The workflow token remains read-only and the sole
+Pages writer and publication concurrency group remain unchanged.
+
+Publication hydrates both live rows and their host-control ledger. Fingerprinted
+rows without the ledger are refused. Control schemas, complete workload sets,
+ordering and stored verdict arithmetic are validated before recording or
+displaying them. The renderer breaks history at flagged controls, measures
+within-period change only, and displays control evidence. A reconstructed
+point's host period uses its measurement time, independently of the source date
+used on the x-axis. No measurement is corrected or discarded. The reference
+ratio is an observation against a separately measured matrix, not proof that
+all historical differences are code changes. Repeated controls against one
+original row are not independent shifts and must not be compounded.
+
+These changes are local pending delivery; the investigation distinguishes
+retained evidence, fresh private calibration and eventual deployed behavior.
+
 - Keep cold preparation, first call, warmed execution, throughput, and memory
   as separate dimensions.
 - Retain ordered raw samples and publish sample count, median, variability or

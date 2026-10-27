@@ -4,6 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const { readResults: readGrabbyBuilds, renderSection: renderGrabbyBuilds } = require("./grabby-builds/render.js");
+const { readControls, validateControls } = require("../tools/bench-host-control.js");
 
 const root = path.resolve(__dirname, "..");
 const sourcePath = path.join(__dirname, "current-results.json");
@@ -14,6 +15,7 @@ const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
 const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
 const operationsStatusPath = path.join(__dirname, "operations-status.json");
+const calibrationReviewPath = path.join(root, "design", "99-benchmark-host-calibration.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
 const REQUIRED_COMMON_WORKLOADS = Object.freeze([
@@ -249,7 +251,12 @@ function readLiveSeries() {
         .split("\n")
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line));
-      return rows.length === 0 ? [] : [{ manifest, rows }];
+      if (rows.length === 0) return [];
+      const controlsPath = path.join(path.dirname(rowsPath), "ci-bench-host-controls.jsonl");
+      if (!fs.existsSync(controlsPath) && rows.some((row) => row.host_fingerprint)) {
+        fail("fingerprinted live history requires its host-control ledger");
+      }
+      return [{ manifest, rows, controls: readControls(controlsPath, manifest.workloads) }];
     });
 }
 
@@ -1149,7 +1156,19 @@ function claimWorkloadLabel(row) {
   return `<span class="target-runtime"><strong>${escapeHtml(row.target)}</strong><span>${escapeHtml(row.workload)} · ${escapeHtml(row.unit)}</span></span>`;
 }
 
-function historySection(history, backfills, currentRows, liveSeries) {
+function readCalibrationReview() {
+  const review = JSON.parse(fs.readFileSync(calibrationReviewPath, "utf8"));
+  if (review.schema !== "rustia.bench.host-calibration-review.v1" || review.schema_version !== 1 ||
+      review.host !== "ci-bench" || !["failed", "passed"].includes(review.status) ||
+      !/^https:\/\/github\.com\/slowchop\/rustia\/actions\/runs\/\d+$/.test(review.run_url) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(review.reviewed_at) ||
+      !/^[0-9a-f]{40}$/.test(review.commit)) {
+    fail("invalid reviewed host-calibration record");
+  }
+  return review;
+}
+
+function historySection(history, backfills, currentRows, liveSeries, calibrationReview = null) {
   const reference = mluaJitHistoryReference(currentRows);
   const reconstructed = rustiaBackfillEras(backfills, reference, liveSeries);
   const { eras: recorded, elsewhere } = rustiaHistoryEras(history.rows, reference);
@@ -1163,11 +1182,13 @@ function historySection(history, backfills, currentRows, liveSeries) {
   const visibleRecorded = reconstructed.length > 0 ? [] : recorded;
   const eras = [...reconstructed, ...visibleRecorded];
   const snapshotCount = eras.reduce((total, era) => total + era.snapshotCount, 0);
+  const latestLiveRow = liveSeries.flatMap((series) => series.rows)
+    .reduce((latest, row) => latest === null || row.timestamp_unix > latest.timestamp_unix ? row : latest, null);
   const summary = reconstructed.length > 0
     ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against ${reconstructed.length === 1 ? "one fixed harness and one pinned dependency set, measured end to end on a single machine" : `${formatInteger(reconstructed.length)} fixed harnesses, each measured end to end on one machine and never blended with another`}.${undrawnRowsNote(elsewhere)}`
     : `${formatInteger(snapshotCount)} recorded Linux matrix runs on ${reference.host == null ? "an unnamed machine" : `<code>${escapeHtml(reference.host)}</code>`} across ${eras.length === 1 ? "one era" : `${formatInteger(eras.length)} eras`}. Each era is normalized to its own first run, so different protocols are never blended, and no other machine is drawn.${undrawnRowsNote(elsewhere)}`;
   const explanation = reconstructed.length > 0
-    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). Every point on this chart comes from the one machine named in the legend, so differences between points are engine changes rather than host changes.`
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.`
     : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
     <section class="panel history-axis-panel" id="history">
@@ -1182,13 +1203,51 @@ function historySection(history, backfills, currentRows, liveSeries) {
         </div>
       </div>
       <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
-      ${eras.length > 1 ? `<p class="cohort-note">The Rustia lines share the same workloads and score, but remain separate: reconstruction and directly recorded matrix runs use different measurement protocols, and each reconstruction ran on its own host.</p>` : ""}
+      ${calibrationReview ? `<p class="cohort-note"><strong>Latest reviewed A/A calibration: ${escapeHtml(calibrationReview.status)} (${escapeHtml(calibrationReview.reviewed_at)}).</strong> ${calibrationReview.status === "failed" ? "Current repeatability is unresolved. Treat these historical observations as provisional; no new thresholds have been adopted." : "This check does not clear earlier host-control findings."} <a href="${escapeHtml(calibrationReview.run_url)}">Private run evidence</a>.</p>` : ""}
+      ${latestLiveRow ? `<p class="cohort-note">Latest per-commit measurement: ${new Date(latestLiveRow.timestamp_unix * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC")} at <code>${escapeHtml(latestLiveRow.commit.slice(0, 8))}</code>. The full cross-engine tables have their own measurement dates.</p>` : ""}
+      ${eras.length > 1 ? `<p class="cohort-note">Separate lines mark different protocols or host periods. No line connects observations across a flagged host control, and change is calculated only within each displayed period.</p>` : ""}
+      ${hostControlSection(liveSeries)}
       <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
       <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
       ${rustiaOverallHistoryTable(eras)}
       <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
     </section>
   `;
+}
+
+function hostControlSection(series) {
+  const controls = series.flatMap((item) => item.controls ?? []);
+  if (controls.length === 0) {
+    return '<p class="cohort-note">No host-control ledger is available for these historical measurements. Unrecorded host changes cannot be ruled out.</p>';
+  }
+  const flagged = controls.filter((entry) => entry.moved).length;
+  return `<div class="cohort-note"><strong>Host controls: ${flagged} of ${controls.length} comparisons exceeded the calibrated screening limits.</strong>
+    <p>Each control re-measures a previously recorded source revision. It compares with that revision's original row, not the preceding control. Repeated findings are not independent slowdowns and must not be added together. Five-repetition controls flag possible host effects or noise; they do not identify a particular package as the cause. Host software was not recorded for some earlier points, so an absent flag does not prove identical conditions. Original numbers are retained without correction factors.</p>
+    <div class="table-wrap"><table><thead><tr><th>Control date (UTC)</th><th>Source revision</th><th>Binary</th><th>Outside screening limits</th></tr></thead><tbody>${controls.map((entry) => {
+      const changes = Object.entries(entry.workloads).filter(([, value]) => value.outside_threshold)
+        .map(([name, value]) => `${escapeHtml(name)} ${value.change_percent >= 0 ? "+" : ""}${value.change_percent.toFixed(2)}% (±${value.threshold_percent}%)`).join("; ");
+      const binary = entry.recorded_binary_sha256 && entry.control_binary_sha256
+        ? entry.recorded_binary_sha256 === entry.control_binary_sha256 ? "Same bytes" : "Different bytes"
+        : "Not recorded";
+      return `<tr><td>${formatIsoDate(entry.timestamp_unix)}</td><td><code>${escapeHtml(entry.commit.slice(0, 8))}</code></td><td>${binary}</td><td>${changes || "None"}</td></tr>`;
+    }).join("")}</tbody></table></div></div>`;
+}
+
+function controlledHistoryEras(title, description, rows, reference, kind, label, controls) {
+  const steps = validateControls(controls, REQUIRED_COMMON_WORKLOADS).filter((entry) => entry.moved);
+  if (steps.length === 0) return [rustiaHistoryEra(title, description, rows, reference, kind, label)];
+  const periods = new Map();
+  for (const row of rows) {
+    // Reconstructed points use source dates on the x-axis, but host boundaries
+    // must use when the measurements were actually taken.
+    const measuredAt = row.measured_timestamp_unix ?? row.timestamp_unix;
+    const period = steps.filter((entry) => entry.timestamp_unix <= measuredAt).length;
+    if (!periods.has(period)) periods.set(period, []);
+    periods.get(period).push(row);
+  }
+  return [...periods].map(([period, values]) => rustiaHistoryEra(
+    title, description, values, reference, kind, `${label} · host period ${period + 1}`,
+  ));
 }
 
 // Recorded rows the chart leaves undrawn, said precisely: rows from another
@@ -1238,7 +1297,7 @@ function requireReferenceMachine(host, what, reference) {
 
 function rustiaBackfillEras(backfills, reference, liveSeries = []) {
   const unattached = new Set(liveSeries);
-  const eras = backfills.map((backfill) => {
+  const eras = backfills.flatMap((backfill) => {
     requireReferenceMachine(backfill.host, `the reconstruction with harness ${backfill.harness_commit.slice(0, 7)}`, reference);
     const targets = new Map(
       backfill.targets.map((target, index) => [
@@ -1256,6 +1315,7 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
       )
       .map((row) => ({
         ...row,
+        measured_timestamp_unix: row.timestamp_unix,
         timestamp_unix: targets.get(row.commit).committedAt,
         backfill_order: targets.get(row.commit).index,
       }));
@@ -1264,9 +1324,11 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
     // and only when they are the same measurement. Ordered after every
     // reconstructed point, since they are by construction later commits.
     let order = backfill.targets.length;
+    const controls = [];
     for (const series of liveSeries) {
       if (!seriesContinues(series.manifest, backfill)) continue;
       unattached.delete(series);
+      controls.push(...(series.controls ?? []));
       const commitOrder = new Map();
       for (const row of series.rows) {
         if (!commitOrder.has(row.commit)) commitOrder.set(row.commit, order++);
@@ -1276,7 +1338,7 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
         rows.push({ ...row, backfill_order: commitOrder.get(row.commit) });
       }
     }
-    return rustiaHistoryEra(
+    return controlledHistoryEras(
       "Fixed-harness reconstructed history",
       `Harness ${backfill.harness_commit.slice(0, 7)} · measured together on ${
         backfill.host
@@ -1290,6 +1352,7 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
       // different hosts are not comparable to each other, so they must never
       // share a label.
       `Reconstructed · ${backfill.host ?? `harness ${backfill.harness_commit.slice(0, 7)}`}`,
+      controls,
     );
   });
 
@@ -1308,13 +1371,14 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
       .map((row) => ({ ...row, backfill_order: commitOrder.get(row.commit) }));
     if (rows.length === 0) continue;
     eras.push(
-      rustiaHistoryEra(
+      ...controlledHistoryEras(
         "Recorded per-commit history",
         `Harness ${series.manifest.harness_commit.slice(0, 7)} · ${series.manifest.host}`,
         rows,
         reference,
         "reconstructed",
         `Recorded · ${series.manifest.host}`,
+        series.controls ?? [],
       ),
     );
   }
@@ -1561,9 +1625,9 @@ function rustiaOverallHistoryTable(eras) {
     const latest = era.overall.at(-1);
     const percent = (latest.gain - 1) * 100;
     const gap = 1 / latest.score;
-    return `<tr><td><strong>${escapeHtml(era.label)}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td>mlua/JIT is <strong>${formatSpeed(gap)}</strong> faster</td></tr>`;
+    return `<tr><td><strong>${escapeHtml(era.label)}</strong><br><small>${formatInteger(era.snapshotCount)} complete scores · geometric mean of 5 workloads</small></td><td>${formatSpeed(first.score)} of mlua/JIT · <code>${escapeHtml(first.commit.slice(0, 7))}</code></td><td>${formatSpeed(latest.score)} of mlua/JIT · <code>${escapeHtml(latest.commit.slice(0, 7))}</code></td><td><strong>${formatSpeed(latest.gain)}</strong> · ${percent >= 0 ? "+" : ""}${formatNumber(percent)}%</td><td><strong>${formatSpeed(gap)}</strong></td></tr>`;
   }).join("");
-  return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Within-period change</th><th>Observed Rustia/reference time</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function memoryHistoryModel(records) {
@@ -3582,7 +3646,7 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
     ${memoryHistorySection(memoryHistory, authority)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows)}
-      ${historySection(history, historyBackfills, data.rows, readLiveSeries())}
+      ${historySection(history, historyBackfills, data.rows, readLiveSeries(), readCalibrationReview())}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm source <code>${escapeHtml(relative(wasmResultsPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>

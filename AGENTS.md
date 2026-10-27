@@ -1,7 +1,8 @@
 # AGENTS.md — how to work in rustia (read before writing code)
 
-rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby; public-bound at
-full Luau parity). **This is an LLM-first codebase** — written and maintained mostly by agents, read and
+rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby).
+Public source access is separate from package publication and supported-release acceptance; full Luau parity
+is not implied by source visibility. **This is an LLM-first codebase** — written and maintained mostly by agents, read and
 contributed to by humans. Optimise for *both*: code an agent can reason about locally and a human can trust.
 
 **Start every session here:** read [`design/CURRENT.md`](design/CURRENT.md) (the single canonical state), then

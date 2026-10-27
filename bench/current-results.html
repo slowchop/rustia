@@ -2143,8 +2143,11 @@
           <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
         </div>
       </div>
-      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>90bc2ae</code>). Every point on this chart comes from the one machine named in the legend, so differences between points are engine changes rather than host changes.</p>
+      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>90bc2ae</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.</p>
+      <p class="cohort-note"><strong>Latest reviewed A/A calibration: failed (2026-10-27).</strong> Current repeatability is unresolved. Treat these historical observations as provisional; no new thresholds have been adopted. <a href="https://github.com/slowchop/rustia/actions/runs/40462439654">Private run evidence</a>.</p>
 
+
+      <p class="cohort-note">No host-control ledger is available for these historical measurements. Unrecorded host changes cannot be ruled out.</p>
       <div data-history-axis-view="date">
     <div class="history-chart">
       <svg viewBox="0 0 920 300" role="img" aria-label="rustia overall Linux performance history by date versus mlua JIT, higher is faster">
@@ -2175,7 +2178,7 @@
       <div class="history-legend"><span><span class="swatch" style="color: #2563eb"></span>rustia · Reconstructed · ci-bench</span><span><span class="swatch" style="color: #ea580c"></span><strong>mlua</strong> / Luau / JIT · 1×</span></div>
     </div>
   </div>
-      <div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Improvement</th><th>Latest gap</th></tr></thead><tbody><tr><td><strong>Reconstructed · ci-bench</strong><br><small>75 complete scores · geometric mean of 5 workloads</small></td><td>0.062x of mlua/JIT · <code>8c0211d</code></td><td>0.259x of mlua/JIT · <code>ac92262</code></td><td><strong>4.195x</strong> · +320%</td><td>mlua/JIT is <strong>3.854x</strong> faster</td></tr></tbody></table></div>
+      <div class="table-wrap history-table"><table><thead><tr><th>Series</th><th>First run</th><th>Latest run</th><th>Within-period change</th><th>Observed Rustia/reference time</th></tr></thead><tbody><tr><td><strong>Reconstructed · ci-bench</strong><br><small>75 complete scores · geometric mean of 5 workloads</small></td><td>0.062x of mlua/JIT · <code>8c0211d</code></td><td>0.259x of mlua/JIT · <code>ac92262</code></td><td><strong>4.195x</strong> · +320%</td><td><strong>3.854x</strong></td></tr></tbody></table></div>
       <p class="cohort-note">Reconstruction measurement time is retained honestly in <code>bench/history/backfills</code>; the chart's x-axis uses each source commit's original date.</p>
     </section>
 
