@@ -110,13 +110,15 @@ jobs:
           cat "$work_dir/acceptance.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain diagnostic evidence, including failed runs
-        if: ${{ always() && (inputs.mode == 'profile' || inputs.mode == 'strings') }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: benchmark-diagnostics-${{ github.run_id }}
           path: |
+            .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz
             .rustia-benchmark-state/dedicated/runs/profile-*/export.tar.gz
             .rustia-benchmark-state/dedicated/runs/strings-*/export.tar.gz
+            ${{ runner.temp }}/rustia-acceptance.*/acceptance.*
             ${{ runner.temp }}/rustia-strings-${{ github.run_id }}/*
           include-hidden-files: true
           if-no-files-found: warn

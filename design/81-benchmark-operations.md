@@ -232,6 +232,12 @@ the reading lands in the job summary, not in the published history, because a
 comparison of two arbitrary historical commits is evidence for a decision
 rather than a row in a series.
 
+All acceptance modes upload completed per-pass evidence exports and summaries
+as private CI artifacts for 30 days, including failed runs. This preserves raw
+samples and build/gate/protocol metadata when a later checkout clears runner
+scratch space. An identical-binary summary skip is not a repeatability verdict;
+the retained raw legs can still be analyzed as a same-binary control.
+
 It measures the pair in eight passes by default (`--passes` takes any even count
 from two to sixteen), A B B A repeated, at the screening calibration's
 repetition count, and reads each workload through the same hierarchical

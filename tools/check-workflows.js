@@ -397,6 +397,17 @@ function checkBenchHostQueue(files) {
   }
 }
 
+function checkAcceptanceEvidence(text) {
+  const label = ".github/workflows/acceptance-bench.yml";
+  const retention = text.split("      - name: Retain diagnostic evidence, including failed runs\n")[1];
+  if (!retention) fail(`${label} must retain acceptance evidence`);
+  requireIncludes(retention, "        if: ${{ always() }}\n", label);
+  requireIncludes(retention, "            .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz\n", label);
+  requireIncludes(retention, "            ${{ runner.temp }}/rustia-acceptance.*/acceptance.*\n", label);
+  requireIncludes(retention, "          include-hidden-files: true\n", label);
+  requireIncludes(retention, "          retention-days: 30\n", label);
+}
+
 function checkCi(text) {
   // GitHub evaluates job env before runner/steps/job contexts exist.
   for (const block of text.matchAll(/^    env:\n((?:^      [^\n]*\n)+)/gm)) {
@@ -1322,11 +1333,15 @@ if (process.argv?.includes("--self-test")) {
     const publicationPath = path.join(temporary, ".github/workflows/publish-benchmark-data.yml");
     const mainWorkflow = fs.readFileSync(mainPath, "utf8");
     const publicationWorkflow = fs.readFileSync(publicationPath, "utf8");
+    const acceptancePath = path.join(temporary, ".github/workflows/acceptance-bench.yml");
+    const acceptanceWorkflow = fs.readFileSync(acceptancePath, "utf8");
     for (const [label, file, original, changed] of [
       ["publication before saved rows", mainPath, mainWorkflow, mainWorkflow.replace('            echo "data_published=true" >> "$GITHUB_OUTPUT"\n', '').replace('            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series', '            echo "data_published=true" >> "$GITHUB_OUTPUT"\n            node tools/push-benchmark-data-publication.js --repo-dir "$data_dir" --kind series')],
       ["drift failure hides publication", mainPath, mainWorkflow, mainWorkflow.replace("if: always() && needs.measure.outputs.data_published == 'true'", "if: success() && needs.measure.outputs.data_published == 'true'")],
       ["publication without push confirmation", mainPath, mainWorkflow, mainWorkflow.replace("if: always() && needs.measure.outputs.data_published == 'true'", "if: always()")],
       ["missing control ledger", publicationPath, publicationWorkflow, publicationWorkflow.replace('install -m 644 "$data_dir/bench/history/series/ci-bench-host-controls.jsonl"', 'true # omitted controls')],
+      ["failed acceptance loses evidence", acceptancePath, acceptanceWorkflow, acceptanceWorkflow.replace("if: ${{ always() }}", "if: ${{ success() }}")],
+      ["acceptance loses raw exports", acceptancePath, acceptanceWorkflow, acceptanceWorkflow.replace("            .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz\n", "")],
     ]) {
       assert.notEqual(changed, original, `${label}: mutation did not apply`);
       fs.writeFileSync(file, changed);
@@ -1357,7 +1372,7 @@ if (process.argv?.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, seventeen policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, nineteen policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -1388,6 +1403,7 @@ checkWeeklyMatrix(readWorkflow(weeklyMatrixPath));
 checkBenchmarkPublication(readWorkflow(benchmarkPublicationPath));
 checkMainBench(readWorkflow(path.join(workflowDir, "main-bench.yml")));
 checkPrBench(readWorkflow(path.join(workflowDir, "pr-bench.yml")));
+checkAcceptanceEvidence(readWorkflow(path.join(workflowDir, "acceptance-bench.yml")));
 checkReleasePreflight(readWorkflow(releasePreflightPath));
 
 console.log(`workflow policy ok for ${files.length} workflow file(s)`);
