@@ -23,8 +23,11 @@ delivery state are in [99-benchmark-history-integrity.md](99-benchmark-history-i
 The fresh private A/A calibration failed its sparse-table canary on an identical
 binary. Its dated result is retained and the proposed graph labels repeatability
 unresolved. No thresholds or measurements were changed. The user has authorized
-deployment to the existing benchmark graph; required private PR/CI delivery and
-live verification remain pending. This does not authorize public source access.
+deployment to the existing benchmark graph. PR #77 merged through required checks
+as `891c29cb`; the published page was verified live with all 89 historical points,
+13 controls and the failed-calibration warning. A larger private same-binary
+control is running; no new thresholds have been adopted. This does not authorize
+public source access.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).

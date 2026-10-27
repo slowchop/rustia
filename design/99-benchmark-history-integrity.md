@@ -1,7 +1,7 @@
 # Benchmark graph publication and history integrity
 
 Date: 2026-10-27 (Australia/Hobart).
-Status: local fixes validated; fresh A/A calibration failed; existing-graph deployment authorized and pending required checks.
+Status: graph update deployed and verified; fresh A/A calibration failed; larger private control running.
 Baseline: `a62ef708e63c02fdea5630c32e3f8c78d173b82a`.
 
 ## Failure and evidence
@@ -53,7 +53,7 @@ last recorded observation. It does not review or clear earlier findings. The
 paired PR #74 acceptance remains separate evidence; historical graph points are
 not a substitute for its within-session comparisons.
 
-## Implemented local correction
+## Implemented correction
 
 1. The series data step sets a job output only after its fast-forward data push
    succeeds. A dependent call to the existing reusable publisher requires that
@@ -105,14 +105,17 @@ date, not an automatic live health feed. Historical observations remain
 provisional. The graph fix makes that limitation visible rather than claiming
 that the runner is fixed.
 
-The raw-sample inventory on the runner was requested read-only through the
-existing configured SSH connection. Filesystem permission was denied under that
-account. No alternate account, privilege escalation or permission change was
-attempted. The private failed-run logs and per-pass summaries were retained;
-identifying a physical cause requires authorized access to the raw pass data or
-a separately specified evidence-retaining diagnostic. The available evidence
-does not justify naming a package, applying correction factors, or declaring
-current repeatability healthy.
+The initial raw-sample read was denied by filesystem ownership. A subsequent
+read using the runner owner's existing sudo access recovered 24 sample files
+and 28 metadata files without changing permissions or runner configuration.
+The combined-file duplicates match the 20 individual pass/workload records;
+all 15 split/workload intervals independently reproduce with the committed
+analyzer. All four binary hashes, software fingerprints and protocols match;
+timed gates accepted with zero steal. Sparse-table passes 2 and 3 consistently
+ran slower than passes 1 and 4. This is pass-level variation, rather than one
+isolated sample. Effective frequency, interrupts, cache/memory/process placement
+and sampling uncertainty remain unresolved. These findings do not justify
+naming a package, applying correction factors, or declaring repeatability healthy.
 
 Re-measuring historical revisions under one frozen current environment would
 provide a separate coherent cohort, but must retain the old records and its own
@@ -121,16 +124,23 @@ the existing measurements to present them honestly now.
 
 Publication sequencing, failure gating, ledger validation, graph segmentation,
 reconstruction measurement-time handling and warning text have focused regression
-checks. Full validation, private delivery and inspection of the actually rendered
-graph remain required before deployment is accepted. Full release preflight
-completed with 98 Rust test summaries, 1,466 passes and zero failures before the
-final dated diagnostic annotation. The affected workflow/renderer/ledger checks,
-package checks and quick inventory were rerun for that annotation. The repository remains
-private, packages remain unpublished, and the existing public graph has not been
-updated by this local preparation.
+checks. Full release preflight passed on the final reviewed commit through the
+pre-push hook; independent workflow and history-arithmetic reviews found no
+remaining issues. [PR #77](https://github.com/slowchop/rustia/pull/77) merged through
+required CI as `891c29cb498811318825ef073f082ea9e90a0167`. Its tree matches the
+reviewed commit. The [publication run](https://github.com/slowchop/rustia/actions/runs/40467806897)+succeeded, Pages built the corresponding data commit `5563a654`, and the
+[served history](https://slowchop.github.io/rustia-bench-data/#history) was inspected
+in a browser: 89 points, four nonempty periods, 13 controls, the latest per-commit
+measurement at `a62ef708`, and the dated failed-calibration warning. Source
+visibility was verified private and package publication remains disabled.
 
-The user subsequently authorized deployment to the existing benchmark graph,
-while keeping Rustia private and packages unpublished. Delivery must use the
-required private PR, CI and merge gates, then verify the graph artifact and
-actual published page. Host-drift investigation continues separately; graph
-deployment does not mean the failed calibration has been resolved.
+After deployment verification, the existing private acceptance workflow was
+dispatched for a predeclared eight-leg-per-side control:
+[run 40468299067](https://github.com/slowchop/rustia/actions/runs/40468299067), comparing
+`a62ef708` with graph-change commit `ccb71374`. Their runtime and harness sources
+are unchanged, but new build hashes must match before interpreting it as A/A.
+It retains balanced order, five repetitions per leg and 99% intervals. The
+coordinator's expected identical-binary skip is not a repeatability verdict:
+all raw legs must be inspected independently. This diagnostic writes no history
+rows and adopts no thresholds. Host-drift investigation continues separately;
+graph deployment does not mean the failed calibration has been resolved.
