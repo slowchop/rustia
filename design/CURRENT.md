@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-27.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-28.)
 
 ## One-paragraph state
 
@@ -26,11 +26,16 @@ unresolved. No thresholds or measurements were changed. The user has authorized
 deployment to the existing benchmark graph. PR #77 merged through required checks
 as `891c29cb`; the published page was verified live with all 89 historical points,
 13 controls and the failed-calibration warning. The larger private same-binary
-control completed with all five 99% intervals spanning zero, but large process
+control (80 workload processes, 16 per workload) completed with all five 99% intervals spanning zero, but large process
 variation widened those intervals: one closure leg was 26.87% above its side's
 median. This does not establish stability. The last package-fingerprint change
 was reconstructed as a zlib update, without evidence of a causal timing effect.
 No thresholds have been adopted. This does not authorize public source access.
+Evidence-retention PR #78 merged through required CI as `0d830e20`; completed
+acceptance exports now have private 30-day artifact retention. The 28 October
+hardware-profile attempt failed before timing under the existing perf policy.
+A separate CI-only process observer investigates CPU time, faults, scheduling,
+interrupts and memory layout without changing host permissions or history.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).

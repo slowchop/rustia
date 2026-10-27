@@ -18,11 +18,11 @@ name: Benchmark Acceptance
   workflow_dispatch:
     inputs:
       mode:
-        description: Acceptance comparison, string-opcode acceptance, or hardware-counter diagnostics
+        description: Acceptance comparison, string acceptance, hardware counters, or unprivileged observation
         required: false
         default: accept
         type: choice
-        options: [accept, profile, strings]
+        options: [accept, profile, observe, strings]
       baseline:
         description: Baseline commit (must be an ancestor of the dispatched ref)
         required: true
@@ -32,7 +32,7 @@ name: Benchmark Acceptance
         required: true
         type: string
       passes:
-        description: Legs per side. Even, 2-16. Legs are what narrow the interval.
+        description: Acceptance legs per side. Even, 2-16. Observe always uses eight.
         required: false
         default: "8"
         type: string
@@ -82,6 +82,11 @@ jobs:
           PASSES: ${{ inputs.passes }}
         run: |
           set -euo pipefail
+          if [ "$MODE" = observe ]; then
+            node tools/run-dedicated-benchmark.js observe --local \
+              --baseline "$BASELINE" --candidate "$CANDIDATE"
+            exit 0
+          fi
           if [ "$MODE" = profile ]; then
             node tools/run-dedicated-benchmark.js profile --local \
               --baseline "$BASELINE" --candidate "$CANDIDATE"
@@ -117,6 +122,7 @@ jobs:
           path: |
             .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz
             .rustia-benchmark-state/dedicated/runs/profile-*/export.tar.gz
+            .rustia-benchmark-state/dedicated/runs/observe-*/export.tar.gz
             .rustia-benchmark-state/dedicated/runs/strings-*/export.tar.gz
             ${{ runner.temp }}/rustia-acceptance.*/acceptance.*
             ${{ runner.temp }}/rustia-strings-${{ github.run_id }}/*

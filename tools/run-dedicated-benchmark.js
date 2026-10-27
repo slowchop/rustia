@@ -421,7 +421,7 @@ function existingBackfills(exceptHarnessCommit) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const known = new Set([
-    "plan", "history", "main", "pr", "accept", "profile", "strings", "live-serde", "calibrate", "matrix", "memory", "fetch",
+    "plan", "history", "main", "pr", "accept", "profile", "observe", "strings", "live-serde", "calibrate", "matrix", "memory", "fetch",
     "unlock", "host-check", "host-fingerprint", "self-test",
   ]);
   if (!known.has(command)) return null;
@@ -546,7 +546,7 @@ function parseArgs(argv) {
   // Acceptance and hardware-counter diagnostics name both sides explicitly.
   // Only acceptance buys a configurable number of legs.
   for (const option of [parsed.baseline, parsed.candidate]) {
-    if (option !== undefined && command !== "accept" && command !== "profile" && command !== "strings") return null;
+    if (option !== undefined && !["accept", "profile", "observe", "strings"].includes(command)) return null;
   }
   if (parsed.passes !== undefined && command !== "accept") return null;
   // `--replace` supersedes an existing artifact, which both the measuring
@@ -854,6 +854,7 @@ function fetchExport(runDirectory, lane = LANES.history) {
 function runnerModeSuffix(mode) {
   if (mode === true || mode === "profile") return ' --profile || test "$?" -eq 2';
   if (mode === "strings") return ' --strings || test "$?" -eq 2';
+  if (mode === "observe") return ' --observe || test "$?" -eq 2';
   return "";
 }
 
@@ -1357,7 +1358,7 @@ function runPass(configFile, label, isLocal, mode = "accept") {
   shipAndRun(configFile, providerFile, bundleFile, isLocal, LANES.history, mode);
   const extracted = fetchExport(runDirectory);
   const status = JSON.parse(fs.readFileSync(path.join(extracted, "status.json"), "utf8"));
-  const expectedStatus = mode === "profile" ? "profile_complete" : mode === "strings" ? "strings_complete" : "backfill_complete";
+  const expectedStatus = ["profile", "strings", "observe"].includes(mode) ? `${mode}_complete` : "backfill_complete";
   if (status.status !== expectedStatus) {
     fail(`${label} did not complete: ${status.status}${status.detail ? ` (${status.detail})` : ""}`);
   }
@@ -1895,16 +1896,17 @@ function commandPr(options) {
 // Both commits must already be ancestors of HEAD: the pair config generator
 // requires it, and the bundle shipped to the host is built from HEAD, so an
 // unreachable commit would fail on the host rather than here.
-function commandProfile(options) {
-  if (!options.baseline || !options.candidate) fail("profile requires --baseline and --candidate");
+function commandProfile(options, mode = "profile") {
+  if (mode === "observe" && (!options.local || process.env.GITHUB_ACTIONS !== "true")) fail("observe requires the CI-local lane");
+  if (!options.baseline || !options.candidate) fail(`${mode} requires --baseline and --candidate`);
   const commits = [options.baseline, options.candidate].map((ref) => git(["rev-parse", ref]).trim());
   for (const commit of commits) {
     if (!FULL_COMMIT.test(commit) || !isAncestorOfHead(commit)) fail("profile revisions must be ancestors of HEAD");
   }
   if (commits[0] === commits[1]) fail("profile requires two distinct revisions");
-  const label = `profile-${commits[0].slice(0, 12)}-${commits[1].slice(0, 12)}`;
-  const extracted = runPass(freezePairConfig(...commits, 5, label), label, options.local, "profile");
-  process.stdout.write(`Hardware counter diagnostics retained at ${extracted}; not acceptance evidence.\n`);
+  const label = `${mode}-${commits[0].slice(0, 12)}-${commits[1].slice(0, 12)}`;
+  const extracted = runPass(freezePairConfig(...commits, 5, label), label, options.local, mode);
+  process.stdout.write(`Diagnostics retained at ${extracted}; not acceptance evidence.\n`);
 }
 
 function stringSummary(result) {
@@ -2808,6 +2810,9 @@ function selfTest() {
   assert.equal(parseArgs(["profile", "--baseline", "a1", "--candidate", "b2", "--local"]).command, "profile");
   assert.equal(parseArgs(["profile", "--passes", "8"]), null);
   assert.equal(parseArgs(["profile", "--out", "report.md"]), null);
+  assert.equal(parseArgs(["observe", "--baseline", "a1", "--candidate", "b2", "--local"]).command, "observe");
+  assert.equal(parseArgs(["observe", "--passes", "8"]), null);
+  assert.equal(parseArgs(["observe", "--out", "report.md"]), null);
   assert.equal(parseArgs(["strings", "--baseline", "a1", "--candidate", "b2", "--out", "s.md", "--json", "s.json"]).command, "strings");
   assert.equal(parseArgs(["strings", "--passes", "8"]), null);
   assert.equal(parseArgs(["strings", "--repetitions", "9"]), null);
@@ -2817,6 +2822,9 @@ function selfTest() {
   }
   assert.equal(runnerModeSuffix(false), "");
   assert.match(runnerModeSuffix("strings"), /--strings/);
+  assert.match(runnerModeSuffix("observe"), /--observe/);
+  const observerTest = spawnSync("python3", [path.join(REPO, "tools/observe-benchmark-process.py"), "--self-test"], { encoding: "utf8" });
+  assert.equal(observerTest.status, 0, observerTest.stderr);
   const accept = parseArgs(["accept", "--baseline", "a1", "--candidate", "b2", "--out", "a.md"]);
   assert.equal(accept.baseline, "a1");
   assert.equal(accept.candidate, "b2");
@@ -3075,6 +3083,7 @@ function usage() {
       "                                         for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
       "  profile   --baseline C --candidate C    ABBA hardware counters; never acceptance\n" +
+      "  observe   --local --baseline C --candidate C  CI-only process observations, 8 legs/side\n" +
       "  strings   --baseline C --candidate C --out FILE [--json FILE]\n" +
       "                                         eight ABBA legs for the dedicated string opcodes\n" +
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +
@@ -3114,6 +3123,7 @@ try {
     else if (parsed.command === "pr") commandPr(parsed);
     else if (parsed.command === "accept") commandAccept(parsed);
     else if (parsed.command === "profile") commandProfile(parsed);
+    else if (parsed.command === "observe") commandProfile(parsed, "observe");
     else if (parsed.command === "strings") commandStrings(parsed);
     else if (parsed.command === "live-serde") commandLiveSerde(parsed);
     else if (parsed.command === "calibrate") commandCalibrate(parsed);

@@ -128,7 +128,8 @@ checks. Full release preflight passed on the final reviewed commit through the
 pre-push hook; independent workflow and history-arithmetic reviews found no
 remaining issues. [PR #77](https://github.com/slowchop/rustia/pull/77) merged through
 required CI as `891c29cb498811318825ef073f082ea9e90a0167`. Its tree matches the
-reviewed commit. The [publication run](https://github.com/slowchop/rustia/actions/runs/40467806897)+succeeded, Pages built the corresponding data commit `5563a654`, and the
+reviewed commit. The [publication run](https://github.com/slowchop/rustia/actions/runs/40467806897)
+succeeded, Pages built the corresponding data commit `5563a654`, and the
 [served history](https://slowchop.github.io/rustia-bench-data/#history) was inspected
 in a browser: 89 points, four nonempty periods, 13 controls, the latest per-commit
 measurement at `a62ef708`, and the dated failed-calibration warning. Source
@@ -164,8 +165,10 @@ to eight legs per side gives these 99% hierarchical intervals:
 Every interval contains zero, meeting the predeclared indistinguishability
 criterion, but the wide intervals do not establish precise repeatability. The
 last baseline closure leg's median is 26.87% above its side's median; all five
-samples in that process are slow. Its sparse-table and math/table legs also
-shift, while dense tables and iteration do not show a matching uniform shift.
+samples in that process are slow. The sparse-table and math/table observations in that pass also shift, but each
+workload runs in a separate process. There are 80 workload processes in this
+control, 16 per workload; a pass is an aggregation, not one process. Dense tables
+and iteration do not show a matching uniform shift.
 Retain this process and all samples. Do not reinterpret the workflow's expected
 identical-binary skip as proof of stability or retry to obtain narrower results.
 
@@ -183,5 +186,32 @@ The acceptance workflow previously uploaded evidence only for profile and
 string modes. [PR #78](https://github.com/slowchop/rustia/pull/78) extends the
 existing private 30-day artifact retention to completed acceptance exports and
 summaries, including failures. Its exact-commit full pre-push inventory and
-independent workflow review passed; required CI gates and merge-commit auto-merge
-control delivery. It changes no thresholds, measurements or publication scope.
+independent workflow review passed. All required CI checks passed and merge-commit
+auto-merge delivered it as `0d830e201aac802b5dde4b5c171cf0c7e03090b4`. It changes no thresholds, measurements or publication scope.
+
+
+### 28 October cause investigation
+
+Static runtime/harness review found no per-process random seed or address-based
+guest-table ordering in these workloads. Each recorded sample creates a fresh
+ReproducibleStandard VM, warms it with one full call, then times another call.
+Allocation and collection execute inside that call. Heap/cache locality,
+scheduling and effective frequency remain hypotheses rather than findings.
+
+The existing private profile mode was dispatched on trusted main as
+[run 40580638855](https://github.com/slowchop/rustia/actions/runs/40580638855).
+It failed before timing because the existing `perf_event_paranoid=4` policy
+refused hardware counters. Its failed export was successfully downloaded from
+CI, verifying PR #78's retention on an actual failed run. No permission or host
+setting was changed, and no counter evidence was obtained.
+
+The separate `observe` mode uses read-only, unprivileged process observations
+around the unchanged measured binary: user/system CPU time, faults, context
+switches, pinned-core interrupt totals and requested clock-state residency.
+Sanitized code/heap/stack mapping bases support process-layout investigation;
+no process IDs, file paths or device labels are exported. It uses 16 ABBA legs
+(eight per side), all five workloads in separate processes, five repetitions
+and the existing fixed work, quiet and timed-steal gates. Exports are private
+CI artifacts. These observations include startup/warmup; their clock policy
+counters are not effective-frequency measurements. They never enter acceptance,
+thresholds or graph history. Missing observations and failed legs are retained.
