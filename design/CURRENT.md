@@ -38,8 +38,13 @@ The first unprivileged observation cohort did not reproduce the large outlier:
 its slowest closure process was +3.112% above the cohort median. Its whole-process
 CPU/wall ratios were at least 99.8%, with no major faults or clock-policy
 transitions. The source notes and observer merged in PR #79 as `5830b4d1`.
-A controlled file-copy/reuse crossover with independent retained-file replay
-is the next cause test; no cause or stability claim has been established.
+The file-copy/reuse crossover and independent retained-file replay completed
+in run 40591758175: all 120 process records and 24 timed gates verify. The
+selected slow closure file did not remain slow on replay (99% interval spans
+zero), and the earlier 26.87% outlier did not recur. PR #80 delivered the
+diagnostic as `3a27384c`. Process layout remains a hypothesis; no cause or
+stability claim has been established. Further privileged diagnostics require
+separate approval; existing host security settings remain unchanged.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).

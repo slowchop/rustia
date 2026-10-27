@@ -225,7 +225,8 @@ log. Independent reconstruction verifies all 80 invocation records, binary
 identity, fixed work/checksums, layouts, child exits and 16 timed gates. The
 post-run package inventory matches the initial package fingerprint.
 
-The largest closure process median was +3.112% above the pooled workload median,
+The largest closure process median was +3.112% above the median of the 16
+closure process medians,
 not the earlier +26.87%. Its child CPU/wall ratio was 0.999878; all invocation
 ratios were at least 0.998059. Across the 80 windows there were 53 interrupt and
 24 softirq deltas, zero major faults and zero clock-policy transitions. The
@@ -265,3 +266,34 @@ controls: 120 workload processes across the crossover and replay. No selected
 extreme alone establishes a cause; only independent persistence can support a
 file-lifecycle finding. Inode identity does not prove physical page-frame
 identity. The diagnostic changes no normal acceptance or graph history.
+
+
+### File-control result and remaining cause boundary
+
+[Run 40591758175](https://github.com/slowchop/rustia/actions/runs/40591758175)
+completed at reviewed source `f8533bc6`. Independent archive reconstruction
+verified all 120 records, fixed work/checksums, executable hashes, file tokens,
+selection and replay order. All 24 timed gates passed with zero steal ticks.
+PR #80 merged through required checks as `3a27384c`.
+
+The slowest initial closure leg was 170.945 ns/unit, +5.731% relative to the
+median of the 16 initial leg medians (161.679 ns/unit). This is an observed
+extreme, not an estimate of an underlying slowdown. Its retained file did not
+remain slow: independent replay measured -0.724% versus the initially fast
+file, with a 99% interval of [-5.400%, +4.387%]. The initially fast file later
+produced a 170.970 ns/unit closure leg. This does not support a persistent
+file-specific explanation, and the earlier 26.87% outlier was not reproduced.
+The math/table replay differed by -1.340% [-1.815%, -0.572%]; it does not
+explain the old closure outlier. All workloads and unsuccessful hypotheses are
+retained rather than selecting a favorable result.
+
+Read-only post-run inspection found the runner's threads confined to the
+housekeeping CPU set, without threads explicitly pinned to the benchmark
+cores. This is an idle snapshot, not evidence about the original timed window.
+The current observer records page-aligned mapping bounds, not the actual
+initial stack pointer. A controlled process-layout experiment remains a
+candidate discriminator, not a known cause. Existing runner security policy
+must be respected; no permission change, global ASLR change or privileged
+counter run is authorized by this investigation. Private operational snapshots,
+raw exports, analysis and the proposed next experiment belong in rustia-ops.
+The calibration warning and existing thresholds remain unchanged.
