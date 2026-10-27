@@ -894,7 +894,8 @@ function measureOne(config, build, attemptDirectory, options = {}) {
     const command = options.observe ? "python3" : profile || cycleSampling ? "perf" : "taskset";
     const commandArgs = options.observe
       ? [path.join(HARNESS, "tools/observe-benchmark-process.py"), "--cpu", String(config.host_gate.benchmark_cpu),
-        "--binary", build.binary, "--output", observationFile, "--", "taskset", ...args]
+        "--binary", build.binary, "--binary-sha256", build.binary_sha256,
+        "--output", observationFile, "--", "taskset", ...args]
       : cycleSampling
       ? ["record", "-e", "cycles:u", "-F", "997", "-o", privatePerfFile,
         "--", "taskset", ...args]
@@ -1368,33 +1369,124 @@ async function profilePair(config, builds, startedAtMs) {
   }
 }
 
-// Separate, unprivileged diagnostic. The measured binaries and fixed work are
-// unchanged; observations include startup/warmup and never become history rows.
+function observationFileToken(file) {
+  const stat = fs.statSync(file, { bigint: true });
+  return crypto.createHash("sha256").update(`${stat.dev}:${stat.ino}`).digest("hex");
+}
+
+function prepareObservationFiles(builds, scratch) {
+  if (builds.length !== 2 || builds[0].binary_sha256 !== builds[1].binary_sha256) {
+    fail("file-copy control requires two byte-identical builds");
+  }
+  const directory = path.join(scratch, "observation-files");
+  fs.mkdirSync(directory, { recursive: true });
+  const reference = path.join(directory, "reference");
+  fs.renameSync(builds[0].binary, reference);
+  for (const build of builds) fs.rmSync(build.binary, { force: true });
+  return { directory, reference };
+}
+
+function linkObservationFile(file, launchPath) {
+  fs.rmSync(launchPath, { force: true });
+  fs.linkSync(file, launchPath);
+  return observationFileToken(launchPath);
+}
+
+function chooseObservationFile(files, leg) {
+  // FFRR / RRFF mirrored twice, balanced within each ABBA source block.
+  const fresh = (Math.floor(leg / 4) % 2 === 0) === (leg % 4 < 2);
+  const file = fresh ? path.join(files.directory, `fresh-${String(leg).padStart(2, "0")}`) : files.reference;
+  if (fresh) fs.copyFileSync(files.reference, file, fs.constants.COPYFILE_EXCL);
+  return { file, condition: fresh ? "fresh" : "reused" };
+}
+
+function selectObservationReplay(records) {
+  const sorted = [...records].sort((a, b) => a.median - b.median);
+  const slow = sorted.at(-1);
+  const fast = sorted.find((record) => record.fileToken !== slow.fileToken);
+  if (!fast) fail("file-copy replay requires two distinct retained files");
+  return { slow, fast };
+}
+
+function observationBuild(builds, sourceIndex = 0) {
+  // Source aliases are byte-identical. Keep one executable pathname; replay
+  // omits sourceIndex so every guest argv value and output filename also agrees.
+  return { ...builds[sourceIndex], binary: builds[0].binary };
+}
+
+async function observeLeg(config, build, startedAtMs, gateFile, directory, metadata) {
+  checkRuntimeBudget(config, startedAtMs, "process observation");
+  if (sha256File(build.binary) !== build.binary_sha256) fail("file-copy bytes differ before quiet gate");
+  fs.mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, "file-control.json"), {
+    schema: "rustia.bench.file-copy-control.v1", ...metadata,
+    binary_sha256: build.binary_sha256, commit: build.commit,
+  });
+  await waitForQuiet(config, gateFile, metadata.leg + 1,
+    Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+  const before = readCpu(config.host_gate.benchmark_cpu);
+  const output = measureOne(config, build, directory, { observe: true });
+  const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+  appendJsonLine(gateFile, { phase: metadata.phase, leg: metadata.leg, commit: build.commit,
+    ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+  validateRows({ ...config, publication: { ...config.publication, rows: WORKLOADS.length } },
+    [build], parseHistory(output.historyFile));
+  for (const workload of WORKLOADS) {
+    const observation = loadJson(path.join(directory, `${build.commit}-${workload}-observation.json`));
+    if (observation.binary_sha256 !== build.binary_sha256 || observation.exit_code !== 0 ||
+        observation.binary_file_token !== metadata.file_token) {
+      fail("process observation binary/exit identity mismatch");
+    }
+  }
+  if (observationFileToken(build.binary) !== metadata.file_token) fail("launched executable file identity changed");
+  if (sha256File(build.binary) !== build.binary_sha256) fail("file-copy bytes differ after workload leg");
+  if (!timedGatePasses(config.host_gate, delta)) fail("process observation failed steal gate; retained without retry");
+  const samples = loadJson(path.join(directory, `${build.commit}-closures_upvalues-samples.json`));
+  return median([...samples.measurements[0].samples_ns_per_unit].sort((a, b) => a - b));
+}
+
+// Diagnostic only: copy lifecycle is crossed with source identity while the
+// launch pathname, bytes, fixed work and ASLR policy remain unchanged. All fresh
+// inodes remain linked until independent replay finishes; no public history rows.
 async function observePair(config, builds, startedAtMs) {
-  if (builds.length !== 2) fail("process observation requires two revisions");
+  const files = prepareObservationFiles(builds, ATTEMPTS);
   const gateFile = path.join(EVIDENCE, "observation-gate.jsonl");
   fs.writeFileSync(gateFile, "");
+  const records = [];
   for (let leg = 0; leg < 16; leg += 1) {
-    const index = [0, 1, 1, 0][leg % 4];
-    checkRuntimeBudget(config, startedAtMs, "process observation");
-    await waitForQuiet(config, gateFile, leg + 1,
-      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
-    const directory = path.join(EVIDENCE, `observe-${leg}`);
-    fs.mkdirSync(directory, { recursive: true });
-    const before = readCpu(config.host_gate.benchmark_cpu);
-    const output = measureOne(config, builds[index], directory, { observe: true });
-    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
-    appendJsonLine(gateFile, { phase: "observe", leg, commit: builds[index].commit,
-      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
-    validateRows({ ...config, publication: { ...config.publication, rows: WORKLOADS.length } },
-      [builds[index]], parseHistory(output.historyFile));
-    for (const workload of WORKLOADS) {
-      const observation = loadJson(path.join(directory, `${builds[index].commit}-${workload}-observation.json`));
-      if (observation.binary_sha256 !== builds[index].binary_sha256 || observation.exit_code !== 0) {
-        fail("process observation binary/exit identity mismatch");
-      }
-    }
-    if (!timedGatePasses(config.host_gate, delta)) fail("process observation failed steal gate; retained without retry");
+    const build = observationBuild(builds, [0, 1, 1, 0][leg % 4]);
+    const choice = chooseObservationFile(files, leg);
+    const fileToken = linkObservationFile(choice.file, build.binary);
+    const directory = path.join(EVIDENCE, `observe-${String(leg).padStart(2, "0")}`);
+    const score = await observeLeg(config, build, startedAtMs, gateFile, directory, {
+      phase: "observe", leg, condition: choice.condition, file_token: fileToken,
+    });
+    records.push({ build, file: choice.file, fileToken, median: score, leg });
+  }
+  const selection = selectObservationReplay(records);
+  writeJson(path.join(EVIDENCE, "file-control-selection.json"), {
+    schema: "rustia.bench.file-copy-selection.v1",
+    rule: "slowest closure process file, then fastest process with a distinct file token",
+    selected: Object.fromEntries(Object.entries(selection).map(([label, record]) => [label, {
+      initial_leg: record.leg, file_token: record.fileToken, median_ns_per_unit: record.median,
+      commit: record.build.commit,
+    }])),
+    limits: "Selection is exploratory. Only independent replay can establish persistence; inodes do not identify physical frames.",
+  });
+  // Reuse exactly one launch/output pathname during replay, retaining every
+  // initial and replay record under a different archive directory afterward.
+  const directory = path.join(EVIDENCE, "observe-00");
+  fs.renameSync(directory, path.join(EVIDENCE, "initial-00"));
+  for (let leg = 0; leg < 8; leg += 1) {
+    const label = ["slow", "fast", "fast", "slow"][leg % 4];
+    const record = selection[label];
+    const build = observationBuild(builds);
+    const token = linkObservationFile(record.file, build.binary);
+    if (token !== record.fileToken) fail("retained replay file identity changed");
+    await observeLeg(config, build, startedAtMs, gateFile, directory, {
+      phase: "observe-replay", leg, condition: label, file_token: token,
+    });
+    fs.renameSync(directory, path.join(EVIDENCE, `replay-${String(leg).padStart(2, "0")}`));
   }
 }
 
@@ -1870,6 +1962,60 @@ async function selfTest() {
   assert.throws(() => summarizeCycleLocations("PERF_RECORD_LOST 10"), /lost events/);
   for (const period of ["0", "-1", "1.5", "9007199254740992"]) {
     assert.throws(() => summarizeCycleLocations(`${period} deadbeef ${genericLocation}`), /invalid cycle sample period/);
+  }
+  // File lifecycle tests use nonexecutable fixture bytes, never a benchmark.
+  {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-file-control-"));
+    try {
+      const bytes = Buffer.from("fixture bytes only");
+      const fixtureBuilds = [0, 1].map((index) => {
+        const binary = path.join(scratch, `source-${index}`);
+        fs.writeFileSync(binary, bytes);
+        return { binary, commit: String(index).repeat(40), binary_sha256: sha256File(binary) };
+      });
+      const files = prepareObservationFiles(fixtureBuilds, scratch);
+      const referenceToken = observationFileToken(files.reference);
+      const freshTokens = new Set();
+      const counts = [0, 0, 0, 0];
+      for (let leg = 0; leg < 16; leg += 1) {
+        const source = [0, 1, 1, 0][leg % 4];
+        const choice = chooseObservationFile(files, leg);
+        const token = linkObservationFile(choice.file, fixtureBuilds[source].binary);
+        counts[source * 2 + (choice.condition === "fresh" ? 0 : 1)] += 1;
+        assert.deepEqual(fs.readFileSync(fixtureBuilds[source].binary), bytes);
+        if (choice.condition === "fresh") {
+          assert.notEqual(token, referenceToken);
+          freshTokens.add(token);
+        } else assert.equal(token, referenceToken);
+      }
+      assert.deepEqual(counts, [4, 4, 4, 4]);
+      assert.equal(freshTokens.size, 8);
+      assert.equal(observationBuild(fixtureBuilds, 1).binary, fixtureBuilds[0].binary);
+      const replayDirectory = path.join(scratch, "observe-00");
+      const replayArgs = () => {
+        const build = observationBuild(fixtureBuilds);
+        return measurementArgs(config, build, path.join(replayDirectory, `${build.commit}.jsonl`),
+          path.join(replayDirectory, `${build.commit}-samples.json`), WORKLOADS);
+      };
+      const expectedReplayArgs = replayArgs();
+      for (const selectedSource of [0, 1, 1, 0, 0, 1, 1, 0]) {
+        // The selected file's original source must not enter guest argv.
+        assert.equal(observationBuild(fixtureBuilds).commit, fixtureBuilds[0].commit);
+        assert.equal(observationBuild(fixtureBuilds, selectedSource).binary, fixtureBuilds[0].binary);
+        assert.deepEqual(replayArgs(), expectedReplayArgs);
+      }
+      const selection = selectObservationReplay([
+        { fileToken: "same", median: 1 }, { fileToken: "other", median: 2 },
+        { fileToken: "same", median: 3 },
+      ]);
+      assert.equal(selection.slow.median, 3);
+      assert.equal(selection.fast.median, 2);
+      assert.throws(() => prepareObservationFiles([
+        fixtureBuilds[0], { ...fixtureBuilds[1], binary_sha256: "different" },
+      ], scratch), /byte-identical/);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   }
   process.stdout.write("history backfill runner self-test passed\n");
 }

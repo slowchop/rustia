@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import resource
+import re
 import subprocess
 import sys
 import time
@@ -75,7 +76,8 @@ def resource_delta(before, after):
 
 def observe(args):
     binary = str(Path(args.binary).resolve(strict=True))
-    digest = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+    stat = Path(binary).stat()
+    file_token = hashlib.sha256(f"{stat.st_dev}:{stat.st_ino}".encode()).hexdigest()
     before = snapshot(args.cpu)
     usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started = time.monotonic()
@@ -107,7 +109,9 @@ def observe(args):
     usage = resource_delta(usage_before, resource.getrusage(resource.RUSAGE_CHILDREN))
     result = {
         "schema": "rustia.bench.process-observation.v1",
-        "binary_sha256": digest, "exit_code": code, "wall_seconds": elapsed,
+        "binary_sha256": args.binary_sha256, "binary_file_token": file_token,
+        "binary_identity": "Enclosing runner verifies bytes before quiet and after the workload leg; this helper does not prefault the executable.",
+        "exit_code": code, "wall_seconds": elapsed,
         "resources": usage, "layout": mapping, "before": before, "after": snapshot(args.cpu),
         "clock_ticks_per_second": os.sysconf("SC_CLK_TCK"),
         "aslr_policy": optional(lambda: int(Path("/proc/sys/kernel/randomize_va_space").read_text())),
@@ -160,7 +164,8 @@ def self_test():
         binary = Path(temporary) / "fixture-binary"
         binary.write_bytes(b"nonexecutable fixture")
         output = Path(temporary) / "observation.json"
-        options = SimpleNamespace(binary=str(binary), output=str(output), cpu=4, command=["fixture"])
+        options = SimpleNamespace(binary=str(binary), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                                  output=str(output), cpu=4, command=["fixture"])
 
         def read_fixture(file, *unused, **kwargs):
             if file.name == "status":
@@ -181,6 +186,7 @@ def self_test():
         assert record["exit_code"] == 7 and record["resources"]["minflt"] == 2
         assert record["wall_seconds"] == 1 and record["layout"]["available"]
         assert record["binary_sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
+        assert len(record["binary_file_token"]) == 64
         assert temporary not in output.read_text()
     print("process observation offline parser/resource tests passed")
 
@@ -192,11 +198,13 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("--cpu", required=True, type=int)
         parser.add_argument("--binary", required=True)
+        parser.add_argument("--binary-sha256", required=True)
         parser.add_argument("--output", required=True)
         parser.add_argument("command", nargs=argparse.REMAINDER)
         args = parser.parse_args()
         if args.command[:1] == ["--"]:
             args.command = args.command[1:]
-        if os.environ.get("GITHUB_ACTIONS") != "true" or not args.command or args.cpu < 0:
+        if (os.environ.get("GITHUB_ACTIONS") != "true" or not args.command or args.cpu < 0
+                or not re.fullmatch(r"[0-9a-f]{64}", args.binary_sha256)):
             parser.error("process observation requires a CI command and a valid pinned CPU")
         sys.exit(observe(args))
