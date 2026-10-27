@@ -242,6 +242,7 @@ const MEASUREMENT_COMMANDS = Object.freeze([
   "node tools/run-linux-matrix-benchmark.js",
   "node tools/run-linux-history-backfill.js",
   "node tools/run-linux-memory-benchmark.js",
+  "python3 tools/observe-benchmark-process.py",
 ]);
 
 // The single entrypoint a timing-authoritative runner may use. It attests the
@@ -399,10 +400,12 @@ function checkBenchHostQueue(files) {
 
 function checkAcceptanceEvidence(text) {
   const label = ".github/workflows/acceptance-bench.yml";
+  requireIncludes(text, "node tools/run-dedicated-benchmark.js observe --local", label);
   const retention = text.split("      - name: Retain diagnostic evidence, including failed runs\n")[1];
   if (!retention) fail(`${label} must retain acceptance evidence`);
   requireIncludes(retention, "        if: ${{ always() }}\n", label);
   requireIncludes(retention, "            .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz\n", label);
+  requireIncludes(retention, "            .rustia-benchmark-state/dedicated/runs/observe-*/export.tar.gz\n", label);
   requireIncludes(retention, "            ${{ runner.temp }}/rustia-acceptance.*/acceptance.*\n", label);
   requireIncludes(retention, "          include-hidden-files: true\n", label);
   requireIncludes(retention, "          retention-days: 30\n", label);
@@ -1342,6 +1345,7 @@ if (process.argv?.includes("--self-test")) {
       ["missing control ledger", publicationPath, publicationWorkflow, publicationWorkflow.replace('install -m 644 "$data_dir/bench/history/series/ci-bench-host-controls.jsonl"', 'true # omitted controls')],
       ["failed acceptance loses evidence", acceptancePath, acceptanceWorkflow, acceptanceWorkflow.replace("if: ${{ always() }}", "if: ${{ success() }}")],
       ["acceptance loses raw exports", acceptancePath, acceptanceWorkflow, acceptanceWorkflow.replace("            .rustia-benchmark-state/dedicated/runs/accept-*/export.tar.gz\n", "")],
+      ["observation loses raw exports", acceptancePath, acceptanceWorkflow, acceptanceWorkflow.replace("            .rustia-benchmark-state/dedicated/runs/observe-*/export.tar.gz\n", "")],
     ]) {
       assert.notEqual(changed, original, `${label}: mutation did not apply`);
       fs.writeFileSync(file, changed);
@@ -1372,7 +1376,7 @@ if (process.argv?.includes("--self-test")) {
       if (scenario === "one") assert.equal(result.status, 0, result.stderr);
       else assert.notEqual(result.status, 0, `golden runner accepted ${scenario}`);
     }
-    console.log("workflow policy self-tests: canonical, nineteen policy rejections, and four explicit-target golden-execution cases pass");
+    console.log("workflow policy self-tests: canonical, twenty policy rejections, and four explicit-target golden-execution cases pass");
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

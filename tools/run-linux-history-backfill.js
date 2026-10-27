@@ -890,8 +890,12 @@ function measureOne(config, build, attemptDirectory, options = {}) {
     const perfFile = path.join(attemptDirectory, `${build.commit}-${workload}-perf.csv`);
     const privatePerfFile = cycleSampling
       ? path.join(options.privateSampleDirectory, `${build.commit}-${workload}.data`) : null;
-    const command = profile || cycleSampling ? "perf" : "taskset";
-    const commandArgs = cycleSampling
+    const observationFile = path.join(attemptDirectory, `${build.commit}-${workload}-observation.json`);
+    const command = options.observe ? "python3" : profile || cycleSampling ? "perf" : "taskset";
+    const commandArgs = options.observe
+      ? [path.join(HARNESS, "tools/observe-benchmark-process.py"), "--cpu", String(config.host_gate.benchmark_cpu),
+        "--binary", build.binary, "--output", observationFile, "--", "taskset", ...args]
+      : cycleSampling
       ? ["record", "-e", "cycles:u", "-F", "997", "-o", privatePerfFile,
         "--", "taskset", ...args]
       : profile
@@ -1364,6 +1368,36 @@ async function profilePair(config, builds, startedAtMs) {
   }
 }
 
+// Separate, unprivileged diagnostic. The measured binaries and fixed work are
+// unchanged; observations include startup/warmup and never become history rows.
+async function observePair(config, builds, startedAtMs) {
+  if (builds.length !== 2) fail("process observation requires two revisions");
+  const gateFile = path.join(EVIDENCE, "observation-gate.jsonl");
+  fs.writeFileSync(gateFile, "");
+  for (let leg = 0; leg < 16; leg += 1) {
+    const index = [0, 1, 1, 0][leg % 4];
+    checkRuntimeBudget(config, startedAtMs, "process observation");
+    await waitForQuiet(config, gateFile, leg + 1,
+      Date.now() + config.host_gate.wait_timeout_seconds * 1000);
+    const directory = path.join(EVIDENCE, `observe-${leg}`);
+    fs.mkdirSync(directory, { recursive: true });
+    const before = readCpu(config.host_gate.benchmark_cpu);
+    const output = measureOne(config, builds[index], directory, { observe: true });
+    const delta = cpuDelta(before, readCpu(config.host_gate.benchmark_cpu));
+    appendJsonLine(gateFile, { phase: "observe", leg, commit: builds[index].commit,
+      ...delta, accepted: timedGatePasses(config.host_gate, delta) });
+    validateRows({ ...config, publication: { ...config.publication, rows: WORKLOADS.length } },
+      [builds[index]], parseHistory(output.historyFile));
+    for (const workload of WORKLOADS) {
+      const observation = loadJson(path.join(directory, `${builds[index].commit}-${workload}-observation.json`));
+      if (observation.binary_sha256 !== builds[index].binary_sha256 || observation.exit_code !== 0) {
+        fail("process observation binary/exit identity mismatch");
+      }
+    }
+    if (!timedGatePasses(config.host_gate, delta)) fail("process observation failed steal gate; retained without retry");
+  }
+}
+
 function captureStringSources(config) {
   const harnessCommit = runText("git", ["-C", HARNESS, "rev-parse", "HEAD"]);
   if (harnessCommit !== config.source.harness_commit) {
@@ -1446,19 +1480,20 @@ async function execute(configFile, providerFile, bundle, mode = "accept") {
       verifySource(config, bundle);
       installRust();
       log(`building ${config.source.target_commits.length} historical Rustia revisions`);
-      if (mode === "profile" || mode === "strings") {
+      if (["profile", "strings", "observe"].includes(mode)) {
         fs.copyFileSync(configFile, path.join(EVIDENCE, "protocol.json"));
         fs.copyFileSync(providerFile, path.join(EVIDENCE, "provider.json"));
       }
       if (mode === "profile") run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
       const builds = buildTargets(config, startedAtMs);
-      if (mode === "profile" || mode === "strings") {
+      if (["profile", "strings", "observe"].includes(mode)) {
         writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
         writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));
         if (mode === "profile") await profilePair(config, builds, startedAtMs);
+        else if (mode === "observe") await observePair(config, builds, startedAtMs);
         else await stringPair(config, builds, startedAtMs);
-        status = { ...status, status: mode === "profile" ? "profile_complete" : "strings_complete",
-          detail: mode === "profile"
+        status = { ...status, status: `${mode}_complete`,
+          detail: mode !== "strings"
             ? "instrumented diagnostic only; not acceptance or publication evidence"
             : "supplemental string acceptance completed; not publication evidence",
           finished_at: new Date().toISOString() };
@@ -1466,7 +1501,8 @@ async function execute(configFile, providerFile, bundle, mode = "accept") {
         // The old runner also stopped and masked apt's periodic timers here.
         // That is an unrequested, root-only side effect on a machine this
         // project does not own exclusively for benchmarking; the host_gate
-        // idle/steal checks already reject a run a timer contaminates.
+        // pre-run quiet and timed-steal checks do not exclude every interrupt
+        // or clock/cache effect. Separate diagnostics investigate those effects.
         log("measuring fixed current workloads across the historical binaries");
         const measurement = await measure(config, builds, EVIDENCE, startedAtMs);
         const repeatability = repeatabilityCheck(builds, measurement.rows);
@@ -1493,7 +1529,7 @@ async function execute(configFile, providerFile, bundle, mode = "accept") {
     } finally {
       exportRun(status, EVIDENCE);
     }
-    return ["backfill_complete", "profile_complete", "strings_complete"].includes(status.status) ? 0 : 2;
+    return ["backfill_complete", "profile_complete", "strings_complete", "observe_complete"].includes(status.status) ? 0 : 2;
   } finally {
     releaseLock();
   }
@@ -1844,14 +1880,14 @@ async function main() {
     await selfTest();
     return;
   }
-  if (process.argv.length !== 5 && !(process.argv.length === 6 && ["--profile", "--strings"].includes(process.argv[5]))) {
+  if (process.argv.length !== 5 && !(process.argv.length === 6 && ["--profile", "--strings", "--observe"].includes(process.argv[5]))) {
     process.stderr.write(
       "usage: run-linux-history-backfill.js CONFIG PROVIDER BUNDLE\n",
     );
     process.exitCode = 2;
     return;
   }
-  const mode = process.argv[5] === "--profile" ? "profile" : process.argv[5] === "--strings" ? "strings" : "accept";
+  const mode = process.argv[5]?.slice(2) ?? "accept";
   process.exitCode = await execute(process.argv[2], process.argv[3], process.argv[4], mode);
 }
 
