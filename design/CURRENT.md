@@ -34,8 +34,12 @@ No thresholds have been adopted. This does not authorize public source access.
 Evidence-retention PR #78 merged through required CI as `0d830e20`; completed
 acceptance exports now have private 30-day artifact retention. The 28 October
 hardware-profile attempt failed before timing under the existing perf policy.
-A separate CI-only process observer investigates CPU time, faults, scheduling,
-interrupts and memory layout without changing host permissions or history.
+The first unprivileged observation cohort did not reproduce the large outlier:
+its slowest closure process was +3.112% above the cohort median. Its whole-process
+CPU/wall ratios were at least 99.8%, with no major faults or clock-policy
+transitions. The source notes and observer merged in PR #79 as `5830b4d1`.
+A controlled file-copy/reuse crossover with independent retained-file replay
+is the next cause test; no cause or stability claim has been established.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).

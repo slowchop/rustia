@@ -32,7 +32,7 @@ name: Benchmark Acceptance
         required: true
         type: string
       passes:
-        description: Acceptance legs per side. Even, 2-16. Observe always uses eight.
+        description: Acceptance legs per side. Even, 2-16. Observe uses its fixed diagnostic sequence.
         required: false
         default: "8"
         type: string

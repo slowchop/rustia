@@ -3083,7 +3083,7 @@ function usage() {
       "                                         for the live series\n" +
       "  pr        --out FILE [--base REF] [--json FILE]  screen HEAD against its merge base\n" +
       "  profile   --baseline C --candidate C    ABBA hardware counters; never acceptance\n" +
-      "  observe   --local --baseline C --candidate C  CI-only process observations, 8 legs/side\n" +
+      "  observe   --local --baseline C --candidate C  CI-only file-copy crossover and independent replay\n" +
       "  strings   --baseline C --candidate C --out FILE [--json FILE]\n" +
       "                                         eight ABBA legs for the dedicated string opcodes\n" +
       "  accept    --baseline C --candidate C --out FILE [--passes N] [--json FILE]\n" +

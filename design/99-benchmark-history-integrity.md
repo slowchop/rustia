@@ -215,3 +215,53 @@ and the existing fixed work, quiet and timed-steal gates. Exports are private
 CI artifacts. These observations include startup/warmup; their clock policy
 counters are not effective-frequency measurements. They never enter acceptance,
 thresholds or graph history. Missing observations and failed legs are retained.
+
+
+### First unprivileged observation result
+
+[Run 40584219256](https://github.com/slowchop/rustia/actions/runs/40584219256)
+completed at reviewed head `6c987adf`. The retained export hash matches its CI
+log. Independent reconstruction verifies all 80 invocation records, binary
+identity, fixed work/checksums, layouts, child exits and 16 timed gates. The
+post-run package inventory matches the initial package fingerprint.
+
+The largest closure process median was +3.112% above the pooled workload median,
+not the earlier +26.87%. Its child CPU/wall ratio was 0.999878; all invocation
+ratios were at least 0.998059. Across the 80 windows there were 53 interrupt and
+24 softirq deltas, zero major faults and zero clock-policy transitions. The
+slowest closure window had no recorded interrupt or softirq delta. Requested
+frequency residency stayed in the exposed 3.8 GHz state; this is not an
+effective-frequency measurement. This cohort did not reproduce or explain the
+old outlier, and cannot rule out conditions missing from this experiment. The
+first helper read the whole executable to hash it just before each launch;
+that prefaulting is an observation effect. The follow-up instead verifies bytes
+before the quiet gate and after the workload leg, using per-child file tokens
+to bind each invocation to the verified inode without reading its contents.
+
+PR #79 merged with every required check passing as `5830b4d14ff8428e6115a3da1f4640f31d293f6b`.
+Detailed evidence and corrected notes are retained in private ops PR #3.
+
+### File-lifecycle crossover and independent replay
+
+The old acceptance lane resets scratch state and copies executables anew for
+each pair pass. Its five separate workload processes share the side's copied
+file within that pass. The first observer built once and reused two files, so
+its negative result does not exclude a file-copy/page-cache interaction.
+
+The follow-up `observe` diagnostic requires byte-identical builds and controls
+copy lifecycle while keeping launch pathnames, argv lengths, fixed work and
+ASLR policy constant. Its first 16 source legs keep ABBA order and cross fresh
+copies with one shared reference inode in mirrored FFRR/RRFF blocks: eight legs
+per lifecycle, four per source/lifecycle. Each fresh inode stays linked until
+the job's confirmation stage. Anonymous file tokens verify identity without
+exporting device/inode numbers or private paths.
+
+Selection is predeclared: choose the file from the slowest closure process,
+then the fastest process with a distinct file token. Eight independent replay
+legs use those exact retained files in ABBA order (four per file). Every replay
+uses the same executable and output pathname; initial/replay records are moved
+to distinct archive directories afterward. All five workloads are retained as
+controls: 120 workload processes across the crossover and replay. No selected
+extreme alone establishes a cause; only independent persistence can support a
+file-lifecycle finding. Inode identity does not prove physical page-frame
+identity. The diagnostic changes no normal acceptance or graph history.

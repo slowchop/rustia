@@ -251,16 +251,19 @@ workload's threshold from the median leg of its side, by the pass it came from.
 A side of fewer than three legs has no median to stand apart from and is never
 flagged.
 
-The separate dispatch-only `observe` mode records unprivileged process resource
-usage, pinned-core interrupt totals, requested frequency-state residency and
-sanitized memory-layout bases around each workload invocation. It builds the
-two named revisions once, then runs 16 ABBA legs (eight per side), five samples
-per workload process at the existing fixed N. There are 80 workload processes,
-not 16 multi-workload processes. It requires the CI-local attested lane and
-retains private exports on failure. CPU times include startup and warmup;
-requested clock-state counters do not establish effective frequency. This
-instrumented diagnostic changes no accepted protocol, thresholds or history and
-requires no perf, root access, package installation or host configuration change.
+The separate dispatch-only `observe` mode requires two byte-identical builds.
+It records unprivileged process resources and sanitized memory-layout bases
+while crossing fresh executable copies against one reused inode. Sixteen ABBA
+source legs use mirrored FFRR/RRFF lifecycle blocks, with fixed launch paths,
+argv lengths, N and five samples. Eight additional independent ABBA replay legs
+compare the selected slowest closure file with the fastest distinct file.
+Retained hard links preserve file identity through confirmation. All five
+workloads run separately: 120 workload processes total, all retained privately.
+CPU times include startup/warmup; policy counters do not establish effective
+frequency, and inodes do not identify physical frames. Exploratory selection
+alone is insufficient for a cause claim. This CI-local diagnostic changes no
+accepted protocol, thresholds or history and requires no perf, root access,
+package installation, ASLR change or host configuration change.
 
 The frozen owned-host config, `bench/cloud/dedicated-core2-tape-sparse.json`,
 is the one place the repository records what the host guarantees. The matrix
