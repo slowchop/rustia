@@ -20,6 +20,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
+const diskSpace = require("./benchmark-disk-space.js");
+const { MINIMUM_FREE_GIB, MINIMUM_FREE_FRACTION } = diskSpace;
 
 const REPO = path.resolve(__dirname, "..");
 const STATE_ROOT = path.join(REPO, ".rustia-benchmark-state/dedicated");
@@ -63,13 +65,8 @@ const STRING_ACCEPTANCE_N = 10_000;
 // acceptance interval; it is even so that A B B A stays balanced.
 const DEFAULT_ACCEPTANCE_PASSES = 8;
 
-// Free space the host must have under $HOME before a run may start. The lanes'
-// working roots and the runner's own work directory all live there, and on
-// 2026-09-06 a filled disk failed the weekly matrix before this script ran,
-// as a runner-level error that named no cause. This is a floor that catches
-// that failure, not a measurement of what a build needs; a run that
-// legitimately needs more should raise it with the figure it observed.
-const MINIMUM_FREE_GIB = 20;
+// Filesystem admission uses the same absolute and fractional reserve as the
+// post-build checks in all three shipped runners (benchmark-disk-space.js).
 
 // A non-interactive ssh session does not read the login profile, so neither
 // rustup's nor a home-directory node install is on PATH by default. Both are
@@ -273,16 +270,7 @@ function compareAttestation(declared, observed) {
   if (observed.smt !== "off" && observed.smt !== "notsupported") {
     problems.push(`SMT must be off, host reports ${JSON.stringify(observed.smt)}`);
   }
-  // Checked here rather than left to the build: a disk that fills mid-run
-  // wastes the whole measurement, and the error it produces names the
-  // symptom, not the cause.
-  const freeKib = Number(observed.free_kib);
-  if (!Number.isFinite(freeKib) || freeKib < MINIMUM_FREE_GIB * 1024 * 1024) {
-    const reported = Number.isFinite(freeKib) ? `${(freeKib / 1024 / 1024).toFixed(1)} GiB` : "unknown";
-    problems.push(
-      `free space: at least ${MINIMUM_FREE_GIB} GiB needed under $HOME, host reports ${reported}`,
-    );
-  }
+  problems.push(...diskSpace.diskSpaceProblems(Number(observed.total_kib), Number(observed.free_kib)));
   let declaredPinned;
   try {
     declaredPinned = parseCpuList(declared.pinned_cpus);
@@ -579,6 +567,8 @@ fi`;
 /// Reads the machine's own account of itself. Only the three isolation tokens
 /// are taken from /proc/cmdline: the full command line carries root=UUID= and
 /// other host detail that must not enter this repository.
+const DISK_SPACE_PROBE = `node -e 'const s = require("node:fs").statfsSync(process.env.HOME); console.log("total_kib=" + s.blocks * s.bsize / 1024); console.log("free_kib=" + s.bavail * s.bsize / 1024)'`;
+
 const ATTEST_SCRIPT = `
 set -u
 ${REMOTE_PATH}printf 'cpu_model=%s\\n' "$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')"
@@ -586,7 +576,7 @@ printf 'logical_cpus=%s\\n' "$(nproc --all)"
 printf 'smt=%s\\n' "$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
 printf 'isolated_cpus=%s\\n' "$(cat /sys/devices/system/cpu/isolated 2>/dev/null || echo '')"
 printf 'kernel=%s\\n' "$(uname -r)"
-printf 'free_kib=%s\\n' "$(df -Pk "$HOME" | awk 'NR==2{print $4}')"
+${DISK_SPACE_PROBE}
 printf 'isolation=%s\\n' "$(tr ' ' '\\n' < /proc/cmdline | grep -E '^(isolcpus|nohz_full|rcu_nocbs)=' | tr '\\n' ' ')"
 printf 'node=%s\\n' "$(command -v node >/dev/null && node --version || echo missing)"
 printf 'cargo=%s\\n' "$(command -v cargo >/dev/null && cargo --version || echo missing)"
@@ -603,6 +593,7 @@ function observeHost() {
   }
   observed.logical_cpus = Number(observed.logical_cpus);
   observed.free_kib = Number(observed.free_kib);
+  observed.total_kib = Number(observed.total_kib);
   return observed;
 }
 
@@ -660,6 +651,7 @@ function providerRecord(declared, observed) {
     kernel: observed.kernel,
     ...hostFingerprint(observed),
     free_gib: Number((observed.free_kib / 1024 / 1024).toFixed(1)),
+    free_fraction: Number((observed.free_kib / observed.total_kib).toFixed(6)),
     cpu_isolation: observed.isolation,
     pinned_cpus: declared.pinned_cpus,
     pinned_cpu_frequency_policy: pinnedFrequencyPolicies(declared.pinned_cpus, observed.cpufreq),
@@ -770,7 +762,7 @@ function commandPlan(options) {
     `config     ${path.relative(REPO, configFile)}\n` +
       `host       ${provider.host} (${provider.cpu_model}, ${provider.logical_cpus} CPUs, SMT ${provider.smt})\n` +
       `isolation  ${provider.cpu_isolation || "none"}\n` +
-      `free       ${provider.free_gib} GiB under $HOME (floor ${MINIMUM_FREE_GIB})\n` +
+      `free       ${provider.free_gib} GiB under $HOME, ${(100 * provider.free_fraction).toFixed(2)}% available (floors ${MINIMUM_FREE_GIB} GiB / ${100 * MINIMUM_FREE_FRACTION}%)\n` +
       `pinned     CPU ${config.host_gate.benchmark_cpu} of ${provider.pinned_cpus}\n` +
       `revisions  ${config.source.target_commits.length}\n` +
       `repairs    ${config.source.source_modifications.length}\n` +
@@ -858,19 +850,23 @@ function runnerModeSuffix(mode) {
   return "";
 }
 
+function runnerFiles(lane) {
+  return [lane.runner, "tools/benchmark-disk-space.js"];
+}
+
 function shipAndRun(configFile, providerFile, bundleFile, isLocal, lane = LANES.history, mode = false) {
   const inbox = `$HOME/${lane.root}/inbox`;
   sshCapture(`set -eu\nmkdir -p "${inbox}"\n`);
   if (isLocal) {
     const resolved = path.join(os.homedir(), lane.root, "inbox");
     fs.mkdirSync(resolved, { recursive: true });
-    for (const file of [path.join(REPO, lane.runner), configFile, providerFile, bundleFile]) {
+    for (const file of [...runnerFiles(lane).map((file) => path.join(REPO, file)), configFile, providerFile, bundleFile]) {
       fs.copyFileSync(file, path.join(resolved, path.basename(file)));
     }
   } else {
     local(
       "scp",
-      ["-q", lane.runner, configFile, providerFile, bundleFile, `${sshDestination()}:${lane.root}/inbox/`],
+      ["-q", ...runnerFiles(lane), configFile, providerFile, bundleFile, `${sshDestination()}:${lane.root}/inbox/`],
       { capture: false },
     );
   }
@@ -2318,7 +2314,7 @@ function commandUnlock() {
 /// policy of each isolated core. Nothing printed names the machine.
 const HOST_CHECK_SCRIPT = `
 set -u
-printf 'free_under_home=%s GiB (floor ${MINIMUM_FREE_GIB})\\n' "$(df -Pk "$HOME" | awk 'NR==2{printf "%.1f", $4/1048576}')"
+${DISK_SPACE_PROBE}
 journal="$(journalctl --disk-usage 2>/dev/null | sed 's/^Archived and active journals take up //')"
 printf 'journal=%s\\n' "\${journal:-unavailable}"
 diag="$(du -sh "$HOME"/actions-runner/_diag 2>/dev/null | cut -f1)"
@@ -2385,12 +2381,22 @@ function commandHostCheck() {
   }
   // The raw policy line is replaced by the per-core reading, not printed
   // beside it: one line of every core's five fields is what nobody reads.
-  for (const line of lines) if (!line.startsWith("cpufreq=")) process.stdout.write(`${line}\n`);
+  for (const line of lines) {
+    if (!/^(cpufreq|total_kib|free_kib)=/.test(line)) process.stdout.write(`${line}\n`);
+  }
+  const total = Number(fields.get("total_kib"));
+  const free = Number(fields.get("free_kib"));
+  const problems = diskSpace.diskSpaceProblems(total, free);
+  process.stdout.write(`disk_admission=${problems.length ? problems.join("; ") : "passes both reserve limits"}\n`);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(free)) {
+    process.stdout.write(`free_under_home=${(free / 1024 / 1024).toFixed(1)} GiB, ${(100 * free / total).toFixed(2)}% available\n`);
+  }
   process.stdout.write(formatFrequencyReport(fields.get("isolated_cpus"), fields.get("cpufreq")));
 }
 
 function selfTest() {
   const assert = require("node:assert/strict");
+  diskSpace.selfTest();
 
   assert.deepEqual(parseCpuList("4"), [4]);
   assert.deepEqual(parseCpuList("4,5"), [4, 5]);
@@ -2415,6 +2421,7 @@ function selfTest() {
     isolated_cpus: "4-5",
     cpufreq: "0:schedutil:2200000:3800000:0 4:performance:3800000:3800000:0 5:performance:3800000:3800000:0",
     free_kib: 64 * 1024 * 1024,
+    total_kib: 100 * 1024 * 1024,
   };
   assert.deepEqual(compareAttestation(declared, good), []);
   // The record written beside every run must not carry a field that could
@@ -2434,6 +2441,7 @@ function selfTest() {
   assert.deepEqual(leaked, [], `provider record field(s) may carry infrastructure detail: ${leaked}`);
   assert.equal(record.host, declared.name);
   assert.equal(record.pinned_cpus, declared.pinned_cpus);
+  assert.equal(record.free_fraction, 0.64);
   // The fingerprint moves with each of its three inputs and with nothing else,
   // so a control run is triggered by a host update and never by a re-run.
   const state = { kernel: "6.8.0-146-generic", microcode: "0x8701034", packages_sha256: "c".repeat(64) };
@@ -2457,7 +2465,7 @@ function selfTest() {
   );
   assert.match(
     compareAttestation(declared, { ...good, free_kib: Number.NaN }).join("|"),
-    /free space: .* host reports unknown/,
+    /free space: filesystem capacity is missing or invalid/,
   );
   // /proc/cpuinfo's trailing marketing text must not read as a different chip.
   assert.deepEqual(
@@ -2905,18 +2913,17 @@ function selfTest() {
     assert(fs.existsSync(path.join(REPO, lane.runner)), `${lane.runner} must exist`);
   }
 
-  // shipAndRun copies the runner into the host's inbox on its own, beside the
-  // config, the attestation and the bundle; a module required next to the
-  // runner does not exist there. Each runner is started from a directory that
-  // holds nothing else and must reach its usage line rather than "Cannot find
-  // module", which is how the memory lane's third owned-host run ended.
+  // Test the actual shipped dependency list in an otherwise empty inbox. A
+  // forgotten helper must fail here, rather than on the benchmark host.
   const inbox = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-inbox-"));
   try {
     for (const lane of Object.values(LANES)) {
       const shipped = path.join(inbox, path.basename(lane.runner));
-      fs.copyFileSync(path.join(REPO, lane.runner), shipped);
+      for (const file of runnerFiles(lane)) {
+        fs.copyFileSync(path.join(REPO, file), path.join(inbox, path.basename(file)));
+      }
       const alone = spawnSync(process.execPath, [shipped], { cwd: inbox, encoding: "utf8" });
-      assert.equal(alone.status, 2, `${lane.runner} must load from an inbox holding only itself: ${alone.stderr}`);
+      assert.equal(alone.status, 2, `${lane.runner} must load from its shipped inbox files: ${alone.stderr}`);
       assert.match(alone.stderr, /^usage: /, `${lane.runner} must print its usage when started without arguments`);
     }
   } finally {

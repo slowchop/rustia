@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { checkDiskSpace } = require("./benchmark-disk-space.js");
 
 // The retired Linode rental was destroyed after every run, so its ROOT was a
 // throwaway path under /opt with no ownership concerns. ci-bench is a machine
@@ -1578,6 +1579,7 @@ async function execute(configFile, providerFile, bundle, mode = "accept") {
       }
       if (mode === "profile") run("perf", ["stat", "-e", "cycles:u,instructions:u", "--", "true"]);
       const builds = buildTargets(config, startedAtMs);
+      checkDiskSpace(ROOT, path.join(EVIDENCE, "disk-space.json"));
       if (["profile", "strings", "observe"].includes(mode)) {
         writeJson(path.join(EVIDENCE, "builds.json"), builds.map(({ binary, ...build }) => build));
         writeJson(path.join(EVIDENCE, "host.json"), collectHost(config, builds));

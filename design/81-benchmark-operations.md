@@ -46,8 +46,7 @@ a class may not name any measurement command.
 ### `bench-solo` — one owned, qualified machine
 
 Timing happens on a single owned host, quiet by construction: cores held off the
-scheduler, SMT disabled, timed work pinned to one isolated core, and one job on
-the box at a time. It is a timing authority precisely because those properties
+scheduler, SMT disabled, timed work pinned to one isolated core, and one runner job at a time. It is a timing authority precisely because those properties
 are checked rather than asserted — `tools/run-dedicated-benchmark.js` compares
 the machine's own report against the frozen config before it ships anything,
 including that every pinned core appears in the kernel's isolated set and is
@@ -93,6 +92,30 @@ The qualification record also carries the machine's measured repeatability.
 Quote it per workload: spread scales inversely with per-unit cost, so the same
 host reads 0.32% worst on `dense_tables` and 5.74% on `closures_upvalues`.
 
+### Filesystem capacity admission
+
+Every owned-host lane requires both at least 20 GiB available and at least 20%
+of the working filesystem available to the unprivileged runner. These are
+independent limits: enough bytes on a large filesystem does not imply enough
+reserve. Admission uses available blocks, not blocks reserved for root, and
+refuses missing, invalid or impossible capacity readings. The provider stores
+the available fraction without device, mount or filesystem identifiers.
+
+The history/acceptance/diagnostic, matrix and memory runners recheck their
+working filesystem after builds and before entering their first quiet window.
+The shared `tools/benchmark-disk-space.js` policy saves a numeric
+`disk-space.json` snapshot before refusing a run, so the existing failed-export
+path can retain it. Filesystem checks do not run inside quiet or timed windows.
+These two checkpoints do not enforce a live build-time reserve or prove the
+absence of filesystem pressure later in a run.
+
+The coordinator explicitly ships this helper alongside every runner; the inbox
+self-test uses that exact dependency list. A helper missing from an otherwise
+empty inbox must fail the test rather than the remote job. Local mode and SSH
+mode ship the same files. This changes admission, not guest work, samples,
+performance thresholds, publication scope or host tuning. Original measurements
+and failed calibration remain retained.
+
 ### Waiting for the host
 
 Exclusivity and order are separate mechanisms. `bench-solo` holds exactly one
@@ -100,6 +123,11 @@ runner, so a second job sent to it waits in GitHub's runner queue rather than
 sharing the machine. That alone keeps a pull-request screening run off the
 pinned cores while a measurement holds them, and it stops being true the moment
 a second runner joins the group.
+
+This serializes runner jobs; it does not exclude operator commands, detached
+services, or resource state left by an earlier job. Quiet windows and capacity
+checks provide additional observations, not a global host lock or proof that
+unrelated activity was absent.
 
 The four lanes that hold the host for a full measurement — the per-commit
 series, the cross-engine matrix, the memory cohort and A/B acceptance — also

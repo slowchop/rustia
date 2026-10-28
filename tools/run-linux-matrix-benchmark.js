@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { checkDiskSpace } = require("./benchmark-disk-space.js");
 
 // The run's whole working tree. Was hardcoded at /opt/rustia, which only a root
 // process on a throwaway instance can write. The owned host runs this as an
@@ -910,6 +911,7 @@ async function execute(configFile, providerFile, bundle) {
     checkRuntimeBudget(config, startedAtMs, "before building the adapters");
     log("building all native adapters and the wasm adapter offline");
     const buildInfo = build(config);
+    checkDiskSpace(ROOT, path.join(evidenceDirectory, "disk-space.json"));
     checkRuntimeBudget(config, startedAtMs, "before measuring");
     // The rented-instance model stopped and permanently masked the package
     // timers, which needs root and outlives the run. On an owned machine that is

@@ -44,7 +44,15 @@ selected slow closure file did not remain slow on replay (99% interval spans
 zero), and the earlier 26.87% outlier did not recur. PR #80 delivered the
 diagnostic as `3a27384c`. Process layout remains a hypothesis; no cause or
 stability claim has been established. Further privileged diagnostics require
-separate approval; existing host security settings remain unchanged.
+separate approval. One subsequently approved counter capture completed in
+run 40608798552; all 20 counter records, four sampled records and eight timed
+gates verify. Nearly identical instruction counts with variable cycle cost did
+not identify the earlier outlier. The prior host security policy was restored
+and independently verified. Saved shared-host timelines show prior capacity
+pressure but no demonstrated overlapping job at the slow process timestamp.
+The shared admission policy requires both 20 GiB and 20% available filesystem capacity,
+then rechecks after builds before quiet windows; this does not establish a timing
+cause, change thresholds or authorize public source/package publication.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
 sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).

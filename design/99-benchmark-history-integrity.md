@@ -297,3 +297,34 @@ must be respected; no permission change, global ASLR change or privileged
 counter run is authorized by this investigation. Private operational snapshots,
 raw exports, analysis and the proposed next experiment belong in rustia-ops.
 The calibration warning and existing thresholds remain unchanged.
+
+
+### Approved counter result and capacity admission follow-up
+
+The one approved counter capture [40608798552](https://github.com/slowchop/rustia/actions/runs/40608798552)
+completed at reviewed main `881bdfef`. Export hash verification and independent
+reconstruction pass for 20 counter records, four sampled iteration records and
+eight zero-steal measurement gates. All builds remain byte-identical to the
+original control. The temporary counter permission was restored to its prior
+policy and independently verified; further privileged captures need separate
+authorization. Operational records and raw recordings remain in private ops.
+
+The old 26.87% closure outlier did not recur. The four profiled closure medians
+range from 162.557 to 170.967 ns/unit. Whole-process instruction counts differ
+by only 0.0000454%, while cycle counts differ by 3.873% max/min. Counters include
+startup, construction, cold calls, warmups and timed repetitions; they do not
+isolate the guest timing region. This shows variable cycle cost in this small
+cohort, not its mechanism or the original cause. The old raw startup arrays also
+show ordinary preparation/first-call medians alongside all five slow
+post-warmup samples. No stability or causal claim follows.
+
+A separate saved-record cross-project timeline audit found prior filesystem
+capacity pressure but no recorded concurrent workload at the original slow
+process timestamp. Unrecorded activity cannot be excluded. The concrete
+admission gap is independent of attribution: a filesystem below 20% available
+could still pass Rustia's old 20 GiB-only floor. The new shared policy requires
+both limits and refuses invalid capacity data, then saves a post-build capacity
+snapshot before each lane's first quiet window. This is not continuous
+monitoring, and does not certify the host's other health conditions. The helper
+is explicitly shipped and inbox-tested with every runner. Existing guest work,
+historical samples, thresholds and the calibration warning stay unchanged.
