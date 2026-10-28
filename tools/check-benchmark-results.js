@@ -641,6 +641,11 @@ function validateDedicatedLinuxMatrix() {
 // disagree about which machine is allowed to produce a number.
 function authoritativeHost() {
   const status = JSON.parse(read(operationsStatusPath));
+  const profilePath = path.join(root, "design", "public-source-profile.json");
+  if (fs.existsSync(profilePath)) {
+    const profile = JSON.parse(read(profilePath));
+    return historicalHostForPublicProfile(profile, status);
+  }
   const classes = Object.entries(status.runner_classes ?? {}).filter(
     ([, runner]) => runner?.timing_authority === true,
   );
@@ -655,6 +660,29 @@ function authoritativeHost() {
     fail(`${relative(operationsStatusPath)} runner class ${name} is a timing authority but names no host`);
   }
   return runner.host;
+}
+
+function historicalHostForPublicProfile(profile, status) {
+  if (profile?.schema !== "rustia.public-source-profile.v1" || profile?.state !== "private-rehearsal"
+    || !/^[0-9a-f]{40}$/.test(profile.historical_head ?? "")
+    || profile.historical_host_label !== "ci-bench"
+    || profile.benchmark_bridge !== "pending-private-trusted-pipeline"
+    || profile.package_publication !== false || profile.visibility_authorized !== false) {
+    fail("public-source profile must preserve the explicit historical benchmark provenance and paused-publication boundary");
+  }
+  if (status?.profile !== "public-source" || status.measurement?.mode !== "paused-pending-private-bridge"
+    || status.measurement?.authoritative_runner_classes?.length !== 0
+    || status.measurement?.scheduled_billing_allowed !== false
+    || status.publication?.state !== "paused" || status.progress?.state !== "paused"
+    || status.landscape?.state !== "paused") {
+    fail("public-source benchmark status must remain paused without a current timing authority");
+  }
+  const authorities = Object.entries(status.runner_classes ?? {}).filter(([, runner]) => runner?.timing_authority === true);
+  if (authorities.length !== 0 || Object.values(status.runner_classes ?? {}).some((runner) =>
+    runner?.environment !== "github-hosted" || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification"))) {
+    fail("public-source benchmark status may not declare a current machine or timing authority");
+  }
+  return profile.historical_host_label;
 }
 
 // Provenance, per row and for the table as a whole.
@@ -807,6 +835,31 @@ function selfTest() {
   };
   const table = (rows, metadata = {}) => ({ metadata, rows });
 
+  const publicProfile = {
+    schema: "rustia.public-source-profile.v1", state: "private-rehearsal", historical_head: "a".repeat(40),
+    historical_host_label: "ci-bench", benchmark_bridge: "pending-private-trusted-pipeline",
+    package_publication: false, visibility_authorized: false,
+  };
+  const pausedPublicStatus = {
+    profile: "public-source",
+    runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
+    measurement: { mode: "paused-pending-private-bridge", authoritative_runner_classes: [], scheduled_billing_allowed: false },
+    publication: { state: "paused" }, progress: { state: "paused" }, landscape: { state: "paused" },
+  };
+  if (historicalHostForPublicProfile(publicProfile, pausedPublicStatus) !== "ci-bench") {
+    fail("public profile must validate historical rows against their recorded provenance label");
+  }
+  refuses(/must remain paused/, () => historicalHostForPublicProfile(publicProfile, {
+    ...pausedPublicStatus, publication: { state: "active" },
+  }));
+  refuses(/may not declare a current machine/, () => historicalHostForPublicProfile(publicProfile, {
+    ...pausedPublicStatus,
+    runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false, host: "ci-bench" } },
+  }));
+  refuses(/preserve the explicit historical benchmark provenance/, () => historicalHostForPublicProfile(
+    { ...publicProfile, visibility_authorized: true }, pausedPublicStatus,
+  ));
+
   if (requireSingleHostTable(table([row("rustia", "ci-bench"), row("koto", "ci-bench")], { hosts: ["ci-bench"] }), "fixture", "ci-bench") !== "ci-bench") {
     fail("self-test did not accept a single-host table");
   }
@@ -907,6 +960,10 @@ function selfTest() {
 
 function main() {
   selfTest();
+  if (process.argv.includes("--self-test")) {
+    process.stdout.write("benchmark result validator self-tests ok\n");
+    return;
+  }
   validateDedicatedLinuxMatrix();
   validateMeasurementHosts();
 

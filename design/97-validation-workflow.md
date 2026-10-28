@@ -46,3 +46,11 @@ not a controlled comparison: machine state, caches and revisions differ.
 The quick stage finished in 41 seconds including setup. All three stages passed.
 The overall manual run failed separately during Windows Rust startup, before
 Windows correctness tests executed; this observation does not close that gate.
+
+## Prepared public source profile
+
+An explicit public-source marker selects hosted correctness CI while retaining
+the full preflight stages and aggregate gate. Benchmark automation is paused;
+existing measurements are historical records. The full inventory additionally
+checks the history projection and refuses missing benchmark source identifiers.
+This does not authorize a package release or replace platform release gates.

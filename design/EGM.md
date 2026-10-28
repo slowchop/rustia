@@ -13,6 +13,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Executed browser/native platform evidence and remaining gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
 - Staged validation and the complete pre-push inventory: [97-validation-workflow.md](./97-validation-workflow.md).
 - Source-access preparation, history-audit scope and visibility gates: [98-public-source-readiness.md](./98-public-source-readiness.md). Separate from supported releases and package publication.
+- [history-projection.json](./history-projection.json) maps the frozen private history to its cleaned projection and fingerprints protected runtime inputs; [public-source-profile.json](./public-source-profile.json) selects hosted correctness CI with benchmark automation paused. Original signatures and private metadata bytes are not authenticated by the projection.
 - Benchmark graph publication ordering, host-control investigation and history presentation: [99-benchmark-history-integrity.md](./99-benchmark-history-integrity.md).
 - Latest reviewed host-calibration result used by the graph: [99-benchmark-host-calibration.json](./99-benchmark-host-calibration.json). This is a dated review record, not a live runner-health feed or a replacement for the control ledger.
 - Progress renderer: [render-progress.js](./render-progress.js), input [progress.json](./progress.json), generated output [progress.html](./progress.html).

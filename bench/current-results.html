@@ -1115,9 +1115,9 @@
   <main>
     <section class="hero">
       <div class="hero-panel">
-        <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Benchmark Results and History</h1>
-        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
+        <p class="eyebrow">Historical benchmark snapshot</p>
+        <h1>Historical rustia Benchmark Results and History</h1>
+        <p class="lead">Recorded benchmark data is preserved for reference. Measurement and publication are paused; the figures do not establish current performance stability or authorize new claims.</p>
         <p class="source-line">
           <span>Source <code>bench/current-results.json</code></span>
           <span>History <code>bench/history/runs.jsonl</code></span>
@@ -1125,6 +1125,8 @@
         </p>
       </div>
     </section>
+
+    <section class="panel operations-banner state-paused" role="note"><div><p class="eyebrow">Historical data only</p><p>All numeric benchmark records on this page are historical. No public workflow may measure or publish benchmark results. A trusted private benchmark bridge is required before new measurements or claims can resume.</p></div><span class="operations-state state-paused">Paused</span></section>
 
     <nav class="nav" aria-label="Report sections">
       <a href="#grabby-builds">Grabby Builds</a>
@@ -1170,41 +1172,32 @@
   </section>
 
     <section class="panel operations-panel" id="operations-status">
-      <div class="operations-banner state-active">
+      <div class="operations-banner state-paused">
         <div>
           <p class="eyebrow">Benchmark operations</p>
-          <h2>Automatic publication is active</h2>
-          <p>Accepted committed benchmark artifacts are validated and published automatically without taking measurements or creating cloud resources.</p>
+          <h2>Measurement and publication are paused</h2>
+          <p>Benchmark-data publication is paused pending a trusted private benchmark bridge.</p>
         </div>
-        <span class="operations-state state-active">Active</span>
+        <span class="operations-state state-paused">Paused</span>
       </div>
       <div class="operations-grid">
         <article class="operations-card">
-          <div class="operations-card-head">
-            <h3>Rustia progress</h3>
-            <span class="operations-state state-pending">Pending</span>
-          </div>
-          <p>Measured 2026-10-25 18:27:40 UTC at <code>90bc2ae</code>.</p>
-          <p><strong>26 relevant commits waiting</strong>; newest <code>f116e72</code>.</p>
-          <p class="operations-next">Next: Measure the newest pending performance-relevant commit on the owned benchmark host.</p>
+          <div class="operations-card-head"><h3>Historical baseline</h3><span class="operations-state state-paused">Recorded</span></div>
+          <p>Historical measurements were recorded 2026-10-25 18:27:40 UTC at <code>90bc2ae</code>.</p>
+          <p>These records do not establish current runner authority or current performance stability.</p>
+          <p class="operations-next">Benchmark progress is paused pending a trusted private benchmark bridge.</p>
         </article>
         <article class="operations-card">
-          <div class="operations-card-head">
-            <h3>Current engine landscape</h3>
-            <span class="operations-state state-paused">Paused</span>
-          </div>
-          <p>Last full cohort measured 2026-10-25 18:27:40 UTC at <code>90bc2ae</code>.</p>
-          <p>Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.</p>
-          <p class="operations-next">Next: Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes.</p>
+          <div class="operations-card-head"><h3>Historical engine landscape</h3><span class="operations-state state-paused">Paused</span></div>
+          <p>The displayed landscape is historical and was recorded 2026-10-25 18:27:40 UTC at <code>90bc2ae</code>.</p>
+          <p>Landscape refresh is paused with benchmark measurement and publication.</p>
+          <p class="operations-next">Resume after a trusted private benchmark bridge is reviewed and enabled.</p>
         </article>
         <article class="operations-card">
-          <div class="operations-card-head">
-            <h3>Runner and publication policy</h3>
-            <span class="operations-state state-active">Active</span>
-          </div>
-          <p>Shared self-hosted runners may build, test correctness, validate evidence, detect updates, and publish accepted artifacts.</p>
-          <p><strong>The shared pool is still not a timing authority.</strong> Every timing on this page was measured on one qualified machine, <code>ci-bench</code>, pinned to isolated core 4 with SMT disabled and one job on the box at a time. No result measured on the shared pool may enter a claim, and no scheduled job may start a billed instance.</p>
-          <p class="operations-next">Next: Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results.</p>
+          <div class="operations-card-head"><h3>Measurement and publication</h3><span class="operations-state state-paused">Paused</span></div>
+          <p>No public workflow is authorized to measure or publish benchmark results. Hosted CI is for correctness and artifact validation only.</p>
+          <p>Resumption depends on a reviewed trusted private benchmark bridge.</p>
+          <p class="operations-next">Resume only after a trusted private benchmark bridge is reviewed and enabled.</p>
         </article>
       </div>
     </section>
@@ -1213,8 +1206,8 @@
       <section class="panel" id="optimization-checks">
         <div class="section-head">
           <div>
-            <h2>Accepted Optimization Checks</h2>
-            <p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>
+            <h2>Historical Optimization Checks</h2>
+            <p>Optimization evidence is historical. Measurement and publication are paused, so these rows do not authorize a current performance claim.</p>
           </div>
         </div>
       </section>
@@ -1727,11 +1720,11 @@
     <section class="panel" id="memory">
       <div class="section-head">
         <div>
-          <h2>rustia Memory on ci-bench</h2>
-          <p>Fresh process+cgroup samples on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence.</p>
+          <h2>Historical Linux Memory</h2>
+          <p>Historical Fresh process+cgroup samples recorded on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence.</p>
         </div>
       </div>
-      <p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>ci-bench</code>.</p>
+      <p class="pending-note">Competitor memory comparisons are not part of this historical cohort. New measurements remain paused pending a trusted private benchmark bridge.</p>
 
       <div class="table-wrap">
         <table>
@@ -1747,7 +1740,7 @@
                 <td><strong>256 KiB</strong></td>
                 <td>+20 KiB</td>
                 <td>0 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">stable</span></td>
+                <td><span class="claim-pill claim-ready">historical: stable</span></td>
               </tr>
 
               <tr>
@@ -1759,7 +1752,7 @@
                 <td><strong>256 KiB</strong></td>
                 <td>+20 KiB</td>
                 <td>+1.333 KiB/epoch</td>
-                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+                <td><span class="claim-pill claim-blocked">historical: growth signal</span></td>
               </tr>
 
               <tr>
@@ -1771,7 +1764,7 @@
                 <td><strong>256 KiB</strong></td>
                 <td>0 KiB</td>
                 <td>0 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">stable</span></td>
+                <td><span class="claim-pill claim-ready">historical: stable</span></td>
               </tr>
 
               <tr>
@@ -1783,7 +1776,7 @@
                 <td><strong>1 MiB</strong></td>
                 <td>+28 KiB</td>
                 <td>0 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">stable</span></td>
+                <td><span class="claim-pill claim-ready">historical: stable</span></td>
               </tr>
 
               <tr>
@@ -1795,7 +1788,7 @@
                 <td><strong>1.25 MiB</strong></td>
                 <td>+768 KiB</td>
                 <td>+1.091 KiB/epoch</td>
-                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+                <td><span class="claim-pill claim-blocked">historical: growth signal</span></td>
               </tr>
 
               <tr>
@@ -1807,7 +1800,7 @@
                 <td><strong>3.75 MiB</strong></td>
                 <td>+3.305 MiB</td>
                 <td>+82.9 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">expected retention</span></td>
+                <td><span class="claim-pill claim-ready">historical: expected retention</span></td>
               </tr>
 
               <tr>
@@ -1819,7 +1812,7 @@
                 <td><strong>256 KiB</strong></td>
                 <td>+16 KiB</td>
                 <td>+1.657 KiB/epoch</td>
-                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+                <td><span class="claim-pill claim-blocked">historical: growth signal</span></td>
               </tr>
 
               <tr>
@@ -1831,7 +1824,7 @@
                 <td><strong>256 KiB</strong></td>
                 <td>+8 KiB</td>
                 <td>0 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">stable</span></td>
+                <td><span class="claim-pill claim-ready">historical: stable</span></td>
               </tr>
 
               <tr>
@@ -1843,7 +1836,7 @@
                 <td><strong>512 KiB</strong></td>
                 <td>+136 KiB</td>
                 <td>0 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">stable</span></td>
+                <td><span class="claim-pill claim-ready">historical: stable</span></td>
               </tr>
 
               <tr>
@@ -1855,7 +1848,7 @@
                 <td><strong>2.25 MiB</strong></td>
                 <td>+1.715 MiB</td>
                 <td>+42.9 KiB/epoch</td>
-                <td><span class="claim-pill claim-ready">expected retention</span></td>
+                <td><span class="claim-pill claim-ready">historical: expected retention</span></td>
               </tr>
 
               <tr>
@@ -1867,7 +1860,7 @@
                 <td><strong>512 KiB</strong></td>
                 <td>+108 KiB</td>
                 <td>+0.4 KiB/epoch</td>
-                <td><span class="claim-pill claim-blocked">growth signal</span></td>
+                <td><span class="claim-pill claim-blocked">historical: growth signal</span></td>
               </tr>
 
           </tbody>
@@ -2039,7 +2032,7 @@
       <div class="section-head">
         <div>
           <h2>Claim Gate</h2>
-          <p>0 / 5 eligible · 5 current workload claims are not public-ready against mlua-luau.</p>
+          <p>Historical comparison rows · These historical comparisons are informational; benchmark claims are not authorized for publication.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -2064,8 +2057,8 @@
       <td>mlua · Lua 5.4 · 40.8 ns</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill claim-blocked">Not ready</span>
-          <small>rustia trails mlua-luau by 3.717x</small>
+          <span class="claim-pill claim-blocked">Historical</span>
+          <small>Informational comparison only; publication is paused.</small>
         </span>
       </td>
     </tr>
@@ -2078,8 +2071,8 @@
       <td>wasmi · WebAssembly · 2,719 ns</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill claim-blocked">Not ready</span>
-          <small>rustia trails mlua-luau by 2.714x</small>
+          <span class="claim-pill claim-blocked">Historical</span>
+          <small>Informational comparison only; publication is paused.</small>
         </span>
       </td>
     </tr>
@@ -2092,8 +2085,8 @@
       <td>wasmi · WebAssembly · 314 ns</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill claim-blocked">Not ready</span>
-          <small>rustia trails mlua-luau by 3.461x</small>
+          <span class="claim-pill claim-blocked">Historical</span>
+          <small>Informational comparison only; publication is paused.</small>
         </span>
       </td>
     </tr>
@@ -2106,8 +2099,8 @@
       <td>wasmi · WebAssembly · 2,353 ns</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill claim-blocked">Not ready</span>
-          <small>rustia trails mlua-luau by 4.117x</small>
+          <span class="claim-pill claim-blocked">Historical</span>
+          <small>Informational comparison only; publication is paused.</small>
         </span>
       </td>
     </tr>
@@ -2120,8 +2113,8 @@
       <td>wasmi · WebAssembly · 26.8 ns</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill claim-blocked">Not ready</span>
-          <small>rustia trails mlua-luau by 6.102x</small>
+          <span class="claim-pill claim-blocked">Historical</span>
+          <small>Informational comparison only; publication is paused.</small>
         </span>
       </td>
     </tr>
@@ -2143,8 +2136,8 @@
           <button type="button" data-history-axis="commit" aria-pressed="false">Commit</button>
         </div>
       </div>
-      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>90bc2ae</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.</p>
-      <p class="cohort-note"><strong>Latest reviewed A/A calibration: failed (2026-10-27).</strong> Current repeatability is unresolved. Treat these historical observations as provisional; no new thresholds have been adopted. <a href="https://github.com/slowchop/rustia/actions/runs/40462439654">Private run evidence</a>.</p>
+      <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the recorded dedicated-VM matrix (<code>90bc2ae</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.</p>
+      <p class="cohort-note"><strong>Historical A/A calibration: failed (2026-10-27).</strong> Historical repeatability was unresolved. Treat these observations as provisional; no new thresholds were adopted. Private run evidence is not included in this public source profile.</p>
 
 
       <p class="cohort-note">No host-control ledger is available for these historical measurements. Unrecorded host changes cannot be ruled out.</p>
@@ -2157,7 +2150,7 @@
         <line x1="54" y1="258" x2="900" y2="258" class="history-axis" />
         <text x="54" y="290" class="history-axis-label">2026-07-02</text>
         <text x="900" y="290" text-anchor="end" class="history-axis-label">2026-08-27</text>
-        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · current matrix 90bc2ae · 1×</title></line>
+        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · recorded matrix 90bc2ae · 1×</title></line>
         <g><polyline points="54.00,246.32 54.57,246.32 54.92,246.37 55.47,246.62 57.65,246.57 58.19,246.56 59.39,246.65 59.70,246.70 59.84,246.85 70.29,246.75 70.42,246.87 70.52,246.54 70.67,246.83 70.92,246.75 259.90,246.62 261.24,245.90 274.05,245.71 276.14,246.12 276.76,245.94 318.56,245.00 345.65,239.61 346.34,239.42 349.09,222.24 349.96,216.20 352.60,214.52 354.12,216.02 395.54,215.92 399.20,214.95 422.55,216.08 423.54,238.10 423.70,221.21 424.81,221.50 426.01,221.61 426.20,219.74 426.35,219.51 427.66,219.50 438.55,219.87 446.14,218.91 452.77,219.97 452.79,218.50 453.34,219.66 454.78,225.13 455.22,224.76 455.80,224.70 467.47,224.73 503.61,224.96 504.51,224.58 504.68,224.73 506.27,225.25 507.14,225.19 515.52,225.35 657.87,225.38 659.35,225.90 659.50,225.61 667.03,225.53 667.74,225.56 668.12,225.45 685.33,224.89 685.91,218.33 701.40,213.09 853.08,215.93 853.88,211.44 856.08,211.54 856.08,213.08 856.27,209.43 857.92,206.96 859.54,208.17 859.55,206.50 866.32,209.52 866.32,210.14 866.32,206.54 883.35,209.35 900.00,209.18 900.00,209.42 900.00,209.01" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /><circle cx="54.00" cy="246.32" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 8c0211d · 0.062x mlua/JIT · 1x vs first in era</title></circle><circle cx="54.57" cy="246.32" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · aee7749 · 0.062x mlua/JIT · 1x vs first in era</title></circle><circle cx="54.92" cy="246.37" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c99a731 · 0.062x mlua/JIT · 0.996x vs first in era</title></circle><circle cx="55.47" cy="246.62" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d2279ca · 0.06x mlua/JIT · 0.975x vs first in era</title></circle><circle cx="57.65" cy="246.57" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 2e7dea9 · 0.061x mlua/JIT · 0.978x vs first in era</title></circle><circle cx="58.19" cy="246.56" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 8d2f097 · 0.061x mlua/JIT · 0.979x vs first in era</title></circle><circle cx="59.39" cy="246.65" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b7f02f3 · 0.06x mlua/JIT · 0.972x vs first in era</title></circle><circle cx="59.70" cy="246.70" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 10bc57a · 0.06x mlua/JIT · 0.967x vs first in era</title></circle><circle cx="59.84" cy="246.85" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9979c3e · 0.059x mlua/JIT · 0.955x vs first in era</title></circle><circle cx="70.29" cy="246.75" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 645c76e · 0.06x mlua/JIT · 0.964x vs first in era</title></circle><circle cx="70.42" cy="246.87" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ad82d39 · 0.059x mlua/JIT · 0.953x vs first in era</title></circle><circle cx="70.52" cy="246.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ea37fec · 0.061x mlua/JIT · 0.981x vs first in era</title></circle><circle cx="70.67" cy="246.83" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9f85d01 · 0.059x mlua/JIT · 0.956x vs first in era</title></circle><circle cx="70.92" cy="246.75" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a559a6a · 0.06x mlua/JIT · 0.963x vs first in era</title></circle><circle cx="259.90" cy="246.62" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 4a28afa · 0.06x mlua/JIT · 0.974x vs first in era</title></circle><circle cx="261.24" cy="245.90" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · dac4ec2 · 0.064x mlua/JIT · 1.037x vs first in era</title></circle><circle cx="274.05" cy="245.71" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ae3beae · 0.065x mlua/JIT · 1.053x vs first in era</title></circle><circle cx="276.14" cy="246.12" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 1370d6c · 0.063x mlua/JIT · 1.018x vs first in era</title></circle><circle cx="276.76" cy="245.94" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ed65077 · 0.064x mlua/JIT · 1.033x vs first in era</title></circle><circle cx="318.56" cy="245.00" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · f208c12 · 0.069x mlua/JIT · 1.113x vs first in era</title></circle><circle cx="345.65" cy="239.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 87db175 · 0.097x mlua/JIT · 1.575x vs first in era</title></circle><circle cx="346.34" cy="239.42" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b1cd284 · 0.098x mlua/JIT · 1.592x vs first in era</title></circle><circle cx="349.09" cy="222.24" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 6ae0cf0 · 0.189x mlua/JIT · 3.063x vs first in era</title></circle><circle cx="349.96" cy="216.20" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3732b80 · 0.221x mlua/JIT · 3.58x vs first in era</title></circle><circle cx="352.60" cy="214.52" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d4ec275 · 0.23x mlua/JIT · 3.724x vs first in era</title></circle><circle cx="354.12" cy="216.02" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a562919 · 0.222x mlua/JIT · 3.595x vs first in era</title></circle><circle cx="395.54" cy="215.92" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d1084d1 · 0.223x mlua/JIT · 3.604x vs first in era</title></circle><circle cx="399.20" cy="214.95" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 661b8ce · 0.228x mlua/JIT · 3.687x vs first in era</title></circle><circle cx="422.55" cy="216.08" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 98003aa · 0.222x mlua/JIT · 3.59x vs first in era</title></circle><circle cx="423.54" cy="238.10" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c28df35 · 0.105x mlua/JIT · 1.704x vs first in era</title></circle><circle cx="423.70" cy="221.21" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 124ac27 · 0.195x mlua/JIT · 3.151x vs first in era</title></circle><circle cx="424.81" cy="221.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 08f5c28 · 0.193x mlua/JIT · 3.126x vs first in era</title></circle><circle cx="426.01" cy="221.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 754d998 · 0.193x mlua/JIT · 3.117x vs first in era</title></circle><circle cx="426.20" cy="219.74" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c0ebc44 · 0.203x mlua/JIT · 3.277x vs first in era</title></circle><circle cx="426.35" cy="219.51" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 612b8fe · 0.204x mlua/JIT · 3.296x vs first in era</title></circle><circle cx="427.66" cy="219.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ef34407 · 0.204x mlua/JIT · 3.297x vs first in era</title></circle><circle cx="438.55" cy="219.87" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9383d21 · 0.202x mlua/JIT · 3.265x vs first in era</title></circle><circle cx="446.14" cy="218.91" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · e005c9c · 0.207x mlua/JIT · 3.348x vs first in era</title></circle><circle cx="452.77" cy="219.97" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c6b9b73 · 0.201x mlua/JIT · 3.257x vs first in era</title></circle><circle cx="452.79" cy="218.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 5887f83 · 0.209x mlua/JIT · 3.383x vs first in era</title></circle><circle cx="453.34" cy="219.66" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9631a4e · 0.203x mlua/JIT · 3.283x vs first in era</title></circle><circle cx="454.78" cy="225.13" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 39aaa21 · 0.174x mlua/JIT · 2.815x vs first in era</title></circle><circle cx="455.22" cy="224.76" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · decf2ec · 0.176x mlua/JIT · 2.847x vs first in era</title></circle><circle cx="455.80" cy="224.70" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · e1ebddb · 0.176x mlua/JIT · 2.852x vs first in era</title></circle><circle cx="467.47" cy="224.73" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3b353f6 · 0.176x mlua/JIT · 2.849x vs first in era</title></circle><circle cx="503.61" cy="224.96" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 82e9a46 · 0.175x mlua/JIT · 2.83x vs first in era</title></circle><circle cx="504.51" cy="224.58" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 0b945f2 · 0.177x mlua/JIT · 2.862x vs first in era</title></circle><circle cx="504.68" cy="224.73" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 776492a · 0.176x mlua/JIT · 2.849x vs first in era</title></circle><circle cx="506.27" cy="225.25" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d0438f0 · 0.173x mlua/JIT · 2.805x vs first in era</title></circle><circle cx="507.14" cy="225.19" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · da99cf0 · 0.174x mlua/JIT · 2.81x vs first in era</title></circle><circle cx="515.52" cy="225.35" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3ca0c06 · 0.173x mlua/JIT · 2.796x vs first in era</title></circle><circle cx="657.87" cy="225.38" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 34f6def · 0.173x mlua/JIT · 2.794x vs first in era</title></circle><circle cx="659.35" cy="225.90" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 74340c4 · 0.17x mlua/JIT · 2.749x vs first in era</title></circle><circle cx="659.50" cy="225.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · dbabb62 · 0.172x mlua/JIT · 2.774x vs first in era</title></circle><circle cx="667.03" cy="225.53" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9078ce2 · 0.172x mlua/JIT · 2.781x vs first in era</title></circle><circle cx="667.74" cy="225.56" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d9a0167 · 0.172x mlua/JIT · 2.778x vs first in era</title></circle><circle cx="668.12" cy="225.45" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · bbe0c5c · 0.172x mlua/JIT · 2.787x vs first in era</title></circle><circle cx="685.33" cy="224.89" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 87bbe1e · 0.175x mlua/JIT · 2.835x vs first in era</title></circle><circle cx="685.91" cy="218.33" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · f412e2d · 0.21x mlua/JIT · 3.397x vs first in era</title></circle><circle cx="701.40" cy="213.09" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b861ee9 · 0.238x mlua/JIT · 3.846x vs first in era</title></circle><circle cx="853.08" cy="215.93" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 2bb7bef · 0.223x mlua/JIT · 3.603x vs first in era</title></circle><circle cx="853.88" cy="211.44" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 84e732a · 0.247x mlua/JIT · 3.987x vs first in era</title></circle><circle cx="856.08" cy="211.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 17a26c4 · 0.246x mlua/JIT · 3.979x vs first in era</title></circle><circle cx="856.08" cy="213.08" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 311de5d · 0.238x mlua/JIT · 3.847x vs first in era</title></circle><circle cx="856.27" cy="209.43" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 77e0d92 · 0.257x mlua/JIT · 4.16x vs first in era</title></circle><circle cx="857.92" cy="206.96" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a38071a · 0.27x mlua/JIT · 4.371x vs first in era</title></circle><circle cx="859.54" cy="208.17" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 02acc61 · 0.264x mlua/JIT · 4.267x vs first in era</title></circle><circle cx="859.55" cy="206.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 0a31255 · 0.273x mlua/JIT · 4.41x vs first in era</title></circle><circle cx="866.32" cy="209.52" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 35401d3 · 0.257x mlua/JIT · 4.152x vs first in era</title></circle><circle cx="866.32" cy="210.14" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b365b79 · 0.254x mlua/JIT · 4.099x vs first in era</title></circle><circle cx="866.32" cy="206.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c780961 · 0.273x mlua/JIT · 4.407x vs first in era</title></circle><circle cx="883.35" cy="209.35" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · eaf3917 · 0.258x mlua/JIT · 4.167x vs first in era</title></circle><circle cx="900.00" cy="209.18" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 48a6732 · 0.259x mlua/JIT · 4.181x vs first in era</title></circle><circle cx="900.00" cy="209.42" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 7d83e88 · 0.257x mlua/JIT · 4.161x vs first in era</title></circle><circle cx="900.00" cy="209.01" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ac92262 · 0.259x mlua/JIT · 4.195x vs first in era</title></circle></g>
       </svg>
       <div class="history-legend"><span><span class="swatch" style="color: #2563eb"></span>rustia · Reconstructed · ci-bench</span><span><span class="swatch" style="color: #ea580c"></span><strong>mlua</strong> / Luau / JIT · 1×</span></div>
@@ -2172,7 +2165,7 @@
         <line x1="54" y1="258" x2="900" y2="258" class="history-axis" />
         <text x="54" y="290" class="history-axis-label">8c0211d</text>
         <text x="900" y="290" text-anchor="end" class="history-axis-label">ac92262</text>
-        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · current matrix 90bc2ae · 1×</title></line>
+        <line x1="54" y1="69.20" x2="900" y2="69.20" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 6"><title>mlua / Luau / JIT · recorded matrix 90bc2ae · 1×</title></line>
         <g><polyline points="54.00,246.32 65.43,246.32 76.86,246.37 88.30,246.62 99.73,246.57 111.16,246.56 122.59,246.65 134.03,246.70 145.46,246.85 156.89,246.75 168.32,246.87 179.76,246.54 191.19,246.83 202.62,246.75 214.05,246.62 225.49,245.90 236.92,245.71 248.35,246.12 259.78,245.94 271.22,245.00 282.65,239.61 294.08,239.42 305.51,222.24 316.95,216.20 328.38,214.52 339.81,216.02 351.24,215.92 362.68,214.95 374.11,216.08 385.54,238.10 396.97,221.21 408.41,221.50 419.84,221.61 431.27,219.74 442.70,219.51 454.14,219.50 465.57,219.87 477.00,218.91 488.43,219.97 499.86,218.50 511.30,219.66 522.73,225.13 534.16,224.76 545.59,224.70 557.03,224.73 568.46,224.96 579.89,224.58 591.32,224.73 602.76,225.25 614.19,225.19 625.62,225.35 637.05,225.38 648.49,225.90 659.92,225.61 671.35,225.53 682.78,225.56 694.22,225.45 705.65,224.89 717.08,218.33 728.51,213.09 739.95,215.93 751.38,211.44 762.81,211.54 774.24,213.08 785.68,209.43 797.11,206.96 808.54,208.17 819.97,206.50 831.41,209.52 842.84,210.14 854.27,206.54 865.70,209.35 877.14,209.18 888.57,209.42 900.00,209.01" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /><circle cx="54.00" cy="246.32" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 8c0211d · 0.062x mlua/JIT · 1x vs first in era</title></circle><circle cx="65.43" cy="246.32" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · aee7749 · 0.062x mlua/JIT · 1x vs first in era</title></circle><circle cx="76.86" cy="246.37" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c99a731 · 0.062x mlua/JIT · 0.996x vs first in era</title></circle><circle cx="88.30" cy="246.62" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d2279ca · 0.06x mlua/JIT · 0.975x vs first in era</title></circle><circle cx="99.73" cy="246.57" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 2e7dea9 · 0.061x mlua/JIT · 0.978x vs first in era</title></circle><circle cx="111.16" cy="246.56" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 8d2f097 · 0.061x mlua/JIT · 0.979x vs first in era</title></circle><circle cx="122.59" cy="246.65" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b7f02f3 · 0.06x mlua/JIT · 0.972x vs first in era</title></circle><circle cx="134.03" cy="246.70" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 10bc57a · 0.06x mlua/JIT · 0.967x vs first in era</title></circle><circle cx="145.46" cy="246.85" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9979c3e · 0.059x mlua/JIT · 0.955x vs first in era</title></circle><circle cx="156.89" cy="246.75" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 645c76e · 0.06x mlua/JIT · 0.964x vs first in era</title></circle><circle cx="168.32" cy="246.87" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ad82d39 · 0.059x mlua/JIT · 0.953x vs first in era</title></circle><circle cx="179.76" cy="246.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ea37fec · 0.061x mlua/JIT · 0.981x vs first in era</title></circle><circle cx="191.19" cy="246.83" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9f85d01 · 0.059x mlua/JIT · 0.956x vs first in era</title></circle><circle cx="202.62" cy="246.75" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a559a6a · 0.06x mlua/JIT · 0.963x vs first in era</title></circle><circle cx="214.05" cy="246.62" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 4a28afa · 0.06x mlua/JIT · 0.974x vs first in era</title></circle><circle cx="225.49" cy="245.90" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · dac4ec2 · 0.064x mlua/JIT · 1.037x vs first in era</title></circle><circle cx="236.92" cy="245.71" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ae3beae · 0.065x mlua/JIT · 1.053x vs first in era</title></circle><circle cx="248.35" cy="246.12" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 1370d6c · 0.063x mlua/JIT · 1.018x vs first in era</title></circle><circle cx="259.78" cy="245.94" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ed65077 · 0.064x mlua/JIT · 1.033x vs first in era</title></circle><circle cx="271.22" cy="245.00" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · f208c12 · 0.069x mlua/JIT · 1.113x vs first in era</title></circle><circle cx="282.65" cy="239.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 87db175 · 0.097x mlua/JIT · 1.575x vs first in era</title></circle><circle cx="294.08" cy="239.42" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b1cd284 · 0.098x mlua/JIT · 1.592x vs first in era</title></circle><circle cx="305.51" cy="222.24" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 6ae0cf0 · 0.189x mlua/JIT · 3.063x vs first in era</title></circle><circle cx="316.95" cy="216.20" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3732b80 · 0.221x mlua/JIT · 3.58x vs first in era</title></circle><circle cx="328.38" cy="214.52" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d4ec275 · 0.23x mlua/JIT · 3.724x vs first in era</title></circle><circle cx="339.81" cy="216.02" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a562919 · 0.222x mlua/JIT · 3.595x vs first in era</title></circle><circle cx="351.24" cy="215.92" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d1084d1 · 0.223x mlua/JIT · 3.604x vs first in era</title></circle><circle cx="362.68" cy="214.95" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 661b8ce · 0.228x mlua/JIT · 3.687x vs first in era</title></circle><circle cx="374.11" cy="216.08" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 98003aa · 0.222x mlua/JIT · 3.59x vs first in era</title></circle><circle cx="385.54" cy="238.10" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c28df35 · 0.105x mlua/JIT · 1.704x vs first in era</title></circle><circle cx="396.97" cy="221.21" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 124ac27 · 0.195x mlua/JIT · 3.151x vs first in era</title></circle><circle cx="408.41" cy="221.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 08f5c28 · 0.193x mlua/JIT · 3.126x vs first in era</title></circle><circle cx="419.84" cy="221.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 754d998 · 0.193x mlua/JIT · 3.117x vs first in era</title></circle><circle cx="431.27" cy="219.74" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c0ebc44 · 0.203x mlua/JIT · 3.277x vs first in era</title></circle><circle cx="442.70" cy="219.51" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 612b8fe · 0.204x mlua/JIT · 3.296x vs first in era</title></circle><circle cx="454.14" cy="219.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ef34407 · 0.204x mlua/JIT · 3.297x vs first in era</title></circle><circle cx="465.57" cy="219.87" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9383d21 · 0.202x mlua/JIT · 3.265x vs first in era</title></circle><circle cx="477.00" cy="218.91" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · e005c9c · 0.207x mlua/JIT · 3.348x vs first in era</title></circle><circle cx="488.43" cy="219.97" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c6b9b73 · 0.201x mlua/JIT · 3.257x vs first in era</title></circle><circle cx="499.86" cy="218.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 5887f83 · 0.209x mlua/JIT · 3.383x vs first in era</title></circle><circle cx="511.30" cy="219.66" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9631a4e · 0.203x mlua/JIT · 3.283x vs first in era</title></circle><circle cx="522.73" cy="225.13" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 39aaa21 · 0.174x mlua/JIT · 2.815x vs first in era</title></circle><circle cx="534.16" cy="224.76" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · decf2ec · 0.176x mlua/JIT · 2.847x vs first in era</title></circle><circle cx="545.59" cy="224.70" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · e1ebddb · 0.176x mlua/JIT · 2.852x vs first in era</title></circle><circle cx="557.03" cy="224.73" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3b353f6 · 0.176x mlua/JIT · 2.849x vs first in era</title></circle><circle cx="568.46" cy="224.96" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 82e9a46 · 0.175x mlua/JIT · 2.83x vs first in era</title></circle><circle cx="579.89" cy="224.58" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 0b945f2 · 0.177x mlua/JIT · 2.862x vs first in era</title></circle><circle cx="591.32" cy="224.73" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 776492a · 0.176x mlua/JIT · 2.849x vs first in era</title></circle><circle cx="602.76" cy="225.25" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d0438f0 · 0.173x mlua/JIT · 2.805x vs first in era</title></circle><circle cx="614.19" cy="225.19" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · da99cf0 · 0.174x mlua/JIT · 2.81x vs first in era</title></circle><circle cx="625.62" cy="225.35" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 3ca0c06 · 0.173x mlua/JIT · 2.796x vs first in era</title></circle><circle cx="637.05" cy="225.38" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 34f6def · 0.173x mlua/JIT · 2.794x vs first in era</title></circle><circle cx="648.49" cy="225.90" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 74340c4 · 0.17x mlua/JIT · 2.749x vs first in era</title></circle><circle cx="659.92" cy="225.61" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · dbabb62 · 0.172x mlua/JIT · 2.774x vs first in era</title></circle><circle cx="671.35" cy="225.53" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 9078ce2 · 0.172x mlua/JIT · 2.781x vs first in era</title></circle><circle cx="682.78" cy="225.56" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · d9a0167 · 0.172x mlua/JIT · 2.778x vs first in era</title></circle><circle cx="694.22" cy="225.45" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · bbe0c5c · 0.172x mlua/JIT · 2.787x vs first in era</title></circle><circle cx="705.65" cy="224.89" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 87bbe1e · 0.175x mlua/JIT · 2.835x vs first in era</title></circle><circle cx="717.08" cy="218.33" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · f412e2d · 0.21x mlua/JIT · 3.397x vs first in era</title></circle><circle cx="728.51" cy="213.09" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b861ee9 · 0.238x mlua/JIT · 3.846x vs first in era</title></circle><circle cx="739.95" cy="215.93" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 2bb7bef · 0.223x mlua/JIT · 3.603x vs first in era</title></circle><circle cx="751.38" cy="211.44" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 84e732a · 0.247x mlua/JIT · 3.987x vs first in era</title></circle><circle cx="762.81" cy="211.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 17a26c4 · 0.246x mlua/JIT · 3.979x vs first in era</title></circle><circle cx="774.24" cy="213.08" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 311de5d · 0.238x mlua/JIT · 3.847x vs first in era</title></circle><circle cx="785.68" cy="209.43" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 77e0d92 · 0.257x mlua/JIT · 4.16x vs first in era</title></circle><circle cx="797.11" cy="206.96" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · a38071a · 0.27x mlua/JIT · 4.371x vs first in era</title></circle><circle cx="808.54" cy="208.17" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 02acc61 · 0.264x mlua/JIT · 4.267x vs first in era</title></circle><circle cx="819.97" cy="206.50" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 0a31255 · 0.273x mlua/JIT · 4.41x vs first in era</title></circle><circle cx="831.41" cy="209.52" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 35401d3 · 0.257x mlua/JIT · 4.152x vs first in era</title></circle><circle cx="842.84" cy="210.14" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · b365b79 · 0.254x mlua/JIT · 4.099x vs first in era</title></circle><circle cx="854.27" cy="206.54" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · c780961 · 0.273x mlua/JIT · 4.407x vs first in era</title></circle><circle cx="865.70" cy="209.35" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · eaf3917 · 0.258x mlua/JIT · 4.167x vs first in era</title></circle><circle cx="877.14" cy="209.18" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 48a6732 · 0.259x mlua/JIT · 4.181x vs first in era</title></circle><circle cx="888.57" cy="209.42" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · 7d83e88 · 0.257x mlua/JIT · 4.161x vs first in era</title></circle><circle cx="900.00" cy="209.01" r="2.2" fill="#2563eb"><title>Reconstructed · ci-bench · ac92262 · 0.259x mlua/JIT · 4.195x vs first in era</title></circle></g>
       </svg>
       <div class="history-legend"><span><span class="swatch" style="color: #2563eb"></span>rustia · Reconstructed · ci-bench</span><span><span class="swatch" style="color: #ea580c"></span><strong>mlua</strong> / Luau / JIT · 1×</span></div>

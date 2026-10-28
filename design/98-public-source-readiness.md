@@ -168,3 +168,55 @@ empty and the 28 confirmed infrastructure fields are preserved for remediation.
 No Cargo manifest, lockfile, version or publication setting changed. Full release
 preflight was not rerun for these documentation-only edits; it remains mandatory
 before any push and does not replace the outstanding visibility gates above.
+
+## Full-history projection rehearsal (2026-10-28)
+
+The user selected a new repository containing the full cleaned history while the
+existing repository remains private. This authorizes local preparation. No new
+repository, visibility change, package publication, hosted deletion, or Actions
+permission change has been performed by this rehearsal.
+
+The frozen remote snapshot contains 1,004 commits and seven annotated tags. The
+local projection preserves every commit, parent order, author, committer, date,
+message and tag message. It redacts confirmed infrastructure identifiers and
+private absolute paths. All commit IDs change; 879 original commit signatures
+are removed. A rewritten commit is a derived record, not an originally signed
+commit. Private original bundles and independent verification records are
+retained separately. Reviewed synthetic address fixtures and author attribution
+are preserved.
+
+The new repository will not inherit the old repository's Actions logs, artifacts,
+or pull-request records. Five archive branches retain seven commits that were
+reachable only through old pull-request refs. Standard branches and tags retain
+the complete cleaned graph; old pull-request refs are excluded from the new
+container. The existing private repository and its hosted evidence stay intact.
+
+[history-projection.json](history-projection.json) records the complete old-to-new
+commit map, protected runtime-input fingerprints, and the original/projected
+hashes of redacted metadata at the frozen head. The runtime crates, conformance
+corpus, workload sources, dependency lockfile and toolchain are identical across
+each mapped commit. Benchmark measurements and historical source IDs remain
+recorded as originally captured. Legacy artifact digests bind the original
+private bytes; they do not authenticate redacted provider metadata. Projected
+metadata has separate hashes. This does not establish identical rebuilt binaries
+or replace original CI acceptance.
+
+The reachability check now refuses missing identifiers instead of silently
+ignoring them. Historical source IDs resolve through the explicit projection;
+all mapped commits and protected inputs are verified. Existing reachable tree
+identifiers remain valid. This check is part of the full preflight inventory.
+
+The explicit [public source profile](public-source-profile.json) prepares hosted
+correctness jobs and bounded fuzz checks. It has no benchmark timing authority,
+publication lane, repository write credentials, or persistent private runner
+access. The rendered benchmark page labels its data as historical and the
+public benchmark bridge as pending. The original private benchmark pipeline is
+unchanged. A future trusted bridge needs separate design and authorization;
+opening the source does not require rebuilding that infrastructure first.
+
+Before staging the cleaned refs, present the concrete candidate and obtain
+approval for any required Actions settings change. Uploading historical branches
+can otherwise trigger their old workflows. Keep Actions disabled during initial
+history transfer, install the prepared safe tip, then validate the hosted check
+inventory and required protections before a separate visibility decision. No
+permission change is implied by choosing the new-repository strategy.

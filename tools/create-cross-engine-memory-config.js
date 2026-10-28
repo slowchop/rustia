@@ -174,13 +174,33 @@ function selfTest() {
   // The Rustia cases must be the rustia-only cohort's cases exactly, or the
   // per-engine merge in the published data would treat the two cohorts'
   // Rustia rows as different measurements.
-  const base = rustiaOnly.toDedicated(rustiaOnly.createConfig(commit));
+  const policyPath = path.resolve(ROOT, "bench/operations-policy.json");
+  const publicProfile = fs.existsSync(path.resolve(ROOT, "design/public-source-profile.json"));
+  const originalReadFileSync = fs.readFileSync;
+  if (publicProfile) {
+    // Static protocol-shape fixtures may exercise the retained private config
+    // converter, but the public paused policy never grants live authority.
+    const fixturePolicy = JSON.stringify({ runner_classes: {
+      fixture: { timing_authority: true, host: "ci-bench", qualification: { isolated_cpus: [4, 5] } },
+    } });
+    fs.readFileSync = function readPolicyFixture(file, ...args) {
+      if (path.resolve(String(file)) === policyPath) return fixturePolicy;
+      return originalReadFileSync.call(this, file, ...args);
+    };
+  }
+  let base;
+  let config;
+  try {
+    base = rustiaOnly.toDedicated(rustiaOnly.createConfig(commit));
+    config = createConfig(commit);
+  } finally {
+    if (publicProfile) fs.readFileSync = originalReadFileSync;
+  }
   const rustiaCases = (measurement) =>
     expandCases(measurement.groups)
       .filter((entry) => entry.engine === "rustia")
       .map((entry) => `${entry.id}\0${entry.n}\0${entry.epochs}`)
       .sort();
-  const config = createConfig(commit);
   assert.deepEqual(rustiaCases(config.measurement), rustiaCases(base.measurement));
   assert.equal(rustiaCases(config.measurement).length, 11);
 

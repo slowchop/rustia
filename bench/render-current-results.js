@@ -15,6 +15,7 @@ const cohortEvidencePath = path.join(__dirname, "history", "evidence");
 const memoryResultsPath = path.join(__dirname, "memory", "current-results.json");
 const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
 const operationsStatusPath = path.join(__dirname, "operations-status.json");
+const publicProfilePath = path.join(__dirname, "../design/public-source-profile.json");
 const calibrationReviewPath = path.join(root, "design", "99-benchmark-host-calibration.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
@@ -147,6 +148,62 @@ function readOperationsStatus(data) {
   }
   if (status.schema !== "rustia.bench.operations-status.v1" || status.schema_version !== 1) {
     fail(`${relative(operationsStatusPath)} must use rustia.bench.operations-status.v1`);
+  }
+  if (fs.existsSync(publicProfilePath)) {
+    let marker;
+    try { marker = JSON.parse(fs.readFileSync(publicProfilePath, "utf8")); }
+    catch (error) { fail(`could not parse ${relative(publicProfilePath)}: ${error.message}`); }
+    if (marker.schema !== "rustia.public-source-profile.v1" || marker.state !== "private-rehearsal"
+      || !/^[0-9a-f]{40}$/.test(marker.historical_head ?? "")
+      || marker.historical_host_label !== "ci-bench"
+      || marker.benchmark_bridge !== "pending-private-trusted-pipeline"
+      || marker.package_publication !== false || marker.visibility_authorized !== false) {
+      fail(`${relative(publicProfilePath)} must declare the public-source private-rehearsal profile and exact historical head`);
+    }
+    const classes = status.runner_classes;
+    const expectedClasses = ["hosted-linux", "hosted-macos", "hosted-windows"];
+    if (status.profile !== "public-source" || status.measurement?.mode !== "paused-pending-private-bridge"
+      || status.measurement?.authoritative_runner_classes?.length !== 0
+      || status.measurement?.scheduled_billing_allowed !== false
+      || !classes || Object.keys(classes).length === 0
+      || Object.values(classes).some((runner) => runner?.environment !== "github-hosted"
+        || runner?.timing_authority !== false || Object.hasOwn(runner, "host")
+        || Object.hasOwn(runner, "qualification") || !Array.isArray(runner.allowed_roles)
+        || runner.allowed_roles.some((role) => role.startsWith("measurement-")))) {
+      fail("public-source operations status must have no active timing authority or machine qualification");
+    }
+    if (JSON.stringify(Object.keys(classes).sort()) !== JSON.stringify(expectedClasses.sort())) {
+      fail("public-source operations status must enumerate only the hosted correctness classes");
+    }
+    for (const lane of ["publication", "progress", "landscape"]) {
+      if (status[lane]?.state !== "paused" || typeof status[lane]?.next_action !== "string"
+        || status[lane].next_action.trim() === "") {
+        fail(`public-source ${lane} must remain paused with a next action`);
+      }
+    }
+    if (![status.measurement.reason, status.publication.reason, status.publication.next_action]
+      .every((text) => typeof text === "string" && /private benchmark bridge/i.test(text))) {
+      fail("public-source status must explain that measurement and publication await a private benchmark bridge");
+    }
+    if (status.progress.state !== "paused" || status.landscape.state !== "paused") {
+      fail("public-source progress and landscape must remain paused regardless of historical pending count");
+    }
+    const measuredCommit = data.metadata.commits.length === 1 ? data.metadata.commits[0] : null;
+    if (status.progress.measured_commit !== measuredCommit || status.landscape.measured_commit !== measuredCommit) {
+      fail("public-source historical commits must match the current result cohort");
+    }
+    const { resolveHistoricalCommit } = require("../tools/history-projection.js");
+    const projectedMeasuredCommit = resolveHistoricalCommit(measuredCommit, root);
+    if (status.progress.projected_measured_commit !== projectedMeasuredCommit
+      || status.landscape.projected_measured_commit !== projectedMeasuredCommit) {
+      fail("public-source projected commit references must match the reviewed history projection");
+    }
+    if (!/^[0-9a-f]{40}$/.test(status.progress.latest_relevant_commit)
+      || !Number.isSafeInteger(status.progress.pending_relevant_commit_count)
+      || status.progress.pending_relevant_commit_count < 0) {
+      fail("public-source progress must retain exact commit and non-negative pending-count metadata");
+    }
+    return status;
   }
   // The page may not render at all unless the shared pool is still barred from
   // producing a timing, and unless whatever class is allowed to produce one
@@ -1091,9 +1148,11 @@ function summarizeClaimRows(rows) {
     );
 }
 
-function claimGateSection(claimRows) {
+function claimGateSection(claimRows, publicSource = false) {
   const readyCount = claimRows.filter((row) => row.posture.ready).length;
-  const headline = readyCount === claimRows.length
+  const headline = publicSource
+    ? "These historical comparisons are informational; benchmark claims are not authorized for publication."
+    : readyCount === claimRows.length
     ? "All current workload claims are eligible, but keep wording per-workload."
     : `${formatInteger(claimRows.length - readyCount)} current workload claims are not public-ready against mlua-luau.`;
   return `
@@ -1101,7 +1160,7 @@ function claimGateSection(claimRows) {
       <div class="section-head">
         <div>
           <h2>Claim Gate</h2>
-          <p>${formatInteger(readyCount)} / ${formatInteger(claimRows.length)} eligible · ${escapeHtml(headline)}</p>
+          <p>${publicSource ? "Historical comparison rows" : `${formatInteger(readyCount)} / ${formatInteger(claimRows.length)} eligible`} · ${escapeHtml(headline)}</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -1117,7 +1176,7 @@ function claimGateSection(claimRows) {
             </tr>
           </thead>
           <tbody>
-            ${claimRows.map(claimGateTableRow).join("")}
+            ${claimRows.map((row) => claimGateTableRow(row, publicSource)).join("")}
           </tbody>
         </table>
       </div>
@@ -1125,7 +1184,7 @@ function claimGateSection(claimRows) {
   `;
 }
 
-function claimGateTableRow(row) {
+function claimGateTableRow(row, publicSource = false) {
   const rustiaMin = row.rustiaRow ? `${formatNumber(row.rustiaRow.ns_per_unit_min)} ns` : "n/a";
   const luauSpeed = row.luauRow ? formatSpeed(row.luauRow.speed_vs_rustia) : "n/a";
   const rank = row.rustiaRank == null
@@ -1134,7 +1193,7 @@ function claimGateTableRow(row) {
   const fastest = row.fastest
     ? `${implementationLabel(row.fastest.engine)} · ${languageLabel(row.fastest.dialect)} · ${formatNumber(row.fastest.ns_per_unit_min)} ns`
     : "n/a";
-  const postureClass = row.posture.ready ? "claim-ready" : "claim-blocked";
+  const postureClass = publicSource ? "claim-blocked" : row.posture.ready ? "claim-ready" : "claim-blocked";
   return `
     <tr>
       <td>${claimWorkloadLabel(row)}</td>
@@ -1144,8 +1203,8 @@ function claimGateTableRow(row) {
       <td>${escapeHtml(fastest)}</td>
       <td>
         <span class="claim-posture">
-          <span class="claim-pill ${postureClass}">${escapeHtml(row.posture.label)}</span>
-          <small>${escapeHtml(row.posture.text)}</small>
+          <span class="claim-pill ${postureClass}">${publicSource ? "Historical" : escapeHtml(row.posture.label)}</span>
+          <small>${publicSource ? "Informational comparison only; publication is paused." : escapeHtml(row.posture.text)}</small>
         </span>
       </td>
     </tr>
@@ -1168,10 +1227,10 @@ function readCalibrationReview() {
   return review;
 }
 
-function historySection(history, backfills, currentRows, liveSeries, calibrationReview = null) {
+function historySection(history, backfills, currentRows, liveSeries, calibrationReview = null, historicalOnly = false) {
   const reference = mluaJitHistoryReference(currentRows);
   const reconstructed = rustiaBackfillEras(backfills, reference, liveSeries);
-  const { eras: recorded, elsewhere } = rustiaHistoryEras(history.rows, reference);
+  const { eras: recorded, elsewhere } = rustiaHistoryEras(history.rows, reference, historicalOnly);
   // One machine, one protocol. When a reconstruction exists it is the whole
   // chart: it replays every revision through one fixed harness, and the
   // accepted matrix runs are a different measurement, so drawing them
@@ -1186,10 +1245,11 @@ function historySection(history, backfills, currentRows, liveSeries, calibration
     .reduce((latest, row) => latest === null || row.timestamp_unix > latest.timestamp_unix ? row : latest, null);
   const summary = reconstructed.length > 0
     ? `${formatInteger(reconstructed.reduce((total, era) => total + era.snapshotCount, 0))} historical Rustia revisions replayed against ${reconstructed.length === 1 ? "one fixed harness and one pinned dependency set, measured end to end on a single machine" : `${formatInteger(reconstructed.length)} fixed harnesses, each measured end to end on one machine and never blended with another`}.${undrawnRowsNote(elsewhere)}`
-    : `${formatInteger(snapshotCount)} recorded Linux matrix runs on ${reference.host == null ? "an unnamed machine" : `<code>${escapeHtml(reference.host)}</code>`} across ${eras.length === 1 ? "one era" : `${formatInteger(eras.length)} eras`}. Each era is normalized to its own first run, so different protocols are never blended, and no other machine is drawn.${undrawnRowsNote(elsewhere)}`;
+    : `${historicalOnly ? "Historical record: " : ""}${formatInteger(snapshotCount)} recorded Linux matrix runs on ${reference.host == null ? "an unnamed machine" : `<code>${escapeHtml(reference.host)}</code>`} across ${eras.length === 1 ? "one era" : `${formatInteger(eras.length)} eras`}. Each era is normalized to its own first run, so different protocols are never blended, and no other machine is drawn.${undrawnRowsNote(elsewhere)}`;
+  const matrixLabel = historicalOnly ? "recorded dedicated-VM matrix" : "current dedicated-VM matrix";
   const explanation = reconstructed.length > 0
-    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.`
-    : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the current dedicated-VM matrix (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
+    ? `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the ${matrixLabel} (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>). A shared machine does not guarantee unchanged software or measurement conditions. These are observed ratios to that separately measured reference, not a controlled attribution of every change to the engine.`
+    : `The Rustia score is the geometric mean across all five workloads. The 1× reference is <strong>mlua / Luau / JIT</strong> from the ${matrixLabel} (<code>${escapeHtml(reference.commit.slice(0, 7))}</code>).`;
   return `
     <section class="panel history-axis-panel" id="history">
       <div class="section-head">
@@ -1203,12 +1263,12 @@ function historySection(history, backfills, currentRows, liveSeries, calibration
         </div>
       </div>
       <p class="history-answer"><strong>Higher is faster; mlua/JIT is 1×.</strong> ${explanation}</p>
-      ${calibrationReview ? `<p class="cohort-note"><strong>Latest reviewed A/A calibration: ${escapeHtml(calibrationReview.status)} (${escapeHtml(calibrationReview.reviewed_at)}).</strong> ${calibrationReview.status === "failed" ? "Current repeatability is unresolved. Treat these historical observations as provisional; no new thresholds have been adopted." : "This check does not clear earlier host-control findings."} <a href="${escapeHtml(calibrationReview.run_url)}">Private run evidence</a>.</p>` : ""}
+      ${calibrationReview ? `<p class="cohort-note"><strong>${historicalOnly ? "Historical" : "Latest reviewed"} A/A calibration: ${escapeHtml(calibrationReview.status)} (${escapeHtml(calibrationReview.reviewed_at)}).</strong> ${calibrationReview.status === "failed" ? `${historicalOnly ? "Historical repeatability was unresolved. Treat these observations as provisional; no new thresholds were adopted." : "Current repeatability is unresolved. Treat these historical observations as provisional; no new thresholds have been adopted."}` : "This check does not clear earlier host-control findings."}${historicalOnly ? " Private run evidence is not included in this public source profile." : ` <a href="${escapeHtml(calibrationReview.run_url)}">Private run evidence</a>.`}</p>` : ""}
       ${latestLiveRow ? `<p class="cohort-note">Latest per-commit measurement: ${new Date(latestLiveRow.timestamp_unix * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC")} at <code>${escapeHtml(latestLiveRow.commit.slice(0, 8))}</code>. The full cross-engine tables have their own measurement dates.</p>` : ""}
       ${eras.length > 1 ? `<p class="cohort-note">Separate lines mark different protocols or host periods. No line connects observations across a flagged host control, and change is calculated only within each displayed period.</p>` : ""}
       ${hostControlSection(liveSeries)}
-      <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date")}</div>
-      <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit")}</div>
+      <div data-history-axis-view="date">${rustiaHistoryChart(eras, reference, "date", historicalOnly)}</div>
+      <div data-history-axis-view="commit" hidden>${rustiaHistoryChart(eras, reference, "commit", historicalOnly)}</div>
       ${rustiaOverallHistoryTable(eras)}
       <p class="cohort-note">${reconstructed.length > 0 ? `Reconstruction measurement time is retained honestly in <code>${escapeHtml(relative(historyBackfillDirectory))}</code>; the chart's x-axis uses each source commit's original date.` : `Restored from published Linux matrix snapshots that were previously overwritten in <code>${escapeHtml(relative(historyPath))}</code>. Future accepted matrix runs now append to this ledger.`}</p>
     </section>
@@ -1392,7 +1452,7 @@ function rustiaBackfillEras(backfills, reference, liveSeries = []) {
 // before hosts were recorded -- are counted and named rather than drawn. Within
 // that machine, a gap of a day or more still splits the series as it did
 // before rows named their machine; both halves are the same box.
-function rustiaHistoryEras(rows, reference) {
+function rustiaHistoryEras(rows, reference, historicalOnly = false) {
   const allRustiaRows = rows
     .filter((row) => row.target === "linux-x86_64" && row.engine === "rustia" && REQUIRED_COMMON_WORKLOAD_SET.has(row.workload))
     .slice()
@@ -1435,7 +1495,11 @@ function rustiaHistoryEras(rows, reference) {
     return {
       eras: [
         rustiaHistoryEra("Earlier Linux history", "Earlier protocol era on the same machine; kept on its own scale", rustiaRows.filter((row) => row.timestamp_unix < splitAt), reference, "recorded", "Recorded · earlier era"),
-        rustiaHistoryEra("Current dedicated Linux history", "Controlled matrix era; this is the chart to use for current progress", current, reference, "recorded", "Recorded dedicated"),
+        rustiaHistoryEra(
+          historicalOnly ? "Later recorded Linux history" : "Current dedicated Linux history",
+          historicalOnly ? "Historical controlled matrix era; not a current progress measurement" : "Controlled matrix era; this is the chart to use for current progress",
+          current, reference, "recorded", "Recorded dedicated",
+        ),
       ],
       elsewhere,
     };
@@ -1555,7 +1619,7 @@ function rustiaHistoryCommitOrder(eras) {
   return commits;
 }
 
-function rustiaHistoryChart(eras, reference, axisMode) {
+function rustiaHistoryChart(eras, reference, axisMode, historicalOnly = false) {
   const width = 920;
   const height = 300;
   const pad = { left: 54, right: 20, top: 22, bottom: 42 };
@@ -1603,7 +1667,7 @@ function rustiaHistoryChart(eras, reference, axisMode) {
         <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="history-axis" />
         <text x="${pad.left}" y="${height - 10}" class="history-axis-label">${escapeHtml(firstLabel)}</text>
         <text x="${width - pad.right}" y="${height - 10}" text-anchor="end" class="history-axis-label">${escapeHtml(lastLabel)}</text>
-        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · current matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
+        <line x1="${pad.left}" y1="${yScale(1).toFixed(2)}" x2="${width - pad.right}" y2="${yScale(1).toFixed(2)}" stroke="${referenceColor}" stroke-width="1.4" stroke-dasharray="7 6"><title>${escapeHtml(`mlua / Luau / JIT · ${historicalOnly ? "recorded" : "current"} matrix ${reference.commit.slice(0, 7)} · 1×`)}</title></line>
         ${eras.map((era, index) => {
           const style = styles[index];
           const points = era.overall.map((point) => `${xScale(point).toFixed(2)},${yScale(point.score).toFixed(2)}`).join(" ");
@@ -1706,7 +1770,7 @@ function undrawnCohortsNote(records, host) {
 // `authorityHost` is the machine the operations policy qualifies to produce
 // numbers. It is only spoken of when there are no cohorts to read a host from;
 // once there are, the section names the machine the cohorts name.
-function memoryHistorySection(records, authorityHost) {
+function memoryHistorySection(records, authorityHost, publicSource = false) {
   if (records.length === 0) {
     return `
       <section class="panel history-axis-panel memory-history-panel" id="memory-history">
@@ -1716,7 +1780,9 @@ function memoryHistorySection(records, authorityHost) {
             <p>No cohorts.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>The series starts again on <code>${escapeHtml(authorityHost)}</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.</p>
+        <p class="pending-note">${publicSource
+          ? "Memory-history records are historical. Measurement and publication remain paused pending a trusted private benchmark bridge."
+          : `<strong>The series starts again on <code>${escapeHtml(authorityHost)}</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.`}</p>
       </section>
     `;
   }
@@ -1965,7 +2031,7 @@ function coldStartSection(rows) {
 // numbers; it is named only while the table is pending. A ready table names
 // the machine its rows name, which readMemoryResults has already required to
 // be a single one.
-function memoryResultsSection(data, authorityHost) {
+function memoryResultsSection(data, authorityHost, publicSource = false) {
   if (data.status === "pending") {
     return `
       <section class="panel" id="memory">
@@ -1975,7 +2041,9 @@ function memoryResultsSection(data, authorityHost) {
             <p>Fresh-process cgroup peaks, smaps phase deltas, and epoch growth across engines.</p>
           </div>
         </div>
-        <p class="pending-note"><strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>${escapeHtml(authorityHost)}</code>, the machine every other number on this page comes from.</p>
+        <p class="pending-note">${publicSource
+          ? "No current memory cohort is authorized. Historical memory records remain unchanged; measurement is paused pending a trusted private benchmark bridge."
+          : `<strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>${escapeHtml(authorityHost)}</code>, the machine every other number on this page comes from.`}</p>
       </section>
     `;
   }
@@ -1995,13 +2063,15 @@ function memoryResultsSection(data, authorityHost) {
     <section class="panel" id="memory">
       <div class="section-head">
         <div>
-          <h2>${comparative ? `Linux Memory Comparison on ${escapeHtml(host[0])}` : `rustia Memory on ${escapeHtml(host[0])}`}</h2>
+          <h2>${publicSource ? "Historical Linux Memory" : comparative ? `Linux Memory Comparison on ${escapeHtml(host[0])}` : `rustia Memory on ${escapeHtml(host[0])}`}</h2>
           <p>${comparative
-            ? "Best-first charts use fresh process+cgroup samples measured on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence."
-            : "Fresh process+cgroup samples on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence."}</p>
+            ? `${publicSource ? "Historical " : ""}Best-first charts use fresh process+cgroup samples recorded on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence.`
+            : `${publicSource ? "Historical " : ""}Fresh process+cgroup samples recorded on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence.`}</p>
         </div>
       </div>
-      ${comparative ? "" : `<p class="pending-note"><strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>${escapeHtml(host[0])}</code>.</p>`}
+      ${comparative ? "" : `<p class="pending-note">${publicSource
+        ? "Competitor memory comparisons are not part of this historical cohort. New measurements remain paused pending a trusted private benchmark bridge."
+        : `<strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>${escapeHtml(host[0])}</code>.`}</p>`}
       ${comparative ? `<div class="memory-cohorts">
         ${memoryComparisonCharts(rows)}
       </div>` : ""}
@@ -2019,7 +2089,7 @@ function memoryResultsSection(data, authorityHost) {
                 <td><strong>${formatMemoryKib(row.metrics.peak_delta_kib.median)}</strong></td>
                 <td>${formatSignedMemoryKib(row.metrics.quiescent_retained_delta_anon_kib.median)}</td>
                 <td>${formatSignedMemoryKib(row.metrics.tail_growth_kib_per_epoch.median)}/epoch</td>
-                <td>${memoryClassification(row.classification, coverage.get(row.engine) === true)}</td>
+                <td>${memoryClassification(row.classification, coverage.get(row.engine) === true, publicSource)}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -2152,7 +2222,7 @@ function formatSignedMemoryKib(value) {
   return `${value > 0 ? "+" : ""}${formatMemoryKib(value)}`;
 }
 
-function memoryClassification(classification, detectorValidated) {
+function memoryClassification(classification, detectorValidated, historicalOnly = false) {
   const labels = {
     expected_retention: "expected retention",
     growth_signal: "growth signal",
@@ -2162,7 +2232,8 @@ function memoryClassification(classification, detectorValidated) {
   };
   const ready = classification === "stable_in_tested_window" || classification === "expected_retention";
   const detector = detectorValidated ? "" : ' <span class="subtle">control unverified</span>';
-  return `<span class="claim-pill ${ready ? "claim-ready" : "claim-blocked"}">${escapeHtml(labels[classification] ?? classification)}</span>${detector}`;
+  const label = labels[classification] ?? classification;
+  return `<span class="claim-pill ${ready ? "claim-ready" : "claim-blocked"}">${historicalOnly ? `historical: ${escapeHtml(label)}` : escapeHtml(label)}</span>${detector}`;
 }
 
 function formatDurationNs(value) {
@@ -2363,6 +2434,40 @@ function operationsStatusSection(status) {
   const progress = status.progress;
   const landscape = status.landscape;
   const publication = status.publication;
+  if (status.profile === "public-source") {
+    return `
+    <section class="panel operations-panel" id="operations-status">
+      <div class="operations-banner state-paused">
+        <div>
+          <p class="eyebrow">Benchmark operations</p>
+          <h2>Measurement and publication are paused</h2>
+          <p>${escapeHtml(publication.reason)}</p>
+        </div>
+        <span class="operations-state state-paused">Paused</span>
+      </div>
+      <div class="operations-grid">
+        <article class="operations-card">
+          <div class="operations-card-head"><h3>Historical baseline</h3><span class="operations-state state-paused">Recorded</span></div>
+          <p>Historical measurements were recorded ${formatTime(progress.measured_at_unix)} at <code>${escapeHtml(progress.measured_commit.slice(0, 7))}</code>.</p>
+          <p>These records do not establish current runner authority or current performance stability.</p>
+          <p class="operations-next">${escapeHtml(progress.next_action)}</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head"><h3>Historical engine landscape</h3><span class="operations-state state-paused">Paused</span></div>
+          <p>The displayed landscape is historical and was recorded ${formatTime(landscape.measured_at_unix)} at <code>${escapeHtml(landscape.measured_commit.slice(0, 7))}</code>.</p>
+          <p>${escapeHtml(landscape.reason)}</p>
+          <p class="operations-next">${escapeHtml(landscape.next_action)}</p>
+        </article>
+        <article class="operations-card">
+          <div class="operations-card-head"><h3>Measurement and publication</h3><span class="operations-state state-paused">Paused</span></div>
+          <p>No public workflow is authorized to measure or publish benchmark results. Hosted CI is for correctness and artifact validation only.</p>
+          <p>Resumption depends on a reviewed trusted private benchmark bridge.</p>
+          <p class="operations-next">${escapeHtml(publication.next_action)}</p>
+        </article>
+      </div>
+    </section>
+  `;
+  }
   // Validated above: exactly one class is a timing authority and it names its
   // host and pinned core. Naming the machine on the page means it can never
   // silently stop saying which one produced these numbers.
@@ -2412,14 +2517,16 @@ function operationsStatusSection(status) {
   `;
 }
 
-function optimizationEvidenceSection(cohorts) {
+function optimizationEvidenceSection(cohorts, publicSource = false) {
   if (cohorts.length === 0) {
     return `
       <section class="panel" id="optimization-checks">
         <div class="section-head">
           <div>
-            <h2>Accepted Optimization Checks</h2>
-            <p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>
+            <h2>${publicSource ? "Historical Optimization Checks" : "Accepted Optimization Checks"}</h2>
+            ${publicSource
+              ? "<p>Optimization evidence is historical. Measurement and publication are paused, so these rows do not authorize a current performance claim.</p>"
+              : "<p>No fixed-work A/B comparison measured on the owned host has been published here yet. The ten cohorts that used to fill this table were measured on rented cloud hosts before the owned host existed; they were removed on 2026-09-13 so that every timing on this page comes from one attested machine. Their samples remain in the repository's Git history. The first owned-host comparison, kept under <code>bench/history/evidence/eaf3917f7618c08852c5f03d81ebb2db0b6f6f6f/</code>, used a simplified protocol and predates the manifest this table reads.</p>"}
           </div>
         </div>
       </section>
@@ -2430,8 +2537,8 @@ function optimizationEvidenceSection(cohorts) {
     <section class="panel" id="optimization-checks">
       <div class="section-head">
         <div>
-          <h2>Accepted Optimization Checks</h2>
-          <p>Independent fixed-work A/B evidence. Negative deltas are faster; intervals are the conservative 95% bootstrap envelope. These checks do not replace the complete engine-comparison cohort.</p>
+          <h2>${publicSource ? "Historical Optimization Checks" : "Accepted Optimization Checks"}</h2>
+          <p>${publicSource ? "Recorded fixed-work A/B evidence. These rows are historical and do not authorize current claims." : "Independent fixed-work A/B evidence. Negative deltas are faster; intervals are the conservative 95% bootstrap envelope. These checks do not replace the complete engine-comparison cohort."}</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -2475,11 +2582,29 @@ function requireAuthorityHost(host, label, authority) {
   }
 }
 
+function requireHistoricalHost(host, label, expected) {
+  if (host !== expected) {
+    fail(`${label} records ${JSON.stringify(host)} but the public-source profile identifies historical rows as ${JSON.stringify(expected)}`);
+  }
+}
+
 // The three things the page draws as the current machine: the timing table,
 // a ready memory table, and the memory history's latest cohort (the machine
 // that chart is keyed on). Older memory cohorts may name another machine;
 // they stay undrawn, and the section says so.
 function requirePublishedHosts(data, memoryResults, memoryHistory, operationsStatus) {
+  if (operationsStatus.profile === "public-source") {
+    const marker = JSON.parse(fs.readFileSync(publicProfilePath, "utf8"));
+    const historicalHost = marker.historical_host_label;
+    requireHistoricalHost(unique(data.rows.map((row) => row.host))[0], relative(sourcePath), historicalHost);
+    if (memoryResults.status === "ready") {
+      requireHistoricalHost(uniqueHosts(memoryResults.rows.map((row) => row.host))[0], relative(memoryResultsPath), historicalHost);
+    }
+    if (memoryHistory.length > 0) {
+      requireHistoricalHost(memoryHistory.at(-1).host ?? null, `${relative(memoryHistoryPath)} latest cohort`, historicalHost);
+    }
+    return historicalHost;
+  }
   const authority = authorityHost(operationsStatus);
   requireAuthorityHost(unique(data.rows.map((row) => row.host))[0], relative(sourcePath), authority);
   if (memoryResults.status === "ready") {
@@ -2493,6 +2618,7 @@ function requirePublishedHosts(data, memoryResults, memoryHistory, operationsSta
 
 function render(data, operationsStatus, wasmResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const authority = requirePublishedHosts(data, memoryResults, memoryHistory, operationsStatus);
+  const publicSource = operationsStatus.profile === "public-source";
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -3615,9 +3741,11 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
   <main>
     <section class="hero">
       <div class="hero-panel">
-        <p class="eyebrow">script-bench current snapshot</p>
-        <h1>rustia Benchmark Results and History</h1>
-        <p class="lead">Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history.</p>
+        <p class="eyebrow">${publicSource ? "Historical benchmark snapshot" : "script-bench current snapshot"}</p>
+        <h1>${publicSource ? "Historical rustia Benchmark Results and History" : "rustia Benchmark Results and History"}</h1>
+        <p class="lead">${publicSource
+          ? "Recorded benchmark data is preserved for reference. Measurement and publication are paused; the figures do not establish current performance stability or authorize new claims."
+          : "Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history."}</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
           <span>History <code>${escapeHtml(relative(historyPath))}</code></span>
@@ -3625,6 +3753,8 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
         </p>
       </div>
     </section>
+
+    ${publicSource ? `<section class="panel operations-banner state-paused" role="note"><div><p class="eyebrow">Historical data only</p><p>All numeric benchmark records on this page are historical. No public workflow may measure or publish benchmark results. A trusted private benchmark bridge is required before new measurements or claims can resume.</p></div><span class="operations-state state-paused">Paused</span></section>` : ""}
 
     <nav class="nav" aria-label="Report sections">
       <a href="#grabby-builds">Grabby Builds</a>
@@ -3640,13 +3770,13 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
 
     ${renderGrabbyBuilds(readGrabbyBuilds())}
     ${operationsStatusSection(operationsStatus)}
-    ${optimizationEvidenceSection(cohorts)}
+    ${optimizationEvidenceSection(cohorts, publicSource)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}
-    ${memoryResultsSection(memoryResults, authority)}
-    ${memoryHistorySection(memoryHistory, authority)}
+    ${memoryResultsSection(memoryResults, authority, publicSource)}
+    ${memoryHistorySection(memoryHistory, authority, publicSource)}
     ${coldStartSection(summary.coldStartRows)}
-    ${claimGateSection(claimRows)}
-      ${historySection(history, historyBackfills, data.rows, readLiveSeries(), readCalibrationReview())}
+    ${claimGateSection(claimRows, publicSource)}
+      ${historySection(history, historyBackfills, data.rows, readLiveSeries(), readCalibrationReview(), publicSource)}
 
     <p class="footnote">Schema <code>${escapeHtml(data.schema)}</code>. Operations <code>${escapeHtml(relative(operationsStatusPath))}</code>. Memory <code>${escapeHtml(relative(memoryResultsPath))}</code> with history <code>${escapeHtml(relative(memoryHistoryPath))}</code>. Wasm source <code>${escapeHtml(relative(wasmResultsPath))}</code>. Performance history <code>${escapeHtml(relative(historyPath))}</code> (${escapeHtml(data.metadata.history_schema)}). The report is deterministic, contains no external assets, and uses inline presentation controls. Refresh data with the benchmark harness before rendering when current history changes.</p>
   </main>
@@ -3763,6 +3893,7 @@ if (require.main === module) {
 module.exports = {
   REQUIRED_COMMON_WORKLOADS,
   bestAvailableRows,
+  claimGateSection,
   coldStartSection,
   implementationLabel,
   languageLabel,
@@ -3779,6 +3910,7 @@ module.exports = {
   optimizationEvidenceSection,
   operationsStatusSection,
   requireAuthorityHost,
+  requireHistoricalHost,
   requirePublishedHosts,
   requireSingleHost,
   rustiaBackfillEras,

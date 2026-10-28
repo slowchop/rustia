@@ -55,6 +55,16 @@ assert.ok(html.includes('href="grabby-builds.json"'));
 assert.equal((html.match(/id="grabby-builds"/g) || []).length, 1);
 assert.equal(renderSection(clone()), html);
 
+if (fs.existsSync(path.join(root, "design/public-source-profile.json"))) {
+  // Artifact/statistical/privacy checks above still apply. The public profile
+  // has no publication route, rather than the private reusable publisher.
+  require("./check-public-workflow-profile.js").readCheckout(root);
+  for (const file of ["publish-benchmark-data.yml", "rustia-memory.yml"]) {
+    assert.equal(fs.existsSync(path.join(root, ".github/workflows", file)), false,
+      "paused public profile must not retain an active publication workflow");
+  }
+  console.log("Grabby historical results, paired statistics, privacy boundary and paused public routing checks passed");
+} else {
 const publisher = fs.readFileSync(path.join(root, ".github/workflows/publish-benchmark-data.yml"), "utf8");
 const memory = fs.readFileSync(path.join(root, ".github/workflows/rustia-memory.yml"), "utf8");
 assert.ok(publisher.includes('install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"'));
@@ -100,3 +110,5 @@ for (const [file, transform] of [
   ["publish-benchmark-data.yml", text => text.replace('install -m 644 bench/grabby-builds/results.json "$pages_dir/grabby-builds.json"', 'echo skipped')],
 ]) assert.throws(() => policyWithMutation(file, transform), `policy must reject mutation of ${file}`);
 console.log("Grabby selected results, paired statistics, privacy boundary and publication routing checks passed");
+
+}

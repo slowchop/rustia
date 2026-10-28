@@ -23,6 +23,7 @@ const path = require("node:path");
 
 const REPO = path.resolve(__dirname, "..");
 const SCAN_ROOTS = ["bench/cloud", "bench/history"];
+const { verifyProjection } = require("./history-projection.js");
 const HASH = /\b[0-9a-f]{40}\b/g;
 
 function git(args) {
@@ -44,8 +45,8 @@ function citedHashes() {
     let text;
     try {
       text = fs.readFileSync(path.join(REPO, file), "utf8");
-    } catch {
-      continue;
+    } catch (error) {
+      throw new Error(`cannot read tracked benchmark artifact ${file}: ${error.message}`);
     }
     for (const match of text.matchAll(HASH)) {
       const hash = match[0];
@@ -68,6 +69,12 @@ function isCommit(hash) {
   }
 }
 
+function classify(hash, reachable, objects, mapping = new Map()) {
+  if (reachable.has(mapping.get(hash) ?? hash)) return "commit";
+  if (objects.has(hash) && !isCommit(hash)) return "object";
+  return "missing";
+}
+
 function subjectOf(hash) {
   try {
     return git(["log", "-1", "--format=%s", hash]).trim();
@@ -86,6 +93,11 @@ function selfTest() {
   const reachable = reachableCommits();
   const head = git(["rev-parse", "HEAD"]).trim();
   const failures = [];
+  const absent = "f".repeat(40);
+  if (classify(absent, reachable, new Set()) !== "missing") failures.push("absent ID silently ignored");
+  if (classify(absent, reachable, new Set(), new Map([[absent, head]])) !== "commit") failures.push("historical mapping not resolved");
+  if (classify(absent, reachable, new Set(), new Map([[absent, orphan]])) !== "missing") failures.push("unreachable projection accepted");
+  if (classify(tree, reachable, new Set([tree])) !== "object") failures.push("reachable tree incorrectly rejected");
   if (!isCommit(orphan)) failures.push("orphan commit was not recognised as a commit");
   if (reachable.has(orphan)) failures.push("orphan commit was reported reachable");
   if (!reachable.has(head)) failures.push("HEAD was reported unreachable");
@@ -103,17 +115,22 @@ function main() {
     selfTest();
     return;
   }
+  const projection = verifyProjection();
+  const mapping = new Map((projection?.entries ?? []).map(row => [row.original, row.projected]));
+  const objects = new Set(git(["rev-list", "--objects", "--all"]).split("\n").filter(Boolean).map(line => line.split(" ")[0]));
   const cited = citedHashes();
   const reachable = reachableCommits();
   const orphaned = [];
   let commits = 0;
 
   for (const [hash, files] of cited) {
-    if (reachable.has(hash)) {
+    const role = classify(hash, reachable, objects, mapping);
+    if (role === "commit") {
       commits += 1;
       continue;
     }
-    if (!isCommit(hash)) continue; // blob/tree hashes and checksums are not our concern
+    if (role === "object") continue; // Known reachable tree/blob, never an absent object.
+    // Missing IDs must fail: redaction rewrites make old commit IDs disappear.
     commits += 1;
     orphaned.push({ hash, files: [...files].sort() });
   }
@@ -126,7 +143,7 @@ function main() {
   }
 
   process.stderr.write(
-    `${orphaned.length} cited benchmark commit(s) are unreachable and will be lost at the next \`git gc\`.\n` +
+    `${orphaned.length} cited benchmark ID(s) are missing or unreachable.\n` +
       `Their evidence would still look complete while ceasing to be reproducible.\n\n`,
   );
   for (const { hash, files } of orphaned) {
@@ -134,7 +151,7 @@ function main() {
     process.stderr.write(`  ${short}  ${subjectOf(hash)}\n`);
     process.stderr.write(`    cited by ${files.length} committed artifact(s), e.g. ${files[0]}\n`);
     process.stderr.write(
-      `    fix: git tag -a bench-evidence/${short} -m "benchmark evidence commit ${short}" ${hash} && git push origin bench-evidence/${short}\n\n`,
+      `    restore the source object and a retained ref, or add its independently reviewed history projection; do not ignore the missing ID.\n\n`,
     );
   }
   process.exitCode = 1;

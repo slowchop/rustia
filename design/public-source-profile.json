@@ -1,0 +1,9 @@
+{
+  "schema": "rustia.public-source-profile.v1",
+  "state": "private-rehearsal",
+  "historical_head": "9720d10dc39c36f9c2f675ed96edeb420f385de7",
+  "historical_host_label": "ci-bench",
+  "benchmark_bridge": "pending-private-trusted-pipeline",
+  "package_publication": false,
+  "visibility_authorized": false
+}

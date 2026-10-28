@@ -4,11 +4,13 @@
 const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { resolveHistoricalCommit } = require("./history-projection.js");
 
 const root = path.resolve(__dirname, "..");
 const policyPath = path.join(root, "bench", "operations-policy.json");
 const resultsPath = path.join(root, "bench", "current-results.json");
 const outputPath = path.join(root, "bench", "operations-status.json");
+const publicProfilePath = path.join(root, "design", "public-source-profile.json");
 const checkOnly = process.argv.includes("--check");
 // A runner class that names its machine names it by a provenance label. The
 // timing authority's is the value every published table is pinned to, and this
@@ -181,6 +183,64 @@ function validatePolicy(policy) {
   ]) requireString(value, label);
 }
 
+// The cleaned public-source tree is an explicit, separate operations profile.
+// It carries historical measurements for transparency, but cannot authorize
+// new measurements or publication while the private bridge is absent.
+function validatePublicPolicy(policy) {
+  if (policy.schema !== "rustia.bench.operations-policy.public.v1" || policy.schema_version !== 1) {
+    fail(`${relative(policyPath)} must use rustia.bench.operations-policy.public.v1`);
+  }
+  if (policy.profile !== "public-source" || policy.measurement?.mode !== "paused-pending-private-bridge"
+    || policy.measurement?.authoritative_runner_classes?.length !== 0
+    || policy.measurement?.scheduled_billing_allowed !== false) {
+    fail("public-source measurement must remain paused with no timing-authoritative runner or scheduled billing");
+  }
+  if (policy.publication?.state !== "paused" || policy.progress?.state !== "paused"
+    || policy.landscape?.state !== "paused") {
+    fail("public-source measurement, publication, progress, and landscape must remain paused");
+  }
+  for (const [label, value] of [
+    ["measurement.reason", policy.measurement.reason],
+    ["publication.reason", policy.publication.reason],
+    ["publication.next_action", policy.publication.next_action],
+    ["progress.next_action", policy.progress.next_action],
+    ["landscape.reason", policy.landscape.reason],
+    ["landscape.next_action", policy.landscape.next_action],
+  ]) requireString(value, label);
+  for (const phrase of [policy.measurement.reason, policy.publication.reason, policy.publication.next_action]) {
+    if (!/private benchmark bridge/i.test(phrase)) fail("public-source paused state must identify the private benchmark bridge dependency");
+  }
+  const classes = policy.runner_classes;
+  if (classes === null || typeof classes !== "object" || Array.isArray(classes) || Object.keys(classes).length === 0) {
+    fail("public-source runner_classes must enumerate hosted correctness classes");
+  }
+  const expectedRoles = {
+    "hosted-linux": ["build", "correctness-test", "artifact-validation", "fuzz-smoke"],
+    "hosted-macos": ["build", "correctness-test", "artifact-validation"],
+    "hosted-windows": ["build", "correctness-test", "artifact-validation"],
+  };
+  if (JSON.stringify(Object.keys(classes).sort()) !== JSON.stringify(Object.keys(expectedRoles).sort())) {
+    fail("public-source runner_classes must enumerate exactly the reviewed hosted classes");
+  }
+  for (const [name, runner] of Object.entries(classes)) {
+    if (runner.environment !== "github-hosted" || runner.timing_authority !== false
+      || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification")
+      || !Array.isArray(runner.allowed_roles) || runner.allowed_roles.length === 0
+      || JSON.stringify(runner.allowed_roles) !== JSON.stringify(expectedRoles[name])) {
+      fail(`runner_classes.${name} must be a hosted correctness-only class with no host or measurement authority`);
+    }
+  }
+  if (!Array.isArray(policy.progress?.relevant_paths) || policy.progress.relevant_paths.length === 0) {
+    fail("progress.relevant_paths must be a non-empty array");
+  }
+  for (const [index, relevantPath] of policy.progress.relevant_paths.entries()) {
+    requireString(relevantPath, `progress.relevant_paths[${index}]`);
+    if (path.isAbsolute(relevantPath) || relevantPath.split("/").includes("..")) {
+      fail(`progress.relevant_paths[${index}] must remain repository-relative`);
+    }
+  }
+}
+
 function measuredCohort(results) {
   if (results.schema !== "rustia.bench.current-results.v1" || results.schema_version !== 1) {
     fail(`${relative(resultsPath)} must use rustia.bench.current-results.v1`);
@@ -244,6 +304,42 @@ function renderStatus(policy, results) {
     landscape: {
       state: policy.landscape.state,
       measured_commit: measured.commit,
+      measured_at_unix: measured.measuredAtUnix,
+      refresh_interval_days: policy.landscape.refresh_interval_days,
+      reason: policy.landscape.reason,
+      next_action: policy.landscape.next_action,
+    },
+  };
+}
+
+function renderPublicStatus(policy, results) {
+  validatePublicPolicy(policy);
+  const measured = measuredCohort(results);
+  const projectedMeasuredCommit = resolveHistoricalCommit(measured.commit, root);
+  git(["merge-base", "--is-ancestor", projectedMeasuredCommit, "HEAD"]);
+  const pending = relevantCommits(projectedMeasuredCommit, policy.progress.relevant_paths);
+  const newestRelevant = pending[0] ?? commitRecord(projectedMeasuredCommit);
+  return {
+    schema: "rustia.bench.operations-status.v1",
+    schema_version: 1,
+    profile: "public-source",
+    runner_classes: policy.runner_classes,
+    measurement: policy.measurement,
+    publication: policy.publication,
+    progress: {
+      state: "paused",
+      measured_commit: measured.commit,
+      projected_measured_commit: projectedMeasuredCommit,
+      measured_at_unix: measured.measuredAtUnix,
+      latest_relevant_commit: newestRelevant.commit,
+      latest_relevant_committed_at_unix: newestRelevant.committed_at_unix,
+      pending_relevant_commit_count: pending.length,
+      next_action: policy.progress.next_action,
+    },
+    landscape: {
+      state: "paused",
+      measured_commit: measured.commit,
+      projected_measured_commit: projectedMeasuredCommit,
       measured_at_unix: measured.measuredAtUnix,
       refresh_interval_days: policy.landscape.refresh_interval_days,
       reason: policy.landscape.reason,
@@ -318,10 +414,47 @@ function selfTest(policy) {
   }
 }
 
+function selfTestPublicPolicy(policy) {
+  validatePublicPolicy(policy);
+  const refuses = (pattern, edit) => {
+    const copy = JSON.parse(JSON.stringify(policy));
+    edit(copy);
+    let message = null;
+    try { validatePublicPolicy(copy); } catch (error) { message = error.message; }
+    if (message == null || !pattern.test(message)) {
+      fail(`public self-test expected a refusal matching ${pattern}, got ${JSON.stringify(message)}`);
+    }
+  };
+  refuses(/must remain paused/, (copy) => { copy.publication.state = "active"; });
+  refuses(/no timing-authoritative runner/, (copy) => { copy.measurement.authoritative_runner_classes = ["hosted"]; });
+  refuses(/correctness-only class/, (copy) => { copy.runner_classes[Object.keys(copy.runner_classes)[0]].allowed_roles.push("measurement-candidate"); });
+  refuses(/private benchmark bridge dependency/, (copy) => { copy.publication.reason = "Publication is paused."; });
+  refuses(/no host or measurement authority/, (copy) => { copy.runner_classes[Object.keys(copy.runner_classes)[0]].host = "runner-name"; });
+  refuses(/exactly the reviewed hosted classes/, (copy) => { copy.runner_classes.extra = copy.runner_classes["hosted-linux"]; });
+  refuses(/correctness-only class/, (copy) => { copy.runner_classes["hosted-linux"].allowed_roles.push("build"); });
+}
+
+function publicProfileActive() {
+  if (!fs.existsSync(publicProfilePath)) return false;
+  const marker = readJson(publicProfilePath);
+  if (marker.schema !== "rustia.public-source-profile.v1" || marker.state !== "private-rehearsal"
+    || !/^[0-9a-f]{40}$/.test(marker.historical_head ?? "")
+    || marker.historical_host_label !== "ci-bench"
+    || marker.benchmark_bridge !== "pending-private-trusted-pipeline"
+    || marker.package_publication !== false || marker.visibility_authorized !== false) {
+    fail(`${relative(publicProfilePath)} must declare the public-source private-rehearsal profile and exact historical head`);
+  }
+  return true;
+}
+
 function main() {
   const policy = readJson(policyPath);
-  selfTest(policy);
-  const output = `${JSON.stringify(renderStatus(policy, readJson(resultsPath)), null, 2)}\n`;
+  const publicProfile = publicProfileActive();
+  if (publicProfile) selfTestPublicPolicy(policy);
+  else selfTest(policy);
+  const results = readJson(resultsPath);
+  const status = publicProfile ? renderPublicStatus(policy, results) : renderStatus(policy, results);
+  const output = `${JSON.stringify(status, null, 2)}\n`;
   if (checkOnly) {
     let current;
     try {
@@ -348,4 +481,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { renderStatus, validatePolicy };
+module.exports = { renderPublicStatus, renderStatus, validatePolicy, validatePublicPolicy };

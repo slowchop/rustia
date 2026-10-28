@@ -1,9 +1,26 @@
 # Benchmark operations and public freshness
 
-> **Status: [ROLLING OUT] (2026-08-14).** This document defines how Rustia
+> **Historical private operations contract; public-source profile is paused.** This document records how Rustia
 > performance evidence is measured, refreshed, and published. It complements
 > [`80-bench-suite.md`](80-bench-suite.md), which defines the harness and
 > measurement protocol.
+
+## Public-source profile
+
+The public-source tree runs correctness and artifact validation on GitHub-hosted
+runners. Benchmark measurement, benchmark-data publication, and landscape
+refresh are paused pending a reviewed trusted private benchmark bridge. The
+committed benchmark records are historical data; they do not establish current
+runner authority, current performance stability, or permission to publish new
+measurements. No public workflow dispatches a benchmark or publishes benchmark
+data. `design/public-source-profile.json` selects this explicit profile, and
+the public workflow, operations-status, and report validators enforce it.
+
+The runner and publication procedures below describe the retained private
+operations contract. They are not active public-source automation. A return to
+measurement or publication requires a separate reviewed private bridge and an
+explicitly updated profile; changing the public workflow profile alone cannot
+enable either operation.
 
 ## Goals
 

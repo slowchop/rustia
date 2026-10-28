@@ -161,8 +161,10 @@ def self_test():
             raise AssertionError("completed child must not be terminated")
 
     with TemporaryDirectory() as temporary:
+        fake_child = Child()
         binary = Path(temporary) / "fixture-binary"
         binary.write_bytes(b"nonexecutable fixture")
+        resolved_binary = str(binary.resolve(strict=True))
         output = Path(temporary) / "observation.json"
         options = SimpleNamespace(binary=str(binary), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                                   output=str(output), cpu=4, command=["fixture"])
@@ -171,14 +173,14 @@ def self_test():
             if file.name == "status":
                 return "Cpus_allowed_list:\t4\n"
             if file.name == "maps":
-                return f"1000-2000 r-xp 0 0 0 {binary}\n"
+                return f"1000-2000 r-xp 0 0 0 {resolved_binary}\n"
             return "2"
 
         with patch(__name__ + ".snapshot", return_value={}), \
-                patch(__name__ + ".subprocess.Popen", return_value=Child()) as launch, \
+                patch(__name__ + ".subprocess.Popen", return_value=fake_child) as launch, \
                 patch(__name__ + ".resource.getrusage", side_effect=[baseline, SimpleNamespace(**dict.fromkeys(fields, 3))]), \
-                patch(__name__ + ".os.path.realpath", return_value=str(binary)), \
-                patch(__name__ + ".time.monotonic", side_effect=[100, 100.01, 101]), \
+                patch(__name__ + ".os.path.realpath", return_value=resolved_binary), \
+                patch(__name__ + ".time.monotonic", side_effect=lambda: 101 if fake_child.done else 100), \
                 patch(__name__ + ".time.sleep"), patch.object(Path, "read_text", read_fixture):
             assert observe(options) == 7
             launch.assert_called_once_with(["fixture"])

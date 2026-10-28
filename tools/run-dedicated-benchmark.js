@@ -81,6 +81,15 @@ function fail(message) {
   process.exit(1);
 }
 
+// A public-source profile marker is a hard operational boundary. Keep this at
+// coordinator dispatch so stale configs cannot start an SSH or local runner
+// after the public policy has paused measurement and publication.
+function pausedProfileCommandProblem(command, root = REPO) {
+  if (command === "self-test") return null;
+  if (!fs.existsSync(path.join(root, "design/public-source-profile.json"))) return null;
+  return `benchmark command ${command} is disabled while the public-source profile is paused pending a trusted private benchmark bridge`;
+}
+
 function sshDestination() {
   const destination = process.env[SSH_ENV];
   if (!destination || !destination.trim()) {
@@ -2600,7 +2609,44 @@ function selfTest() {
   // asserted here, where every lane is driven from.
   const head = git(["rev-parse", "HEAD"]).trim();
   const matrixFreezer = require("./create-linode-matrix-config.js");
-  const dedicatedMatrix = matrixFreezer.toDedicated(matrixFreezer.createConfig(head));
+  const publicProfilePath = path.join(REPO, "design/public-source-profile.json");
+  const isPublicProfile = fs.existsSync(publicProfilePath);
+  let dedicatedMatrix;
+  const memoryConfigs = [];
+  if (isPublicProfile) {
+    // These are static config-shape tests, not a measurement authorization.
+    // The public operations policy intentionally has no active authority, so
+    // supply a local-only fixture to the legacy config converters while they
+    // prove that frozen historical lane labels and core selection still agree.
+    const policyPath = path.join(REPO, "bench/operations-policy.json");
+    const originalReadFileSync = fs.readFileSync;
+    const fixturePolicy = JSON.stringify({
+      runner_classes: {
+        "self-test-authority": {
+          timing_authority: true,
+          host: "ci-bench",
+          qualification: { isolated_cpus: [4, 5] },
+        },
+      },
+    });
+    fs.readFileSync = function readFileSyncForStaticFixtures(file, ...args) {
+      if (path.resolve(String(file)) === policyPath) return fixturePolicy;
+      return originalReadFileSync.call(this, file, ...args);
+    };
+    try {
+      dedicatedMatrix = matrixFreezer.toDedicated(matrixFreezer.createConfig(head));
+      for (const cohort of MEMORY_COHORTS) {
+        memoryConfigs.push([cohort, MEMORY_COHORT_FREEZERS[cohort].freeze(head)]);
+      }
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
+  } else {
+    dedicatedMatrix = matrixFreezer.toDedicated(matrixFreezer.createConfig(head));
+    for (const cohort of MEMORY_COHORTS) {
+      memoryConfigs.push([cohort, MEMORY_COHORT_FREEZERS[cohort].freeze(head)]);
+    }
+  }
   // Every memory cohort, not only the routine one: the cross-engine cohort's
   // competitor rows share one published table with the rustia-only cohort's
   // Rustia rows, and that table may name exactly one machine -- the timing
@@ -2610,20 +2656,40 @@ function selfTest() {
   const operationsStatus = JSON.parse(fs.readFileSync(path.join(REPO, "bench/operations-status.json"), "utf8"));
   const authorities = Object.values(operationsStatus.runner_classes)
     .filter((runner) => runner?.timing_authority === true);
-  assert.equal(authorities.length, 1, "operations-status must name exactly one timing authority");
-  const authority = authorities[0].host;
+  let expectedLabel;
+  if (isPublicProfile) {
+    const profile = JSON.parse(fs.readFileSync(publicProfilePath, "utf8"));
+    assert.equal(profile.schema, "rustia.public-source-profile.v1");
+    assert.equal(profile.state, "private-rehearsal");
+    assert.equal(profile.benchmark_bridge, "pending-private-trusted-pipeline");
+    assert.equal(operationsStatus.profile, "public-source");
+    assert.equal(operationsStatus.measurement?.mode, "paused-pending-private-bridge");
+    assert.equal(operationsStatus.publication?.state, "paused");
+    assert.equal(authorities.length, 0, "paused public operations status must not declare a current timing authority");
+    for (const runner of Object.values(operationsStatus.runner_classes)) {
+      assert.equal(runner?.environment, "github-hosted", "public profile must declare hosted correctness runners only");
+      assert.equal(Object.hasOwn(runner, "host"), false, "public profile must not expose a current runner host");
+      assert.equal(Object.hasOwn(runner, "qualification"), false, "public profile must not expose a current host qualification");
+    }
+    expectedLabel = profile.historical_host_label;
+  } else {
+    assert.equal(authorities.length, 1, "operations-status must name exactly one timing authority");
+    expectedLabel = authorities[0].host;
+  }
+  // Used only by the SSH-label parser fixtures below; in the public profile
+  // this is explicitly a historical provenance label, never an authority.
+  const authority = expectedLabel;
   const lanes = [["matrix", dedicatedMatrix, matrixRules.matrixHostLabel(dedicatedMatrix)]];
-  for (const cohort of MEMORY_COHORTS) {
-    const config = MEMORY_COHORT_FREEZERS[cohort].freeze(head);
+  for (const [cohort, config] of memoryConfigs) {
     lanes.push([`memory ${cohort}`, config, matrixRules.memoryHostLabel(config)]);
   }
   for (const [lane, config, label] of lanes) {
     assert.equal(label, config.provider.host.name, `${lane} rows must be labelled with the attested host`);
-    assert.equal(label, authority, `${lane} rows must be labelled with the timing authority ${authority}`);
+    assert.equal(label, expectedLabel, `${lane} frozen config must preserve the expected host provenance label`);
   }
   // An address in the frozen host block is refused before it can label a
   // cross-engine row, as it is for the routine cohort.
-  const crossEngine = MEMORY_COHORT_FREEZERS["cross-engine"].freeze(head);
+  const crossEngine = memoryConfigs.find(([cohort]) => cohort === "cross-engine")[1];
   assert.throws(
     () => matrixRules.memoryHostLabel({
       ...crossEngine,
@@ -2681,14 +2747,16 @@ function selfTest() {
     for (const tool of ["ssh", "scp"]) {
       fs.writeFileSync(path.join(stubDir, tool), `#!/bin/sh\necho "${tool}" >> "${called}"\n`, { mode: 0o755 });
     }
-    for (const command of ["host-check", "unlock"]) {
+    const dispatchedCommands = isPublicProfile ? ["matrix", "host-check", "unlock"] : ["host-check", "unlock"];
+    for (const command of dispatchedCommands) {
+      const commandRefusal = pausedProfileCommandProblem(command) ?? refusal;
       for (const destination of [authority, `user@${authority}:22`, `ssh://${authority}/`, `ssh://${authority}.`]) {
         const run = spawnSync(process.execPath, [__filename, command], {
           encoding: "utf8",
           env: { ...process.env, [SSH_ENV]: destination, PATH: `${stubDir}${path.delimiter}${process.env.PATH}` },
         });
         assert.equal(run.status, 1, `${command} with ${destination} must be refused: ${run.stderr}`);
-        assert.equal(run.stderr, `run-dedicated-benchmark: ${refusal}\n`, `${command} with ${destination}`);
+        assert.equal(run.stderr, `run-dedicated-benchmark: ${commandRefusal}\n`, `${command} with ${destination}`);
         assert(!fs.existsSync(called), `${command} with ${destination} reached ssh`);
       }
     }
@@ -2750,6 +2818,20 @@ function selfTest() {
     local: false, plan: false, base: undefined, json: undefined, repetitions: undefined,
     confidence: undefined, baseline: undefined, candidate: undefined, passes: undefined,
   };
+
+  const pausedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-paused-profile-"));
+  try {
+    assert.equal(pausedProfileCommandProblem("self-test", pausedRoot), null);
+    assert.equal(pausedProfileCommandProblem("matrix", pausedRoot), null);
+    writeJson(path.join(pausedRoot, "design/public-source-profile.json"), { schema: "rustia.public-source-profile.v1" });
+    for (const command of ["plan", "history", "main", "pr", "profile", "observe", "strings", "accept", "live-serde", "matrix", "memory", "calibrate", "fetch", "unlock", "host-check", "host-fingerprint"]) {
+      assert.match(pausedProfileCommandProblem(command, pausedRoot) ?? "", /disabled while the public-source profile is paused/,
+        `${command} must refuse before any local or SSH work`);
+    }
+    assert.equal(pausedProfileCommandProblem("self-test", pausedRoot), null);
+  } finally {
+    fs.rmSync(pausedRoot, { recursive: true, force: true });
+  }
   assert.deepEqual(parseArgs(["plan"]), { command: "plan", ...defaults });
   assert.deepEqual(parseArgs(["history", "--replace"]), {
     command: "history", ...defaults, replace: true,
@@ -3122,6 +3204,8 @@ try {
   } else if (parsed.command === "self-test") {
     selfTest();
   } else {
+    const profileProblem = pausedProfileCommandProblem(parsed.command);
+    if (profileProblem !== null) fail(profileProblem);
     fs.mkdirSync(STATE_ROOT, { recursive: true });
     useLocalHost(parsed.local === true);
     if (parsed.command === "plan") commandPlan(parsed);

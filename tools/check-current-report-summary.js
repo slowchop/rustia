@@ -5,6 +5,7 @@ const assert = require("assert/strict");
 const {
   REQUIRED_COMMON_WORKLOADS,
   bestAvailableRows,
+  claimGateSection,
   coldStartSection,
   historySection,
   implementationLabel,
@@ -21,6 +22,7 @@ const {
   optimizationEvidenceSection,
   operationsStatusSection,
   requireAuthorityHost,
+  requireHistoricalHost,
   requirePublishedHosts,
   requireSingleHost,
   rustiaBackfillEras,
@@ -100,6 +102,56 @@ function main() {
   assert.match(operationsHtml, /ci-bench/);
   assert.match(operationsHtml, /isolated core 4/);
   assert.match(operationsHtml, /no scheduled job may start a billed instance/i);
+
+  const publicOperationsHtml = operationsStatusSection({
+    profile: "public-source",
+    runner_classes: {
+      "hosted-linux": { environment: "github-hosted", timing_authority: false },
+      "hosted-macos": { environment: "github-hosted", timing_authority: false },
+    },
+    measurement: {
+      mode: "paused-pending-private-bridge",
+      authoritative_runner_classes: [],
+      scheduled_billing_allowed: false,
+      reason: "Measurement is paused pending a trusted private benchmark bridge.",
+    },
+    publication: {
+      state: "paused",
+      reason: "Benchmark-data publication is paused pending a trusted private benchmark bridge.",
+      next_action: "Resume only after a trusted private benchmark bridge is reviewed and enabled.",
+    },
+    progress: {
+      state: "paused",
+      measured_commit: "a".repeat(40),
+      measured_at_unix: 100,
+      latest_relevant_commit: "b".repeat(40),
+      pending_relevant_commit_count: 2,
+      next_action: "Benchmark progress is paused pending a trusted private benchmark bridge.",
+    },
+    landscape: {
+      state: "paused",
+      measured_commit: "a".repeat(40),
+      measured_at_unix: 100,
+      reason: "Landscape refresh is paused with benchmark measurement and publication.",
+      next_action: "Resume after a trusted private benchmark bridge is reviewed and enabled.",
+    },
+  });
+  assert.match(publicOperationsHtml, /Measurement and publication are paused/);
+  assert.match(publicOperationsHtml, /Historical measurements were recorded/);
+  assert.match(publicOperationsHtml, /do not establish current runner authority or current performance stability/);
+  assert.match(publicOperationsHtml, /No public workflow is authorized to measure or publish/);
+  assert.doesNotMatch(publicOperationsHtml, /ci-bench|self-hosted|isolated core/);
+  assert.equal(requireHistoricalHost("ci-bench", "fixture", "ci-bench"), undefined);
+  assert.throws(() => requireHistoricalHost("other-machine", "fixture", "ci-bench"), /records "other-machine" but the public-source profile identifies historical rows as "ci-bench"/);
+  const publicClaimHtml = claimGateSection([{
+    target: "linux-x86_64", workload: "generic_iteration", unit: "iteration",
+    posture: { ready: true },
+  }], true);
+  assert.match(publicClaimHtml, /Historical comparison rows/);
+  assert.match(publicClaimHtml, /not authorized for publication/);
+  assert.doesNotMatch(publicClaimHtml, /All current workload claims are eligible/);
+  assert.match(publicClaimHtml, /Historical/);
+  assert.doesNotMatch(publicClaimHtml, /<span class="claim-pill claim-ready">/);
 
   const optimizationHtml = optimizationEvidenceSection([{
     workload: "generic_iteration",
@@ -669,6 +721,14 @@ function main() {
   assert.match(provisionalHtml, /Latest reviewed A\/A calibration: failed/);
   assert.match(provisionalHtml, /Current repeatability is unresolved/);
   assert.match(provisionalHtml, /no new thresholds have been adopted/);
+  const historicalHtml = historySection(mixedHistory, [], snapshot(1_000, "reference", 100, "ci-bench", "mlua-luau-jit"), [], {
+    status: "failed", reviewed_at: "2026-10-27", run_url: "https://example.invalid/private-run",
+  }, true);
+  assert.match(historicalHtml, /Historical benchmark|Historical A\/A calibration/);
+  assert.match(historicalHtml, /recorded dedicated-VM matrix/);
+  assert.doesNotMatch(historicalHtml, /current dedicated-VM matrix|current matrix/);
+  assert.doesNotMatch(historicalHtml, /href="https:\/\/example\.invalid\/private-run/);
+  assert.match(historicalHtml, /Private run evidence is not included in this public source profile/);
   assert.doesNotMatch(controlledHtml, /2\.000x/);
   const differentBinary = structuredClone(controlledSeries);
   differentBinary.controls[0].control_binary_sha256 = "d".repeat(64);

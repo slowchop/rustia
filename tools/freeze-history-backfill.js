@@ -274,7 +274,16 @@ function sourceModifications(selected) {
     fail(`could not read bench/history/repairs.json: ${error.message}`);
   }
   try {
-    return selectRepairs(registry, selected, (commit) => git(["rev-parse", `${commit}^`]).trim());
+    // The retained registry names original source IDs. Resolve both ends of
+    // each parent proof explicitly in the cleaned graph; never rewrite raw evidence.
+    const { resolveHistoricalCommit } = require("./history-projection.js");
+    registry = { ...registry, repairs: (registry.repairs ?? []).map(repair => ({
+      ...repair, commit: resolveHistoricalCommit(repair.commit),
+      cherry_pick: repair.cherry_pick && { ...repair.cherry_pick,
+        from_commit: resolveHistoricalCommit(repair.cherry_pick.from_commit) },
+    })) };
+    return selectRepairs(registry, selected.map(commit => resolveHistoricalCommit(commit)),
+      (commit) => git(["rev-parse", `${commit}^`]).trim());
   } catch (error) {
     fail(error.message);
   }

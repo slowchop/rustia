@@ -9,6 +9,7 @@ const workflowDir = path.join(root, ".github", "workflows");
 const ciPath = path.join(workflowDir, "ci.yml");
 const rustiaMemoryPath = path.join(workflowDir, "rustia-memory.yml");
 const benchmarkPublicationPath = path.join(workflowDir, "publish-benchmark-data.yml");
+const publicSourceProfilePath = path.join(root, "design", "public-source-profile.json");
 const weeklyMatrixPath = path.join(workflowDir, "weekly-matrix-bench.yml");
 const rustToolchainPath = path.join(root, "rust-toolchain.toml");
 const releasePreflightPath = path.join(root, "tools", "run-release-preflight.js");
@@ -1291,6 +1292,26 @@ function checkBenchmarkPublication(text) {
 }
 
 // Embedded policy checks may supply a minimal process object.
+// The public-source preparation profile is a separate, explicit contract. If
+// its marker is absent, execution continues into the original private-runner
+// checker unchanged. A present but invalid marker fails closed in the public
+// helper; it never falls through to the private contract.
+if (fs.existsSync(publicSourceProfilePath)) {
+  const publicProfile = require("./check-public-workflow-profile.js");
+  if (process.argv?.includes("--self-test")) {
+    const result = publicProfile.selfTest(root);
+    console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);
+    process.exit(0);
+  }
+  try {
+    const result = publicProfile.readCheckout(root);
+    console.log(`workflow policy ok for ${result.files} public workflow file(s) (${result.profile})`);
+  } catch (error) {
+    fail(`public-source profile: ${error.message}`);
+  }
+  process.exit(0);
+}
+
 if (process.argv?.includes("--self-test")) {
   const os = require("node:os");
   const assert = require("node:assert/strict");

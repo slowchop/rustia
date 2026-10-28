@@ -1,92 +1,68 @@
 {
   "schema": "rustia.bench.operations-status.v1",
   "schema_version": 1,
+  "profile": "public-source",
   "runner_classes": {
-    "general-linux": {
-      "environment": "self-hosted-shared",
+    "hosted-linux": {
+      "environment": "github-hosted",
       "timing_authority": false,
-      "reason": "Shared and normally CPU-busy. Valid for work whose result does not depend on wall-clock speed; no result measured here may enter a performance claim, a regression trend, or an engine ranking.",
+      "reason": "Hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
       "allowed_roles": [
         "build",
         "correctness-test",
         "artifact-validation",
-        "relevance-detection",
-        "dependency-update-detection",
-        "artifact-publication"
+        "fuzz-smoke"
       ]
     },
-    "bench-solo": {
-      "environment": "self-hosted-owned-qualified",
-      "timing_authority": true,
-      "host": "ci-bench",
-      "reason": "One owned machine, quiet by construction: cores held off the scheduler, SMT disabled, one job at a time, and attested against the kernel before a run builds anything.",
-      "qualification": {
-        "isolated_cpus": [
-          4,
-          5
-        ],
-        "pinned_cpu": 4,
-        "smt": "disabled",
-        "concurrent_jobs": 1,
-        "cpu_frequency": {
-          "pinned_cores": "held-at-ceiling",
-          "governor": "performance",
-          "boost": "off",
-          "equivalent": "scaling_min_freq equal to scaling_max_freq, under any governor",
-          "exemption": "A pinned core that exposes no cpufreq policy is accepted: the kernel is not scaling it. This qualifies the policy the kernel publishes, not the frequency the core ran at.",
-          "reason": "On an isolated, tickless core nothing drives a dynamic governor's next decision while one process runs, so a process after a long idle can run to completion at the floor. One acceptance leg read dense_tables 1.68x slow that way and passed every idle and steal gate."
-        },
-        "attested_by": "tools/run-dedicated-benchmark.js compares the machine's own report against the frozen config before shipping anything and refuses the run on any disagreement. This field names the mechanism, not the checks: the qualified properties are the keys beside it, and each run's provider record carries the readings taken.",
-        "repeatability": {
-          "protocol": "rustia_history_backfill_v1",
-          "repetitions": 5,
-          "comparisons": 20,
-          "median_spread_percent": 0.41,
-          "worst_spread_percent": 5.74,
-          "method": "Revision pairs that compile to byte-identical binaries, so the figure assumes no model of what counts as equivalent work.",
-          "caveat": "Quote it per workload, not as one number: spread scales inversely with per-unit cost, from 0.32% worst on dense_tables at 39us/unit to 5.74% on closures_upvalues at 372ns/unit. This belongs to the backfill protocol's five repetitions; the A/B acceptance protocol runs 101-201 and is far tighter."
-        }
-      },
+    "hosted-macos": {
+      "environment": "github-hosted",
+      "timing_authority": false,
+      "reason": "Hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
       "allowed_roles": [
         "build",
-        "measurement-progress",
-        "measurement-candidate",
-        "measurement-landscape",
-        "measurement-screening",
-        "measurement-memory",
+        "correctness-test",
+        "artifact-validation"
+      ]
+    },
+    "hosted-windows": {
+      "environment": "github-hosted",
+      "timing_authority": false,
+      "reason": "Hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "allowed_roles": [
+        "build",
+        "correctness-test",
         "artifact-validation"
       ]
     }
   },
   "measurement": {
-    "mode": "attested-owned-host",
-    "authoritative_runner_classes": [
-      "bench-solo"
-    ],
+    "mode": "paused-pending-private-bridge",
+    "authoritative_runner_classes": [],
     "scheduled_billing_allowed": false,
-    "billed_host_creation": "none-possible",
-    "reason": "All timing runs on the attested owned host. Nothing in this repository creates or pays for a billed instance: not on a timer, not on a push, not by dispatch, and not by a recipe. The cross-engine matrix is one of that host's own lanes, and it remains the sole producer of the reference every published Rustia number is normalised against."
+    "reason": "Measurement is paused pending a trusted private benchmark bridge. Historical measurements remain recorded but do not authorize current timing or stability claims."
   },
   "publication": {
-    "state": "active",
-    "reason": "Accepted committed benchmark artifacts are validated and published automatically without taking measurements or creating cloud resources.",
-    "next_action": "Keep the artifact-only publisher healthy and investigate any failed publication before accepting newer public results."
+    "state": "paused",
+    "reason": "Benchmark-data publication is paused pending a trusted private benchmark bridge.",
+    "next_action": "Resume only after a trusted private benchmark bridge is reviewed and enabled."
   },
   "progress": {
-    "state": "pending",
+    "state": "paused",
     "measured_commit": "90bc2ae4c397f6e2bbb1af687cc8e30688010123",
+    "projected_measured_commit": "df240799de22ea8588865a7f594262053c2e92f1",
     "measured_at_unix": 1792952860,
-    "latest_relevant_commit": "f116e72731004af43bdee8fafefc40a05fd3a7ad",
+    "latest_relevant_commit": "63127f420c0fbf9bb6de0887f8fa68559a41d08c",
     "latest_relevant_committed_at_unix": 1793048333,
     "pending_relevant_commit_count": 26,
-    "next_action": "Measure the newest pending performance-relevant commit on the owned benchmark host."
+    "next_action": "Benchmark progress is paused pending a trusted private benchmark bridge."
   },
   "landscape": {
     "state": "paused",
     "measured_commit": "90bc2ae4c397f6e2bbb1af687cc8e30688010123",
+    "projected_measured_commit": "df240799de22ea8588865a7f594262053c2e92f1",
     "measured_at_unix": 1792952860,
     "refresh_interval_days": 35,
-    "reason": "Immutable latest-stable landscape campaigns and engine-version bridges are not implemented yet.",
-    "next_action": "Add version provenance, immutable landscape snapshots, and old/new reference bridge validation before enabling monthly refreshes."
+    "reason": "Landscape refresh is paused with benchmark measurement and publication.",
+    "next_action": "Resume after a trusted private benchmark bridge is reviewed and enabled."
   }
 }

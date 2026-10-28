@@ -658,7 +658,28 @@ function selfTest() {
   }).stdout.trim();
   const rented = freezer.createConfig(head);
   assert.equal(validateConfig(rented).schema, "rustia.linode-fixed-benchmark.v2");
-  const dedicated = freezer.toDedicated(rented);
+  const policyPath = path.resolve(__dirname, "../bench/operations-policy.json");
+  const publicProfile = fs.existsSync(path.resolve(__dirname, "../design/public-source-profile.json"));
+  const originalReadFileSync = fs.readFileSync;
+  if (publicProfile) {
+    // Exercise the legacy config converter in a static fixture. This does not
+    // alter the public paused policy or authorize any runner command.
+    const fixturePolicy = JSON.stringify({ runner_classes: {
+      fixture: { timing_authority: true, host: "ci-bench", qualification: { isolated_cpus: [4, 5] } },
+    } });
+    fs.readFileSync = function readPolicyFixture(file, ...args) {
+      if (path.resolve(String(file)) === policyPath) return fixturePolicy;
+      return originalReadFileSync.call(this, file, ...args);
+    };
+  }
+  let dedicated;
+  let crossEngine;
+  try {
+    dedicated = freezer.toDedicated(rented);
+    crossEngine = require("./create-cross-engine-memory-config.js").createConfig(head);
+  } finally {
+    if (publicProfile) fs.readFileSync = originalReadFileSync;
+  }
   assert.equal(validateConfig(dedicated).schema, DEDICATED_SCHEMA);
   assert.equal(dedicated.provider.host.name, "ci-bench");
   // Two distinct pinned cores, both in the kernel's isolated set.
@@ -696,7 +717,6 @@ function selfTest() {
   // The second freezer, the cross-engine cohort, is held to the same link:
   // it must validate here, and it must take the all-engines build path
   // rather than the rustia-only shortcut.
-  const crossEngine = require("./create-cross-engine-memory-config.js").createConfig(head);
   assert.equal(validateConfig(crossEngine).schema, DEDICATED_SCHEMA);
   assert.equal(crossEngine.publication.mode, "memory");
   assert.equal(crossEngine.publication.rows, 110);

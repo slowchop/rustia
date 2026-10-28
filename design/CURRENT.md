@@ -15,6 +15,15 @@ platform and package-release requirements remain in force. The source-access
 audit and remaining visibility gates are recorded in
 [98-public-source-readiness.md](98-public-source-readiness.md).
 
+**Full-history source projection (2026-10-28):** the user selected a new repository
+with the complete cleaned history; the existing repository stays private. Local
+preparation preserves the frozen 1,004-commit graph and attribution, with an
+explicit old-to-new map and protected runtime-input checks. Rewritten signatures
+are not retained. The prepared public profile uses hosted correctness CI and
+pauses benchmark automation pending a trusted bridge. No new repository,
+visibility change, Actions permission change or package publication is authorized
+by this selection. See [98](98-public-source-readiness.md#full-history-projection-rehearsal-2026-10-28).
+
 **Benchmark history follow-up:** local fixes sequence graph publication after
 saved per-commit data, carry host-control records into the graph, and separate
 observations across flagged host changes. Original results are retained; this
