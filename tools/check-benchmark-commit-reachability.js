@@ -89,7 +89,13 @@ function subjectOf(hash) {
 // on a clean repository and report nothing on a dirty one.
 function selfTest() {
   const tree = git(["rev-parse", "HEAD^{tree}"]).trim();
-  const orphan = git(["commit-tree", tree, "-m", "reachability self-test"]).trim();
+  const authorName = "Rustia reachability self-test";
+  const authorEmail = "reachability-self-test@example.invalid";
+  const orphan = git([
+    "-c", `user.name=${authorName}`,
+    "-c", `user.email=${authorEmail}`,
+    "commit-tree", tree, "-m", "reachability self-test",
+  ]).trim();
   const reachable = reachableCommits();
   const head = git(["rev-parse", "HEAD"]).trim();
   const failures = [];
@@ -99,6 +105,11 @@ function selfTest() {
   if (classify(absent, reachable, new Set(), new Map([[absent, orphan]])) !== "missing") failures.push("unreachable projection accepted");
   if (classify(tree, reachable, new Set([tree])) !== "object") failures.push("reachable tree incorrectly rejected");
   if (!isCommit(orphan)) failures.push("orphan commit was not recognised as a commit");
+  const identity = git(["show", "-s", "--format=%an%n%ae%n%cn%n%ce", orphan]).trim().split("\n");
+  if (identity[0] !== authorName || identity[1] !== authorEmail
+    || identity[2] !== authorName || identity[3] !== authorEmail) {
+    failures.push("orphan commit did not use the explicit self-test identity");
+  }
   if (reachable.has(orphan)) failures.push("orphan commit was reported reachable");
   if (!reachable.has(head)) failures.push("HEAD was reported unreachable");
   if (!isCommit(head)) failures.push("HEAD was not recognised as a commit");
