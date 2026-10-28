@@ -23,6 +23,10 @@ are not retained. The prepared public profile uses hosted correctness CI and
 pauses benchmark automation pending a trusted bridge. No new repository,
 visibility change, Actions permission change or package publication is authorized
 by this selection. See [98](98-public-source-readiness.md#full-history-projection-rehearsal-2026-10-28).
+The prepared first-history transfer path is pinned to the reviewed 75-ref
+manifest and refuses to run unless read-only checks confirm a private empty
+target with Actions disabled; it still runs the ordinary full preflight. This
+local guard is fixture-tested, but no remote refs have been transferred.
 
 **Benchmark history follow-up:** local fixes sequence graph publication after
 saved per-commit data, carry host-control records into the graph, and separate

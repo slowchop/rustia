@@ -220,3 +220,12 @@ can otherwise trigger their old workflows. Keep Actions disabled during initial
 history transfer, install the prepared safe tip, then validate the hosted check
 inventory and required protections before a separate visibility decision. No
 permission change is implied by choosing the new-repository strategy.
+
+The prepared checkout's pre-push guard has a manifest-pinned first-history
+import path for the reviewed `slowchop/rustia-source` ref set. It fails closed
+unless read-only GitHub/API checks confirm the exact private, empty non-fork repository
+and disabled Actions; it verifies every local ref against the reviewed manifest
+and projection, runs the ordinary full release preflight, then repeats those
+checks. The path is prepared and fixture-tested only. No repository refs have
+been pushed, and the live target/settings still require verification before
+any transfer.

@@ -13,6 +13,7 @@ try {
   git("init"); git("config", "commit.gpgsign", "false"); git("config", "user.name", "Guard test"); git("config", "user.email", "guard@example.invalid");
   fs.mkdirSync(path.join(temporary, "tools"));
   fs.copyFileSync(path.join(__dirname, "pre-push.js"), path.join(temporary, "tools/pre-push.js"));
+  fs.copyFileSync(path.join(__dirname, "initial-history-import.js"), path.join(temporary, "tools/initial-history-import.js"));
   fs.writeFileSync(path.join(temporary, "tools/run-release-preflight.js"), `
     const fs = require('node:fs');
     if (process.env.GUARD_TEST_MODE === 'fail') process.exit(1);
