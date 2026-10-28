@@ -6,14 +6,11 @@ full preflight, and checks that neither HEAD nor the checkout changed during it.
 It refuses to replace an existing hook. Git can bypass local hooks, so required
 CI remains authoritative.
 
-For the reviewed private first-history transfer, `RUSTIA_INITIAL_HISTORY_IMPORT`
-selects a manifest-pinned path. The hook checks the exact repository URL, all
-75 manifest refs and local object IDs, an empty private non-fork target with Actions
-disabled, and the cleaned-history projection before running this same full
-preflight. It rechecks the manifest, refs, clean HEAD and remote state after
-validation. Ordinary pushes still require the checked-out commit. Offline
-fixtures cover rejected manifests and remote states; they do not perform a push
-or establish that the target is ready.
+The temporary first-history bootstrap guard is retained in staging commit
+`417828e` for provenance and is not part of the current source. Current pushes
+use the ordinary exact-HEAD and full-preflight guard above. The initial private
+transfer was verified with Actions disabled; accepting staged revisions requires
+the hosted correctness checks. This does not authorize public visibility.
 
 For iteration, `just check-quick` runs formatting, repository/evidence checks,
 tool self-tests and all compiler unit tests. This is early feedback, not release

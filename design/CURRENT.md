@@ -2,17 +2,19 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-28.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-29.)
 
 ## One-paragraph state
 
-**Source-access preparation (2026-10-27):** prepare the repository for public
-inspection separately from package publication or a supported 0.1/1.0 release.
-The user has authorized a repository/history privacy audit and local preparation
-only. Keep the repository private, all workspace packages at `publish = false`,
-and the workspace at `0.0.1` until separately authorized. Existing runtime,
-platform and package-release requirements remain in force. The source-access
-audit and remaining visibility gates are recorded in
+**Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
+repository for inspection separately from package publication or a supported
+0.1/1.0 release. The user has authorized private staging in a new repository;
+the cleaned history has been transferred and verified there. It uses hosted
+correctness CI; exact staging evidence is retained privately. Public visibility and package
+publication are not authorized. Keep all workspace packages at `publish =
+false` and the workspace at `0.0.1`. Existing runtime, platform and
+package-release requirements remain in force. The source-access audit and
+remaining visibility gates are recorded in
 [98-public-source-readiness.md](98-public-source-readiness.md).
 
 **Full-history source projection (2026-10-28):** the user selected a new repository
@@ -20,13 +22,12 @@ with the complete cleaned history; the existing repository stays private. Local
 preparation preserves the frozen 1,004-commit graph and attribution, with an
 explicit old-to-new map and protected runtime-input checks. Rewritten signatures
 are not retained. The prepared public profile uses hosted correctness CI and
-pauses benchmark automation pending a trusted bridge. No new repository,
-visibility change, Actions permission change or package publication is authorized
-by this selection. See [98](98-public-source-readiness.md#full-history-projection-rehearsal-2026-10-28).
-The prepared first-history transfer path is pinned to the reviewed 75-ref
-manifest and refuses to run unless read-only checks confirm a private empty
-target with Actions disabled; it still runs the ordinary full preflight. This
-local guard is fixture-tested, but no remote refs have been transferred.
+pauses benchmark automation pending a trusted bridge. The private staging
+repository received the verified history with Actions disabled during import.
+Its active profile uses hosted correctness CI and the ordinary exact-commit
+push guard; the one-time bootstrap code remains only in history. Public visibility, package
+publication and benchmark automation remain disabled. See
+[98](98-public-source-readiness.md#full-history-projection-rehearsal-2026-10-28).
 
 **Benchmark history follow-up:** local fixes sequence graph publication after
 saved per-commit data, carry host-control records into the graph, and separate
