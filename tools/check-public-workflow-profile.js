@@ -144,6 +144,9 @@ function checkActionPins(text, label) {
 
 function checkNoForbidden(text, label) {
   for (const needle of FORBIDDEN_WORKFLOW_TEXT) forbidText(text, needle, label);
+  if (/^\s*git config --global --add safe\.directory\s+.*\*.*$/m.test(text)) {
+    reject(`${label} must not use wildcard git safe.directory scope`);
+  }
   if (/^\s*uses:\s*[^\s]+@(?![0-9a-f]{40}\b)/m.test(text)) {
     reject(`${label} must pin every action to a full commit SHA`);
   }
@@ -172,6 +175,15 @@ function checkCi(text) {
     'run: test "$PREFLIGHT_RESULT" = success && test "$WEBKIT_RESULT" = success',
     `${label} release-gate`,
   );
+  const webkit = jobs.get("webkit-runtime");
+  const safeDirectory = '          git config --global --add safe.directory "$GITHUB_WORKSPACE"';
+  const browserCommand = "          bash tools/run-browser-correctness.sh webkit 1.64.1";
+  requireText(webkit, [
+    "      - name: Execute both feature modes in headless WebKit",
+    "        run: |",
+    safeDirectory,
+    browserCommand,
+  ].join("\n"), `${label} webkit-runtime`);
   for (const textFragment of [
     "name: Engine build (${{ matrix.target }})",
     "aarch64-apple-darwin",
@@ -311,11 +323,18 @@ function selfTest(root) {
       ["credentials persisted", "ci.yml", (s) => s.replace("persist-credentials: false", "persist-credentials: true"), /persist-credentials: false/],
       ["enabled build cache", "ci.yml", (s) => s.replace("cache: false", "cache: true"), /cache: false/],
       ["missing preflight aggregate", "ci.yml", (s) => s.replace("run: test \"$PREFLIGHT_RESULT\" = success && test \"$WEBKIT_RESULT\" = success", "run: true"), /run: test.*PREFLIGHT_RESULT/],
+      ["missing WebKit safe-directory setup", "ci.yml", (s) => s.replace('          git config --global --add safe.directory "$GITHUB_WORKSPACE"\n', ""), /safe\.directory/],
+      [
+        "wildcard WebKit safe-directory setup",
+        "ci.yml",
+        (s) => s.replace('git config --global --add safe.directory "$GITHUB_WORKSPACE"', "git config --global --add safe.directory '*'"),
+        /wildcard git safe\.directory/,
+      ],
     ]) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
-    return { cases: 18, passed: true };
+    return { cases: 20, passed: true };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

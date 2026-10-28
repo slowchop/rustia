@@ -27,9 +27,13 @@ CI runs the three stages independently. Every stage fetches the pinned lockfile
 dependencies it needs, including offline package consumers. The unchanged
 required status `Release preflight` succeeds only when all stages succeed;
 failure, cancellation or a skipped stage cannot pass it. The gate also requires
-the headless WebKit browser job; real Safari remains release-candidate acceptance. Linux native goldens
-remain in the workspace stage. Existing Mac, Node, build-matrix and benchmark
-checks remain in place.
+the headless WebKit browser job; real Safari remains release-candidate
+acceptance. The WebKit job runs in a container and adds only `$GITHUB_WORKSPACE`
+to Git's safe-directory list before the browser tests, because the checkout
+action's temporary HOME setting does not carry into that container step. Linux
+native goldens remain in the workspace stage. Mac, Node and build-matrix checks
+remain in place. Saved benchmark artifacts are validated offline; the private
+staging profile runs no performance measurements.
 
 The refactor retains all 68 previous preflight commands. It adds compiler unit
 tests as an early check, plus tests of stage selection and push rejection. No

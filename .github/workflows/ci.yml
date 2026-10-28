@@ -298,4 +298,6 @@ jobs:
           cargo install wasm-bindgen-cli --version 0.2.126 --locked
           npm ci --prefix tools/browser --ignore-scripts
       - name: Execute both feature modes in headless WebKit
-        run: bash tools/run-browser-correctness.sh webkit 1.64.1
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash tools/run-browser-correctness.sh webkit 1.64.1
