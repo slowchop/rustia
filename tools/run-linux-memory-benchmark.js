@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { checkDiskSpace } = require("./benchmark-disk-space.js");
 
 // The run's working tree. Was fixed at /opt/rustia, which only a root process on
 // a throwaway instance can write; the owned host runs this as an ordinary user.
@@ -559,6 +560,7 @@ async function execute(configFile, providerFile, bundle) {
     // which needs root and outlives the run. On an owned machine that is an
     // unrequested change to somebody's box; quiet is asserted by the idle gate.
     fs.rmSync(evidenceDirectory, { recursive: true, force: true });
+    checkDiskSpace(ROOT, path.join(evidenceDirectory, "disk-space.json"));
     const protocolFile = path.join(ROOT, "memory-protocol.json");
     writeJson(protocolFile, memoryProtocol(config));
     const quiet = await waitForQuiet(config);

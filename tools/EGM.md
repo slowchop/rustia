@@ -6,6 +6,7 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Interface
 
+- [`benchmark-disk-space.js`](benchmark-disk-space.js) shares the 20 GiB and 20% available-filesystem reserve between coordinator admission and all three post-build runner checks. Numeric post-build snapshots, including refusals, are saved before quiet windows; no device names or paths are exported. The coordinator explicitly ships the helper with each runner and tests that inbox dependency list. This is admission and a post-build check, not continuous disk monitoring.
 - [`run-dedicated-benchmark.js`](run-dedicated-benchmark.js) coordinates owned-host history, per-commit, PR screening, A/B acceptance, live-Serde, calibration, matrix, and memory work. It obtains its SSH destination from an environment variable; the published host label is deliberately not the connection target.
 - `just check-benchmark-results` runs offline self-tests for benchmark analyzers, runners, and renderers plus committed-artifact validators ([Justfile](../Justfile)). `just release-preflight` invokes the full staged release preflight inventory; `just check-quick` runs its early checks.
 - [`pre-push.js`](pre-push.js) runs the full inventory against a clean, unchanged checked-out commit. [`install-git-hooks.js`](install-git-hooks.js) installs the checkout-local guard while preserving existing hooks; [`check-pre-push.js`](check-pre-push.js) and [`check-preflight.js`](check-preflight.js) validate these contracts.
