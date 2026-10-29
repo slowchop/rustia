@@ -1,4 +1,9 @@
 //! Standard/live objects can change application state immediately.
+//!
+//! Run from the repository root:
+//! `cargo run --locked -p rustia --example mutable_objects`
+//! Expected output: a line starting with `Counter is 3 after:`, followed by the
+//! script failure. The assertion checks that the counter change survived it.
 
 use rustia::{Error, ObjectType, Result, RustiaBuilder};
 
@@ -8,6 +13,7 @@ struct Counter {
 
 fn main() -> Result<()> {
     let mut lua = RustiaBuilder::standard().build()?;
+    // Register the type's script methods before creating an instance.
     lua.register_object_type(
         ObjectType::<Counter>::new("Counter")
             .method("value", 1, |counter: &Counter| counter.value)
@@ -24,6 +30,7 @@ fn main() -> Result<()> {
             ),
     )?;
     let counter = lua.create_object(Counter { value: 0 })?;
+    // Expose a live handle: Luau calls mutate this same Rust payload.
     lua.globals()?
         .set_live(&mut lua, "counter", &counter.as_value())?;
 

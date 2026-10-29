@@ -4,13 +4,15 @@
 
 These examples show the facade's supported embedding shapes: owned values and Serde, chunk builders, diagnostics, modules, live object graphs, host callbacks, typed invocation journals, deterministic object methods, hot replacement, and standard-profile mutable Rust objects.
 
+The introductory embedding, chunk-builder, mutable-object, and live-value files start with their purpose, repository-root run command, and expected outcome. Their comments mark the main integration steps.
+
 ## Interface
 
 - [embedding.rs](./embedding.rs): owned conversion, extension callbacks, Serde, and decision reset.
 - [chunk_builder.rs](./chunk_builder.rs): source labels and exact lexical environments.
 - [diagnostics.rs](./diagnostics.rs): human-readable error reports.
 - [typed_invocation.rs](./typed_invocation.rs) and [game_objects.rs](./game_objects.rs): borrowed per-call host context and staged output records.
-- [live_values.rs](./live_values.rs): rooted handles and shared/cyclic table identity.
+- [live_values.rs](./live_values.rs): rooted handles, shared/cyclic table identity, and typed stale-handle rejection after reset.
 - [module_resolution.rs](./module_resolution.rs): host-supplied module resolver.
 - [hot_reload.rs](./hot_reload.rs): candidate installation and host-owned replacement.
 - [mutable_objects.rs](./mutable_objects.rs): immediate standard-profile Rust payload mutation.
@@ -29,4 +31,4 @@ Examples may print status or diagnostics and execute guest code. The two `_bench
 
 ## Verification
 
-From the repository root, compile examples with `cargo check --locked -p rustia --examples`. Run `cargo run --locked -p rustia --example hardened_decision` to check success, record overflow without publication, and reuse after automatic reset. Release preflight runs this correctness example. Do not run the timing examples.
+From the repository root, `just check-examples` compiles every example and executes embedding, chunk-builder, mutable-object, live-value, game-object, and hardened-decision correctness checks. Release preflight executes the same six examples. The hardened example checks success, record overflow without publication, and reuse after automatic reset. Do not run the timing examples.

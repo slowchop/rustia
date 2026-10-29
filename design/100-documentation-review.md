@@ -77,11 +77,11 @@ The nominal one-paragraph state spans hundreds of lines, and the file contains c
 
 Keep one current summary, implemented contract links, genuine open gates and one next-action list. Move completed chronology into its existing dated acceptance/audit record, preserving citations and decisions. Review this as its own change: CURRENT is authoritative, so a wholesale rewrite without checking every retained requirement would be risky. Do not delete evidence to achieve a line target.
 
-### Turn existing examples into teaching tools
+### Finish teaching guidance for examples
 
-Add short purpose/run/expected-result headers and a few comments marking the important steps. Introduce simple mutable objects before deterministic staged game changes. Remove redundant selection of default profiles and incidental `unwrap` calls from introductory examples when changing those examples; use their existing correctness checks to verify the edits.
+The introductory pass is implemented in [embedding](../crates/rustia/examples/embedding.rs), [chunk builder](../crates/rustia/examples/chunk_builder.rs), [mutable objects](../crates/rustia/examples/mutable_objects.rs) and [live values](../crates/rustia/examples/live_values.rs). Each starts with its purpose, repository-root run command and expected outcome, with a few comments marking the integration boundaries. README already presents simple mutable objects before staged game objects. The live-value example removes redundant default-profile selection, propagates builder errors, and requires the typed `StaleRetainedValue` error after reset. `just check-examples` and release preflight execute all four assertion sets alongside game objects and hardened decisions; all six pass.
 
-The first Serde recipe should list the application's direct `serde` dependency and derive feature. Show dense arrays versus sparse/mixed tables, checked integer conversion, and copied versus identity-preserving results where readers choose a conversion. Method-level details belong beside the methods, not in a new serialization chapter.
+The embedding header now lists the application's direct `serde` dependency and derive feature. Remaining conversion guidance should show dense arrays versus sparse/mixed tables, checked integer conversion, and copied versus identity-preserving results where readers choose a conversion. Extend useful headers to the more advanced examples when touching them. Method-level details belong beside the methods, not in a new serialization chapter.
 
 ### Treat the progress dashboard as a dated snapshot
 
