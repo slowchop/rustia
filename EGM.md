@@ -45,6 +45,8 @@ the same commit-pinned setup action used by the build matrix, then verifies the 
 before running shared correctness suites. The [Justfile](./Justfile) remains the local
 validation entry point. The ignored private sibling is a separate repository and is outside
 this map.
+The hosted Linux workspace job additionally runs the default-off executor accounting
+diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.
 
 ## Invariants
 

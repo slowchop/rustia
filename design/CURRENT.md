@@ -6,6 +6,13 @@
 
 ## One-paragraph state
 
+**Executor accounting diagnostics (2026-10-30):** the default-off executor
+census partitions GC-root refreshes by control-memory accounting state. A fixed
+hosted Linux CI test reports setup and workload-call counts separately at bounded
+input sizes. These counts establish path exposure, not elapsed cost or a
+regression cause; ordinary benchmark builds contain no instrumentation. See
+[the validation contract](97-validation-workflow.md).
+
 **Retained-handle stateful coverage (2026-10-30):** the bounded embedding fuzzer
 now interleaves retained exports/functions with replacement, captured-state
 installation rollback, clone/drop, verified collection and decision reset.

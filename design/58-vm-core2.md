@@ -703,9 +703,11 @@ default is now purely a measured performance decision behind the standard contro
 
 **Measured size of the root-scan prize (2026-08-26).** `Vm::update_current_gc_roots` clears the current
 frame's root vector and copies the whole register file, capture cells, varargs, and pending return
-prefixes into it, and it runs at every instruction `instruction_may_invoke_guest` reports — which
-includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, `Concat`, and `Len`. The
-`executor-diagnostics` census counts that traffic per workload at `n = 32`:
+prefixes into it, and it runs at every instruction `instruction_may_invoke_guest` reports in the scalar
+dispatcher — which includes `GetIndex`/`SetIndex` unconditionally, plus calls that reach generic dispatch,
+global access, `Concat`, and `Len`. An admitted scalar closure leaf can return before this root-refresh
+predicate, so opcode classification alone does not give the dynamic refresh count. The
+`executor-diagnostics` census counts actual refreshes per workload at `n = 32`:
 
 | workload | executed | root refreshes | values copied | copies per executed instruction |
 | --- | --- | --- | --- | --- |
@@ -714,6 +716,17 @@ includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, 
 | `stdlib_math_table` | 1,771 | 133 | 1,699 | 0.96 |
 | `dense_tables` | 222,933 | 86 | 1,290 | 0.006 |
 | `array_mutation` | 166,786 | 16 | 240 | 0.001 |
+
+**Accounting-path census (2026-10-30).** The default-off
+`executor-diagnostics` counters partition actual refresh attempts into clean
+accounting updates, dirty-accounting skips, and calls with no current frame.
+The feature-gated compiler test `gc_accounting_paths.rs` reports setup and
+single-call deltas separately for the real `closures_upvalues` and
+`generic_iteration` Luau sources at `n = 32`, `512`, and their acceptance sizes.
+It also reports closure-fast and dynamic leaf-value entries and asserts fixed
+checksums. This is correctness-only path evidence: it adds no timings, and its
+output must come from the explicit hosted CI diagnostic step before drawing
+conclusions about which path ran in a particular workload.
 
 **Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
 the prize was bounded before committing to the rewrite. Both arms disable deterministic collection

@@ -29,6 +29,9 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Invariants
 
+- `check-public-workflow-profile.js` also requires the fixed feature-gated executor
+  accounting diagnostic in the hosted workspace stage; it is not a local profiling command.
+
 - `ci-bench` alone is authorized to produce timing evidence. Local builds, correctness checks, and artifact validation are not performance evidence ([AGENTS.md](../AGENTS.md#benchmark-policy), [CURRENT.md](../design/CURRENT.md)).
 - The checked-in design says the repository does not create or pay for cloud instances, and describes `run-linode-benchmark.js` as retired except for offline self-test use ([operations design](../design/81-benchmark-operations.md#cost)).
 - Do not add hostnames, addresses, credentials, or other private infrastructure details to public tool documentation ([AGENTS.md](../AGENTS.md#where-things-live-public-vs-private-boundary)).

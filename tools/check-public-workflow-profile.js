@@ -170,6 +170,13 @@ function checkCi(text) {
   const jobs = jobBlocks(text, label);
   requireText(text, "max-parallel: 2", label);
   requireText(jobs.get("release-preflight"), "fetch-depth: 0", `${label} release-preflight`);
+  requireText(jobs.get("release-preflight"), [
+    "      - name: Check feature-gated executor accounting paths",
+    "        if: matrix.stage == 'workspace'",
+    "        run: |",
+    "          cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings",
+    "          cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture",
+  ].join("\n"), `${label} executor accounting diagnostic`);
   requireText(jobs.get("release-gate"), "needs: [release-preflight, webkit-runtime]", `${label} release-gate`);
   requireText(jobs.get("release-gate"), "if: always()", `${label} release-gate`);
   requireText(jobs.get("release-gate"), "PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}", `${label} release-gate`);
@@ -306,8 +313,10 @@ function selfTest(root) {
   const files = EXPECTED_FILES.slice();
   const run = (changedProfile = profile, changedFiles = files, changedWorkflows = workflows) =>
     validatePublicProfile({ profile: changedProfile, files: changedFiles, workflows: changedWorkflows });
+  let cases = 0;
   const expectFail = (label, fn, pattern) => {
     assert.throws(fn, pattern, label);
+    cases += 1;
   };
   try {
     assert.deepEqual(run(), { files: 2, profile: "private-rehearsal" });
@@ -338,6 +347,8 @@ function selfTest(root) {
       ["credentials persisted", "ci.yml", (s) => s.replace("persist-credentials: false", "persist-credentials: true"), /persist-credentials: false/],
       ["enabled build cache", "ci.yml", (s) => s.replace("cache: false", "cache: true"), /cache: false/],
       ["missing preflight aggregate", "ci.yml", (s) => s.replace("run: test \"$PREFLIGHT_RESULT\" = success && test \"$WEBKIT_RESULT\" = success", "run: true"), /run: test.*PREFLIGHT_RESULT/],
+      ["missing executor accounting diagnostic", "ci.yml", (s) => s.replace("--test gc_accounting_paths -- --nocapture", "--test missing_diagnostic -- --nocapture"), /executor accounting diagnostic/],
+      ["duplicated executor accounting diagnostic", "ci.yml", (s) => s.replace("      - name: Check feature-gated executor accounting paths\n        if: matrix.stage == 'workspace'", "      - name: Check feature-gated executor accounting paths\n        if: always()"), /executor accounting diagnostic/],
       ["missing WebKit safe-directory setup", "ci.yml", (s) => s.replace('          git config --global --add safe.directory "$GITHUB_WORKSPACE"\n', ""), /safe\.directory/],
       ["missing browser recipe build", "ci.yml", (s) => s.replace("cargo build --locked --manifest-path demos/web-live/Cargo.toml", "true"), /web-live recipe/],
       ["missing browser recipe execution", "ci.yml", (s) => s.replace("node tools/browser/web-live-example.cjs", "true"), /web-live recipe/],
@@ -351,7 +362,7 @@ function selfTest(root) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
-    return { cases: 22, passed: true };
+    return { cases, passed: true };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

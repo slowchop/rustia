@@ -12,6 +12,8 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).
 - Executed browser/native platform evidence and remaining gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
 - Staged validation and the complete pre-push inventory: [97-validation-workflow.md](./97-validation-workflow.md).
+- Hosted executor-accounting path counts are a default-off CI diagnostic, described
+  in the validation contract and [VM Core 2](./58-vm-core2.md); they provide no timing acceptance.
 - Source-access preparation, history-audit scope and visibility gates: [98-public-source-readiness.md](./98-public-source-readiness.md). Separate from supported releases and package publication.
 - [history-projection.json](./history-projection.json) maps the frozen private history to its cleaned projection and fingerprints protected runtime inputs; [public-source-profile.json](./public-source-profile.json) selects hosted correctness CI, keeps public benchmark automation paused, and records the private bridge's exact-cohort-only availability. Original signatures and private metadata bytes are not authenticated by the projection.
 - Benchmark graph publication ordering, host-control investigation and history presentation: [99-benchmark-history-integrity.md](./99-benchmark-history-integrity.md).
