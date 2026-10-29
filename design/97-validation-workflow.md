@@ -47,10 +47,10 @@ show whether scheduling helps; they are not interpreter performance evidence.
 
 ## First CI observation
 
-[Run 39883557562](https://github.com/slowchop/rustia/actions/runs/39883557562)
+[Run 39883557562](https://github.com/slowchop/rustia-historic/actions/runs/39883557562)
 passed the preflight gate in 20 minutes 21 seconds from the first stage start to
 the aggregate completion. The previous successful main preflight,
-[39863764500](https://github.com/slowchop/rustia/actions/runs/39863764500), took
+[39863764500](https://github.com/slowchop/rustia-historic/actions/runs/39863764500), took
 41 minutes 4 seconds. This is about 50% less elapsed time in this pair of runs,
 not a controlled comparison: machine state, caches and revisions differ.
 The quick stage finished in 41 seconds including setup. All three stages passed.

@@ -6,6 +6,20 @@
 
 ## One-paragraph state
 
+**Documentation and repository identity (2026-10-29):** the cleaned source
+repository is `slowchop/rustia`; the original private repository is
+`slowchop/rustia-historic`. Both remain private and packages remain unpublished.
+Source visibility does not imply accepting outside contributions. Contribution,
+issue-reporting and support policies are undecided; documentation must not invite
+participation or promise maintainer review. Main protections and auto-merge
+settings for the cleaned repository still await separate approval. Its hosted
+correctness CI has passed; historical benchmark automation remains separate.
+Older PR and CI links target the private historic repository; they are retained
+evidence, not an anonymously accessible public verification service. The
+[documentation review](100-documentation-review.md) records the completed
+entry-point/reference fixes and prioritized reader-facing additions and cuts;
+API-reference completion remains open.
+
 **Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
 repository for inspection separately from package publication or a supported
 0.1/1.0 release. The user has authorized private staging in a new repository;
@@ -69,13 +83,13 @@ then rechecks after builds before quiet windows; this does not establish a timin
 cause, change thresholds or authorize public source/package publication.
 
 PR #74 runtime `f116e727`, delivered as `b5982752`, passes the direct
-sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841).
+sixteen-pair original-baseline comparison [40407361841](https://github.com/slowchop/rustia-historic/actions/runs/40407361841).
 Iteration, closures and math/table improve; dense and sparse tables have 99%
 intervals spanning zero. All unchanged material-regression thresholds are
 excluded, with flagged baseline outliers retained. Independent raw-data and
 exact-head correctness audits pass, including native Linux ARM64 and manual
 Windows contracts with matching goldens. Supplemental eight-pair string acceptance
-[40407374105](https://github.com/slowchop/rustia/actions/runs/40407374105) also
+[40407374105](https://github.com/slowchop/rustia-historic/actions/runs/40407374105) also
 passes, measuring -2.11% [-4.19%, -1.33%] at 99% confidence. Performance and
 exact-runtime correctness are accepted. Delivery uses current-head CI and
 required merge gates. Earlier failures, the rejected first tape handoff,
@@ -133,7 +147,7 @@ code independent of interpreter implementation types. Required checks and
 independent reviews gate every rollout PR; the private baseline does not close
 the broader public-release checklist.
 
-**The application API boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)**
+**The application API boundary merged in [PR #63](https://github.com/slowchop/rustia-historic/pull/63)**
 as `8f8558abf361e939599d2c093614ae0776682d26`. The facade owns settings,
 profiles/capabilities, memory samples, source/compile/runtime errors, and
 source diagnostics. Builder configuration replaces raw VM constructors/settings;
@@ -153,7 +167,7 @@ pins above remain historical evidence; final pins and gates are in the acceptanc
 record. The CLI accepts `-V`/`--version`.
 See [the boundary contract](75-embedded-api.md#application-api-boundary).
 
-**Focused builtin error-phase fixes merged in [PR #64](https://github.com/slowchop/rustia/pull/64)**
+**Focused builtin error-phase fixes merged in [PR #64](https://github.com/slowchop/rustia-historic/pull/64)**
 as `71524dba99b277622f27e0522c8740f611c37547`.
 Unknown standard-library fields and argument lists outside a specialized opcode's
 shape use ordinary calls, so runtime failures no longer reject valid source or
@@ -210,11 +224,11 @@ and candidate-lock package identities. Native Mac and Node jobs have executed
 the integrated candidate; the complete job logs and Linux/final acceptance gates
 are linked from the acceptance record.
 PR #60's stale generated benchmark-progress report was repaired in
-[PR #61](https://github.com/slowchop/rustia/pull/61), merged after full preflight,
+[PR #61](https://github.com/slowchop/rustia-historic/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The
 repair changed no measurement or performance claim.
 
-**Typed Rust objects merged in [PR #65](https://github.com/slowchop/rustia/pull/65)**
+**Typed Rust objects merged in [PR #65](https://github.com/slowchop/rustia-historic/pull/65)**
 as `2187c8d16ec5c222bb01ed15ab68950569e937ce`.
 `ObjectType<T, H>` registers methods and `Object<T>` keeps a VM/epoch-bound live
 instance. Callbacks accept object handles and return existing or fresh objects
@@ -239,7 +253,7 @@ and instrumentation-free execution counters cover this policy. See the
 acceptance record; no local timings or new speed claim are used.
 
 [Error behaviour and fuzzing](82-error-behaviour-fuzzing.md) is complete in
-[PR #34](https://github.com/slowchop/rustia/pull/34): cross-profile failure/recovery
+[PR #34](https://github.com/slowchop/rustia-historic/pull/34): cross-profile failure/recovery
 regressions, bounded stateful embedding and isolated pinned-Luau differential
 fuzzing, and the quota-limited PUC short-string placement fix are merged.
 Both six-target remote campaigns pass, including expanded stateful coverage at
@@ -250,7 +264,7 @@ their full rollout gates and required reviews, using exact upstream revision
 This is not a release-completion or performance claim.
 
 [Human-friendly script diagnostics](79-script-diagnostics.md) merged in
-[PR #32](https://github.com/slowchop/rustia/pull/32), with host-only source
+[PR #32](https://github.com/slowchop/rustia-historic/pull/32), with host-only source
 snapshots, expression spans, typed errors, bounded reports, and console source
 mapping. Canonical release preflight, full correctness/conformance tests,
 platform/Node-V8 CI and remote PR screening pass. Controlled-client changes are

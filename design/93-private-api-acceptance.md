@@ -43,11 +43,11 @@ baseline is not a 1.x compatibility promise.
 
 | Area | Evidence |
 |---|---|
-| Application boundary | [PR #63](https://github.com/slowchop/rustia/pull/63), merged `8f8558ab`; facade-owned types, sealed callback adapters and versioned settings identity |
-| Typed objects | [PR #65](https://github.com/slowchop/rustia/pull/65), merged `2187c8d1`; deterministic game-turn and mutable-object examples, lifecycle/quota/receiver tests |
-| Runtime calls | [PR #64](https://github.com/slowchop/rustia/pull/64), merged `71524dba`; full preflight, Node, eight builds, differential smoke and remote screening passed |
-| Platform checks | [PR #66](https://github.com/slowchop/rustia/pull/66); actual Linux x86-64, macOS arm64 and Node/V8, with explicit target/host checks and one shared transcript |
-| Integrated candidate | [PR #68](https://github.com/slowchop/rustia/pull/68); final preflight, packaged conformance, platform execution, differential smoke and remote screening |
+| Application boundary | [PR #63](https://github.com/slowchop/rustia-historic/pull/63), merged `8f8558ab`; facade-owned types, sealed callback adapters and versioned settings identity |
+| Typed objects | [PR #65](https://github.com/slowchop/rustia-historic/pull/65), merged `2187c8d1`; deterministic game-turn and mutable-object examples, lifecycle/quota/receiver tests |
+| Runtime calls | [PR #64](https://github.com/slowchop/rustia-historic/pull/64), merged `71524dba`; full preflight, Node, eight builds, differential smoke and remote screening passed |
+| Platform checks | [PR #66](https://github.com/slowchop/rustia-historic/pull/66); actual Linux x86-64, macOS arm64 and Node/V8, with explicit target/host checks and one shared transcript |
+| Integrated candidate | [PR #68](https://github.com/slowchop/rustia-historic/pull/68); final preflight, packaged conformance, platform execution, differential smoke and remote screening |
 | External application | Twelve public contract suites, 252 tests across default/bare modes, compiled from extracted runtime archives with only facade/Serde dependencies |
 | Documentation | Three executable README examples and 34 rustdoc examples; strict docs and semantic API checks |
 | Resource recovery | Seven builtin phase/budget tests across four profiles; the same test bodies pass in supplementary Node 25.8.1 runs with Wasm runner 0.2.126, in default/bare modes |

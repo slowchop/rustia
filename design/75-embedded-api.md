@@ -106,7 +106,7 @@ or release that lease. External typed Rust causes remain downcastable.
 External contract tests cover settings readback/identity, error ownership,
 callback bounds and custom conversions. Private unit tests preserve the
 collector and conformance control cases that applications no longer configure.
-The facade boundary merged in [PR #63](https://github.com/slowchop/rustia/pull/63)
+The facade boundary merged in [PR #63](https://github.com/slowchop/rustia-historic/pull/63)
 as `8f8558ab`. WOTS and civfun adopted its exact reviewed revision; Grabby's rollout
 awaits its own CI. Object validation and consumer use, the full private milestone,
 and the eventual 1.0 freeze remain open.

@@ -1,6 +1,6 @@
 # Typed Rust objects
 
-Implementation merged in [PR #65](https://github.com/slowchop/rustia/pull/65);
+Implementation merged in [PR #65](https://github.com/slowchop/rustia-historic/pull/65);
 civfun's real Player integration merged in [#52](https://github.com/civfun/civfun/pull/52).
 The [private acceptance record](93-private-api-acceptance.md) identifies the
 common source, verification and required rollout gates. Stable 1.0 acceptance

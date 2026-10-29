@@ -22,12 +22,16 @@
 //! | Pass Rust data to a script | [`Rustia::insert_global`], [`Rustia::insert_serde`] |
 //! | Call Rust from Luau | [`Rustia::add_fn`], [`HostFunction`] |
 //! | Call Luau from Rust | [`Chunk::install`], [`Exports::function`], [`Function::call`] |
+//! | Compile once and install in one or more interpreters | [`Rustia::compile_module`], [`Rustia::install`] |
+//! | Load dependencies with `require` | [`RustiaBuilder::module_resolver`], [`ServiceModuleResolver`] |
+//! | Replace a script while keeping the old version on failure | [`Chunk::install`], [`Exports`] |
 //! | Work with live script objects | [`Value`], [`Table`], [`Chunk::eval_live`] |
 //! | Give Rust objects script methods | [`ObjectType`], [`Rustia::create_object`] |
 //! | Read structured data with Serde | [`Chunk::eval_serde`] |
 //! | Show a script error | [`Error::report`] |
 //! | Set execution and memory limits | [`RustiaBuilder::fuel`], [`RustiaBuilder::memory_limit_bytes`] |
 //! | Borrow application state for a call | [`HostSchema`], [`Rustia::invoke`] |
+//! | Reuse an interpreter with fresh guest state | [`Rustia::reset_decision`] |
 //!
 //! # Defaults and values
 //!
@@ -37,11 +41,18 @@
 //! reject providers and callbacks declared nondeterministic. Callbacks must
 //! honour their declared capabilities; Rustia cannot inspect captured Rust state.
 //!
-//! Most examples return ordinary Rust data. [`OwnedValue`] is an independent,
-//! acyclic copy; [`Value`], [`Table`], [`Function`], and [`Exports`] instead keep
-//! objects alive in their owning interpreter. Live handles preserve shared and
-//! cyclic objects, but cannot be used with another interpreter or after
-//! [`Rustia::reset_decision`].
+//! Choose how data crosses the Rust/script boundary:
+//!
+//! | Need | Use | Ownership and limits |
+//! | --- | --- | --- |
+//! | Copy ordinary data out of a script | [`Chunk::eval`], [`OwnedValue`] | Independent Rust-owned data; strings must be UTF-8 and tables must be acyclic. Shared tables are copied independently. |
+//! | Read a Rust struct or collection with Serde | [`Chunk::eval_serde`], [`Value::deserialize`] | The result owns its data and must match the requested Rust type; it cannot borrow from the VM. |
+//! | Keep binary strings or shared/cyclic script objects | [`Chunk::eval_live`], [`Value`], [`Table`] | Live handles preserve identity and keep objects alive in their original interpreter. |
+//!
+//! A live handle belongs to one interpreter and one *decision epoch*: the guest
+//! state generation that ends when [`Rustia::reset_decision`] succeeds. Reset
+//! invalidates existing [`Value`], [`Table`], [`Function`], and [`Exports`] handles.
+//! Rust-owned copies remain usable after reset or after dropping the interpreter.
 //!
 //! # WebAssembly
 //!
@@ -154,6 +165,14 @@ pub use value::{
 /// assert_eq!(greeting, "Hello, Ada");
 /// # Ok::<(), rustia::Error>(())
 /// ```
+///
+/// # Threads
+///
+/// An interpreter and its live handles cannot be sent to or shared with another
+/// thread. Create each interpreter in the worker that will run it. Callback
+/// closures requiring `Send + Sync` do not make the interpreter transferable.
+/// Host-owned [`CompiledModule`] and [`CompiledEntry`] values can be reused across
+/// interpreters without sharing their guest state.
 ///
 /// # Typed host contexts
 ///

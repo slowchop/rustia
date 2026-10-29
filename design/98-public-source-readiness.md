@@ -13,8 +13,10 @@ Source access is separate from supported 0.1/1.0 releases. Requirements in
 [90](90-release-readiness.md), [91](91-semver-policy.md),
 [92](92-first-release.md) and [00](00-constraints.md) remain in force for releases.
 
-Public source should invite inspection without implying a stable API, full Luau
-parity, support for platforms without execution evidence, or guaranteed support.
+Public source permits inspection without implying a stable API, full Luau
+parity, support for platforms without execution evidence, an invitation to
+contribute, or guaranteed support. Outside contribution and issue policies are
+undecided; source visibility does not require opening either channel.
 The initial documentation remains README, rustdoc and CONTRIBUTING; a website,
 new execution tier or additional API layer is not needed to open the source.
 
@@ -118,7 +120,7 @@ The benchmark workflow's fork guard does not establish isolation for all jobs,
 and editable workflow conditions alone are not a sufficient runner trust boundary.
 
 Keep the current protection in place. Prefer GitHub-hosted isolated correctness
-jobs for external contributions, with private measurement infrastructure behind
+jobs for source validation, with private measurement infrastructure behind
 a separately reviewed trusted execution path. Preserve required checks and
 reviews; do not bypass them to compensate for runners becoming unavailable.
 GitHub describes the risks and private-only default in its

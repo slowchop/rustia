@@ -88,10 +88,10 @@ public-release compatibility or platform matrix gates.
 The first eight-leg acceptance measured generic iteration +2.14% and math/table
 +1.53%, with a closure outlier. Its repeat included zero in every interval but
 flagged a sparse-table outlier. The sixteen-leg comparison at `78b783c9`
-([run](https://github.com/slowchop/rustia/actions/runs/40061724219)) measured
+([run](https://github.com/slowchop/rustia-historic/actions/runs/40061724219)) measured
 generic iteration +2.13% [1.68%, 2.94%] and math/table +1.85% [1.00%, 3.00%],
 with another sparse-table outlier. The separate identical-binary control
-([run](https://github.com/slowchop/rustia/actions/runs/40063636709)) failed its
+([run](https://github.com/slowchop/rustia-historic/actions/runs/40063636709)) failed its
 straddling comparison: math/table read -1.737% [-3.18%, -0.80%] despite identical
 code. These results do not establish clean acceptance. Thresholds are unchanged.
 
@@ -102,9 +102,9 @@ contract and its existing adjacent-boundary tests remain unchanged. Remote
 comparison must establish whether this candidate resolves the movement.
 
 The first isolation candidate did not improve performance: direct comparison
-[40069181372](https://github.com/slowchop/rustia/actions/runs/40069181372)
+[40069181372](https://github.com/slowchop/rustia-historic/actions/runs/40069181372)
 found no change, while baseline comparison
-[40069183742](https://github.com/slowchop/rustia/actions/runs/40069183742)
+[40069183742](https://github.com/slowchop/rustia-historic/actions/runs/40069183742)
 still measured iteration +2.21% [1.61%, 3.32%] and math/table +1.81%
 [0.87%, 2.65%], without flagged outliers. This is not accepted.
 
@@ -118,7 +118,7 @@ string workloads, are required before adopting it. No timing was collected
 from the local disassembly builds, and thresholds remain unchanged.
 
 The out-of-line experiment was rejected after
-[40231066927](https://github.com/slowchop/rustia/actions/runs/40231066927):
+[40231066927](https://github.com/slowchop/rustia-historic/actions/runs/40231066927):
 against `4ca0b13b`, `5ddfdd76` measured dense tables +0.81% [0.05%, 1.68%],
 sparse tables +2.33% [0.79%, 3.89%], closures +4.53% [2.50%, 5.78%],
 iteration +1.36% [0.34%, 2.66%], and math/table -0.11% [-1.44%, 3.82%].
@@ -136,7 +136,7 @@ toward zero. This removes redundant work but remains a performance candidate
 until remote baseline comparison passes; no threshold or prior evidence changes.
 
 The checked-cast candidate `f54b0774` also failed acceptance in
-[40234600209](https://github.com/slowchop/rustia/actions/runs/40234600209).
+[40234600209](https://github.com/slowchop/rustia-historic/actions/runs/40234600209).
 The original baseline remained `90bc2ae4`; this run used sixteen legs per side,
 ABBA ordering, five repetitions per leg and 99% intervals:
 
@@ -168,19 +168,19 @@ Counter totals include harness setup and warmup; they are diagnostic only.
 Normal acceptance and committed calibration remain unchanged.
 
 The first diagnostic dispatch
-[40241006935](https://github.com/slowchop/rustia/actions/runs/40241006935)
+[40241006935](https://github.com/slowchop/rustia-historic/actions/runs/40241006935)
 failed the counter-access probe before compilation or measurement. The runner
 host denied perf events. Diagnostics now request only user-space counters and
 fetch failed exports before reporting failure; workflow artifacts retain those
 exports for review. This is an infrastructure prerequisite, not a performance
 result. The f54b0774 screening run
-[40234604744](https://github.com/slowchop/rustia/actions/runs/40234604744)
+[40234604744](https://github.com/slowchop/rustia-historic/actions/runs/40234604744)
 also retained dense +2.36% [0.65%, 3.28%], sparse +0.93% [0.03%, 1.85%],
 closures +2.25% [-3.29%, 6.35%], iteration +3.15% [2.85%, 4.00%], and
 math/table +1.59% [-0.96%, 3.44%]; it does not overturn failed acceptance.
 
 The authorized user-space counter run
-[40242289162](https://github.com/slowchop/rustia/actions/runs/40242289162)
+[40242289162](https://github.com/slowchop/rustia-historic/actions/runs/40242289162)
 completed in ABBA order on the original baseline and checked-cast candidate.
 Both sides used the same frozen workloads, loop counts and five repetitions.
 Mean counter differences (two legs per side, diagnostic only) were:
@@ -246,9 +246,9 @@ size reduction is not claimed. Default/bare numeric-contract, diagnostic-parity
 and error-recovery tests pass. Remote five-workload and supplemental string
 comparisons remain required. Delivery head `02c0b174` was pushed after full
 pre-push validation. Original-baseline sixteen-leg comparison
-[40246582277](https://github.com/slowchop/rustia/actions/runs/40246582277)
+[40246582277](https://github.com/slowchop/rustia-historic/actions/runs/40246582277)
 and supplemental string comparison
-[40246584665](https://github.com/slowchop/rustia/actions/runs/40246584665)
+[40246584665](https://github.com/slowchop/rustia-historic/actions/runs/40246584665)
 were dispatched; their completed intervals must be inspected before acceptance.
 
 The supplemental `strings` workflow mode freezes the existing paired harness
@@ -263,7 +263,7 @@ calibrated string materiality threshold. Normal five-workload acceptance and
 the committed calibration are unchanged.
 
 The string-dispatch candidate failed original-baseline acceptance in
-[40246582277](https://github.com/slowchop/rustia/actions/runs/40246582277),
+[40246582277](https://github.com/slowchop/rustia-historic/actions/runs/40246582277),
 although the workflow completed successfully. Sixteen ABBA legs per side and
 five repetitions produced these 99% intervals:
 
@@ -292,7 +292,7 @@ unknown frames keep the old scan. Correctness and fresh baseline comparison
 remain required, with all preceding results retained.
 
 The completed supplemental string comparison
-[40246584665](https://github.com/slowchop/rustia/actions/runs/40246584665)
+[40246584665](https://github.com/slowchop/rustia-historic/actions/runs/40246584665)
 measured `02c0b174` against original baseline `90bc2ae4`: -1.57%, with a
 99% interval of [-2.46%, -0.41%]. All sixteen raw legs use fixed N=10,000,
 five repetitions, and matching checksums. The frozen source hash is
@@ -302,16 +302,16 @@ closure regression above; no string materiality threshold was invented.
 
 The caller-cell proof is implemented at `aa432f17`; delivery head `4be30aca`
 passed the full pre-push inventory before remote validation. Fresh
-[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia/actions/runs/40253017402),
-[eight-leg string acceptance](https://github.com/slowchop/rustia/actions/runs/40253020172),
-and [manual platform CI](https://github.com/slowchop/rustia/actions/runs/40253022712)
+[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia-historic/actions/runs/40253017402),
+[eight-leg string acceptance](https://github.com/slowchop/rustia-historic/actions/runs/40253020172),
+and [manual platform CI](https://github.com/slowchop/rustia-historic/actions/runs/40253022712)
 were dispatched for that candidate. Their completed evidence remains a gate;
 neither the earlier string result nor passing correctness tests establishes
 performance acceptance for the new runtime.
 
 
 The caller-cell candidate failed its completed sixteen-leg comparison
-[40253017402](https://github.com/slowchop/rustia/actions/runs/40253017402).
+[40253017402](https://github.com/slowchop/rustia-historic/actions/runs/40253017402).
 All 192 raw sidecars and the complete workflow log are retained locally. Five
 repetitions per leg and unchanged 99% analysis produced:
 
@@ -340,7 +340,7 @@ acceptance is required; this inspection is not a performance claim.
 
 
 The retained caller-cell candidate's supplemental string comparison
-[40253020172](https://github.com/slowchop/rustia/actions/runs/40253020172)
+[40253020172](https://github.com/slowchop/rustia-historic/actions/runs/40253020172)
 completed after its failed five-workload comparison. Against original baseline
 `90bc2ae4`, delivery head `4be30aca` measured -1.43%, with a 99% interval of
 [-2.67%, 0.12%]. All sixteen individual raw legs and their aggregate copies
@@ -353,7 +353,7 @@ five-workload acceptance or establish acceptance for the corrected lookup.
 
 
 The lookup correction `6fd0e482`, delivered as `6b0122bd`, failed complete
-[sixteen-leg acceptance](https://github.com/slowchop/rustia/actions/runs/40259998147)
+[sixteen-leg acceptance](https://github.com/slowchop/rustia-historic/actions/runs/40259998147)
 despite the workflow completing successfully. Independently recomputed 99%
 intervals from all 192 retained sidecars are:
 
@@ -384,7 +384,7 @@ candidates, not performance claims, until fresh remote acceptance succeeds.
 
 
 The preceding lookup candidate's supplemental string run
-[40260011328](https://github.com/slowchop/rustia/actions/runs/40260011328)
+[40260011328](https://github.com/slowchop/rustia-historic/actions/runs/40260011328)
 measured `6b0122bd` at +0.45% [-0.37%, 1.29%], a 99% interval spanning zero.
 Independent analysis validates all sixteen raw legs and aggregate copies,
 frozen source hash, full identities, N=10,000, five repetitions, matching
@@ -393,7 +393,7 @@ with no apparent outlier. The raw export and full log are retained. This does
 not resolve that candidate's sparse-table and math/table regressions above.
 
 The table/math correction `550d9b1b`, delivered as `8c96cf24`, failed
-[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia/actions/runs/40282644301).
+[sixteen-leg original-baseline acceptance](https://github.com/slowchop/rustia-historic/actions/runs/40282644301).
 All 192 raw sidecars are retained and independently validated for full identities,
 fixed N, repetitions, checksums, aggregate copies and ABBA timestamp order.
 The unchanged 99% analysis gives:
@@ -418,7 +418,7 @@ from fresh calls without changing cell aliases, fuel or collection boundaries;
 fresh remote evidence is required before any performance claim.
 
 The preceding table/math candidate's supplemental string comparison
-[40282653930](https://github.com/slowchop/rustia/actions/runs/40282653930)
+[40282653930](https://github.com/slowchop/rustia-historic/actions/runs/40282653930)
 measured `8c96cf24` at +0.21% [-1.43%, 1.39%]. Independent analysis validates
 all sixteen raw legs and aggregate copies, frozen source hash, full identities,
 N=10,000, five repetitions, matching checksums and ABBA order. The largest
@@ -427,14 +427,14 @@ zero but does not overturn the failed five-workload acceptance above.
 
 The fresh-frame correction is runtime `3b776b31`, delivered as `4846cd1e`
 after full pre-push validation. Its
-[original-baseline comparison](https://github.com/slowchop/rustia/actions/runs/40291359314)
-and [string comparison](https://github.com/slowchop/rustia/actions/runs/40291363030)
+[original-baseline comparison](https://github.com/slowchop/rustia-historic/actions/runs/40291359314)
+and [string comparison](https://github.com/slowchop/rustia-historic/actions/runs/40291363030)
 were dispatched for that exact head. The completed baseline failure is recorded
 below; the completed string result follows it. The code change itself is not
 performance evidence.
 
 The fresh-frame candidate `4846cd1e` failed complete
-[sixteen-leg acceptance](https://github.com/slowchop/rustia/actions/runs/40291359314).
+[sixteen-leg acceptance](https://github.com/slowchop/rustia-historic/actions/runs/40291359314).
 All 192 sidecars are retained and independently validate identities, fixed N,
 five repetitions, checksums, aggregate copies and all 80 ABBA workload pairs.
 No outliers were flagged. Recomputed 99% intervals are:
@@ -457,7 +457,7 @@ against `6b0122bd` will isolate that math change; it cannot substitute for final
 original-baseline acceptance or establish code-layout causality by itself.
 
 The fresh-frame candidate's completed supplemental string comparison
-[40291363030](https://github.com/slowchop/rustia/actions/runs/40291363030)
+[40291363030](https://github.com/slowchop/rustia-historic/actions/runs/40291363030)
 measures `4846cd1e` at -0.18% [-1.39%, 0.92%], a 99% interval spanning zero.
 The retained export validates all sixteen raw legs and aggregate copies, full
 identities, frozen source hash, fixed N=10,000, five repetitions, checksums and
@@ -465,7 +465,7 @@ ABBA order. This does not resolve its failed five-workload acceptance.
 
 
 The unary-math-only candidate `ecbd774d`, delivered as `6b06808b`, fails its
-[direct eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40305656584)
+[direct eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40305656584)
 against `6b0122bd`. All 96 sidecars independently validate full identities,
 fixed N, five repetitions, checksums, sixteen aggregate copies and forty ABBA
 workload pairs. Recomputed 99% results are:
@@ -503,7 +503,7 @@ math change before any original-baseline acceptance is warranted.
 
 
 The wrapper candidate `2e347dad`, delivered as `457d7715`, completes its
-[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40311566683)
+[eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40311566683)
 against `6b0122bd` but does not resolve acceptance. All 96 sidecars independently
 validate identities, fixed work, repetitions, checksums, aggregate copies and
 forty ABBA workload pairs. No outliers were flagged. The 99% results are:
@@ -543,7 +543,7 @@ checks and the numeric-index and suspended-call contracts.
 
 
 The shared-value candidate `12d16851`, delivered as `6a8b61b1`, completes its
-[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40317807249)
+[eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40317807249)
 against `6b0122bd` without establishing acceptance. All 96 sidecars independently
 validate full identities, fixed N, repetitions, checksums, aggregate copies and
 forty ABBA workload pairs. The 99% results are:
@@ -575,7 +575,7 @@ still requires the original `90bc2ae4` baseline and the string workload.
 
 
 The numeric-slot candidate `cd1071cf`, delivered as `2eaf304e`, fails its
-[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40324770013)
+[eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40324770013)
 against `6a8b61b1`. All 96 raw sidecars, full identities, fixed N, repetitions,
 checksums, aggregate copies and forty ABBA workload pairs independently validate.
 No outliers were flagged. The 99% results are:
@@ -620,7 +620,7 @@ diagnostic counts.
 
 
 The retained-bytecode metadata candidate `12521d60`, delivered as `7cbdd866`,
-completes [eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40332718288)
+completes [eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40332718288)
 against `6a8b61b1`. Independent audits validate all 96 sidecars, full identities,
 fixed N, repetitions, checksums, aggregate copies and forty ABBA workload pairs.
 No outliers were flagged. The 99% results are:
@@ -666,14 +666,14 @@ deferred calls and synchronization of captured caller state across four profiles
 
 
 The scoped iterator-resolution runtime `e292ef2b`, delivered as `c754371f`,
-completes [eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40341946265)
+completes [eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40341946265)
 against `7cbdd866`. All 96 raw sidecars and forty ABBA workload pairs validate,
 with no outliers. Dense tables measure +0.65% [0.05%, 1.77%], sparse tables
 +0.16% [-1.47%, 1.33%], closures +0.78% [-1.69%, 2.67%], iteration
 -1.59% [-5.97%, 0.03%], and math/table -2.45% [-4.38%, -0.41%].
 Iteration's improvement is indistinguishable at 99%; this is not acceptance.
 
-The direct [sixteen-pair original-baseline comparison](https://github.com/slowchop/rustia/actions/runs/40347110048)
+The direct [sixteen-pair original-baseline comparison](https://github.com/slowchop/rustia-historic/actions/runs/40347110048)
 against `90bc2ae4` avoids combining deltas from separate runs. All 192 sidecars,
 full identities, fixed N, repetitions, checksums, aggregate copies and eighty
 ABBA workload pairs independently validate. Its 99% results are:
@@ -702,7 +702,7 @@ Iteration remains separately unresolved. No broader capture-admission refactor
 or annotation sweep is bundled into this correction.
 
 
-The same `c754371f` candidate's [eight-pair string comparison](https://github.com/slowchop/rustia/actions/runs/40347116567)
+The same `c754371f` candidate's [eight-pair string comparison](https://github.com/slowchop/rustia-historic/actions/runs/40347116567)
 measures -3.17% [-4.09%, -2.07%]. All sixteen individual legs and sixteen
 aggregate copies validate against the pinned source hash, N=10,000, five
 repetitions, checksums and ABBA timestamps. This improvement does not resolve the
@@ -717,7 +717,7 @@ mutation and golden facade checks pass eight tests total per feature mode.
 
 
 The isolated vector-probe runtime `8a1c6ac4`, delivered as `f1e6de36`, completes
-[eight-pair comparison](https://github.com/slowchop/rustia/actions/runs/40361503127)
+[eight-pair comparison](https://github.com/slowchop/rustia-historic/actions/runs/40361503127)
 against `c754371f`. All 96 raw sidecars and forty ABBA workload pairs validate;
 no outliers are flagged. At 99% confidence, dense tables measure +0.32%
 [-0.62%, 0.77%], sparse tables -1.34% [-2.84%, 0.58%], closures +0.21%
@@ -747,7 +747,7 @@ These correctness and code-shape checks do not establish a speed improvement.
 
 
 The combined-boundary runtime `dc2adfd2`, delivered as `7b450eb3`, completes
-[eight-pair isolation](https://github.com/slowchop/rustia/actions/runs/40369557729)
+[eight-pair isolation](https://github.com/slowchop/rustia-historic/actions/runs/40369557729)
 against `c754371f`. Both audits validate all 96 sidecars, full identities,
 fixed work, repetitions, checksums, aggregate copies and forty ABBA workload
 pairs. No outliers are flagged. The 99% results are:
@@ -765,7 +765,7 @@ remain inconclusive. The production experiment is reverted while retaining its
 four-profile guard regression and all evidence. No original-baseline acceptance
 is run for this unproven candidate and no thresholds or samples change.
 
-A fresh [remote counter diagnostic](https://github.com/slowchop/rustia/actions/runs/40374618824)
+A fresh [remote counter diagnostic](https://github.com/slowchop/rustia-historic/actions/runs/40374618824)
 compares retained `c754371f` with original `90bc2ae4`. It uses the existing fixed
 five-workload profile and four ABBA legs. Counters include startup, compilation
 and warmup; instrumented elapsed times are not acceptance evidence. The completed diagnostic validates all twenty counter files, 24 sample sidecars,
@@ -798,7 +798,7 @@ nearby instructions; block attribution must not be treated as exact causality
 or substitute for uninstrumented performance acceptance.
 
 
-The first sampled run [40379229237](https://github.com/slowchop/rustia/actions/runs/40379229237)
+The first sampled run [40379229237](https://github.com/slowchop/rustia-historic/actions/runs/40379229237)
 failed its diagnostic validity gate on the first baseline leg. Private raw audit
 finds 382 actual throttle records and 382 unthrottle records, with no lost-record
 events. The recording, exact binaries and counter-phase export are retained;
@@ -808,7 +808,7 @@ changing runner limits or acceptance thresholds. Validation matches actual raw
 record headers so zero-count summary labels cannot trigger a false rejection.
 
 
-The lower-rate run [40383117166](https://github.com/slowchop/rustia/actions/runs/40383117166)
+The lower-rate run [40383117166](https://github.com/slowchop/rustia-historic/actions/runs/40383117166)
 also fails on its first baseline sampled leg: 40 actual throttle/unthrottle
 pairs, 4,145 samples at period 1,000,000, and no lost-record events. Its private
 recording, exact binaries and counter export remain retained. There is still no
@@ -834,7 +834,7 @@ locations and weights. All 4,145 retained records parse with the expected total
 period sum; this is a parser check, not interpretation of the throttled data.
 
 
-The frequency diagnostic [40387592920](https://github.com/slowchop/rustia/actions/runs/40387592920)
+The frequency diagnostic [40387592920](https://github.com/slowchop/rustia-historic/actions/runs/40387592920)
 completes all four counter legs and four sampled legs. Independent audits reconcile
 32 measurement sidecars, twenty counter files, four location summaries, fixed work,
 checksums, exact source/binary identities and all raw records. Every timed gate has
@@ -866,7 +866,7 @@ in both modes. These verify correctness and executor selection, not speed.
 
 
 The complete eight-pair tape-first isolation
-[40394564242](https://github.com/slowchop/rustia/actions/runs/40394564242),
+[40394564242](https://github.com/slowchop/rustia-historic/actions/runs/40394564242),
 `c754371f` versus `60077eaf`, rejects the candidate despite workflow success.
 All 96 sidecars (80 individual, 16 aggregate), fixed work, checksums and ABBA
 ordering pass audit. At 99% confidence, iteration improves 6.35%
@@ -893,7 +893,7 @@ and each facade configuration passes eight focused numeric, continuation and
 golden tests. `Complete` returns an unaccounted scalar boundary or policy refusal;
 direct admission preserves its accounting and does not change guard exits.
 
-Eight-pair isolation [40402802516](https://github.com/slowchop/rustia/actions/runs/40402802516)
+Eight-pair isolation [40402802516](https://github.com/slowchop/rustia-historic/actions/runs/40402802516)
 compares `c754371f` directly with `b5982752`. All 96 sidecars and 40 workload
 pairs pass independent identity, checksum, fixed-work and ABBA audits. At 99%
 confidence, closures improve 4.74% [-6.35%, -1.23%], iteration improves 4.41%
@@ -904,7 +904,7 @@ closure performance relative to the intermediate candidate but is not final
 acceptance; dense behavior must be measured against the original baseline.
 
 The distinct sixteen-pair original-baseline comparison
-[40407361841](https://github.com/slowchop/rustia/actions/runs/40407361841)
+[40407361841](https://github.com/slowchop/rustia-historic/actions/runs/40407361841)
 compares `90bc2ae4c397f6e2bbb1af687cc8e30688010123` directly with
 `b5982752df3711c593b5249908bea01651f4364e`. It passes the frozen acceptance
 criteria. Independent audits validate all 192 sidecars (160 individual records,
@@ -929,7 +929,7 @@ original-baseline string acceptance also passes as recorded below.
 
 
 Eight-pair string comparison
-[40407374105](https://github.com/slowchop/rustia/actions/runs/40407374105)
+[40407374105](https://github.com/slowchop/rustia-historic/actions/runs/40407374105)
 uses the same original baseline and delivery candidate. Strings improve 2.11%
 with a 99% interval of [-4.19%, -1.33%]. All sixteen individual legs and sixteen
 aggregate copies match; full commits, ABBA order, source hash

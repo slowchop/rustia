@@ -60,7 +60,7 @@ Client-specific regressions remain part of the rollout acceptance.
 
 ### Remote campaign evidence
 
-[Run 34312173291](https://github.com/slowchop/rustia/actions/runs/34312173291)
+[Run 34312173291](https://github.com/slowchop/rustia-historic/actions/runs/34312173291)
 completed successfully on revision `0580e4bfb46fb867dd337b972cf426e9e3acd97d`.
 Lexer, parser, compiler and VM ran for 30 minutes each; stateful and differential
 each ran for 30 minutes plus a two-hour extension. Logs report no crashes,
@@ -76,7 +76,7 @@ timeouts or differential mismatches.
 | Differential | 1,919,974 |
 
 The expanded ten-operation stateful harness also passed in
-[run 34334524153](https://github.com/slowchop/rustia/actions/runs/34334524153),
+[run 34334524153](https://github.com/slowchop/rustia-historic/actions/runs/34334524153),
 revision `347b0af7557535227d7b901713f0e3559c621b02`, with the same durations and
 limits: lexer 27,116,785; parser 23,274,567; compiler 13,843,528; VM 462,119;
 stateful 294,889; differential 2,045,334 executions. All six jobs succeeded,
@@ -90,10 +90,10 @@ identity, toolchain, seeds, corpus and termination logs for 30 days.
 
 ## Completed rollout
 
-[Rustia #34](https://github.com/slowchop/rustia/pull/34) merged as
+[Rustia #34](https://github.com/slowchop/rustia-historic/pull/34) merged as
 `aee98e7815460c2df014c9b20f92de8de5382814`. Canonical release preflight and final
 PR checks passed, including remote benchmark screening; the
-[merged-main CI](https://github.com/slowchop/rustia/actions/runs/34408292742)
+[merged-main CI](https://github.com/slowchop/rustia-historic/actions/runs/34408292742)
 also passed before any consumer merged. This records correctness and delivery,
 not a new performance claim or completion of the wider public-release gates.
 

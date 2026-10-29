@@ -1,5 +1,27 @@
 # script-bench-harness
 
+## Measurement policy and paused source profile
+
+This source checkout uses hosted correctness CI. Benchmark automation is paused
+pending a trusted private bridge; it has no `ci-bench` measurement workflow.
+Displayed results are retained historical evidence, not a current host-health
+or repeatability guarantee. See [CURRENT](../design/CURRENT.md) and the
+[source profile](../design/public-source-profile.json).
+
+**Do not run timings or profiling on a development machine.** This includes
+benchmark binaries, examples, Wasm timing scripts, and ad hoc comparisons.
+Only `ci-bench` results count as performance evidence. Leave new measurements
+pending while that service is unavailable.
+
+The measurement commands and workflow names below document retained protocols
+and the historical private coordinator. Timing commands are reference material
+for trusted CI operators, not local setup instructions or workflows present in
+this source profile. Local compilation, offline artifact validation, and rendering
+already-recorded data are allowed; `just check-benchmark-results` validates artifacts
+without measuring performance.
+
+## Harness and retained protocols
+
 `script-bench-harness` is a standalone benchmark harness for embedded scripting
 engines. It lives in the rustia repo while rustia is early, but it is structured
 to split into its own OSS project with a website, published result history, and
@@ -11,7 +33,7 @@ The harness writes one JSONL record per completed engine/workload measurement,
 so history can be committed, served statically, or uploaded by CI without needing
 a hosted metrics service.
 
-The active performance product is deliberately narrower than Rustia's build
+The retained owned-host measurement protocol is narrower than Rustia's build
 support: native measurements are `linux-x86_64` on the owned benchmark host
 labelled `ci-bench`, and the wasm runtimes are measured under Node/V8 on that
 same host, inside the cross-engine matrix lane. macOS and Windows timings are
@@ -25,17 +47,13 @@ The default build runs the in-repo `rustia` adapter over five workload families:
 - `generic_iteration`
 - `stdlib_math_table`
 
-The inventory currently contains 20 workload entries. Non-default workloads are
+The documented inventory contained 20 workload entries. Non-default workloads are
 kept out of the committed timing snapshot until they have intentional
 measurement history; `string_building` is wired across every requested adapter
 as the #15 string/concat workload source set. Entries #16–#18 are portable
 burst/churn/intentional-retention memory probes, and #19–#21 are deterministic
 steady/history/intentional-retention todo-app memory workloads for Luau and
 Koto.
-
-```sh
-cargo run -p script-bench-harness --release -- --history bench/history/runs.jsonl
-```
 
 Each calibration probe and each recorded repetition uses a freshly prepared
 engine/workload instance. A single invocation at the selected `n` warms that
@@ -49,18 +67,12 @@ Pass `--fixed-n <positive integer>` to bypass calibration and use exactly that
 default remains calibrated measurement, so existing commands and public history
 behavior are unchanged.
 
-The JSONL summary stores only the stable min/median values. Direct harness runs
-may append rows, while the owned-host matrix coordinator
+The JSONL summary stores only the stable min/median values. Historical trusted
+CI runs could append rows, while the private matrix coordinator
 (`weekly-matrix-bench.yml`, through `tools/run-dedicated-benchmark.js matrix`)
-atomically publishes a fresh, complete Linux cohort. For local analysis, write
-the raw per-repetition `ns/unit` values to a separate JSON sidecar:
-
-```sh
-cargo run -p script-bench-harness --release -- \
-  --engines rustia \
-  --samples-json /tmp/rustia-samples.json \
-  --no-history --no-results --no-latest-json
-```
+published a complete Linux cohort atomically. That workflow is absent from this
+source profile. Harness executions used `--samples-json <path>` to retain raw
+per-repetition `ns/unit` values in a separate sidecar for offline analysis.
 
 The sidecar uses the `rustia.bench.raw-samples.v1` schema and preserves samples
 in execution order. It also records the commit, target, workload, selected `n`,
@@ -71,7 +83,7 @@ changes, so machine drift is visible rather than folded into one best result.
 Fixed-N runs that append history must provide `--samples-json`; the harness
 writes that sidecar before appending its summary row.
 
-The local hardening diagnostics, 2026-07-20 accepted dense/OOP comparisons, and completed string-memory evidence are
+The dated hardening diagnostics, 2026-07-20 accepted dense/OOP comparisons, and completed string-memory evidence are
 recorded in [`design/56-performance-research.md`](https://github.com/slowchop/rustia/blob/main/design/56-performance-research.md),
 including exact identities, paired protocols, confidence intervals, retained artifacts, and the deliberately
 conservative claim posture.
@@ -91,7 +103,8 @@ cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes
 just bench-memory-self-test
 ```
 
-Fresh memory rows come from `.github/workflows/rustia-memory.yml`: dispatch-only, with a required `commit_sha`
+The historical private `.github/workflows/rustia-memory.yml` produced memory rows; it is absent
+from this source profile. That dispatch-only workflow used a required `commit_sha`
 input and a `cohort` choice — `rustia-only`, the default 11-row per-commit cohort, or `cross-engine`, the
 110-row thirteen-engine cohort under the same protocol — on the `bench-solo` runner group, pinning two isolated
 cores so the supervisor never shares a core with the benchmark. Its rows are pushed to the published data
@@ -104,9 +117,10 @@ label is refused before the build, for the reasons in
 
 ## Equal-work validation and publication
 
-Use fixed mode when a small A/B difference must not be confounded by separate
-calibration choices. Build the baseline and candidate from byte-identical
-`bench/src/main.rs` source, then run the following from a quiet benchmark host.
+The retained acceptance protocol uses fixed mode so a small A/B difference is
+not confounded by separate calibration choices. The following commands document
+trusted CI execution on a qualified benchmark host, not a local procedure.
+The baseline and candidate use byte-identical `bench/src/main.rs` source.
 The example fixes the dense-table workload at 1,500 units and 15 repetitions;
 choose and record a workload-appropriate fixed value for any other workload.
 Freeze a clean candidate commit before creating any accepted evidence. Build
@@ -230,7 +244,7 @@ Record the following provenance beside any published interpretation:
 
 ### Reproducible ephemeral Linux host
 
-The current accepted DigitalOcean VM Core 2 C2.2 comparison is frozen in
+The historical accepted DigitalOcean VM Core 2 C2.2 comparison is frozen in
 [`cloud/digitalocean-core2-84e732a-ams3.json`](cloud/digitalocean-core2-84e732a-ams3.json).
 It compares exact baseline `9695a62` with candidate `84e732a` on
 `generic_iteration` using 101-repetition sample blocks in the fixed-work paired
@@ -373,8 +387,8 @@ The resulting evidence is Linux/x86_64-specific. macOS and Windows remain
 supported build targets, but neither is an active benchmark target without a
 dedicated measurement host.
 
-The committed JSONL snapshot remains the summary source of truth. The active
-matrix coordinator replaces it only with a complete single-revision Linux
+The committed JSONL snapshot remains the summary source of truth. The historical
+private matrix coordinator replaced it only with a complete single-revision Linux
 cohort. Raw sidecars and provenance manifests live under
 [`history/evidence/`](history/evidence/) and must not change that public schema.
 
@@ -397,8 +411,8 @@ Emit the wasm pre-lock gate tracker as deterministic JSON:
 cargo run -p script-bench-harness -- --wasm-gate-json
 ```
 
-Measure the `call_ref` versus `br_table` wasm dispatch gate across available
-JavaScript runtimes:
+Trusted CI reference command for the `call_ref` versus `br_table` wasm dispatch
+gate across JavaScript runtimes (do not run locally):
 
 ```sh
 node tools/run-wasm-dispatch-gate.js
@@ -410,14 +424,14 @@ two mlua/Luau slots are the same adapter in explicit interpreter and native-JIT 
 feature-gated so heavyweight dependencies do not affect the normal workspace
 build.
 
-The matrix switch is present now:
+The matrix inventory can be listed without measuring:
 
 ```sh
 cargo run -p script-bench-harness --features all-engines -- --list
 ```
 
-Do not publish the full matrix from a developer machine. It is measured and
-published by the owned-host lane described under
+Do not measure or publish the full matrix from a developer machine. The historical
+private owned-host lane measured and published it as described under
 [Cross-engine matrix](#cross-engine-matrix) below.
 
 The coordinator verifies the frozen source and runtime artifacts, builds the
@@ -516,9 +530,10 @@ lowercases a host before it reads `ssh_config`. The refusal names the label and 
 Only equality is refused, so choose an alias plainly unlike the label rather
 than a variation of it. With `--local` the variable is never read.
 
-The reconstruction stays out of GitHub Actions: `tools/check-workflows.js`
-forbids the raw harness there, and starting a rebuild remains an explicit
-operator action.
+The historical private profile kept reconstruction out of GitHub Actions through
+`tools/check-workflows.js`. The source profile permits only hosted correctness
+workflows; it does not enable reconstruction. Starting a new measurement requires
+the trusted private benchmark service.
 
 Only one reconstruction may run at a time. Concurrent runs sharing a worktree
 and a target directory reset each other's checkouts mid-build and yield no
@@ -545,6 +560,9 @@ rest of the series exactly.
 
 ### Per-commit series
 
+This section records the historical private coordinator. Its workflow is absent
+from this source profile; the preserved series is historical evidence.
+
 Every commit that lands on `main` starts a run that measures it on the owned
 host under exactly the reconstruction's protocol, so the chart continues rather
 than restarting. The weekly matrix's publication merge is no exception, now
@@ -553,7 +571,7 @@ merge would: that run builds the engine, finds a byte-identical binary and
 records nothing. It is the same exact gate that keeps a documentation commit
 out of the series, and it costs one build on the host rather than a
 measurement.
-`.github/workflows/main-bench.yml` runs on the qualified runner class and reaches
+The historical private `.github/workflows/main-bench.yml` ran on the qualified runner class and reached
 measurement only through `run-dedicated-benchmark.js`, which attests the machine
 before it builds — including when it runs on that machine, where local mode
 skips the transport but not the attestation.
@@ -647,7 +665,7 @@ Host steps a person looked at and left in the series:
 | --- | --- | --- | --- |
 | Kernel `6.8.0-138` to `6.8.0-146` plus a package upgrade, 2026-10-01 | `911bad60`, byte-identical binary, 2026-10-02 | `sparse_tables` +3.5% median (threshold 1.2%); the other four within threshold (`closures_upvalues` -3.3%, `generic_iteration` +2.3%, `stdlib_math_table` +0.2%, `dense_tables` 0.0%) | Kept. Series points from 2026-10-01 on read `sparse_tables` about 3.5% slower than the points before them for host reasons, not code |
 
-The workflow also runs daily at 21:00 UTC, after the host's restart window, so
+That private workflow was also scheduled daily at 21:00 UTC, after the host's restart window, so
 an update is controlled the morning it lands, not at the next merge. Those
 runs check the host only and never measure HEAD. After an update the same
 commit can build a different binary (a new linker), so the byte-identical gate
@@ -669,8 +687,9 @@ belongs in the evidence.
 
 ### Pull-request screening
 
-`.github/workflows/pr-bench.yml` measures a pull request against its merge base
-with the target branch and reports the result in the job summary. It
+The historical private `.github/workflows/pr-bench.yml` measured a pull request
+against its merge base with the target branch and reported the result in the job
+summary. It is absent from this source profile. It
 records nothing: no row, no published artifact, and no write access to either
 repository. The merge base rather than main's tip, because an unrelated commit
 landing mid-review would otherwise be attributed to the pull request.
@@ -768,15 +787,15 @@ twenty minutes. Historical source commit time is retained separately from
 honest measurement time; renderers order the reconstructed trend by the frozen
 target list rather than pretending the measurements happened in the past.
 
-The shared runner pool only validates the committed artifacts.
-`tools/check-workflows.js` forbids the raw harness and the on-host runners in
-GitHub Actions: measurement there is permitted only on `bench-solo`, and only
-through the attesting entrypoint `tools/run-dedicated-benchmark.js`, which that
-checker pins.
+The historical private workflow policy allowed measurement only on `bench-solo`
+through the attesting entrypoint `tools/run-dedicated-benchmark.js`; the shared
+runner pool validated committed artifacts. The source profile's
+`tools/check-workflows.js` instead permits only hosted correctness CI, with no
+measurement workflow.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and
-`mlua-luau` cannot be linked into one binary. Run the Lua 5.4 mlua adapter as a
-separate binary:
+`mlua-luau` cannot be linked into one binary. The trusted CI reference command
+for the separate Lua 5.4 mlua adapter is (do not run locally):
 
 ```sh
 cargo run -p script-bench-harness --no-default-features --features mlua-lua54 -- --engines mlua-lua54
@@ -795,9 +814,10 @@ so the standalone harness shell is not tied to rustia internals.
 
 ### Cross-engine matrix
 
-`.github/workflows/weekly-matrix-bench.yml` measures all thirteen engines across
-the five workloads on the owned host and lands the accepted cohort on `main`.
-It is this repository's single sanctioned contents-write grant: the cohort
+The historical private `.github/workflows/weekly-matrix-bench.yml` measured all
+thirteen engines across the five workloads on the owned host and landed the
+accepted cohort on `main`. That workflow and its contents-write grant are absent
+from this source profile. In the private coordinator, the cohort
 belongs in source history, unlike the per-commit series, whose rows grow forever
 and live in the data repository. `main` accepts changes only through pull
 requests — an organisation rule covering every active private repository, which
@@ -847,11 +867,12 @@ turn `main` red is not landed.
 
 Two constraints follow. Required status checks reach a publication pull request
 like any other, and it has none to show, so the app's bypass is load-bearing:
-withdraw it and every cohort stops landing. `main` now requires eleven checks
-through a repository ruleset whose only bypass actor is that app. And a
-publication pull request lands only as a merge commit, which the helper always
-uses and which is now the only merge the repository offers, squash and rebase
-being disabled. One left open by a failed run should be closed, not merged by
+withdraw it and every cohort stops landing. At the documented private landing,
+`main` required eleven checks through a repository ruleset whose only bypass
+actor was that app. A publication pull request landed only as a merge commit,
+which was the only merge that private repository offered, squash and rebase
+being disabled. These settings do not describe the new source repository. In
+that coordinator, a pull request left open by a failed run should be closed, not merged by
 hand: a hand merge does not check that `main` is still the commit it was
 rendered on, and the squash and rebase buttons that would copy the marker onto
 `main` are off for that reason.
@@ -862,7 +883,7 @@ are gone. The gate asked the Rustia-progress question, which the per-commit
 series now answers directly; this lane asks about competitors, and running it
 unconditionally also produces a host-drift signal — kernel, microcode, thermal —
 that a gated run would hide. Its cost is forty minutes of an otherwise idle
-owned machine rather than a bill. It runs every Sunday at 15:00 UTC, an hour
+owned machine rather than a bill. That private workflow was scheduled every Sunday at 15:00 UTC, an hour
 the host is idle, and can be dispatched by hand for an out-of-cycle cohort; the
 schedule was added once the first owned-host cohort had landed and been looked
 at.
@@ -985,13 +1006,13 @@ series.
 Raw repetitions are intentionally excluded from this public history schema, while their derived
 minimums and medians are retained. `--samples-json <path>` exports the ordered steady-state,
 preparation, first-call, and combined cold-start samples without changing JSONL history records or
-generated current-results artifacts. A sidecar is optional for ordinary local
-or calibrated runs, but required when a fixed-N run appends history; accepted
+generated current-results artifacts. A sidecar is optional for ordinary trusted
+CI calibrated runs, but required when a fixed-N run appends history; accepted
 milestone evidence is retained under `history/evidence/<full-commit>/`.
 
 `--list-json` emits a separate schema-identified metadata document for the
 available engine slots, feature gates, workload IDs, default workload set, and
-result paths. It is intended for tooling; active native benchmark measurements
+result paths. It is intended for tooling; retained native benchmark measurements
 stay in the JSONL snapshot above. In that document, `implemented` means the
 source adapter exists, while `available` means this specific binary was compiled
 with the adapter's feature enabled.
@@ -1091,10 +1112,11 @@ with `node bench/render-current-results.js`. These commands validate/render
 existing evidence and take no performance measurements. New results require
 fresh ci-bench evidence and independent source review before updating this data.
 
-The main-only publisher mirrors the selected JSON to the data repository and
-publishes it beside `index.html` as `grabby-builds.json`. It is the only Pages
-writer, including after memory cohorts; it always uses current main rendering
-code plus the data repository's retained live series and memory. Do not hand-edit
+The historical private main-only publisher mirrored the selected JSON to the data
+repository and published it beside `index.html` as `grabby-builds.json`. This source
+profile has no publication workflow. That private publisher was the sole Pages
+writer, including after memory cohorts; it used main rendering code plus the
+data repository's retained live series and memory. Do not hand-edit
 the generated page or publish from a historical measurement checkout.
 
 The non-default `string_opcodes` workload is Rustia-only supplemental acceptance.

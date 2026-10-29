@@ -91,7 +91,7 @@ or result transformations, and verify all active clients in the same rollout.
 
 ### Delivery record
 
-The runtime merged in [Rustia #30](https://github.com/slowchop/rustia/pull/30) as
+The runtime merged in [Rustia #30](https://github.com/slowchop/rustia-historic/pull/30) as
 `fc0d19a56ba7cc58a4d4c2f03cd32bf3a6d352c9`, after the canonical release preflight,
 platform checks, native/wasm execution and PR benchmark screening passed. Client pins and vendor
 copies use that exact merged runtime revision, not an unmerged implementation branch.

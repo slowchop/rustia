@@ -85,7 +85,7 @@ a Safari crash diagnosis. Local diagnostic logs stay outside the repository.
 
 On 2026-10-24 (Australia/Hobart), commit
 `2bcfd4bef3f4a077008b21900f39a149118a9cc3` passed native Windows x86-64 MSVC
-in [CI run 40021456000](https://github.com/slowchop/rustia/actions/runs/40021456000/job/120647451654).
+in [CI run 40021456000](https://github.com/slowchop/rustia-historic/actions/runs/40021456000/job/120647451654).
 The log contains 120 passing tests across default and bare feature modes,
 including two identical shared golden transcripts, callbacks, typed objects,
 live values, module resolution, yieldable modules, callable continuations and
@@ -107,10 +107,10 @@ alone, establish the counts below.
 
 | Runtime | Passing tests | Groups | Evidence |
 |---|---:|---:|---|
-| Native macOS arm64 | 120 | 16 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369338) |
-| Headless Playwright WebKit | 88 | 16 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369066) |
-| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40234605092/job/121293369159) |
-| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40234679489/job/121293588462) |
+| Native macOS arm64 | 120 | 16 | [PR CI job](https://github.com/slowchop/rustia-historic/actions/runs/40234605092/job/121293369338) |
+| Headless Playwright WebKit | 88 | 16 | [PR CI job](https://github.com/slowchop/rustia-historic/actions/runs/40234605092/job/121293369066) |
+| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia-historic/actions/runs/40234605092/job/121293369159) |
+| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia-historic/actions/runs/40234679489/job/121293588462) |
 | Native Linux arm64 | 120 | 16 | Exact-source local correctness run described below |
 
 Each runtime emitted two byte-identical shared transcripts. All ten transcripts
@@ -153,10 +153,10 @@ platform contracts on 2026-10-26 (Australia/Hobart):
 
 | Runtime | Passing tests | Groups | Evidence |
 |---|---:|---:|---|
-| Native macOS arm64 | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330294) |
-| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330318) |
-| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/40246584261/job/121329319338) |
-| Headless Playwright WebKit | 88 | 16 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/40246586880/job/121329330289) |
+| Native macOS arm64 | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia-historic/actions/runs/40246586880/job/121329330294) |
+| Native Windows x86-64 MSVC | 120 | 16 | [Manual CI job](https://github.com/slowchop/rustia-historic/actions/runs/40246586880/job/121329330318) |
+| Node/V8 WebAssembly | 90 | 18 | [PR CI job](https://github.com/slowchop/rustia-historic/actions/runs/40246584261/job/121329319338) |
+| Headless Playwright WebKit | 88 | 16 | [Manual CI job](https://github.com/slowchop/rustia-historic/actions/runs/40246586880/job/121329330289) |
 
 Actual logs establish zero failures and two identical transcripts on each runtime.
 All ten transcripts, including native Linux arm64, match byte for byte. The
@@ -164,7 +164,7 @@ first PR WebKit job was terminated when its runner's user service stopped;
 Docker's socket disappeared during the test. That infrastructure failure is
 retained, and the failed PR jobs were retried after Docker recovered. The
 independent manual CI run completed successfully. The
-[retried PR WebKit job](https://github.com/slowchop/rustia/actions/runs/40246584261/job/121335358325)
+[retried PR WebKit job](https://github.com/slowchop/rustia-historic/actions/runs/40246584261/job/121335358325)
 also passed all 88 tests and both goldens, and the aggregate PR CI passed.
 These results do not establish
 performance acceptance or close Intel Mac, mobile or real-browser release gates.
@@ -180,7 +180,7 @@ and evidence note are `/private/tmp/rustia-linux-arm64-aa432f17.log` and
 evidence only.
 
 Delivery head `4be30aca` also passed native macOS arm64 and Windows x86-64
-in the [new candidate's platform run](https://github.com/slowchop/rustia/actions/runs/40253022712).
+in the [new candidate's platform run](https://github.com/slowchop/rustia-historic/actions/runs/40253022712).
 The actual logs for jobs `121348804463` and `121348804611` each record 120 tests
 across sixteen groups, zero failures, and two golden transcripts byte-identical
 to the Linux arm64 result. Node/V8 job `121348804515` executed ninety tests in
@@ -193,8 +193,8 @@ The same runtime's manual CI completed successfully. WebKit job `121348804132`
 executed 88 tests across sixteen groups with zero failures and two identical
 goldens, matching all ten transcripts across the five recorded runtimes.
 Documentation-only integration `c4185197` preserved runtime and build inputs
-and passed [PR CI](https://github.com/slowchop/rustia/actions/runs/40254807221)
-and [differential smoke](https://github.com/slowchop/rustia/actions/runs/40254807181)
+and passed [PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40254807221)
+and [differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40254807181)
 (27 matches, zero differences). Its Mac, Node and WebKit logs re-established
 120/16, 90/18 and 88/16 tests/groups respectively; workspace Linux goldens also
 match. All eight target builds and the required aggregate passed. These results
@@ -211,8 +211,8 @@ zero failures and two byte-identical golden transcripts. The retained log is
 `/private/tmp/rustia-linux-arm64-6fd0e482.log`; the corresponding acceptance
 note records the source archive and image digest.
 
-Both [PR CI](https://github.com/slowchop/rustia/actions/runs/40259959422) and
-[manual platform CI](https://github.com/slowchop/rustia/actions/runs/40260017553)
+Both [PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40259959422) and
+[manual platform CI](https://github.com/slowchop/rustia-historic/actions/runs/40260017553)
 passed on delivery head `6b0122bd`. Actual platform logs establish:
 
 | Runtime | Manual CI job | Tests | Groups | Goldens |
@@ -230,7 +230,7 @@ acceptance in default and bare modes. Required aggregate `121375169183`
 verified successful preflight and WebKit inputs. Manual CI also passed all
 sixteen jobs, including aggregate `121376187277`.
 
-[Current-head differential smoke](https://github.com/slowchop/rustia/actions/runs/40259959466)
+[Current-head differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40259959466)
 matched all 27 oracle cases with zero differences and passed its execution
 test. These correctness results do not establish performance acceptance.
 Intel Mac and mobile runtime execution remain open; real Safari remains a
@@ -250,9 +250,9 @@ in sixteen groups, zero failures, and two golden transcripts byte-identical
 to the earlier platforms. The companion acceptance note records source and
 image identity.
 
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40282602943) passed all
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40282602943) passed all
 fifteen applicable jobs; Windows is intentionally covered by the
-[manual CI run](https://github.com/slowchop/rustia/actions/runs/40282662208),
+[manual CI run](https://github.com/slowchop/rustia-historic/actions/runs/40282662208),
 which passed all sixteen jobs. Independently audited manual platform logs are:
 
 | Runtime | Job | Tests | Groups | Goldens |
@@ -268,7 +268,7 @@ runs passed all eight target builds. Workspace jobs `121439006108` and
 `121439006049` and `121439184499` each report 311 passes across 36 groups,
 including the twelve-suite archived facade checks in default and bare modes.
 Aggregates `121444811481` and `121445198112` verified successful preflight
-and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40282603016)
+and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40282603016)
 matched all 27 cases with zero differences and passed its execution test.
 Performance acceptance remains separate. Intel Mac and mobile execution and
 real Safari release-candidate checks remain open release requirements.
@@ -282,8 +282,8 @@ Remote platform evidence must still be checked for delivery head `4846cd1e`;
 these correctness results do not establish performance acceptance.
 
 Delivery `4846cd1e` passes all fifteen applicable jobs in
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40291330000).
-[Manual CI](https://github.com/slowchop/rustia/actions/runs/40291366559)
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40291330000).
+[Manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40291366559)
 has fifteen successes and one Windows infrastructure failure. Both runs
 independently verify macOS 122 tests/16 groups, Node 92/18, and WebKit 90/16,
 with zero test failures, the new regression twice, and two matching goldens
@@ -307,8 +307,8 @@ Native Linux arm64 correctness from its exact Git source archive passes 122
 tests across sixteen groups with zero failures and two matching golden
 transcripts, retained in `/private/tmp/rustia-linux-arm64-ecbd774d.log`.
 
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40305528112) passes all
-fifteen applicable jobs and [manual CI](https://github.com/slowchop/rustia/actions/runs/40305723455)
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40305528112) passes all
+fifteen applicable jobs and [manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40305723455)
 passes all sixteen. Windows job `121514224792` executes 122 tests across sixteen
 groups with zero failures and two matching goldens; the earlier checkout
 infrastructure failure remains historical evidence. Both runs independently
@@ -321,7 +321,7 @@ Workspace jobs `121513566983` and `121514224844` each report 1,023 passes across
 36 groups, including twelve reused external archived facade suites in default
 and bare modes. Both stages have zero failures and two matching goldens. Both
 aggregate jobs explicitly receive successful preflight and WebKit inputs.
-[Differential smoke](https://github.com/slowchop/rustia/actions/runs/40305528187)
+[Differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40305528187)
 matches all 27 cases with zero differences and passes its execution test.
 These results establish correctness evidence for this candidate, not performance
 acceptance. Intel Mac and mobile runtime execution remain open release gates;
@@ -333,8 +333,8 @@ as `457d7715`. Its exact source archive passes native Linux arm64 correctness:
 122 tests across sixteen groups, zero failures and two matching goldens,
 retained in `/private/tmp/rustia-linux-arm64-2e347dad.log`.
 
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40311547800) passes all
-fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia/actions/runs/40311573884)
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40311547800) passes all
+fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40311573884)
 passes all sixteen. Independent log audits verify macOS and Windows 122 tests
 across sixteen groups, Node 92/18 and WebKit 90/16, all with zero failures,
 two matching goldens and the suspended-capture regression in both feature modes.
@@ -345,7 +345,7 @@ Workspace jobs `121533697826` and `121533794690` each execute 1,023 tests across
 63 groups; release jobs `121533697744` and `121533795048` each execute 313 across
 36 groups, including twelve external archived facade suites in default and bare
 modes. Both stages have zero failures and two matching goldens; both aggregates
-receive successful preflight and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40311547738)
+receive successful preflight and WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40311547738)
 verifies 27 matches, zero differences and a passing execution test. Performance
 acceptance remains separate; the open public-release platform gates remain.
 
@@ -355,8 +355,8 @@ The shared unary-math value operation is runtime `12d16851`, delivered as
 groups, zero failures and two matching goldens; the retained log is
 `/private/tmp/rustia-linux-arm64-12d16851.log`.
 
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40317696020) passes all
-fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia/actions/runs/40317811651)
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40317696020) passes all
+fifteen applicable jobs; [manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40317811651)
 passes all sixteen. Independent completed-log audits verify macOS and Windows
 122 tests/16 groups, Node 92/18 and WebKit 90/16, all with zero failures,
 the suspended-capture regression twice and two matching golden transcripts.
@@ -369,7 +369,7 @@ call-shape regressions. Release jobs `121554321360` and `121554727337` each
 execute 313 tests across 36 groups, including twelve archived facade suites in
 default and bare modes. All have zero failures and two matching goldens.
 Aggregates `121561950917` and `121563157648` receive successful preflight and
-WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia/actions/runs/40317695934)
+WebKit inputs. [Differential smoke](https://github.com/slowchop/rustia-historic/actions/runs/40317695934)
 verifies 27 matches, zero differences and a passing execution test. This is
 correctness evidence, not performance acceptance; public-release platform
 gates remain open as above.
@@ -379,8 +379,8 @@ gates remain open as above.
 
 Runtime `cd1071cfaf626959bcec0120d0c8806b442a3e61`, delivery
 `2eaf304e24bde9e0bccf304106c11b561a343df9`, passes
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40324655813) and
-[manual CI](https://github.com/slowchop/rustia/actions/runs/40324774754).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40324655813) and
+[manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40324774754).
 Both workspace logs execute 1,026 tests in 63 groups, including the new iterator
 regression. Both release logs execute 313 tests in 36 groups, including twelve
 archived facade suites in each feature mode. Both aggregate gates receive
@@ -399,8 +399,8 @@ revert are retained in [95](95-numeric-index-contract.md).
 
 Runtime `12521d6016d7810eb729520802c507ff4d0c7b44`, delivery
 `7cbdd8665f9b12ceb966039c173fc28dda425e8c`, passes
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40332537230) and
-[manual CI](https://github.com/slowchop/rustia/actions/runs/40332724032).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40332537230) and
+[manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40332724032).
 Each workspace log executes 1,026 tests in 63 groups, including the retained
 array regression and expanded closure guard regression. Each release log
 executes 313 tests in 36 groups, including twelve archived facade suites in
@@ -420,8 +420,8 @@ isolation and pending iterator correction remain recorded in [95](95-numeric-ind
 
 Runtime `e292ef2b67e8497bac9bb399d80b9d7bd2e7d59a`, delivery
 `c754371f0b7622a4ab811ff0c4ed97bae7e6fbc2`, passes
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40341828709) and
-[manual CI](https://github.com/slowchop/rustia/actions/runs/40341952742).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40341828709) and
+[manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40341952742).
 Each workspace log executes 1,028 tests in 63 groups; each release log executes
 315 tests in 36 groups, including twelve archived facade suites in both feature
 modes. Both aggregate gates explicitly receive successful preflight and WebKit
@@ -440,8 +440,8 @@ performance and the next isolated probe correction remain recorded in [95](95-nu
 
 Runtime `8a1c6ac4aa32fe9bf1aa29218ff7d86a2b20ceaa`, delivery
 `f1e6de3648a263ef1e03be2313c420f0d27b1920`, passes
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40361453671) and
-[manual CI](https://github.com/slowchop/rustia/actions/runs/40361508072).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40361453671) and
+[manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40361508072).
 Each workspace log executes 1,028 tests in 63 groups; each release log executes
 315 tests in 36 groups, including twelve archived facade suites in both feature
 modes. Both aggregate gates have successful preflight and WebKit inputs. All
@@ -459,8 +459,8 @@ and next boundary-guard correction remain recorded in [95](95-numeric-index-cont
 
 Runtime `dc2adfd2418972987a6a22c3036ed53cba746072`, delivery
 `7b450eb33051aaa89c9fb99e64ee67a9b6b8670f`, passes
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40369390185) and
-[manual CI](https://github.com/slowchop/rustia/actions/runs/40369563630).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40369390185) and
+[manual CI](https://github.com/slowchop/rustia-historic/actions/runs/40369563630).
 Each workspace log executes 1,029 tests in 63 groups; each release log executes
 315 tests in 36 groups, including twelve archived facade suites in both feature
 modes. Both aggregate gates explicitly receive successful preflight and WebKit
@@ -478,9 +478,9 @@ performance isolation and production revert remain recorded in
 ## Cycle-diagnostic tooling deliveries (historical after tape-first correction)
 
 Tooling heads `e4985396`, `b840a94d` and `844df778` pass their respective
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40378938461),
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40382863978) and
-[PR CI](https://github.com/slowchop/rustia/actions/runs/40387282169).
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40378938461),
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40382863978) and
+[PR CI](https://github.com/slowchop/rustia-historic/actions/runs/40387282169).
 Each independently audited workspace log executes 1,029 tests in 63 groups;
 each release log executes 315 tests in 36 groups, including twelve archived
 facade suites across both feature modes. All eight target builds per run pass;
@@ -493,8 +493,8 @@ next tape-first runtime correction. Its exact-head platform checks remain pendin
 
 
 PR #74 delivery `60077eafa66b60e217aa74a65da1c4483ce3073b` passes PR CI
-[40394468138](https://github.com/slowchop/rustia/actions/runs/40394468138)
-and manual CI [40394576399](https://github.com/slowchop/rustia/actions/runs/40394576399).
+[40394468138](https://github.com/slowchop/rustia-historic/actions/runs/40394468138)
+and manual CI [40394576399](https://github.com/slowchop/rustia-historic/actions/runs/40394576399).
 Independent artifact audits verify 1,029 workspace tests in 63 summaries and
 315 release tests in 36 summaries per run, including twelve archived facade
 suites; all eight target builds pass in each run. Mac and Windows pass 124 shared
@@ -510,8 +510,8 @@ runtime code; performance rejection remains recorded in design 95.
 
 Runtime `f116e72731004af43bdee8fafefc40a05fd3a7ad`, delivered as
 `b5982752df3711c593b5249908bea01651f4364e`, passes
-[PR CI 40402650611](https://github.com/slowchop/rustia/actions/runs/40402650611)
-and [manual CI 40402811341](https://github.com/slowchop/rustia/actions/runs/40402811341).
+[PR CI 40402650611](https://github.com/slowchop/rustia-historic/actions/runs/40402650611)
+and [manual CI 40402811341](https://github.com/slowchop/rustia-historic/actions/runs/40402811341).
 Independent audits verify all 33 completed job artifacts. Each workspace stage
 passes 1,029 tests in 63 groups, each release stage passes 315 tests in 36 groups
 with twelve archived facade suites, and both aggregate gates receive successful

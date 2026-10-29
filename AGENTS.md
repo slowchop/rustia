@@ -3,7 +3,7 @@
 rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby).
 Public source access is separate from package publication and supported-release acceptance; full Luau parity
 is not implied by source visibility. **This is an LLM-first codebase** — written and maintained mostly by agents, read and
-contributed to by humans. Optimise for *both*: code an agent can reason about locally and a human can trust.
+reviewed by humans. Outside contribution and support policies are undecided. Optimise for *both*: code an agent can reason about locally and a human can trust.
 
 **Start every session here:** read [`design/CURRENT.md`](design/CURRENT.md) (the single canonical state), then
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
@@ -33,8 +33,12 @@ serves them.
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
-- `main` requires status checks through a repository ruleset, so auto-merge lands a pull request when it is green rather than when it is opened. The ruleset's only bypass actor is the `slowchop-ops-controller` app, which lands the weekly benchmark cohort: that publication pull request carries a CI-skip marker and so reports no checks at all.
-- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. The repository enforces this rather than trusting it: squash and rebase merging are disabled, so merge is the only method offered.
+- The cleaned source repository uses hosted correctness CI. Its main-branch ruleset and
+  auto-merge settings await separate approval; do not describe them as already enforced.
+  Check every applicable PR check and independent review before merging. Historical
+  benchmark publication permissions belong to the private historic repository and do not
+  grant a bypass in this repository.
+- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the repository settings still offer squash and rebase.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)
 
@@ -109,14 +113,14 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
   confusing split API.
 
 ## Where things live (public vs private boundary)
-- **This repo `rustia` (public-bound):** code + `design/` (the spec) + public GitHub Issues. **Nothing secret
+- **This repo `rustia` (public-bound):** code + `design/` (the spec). Public issue and contribution policies are undecided. **Nothing secret
   or infra-identifying ever lands here** (no runner hostnames/IPs/config, no credentials).
 - **`private/` — the `rustia-ops` private sibling repo, git-ignored mount** (separate git history → the
   self-hosted CI/infra can never appear in public history by construction). Holds private notes, the CI-runner
   setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
 - **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
-- **Tasks:** public bugs/features = GitHub Issues on this repo; private/infra tasks = files (or Issues) in
-  `rustia-ops`. **No Linear** (the private repo covers it).
+- **Tasks:** keep source maintenance in this repo; private/infra tasks = files (or Issues) in
+  `rustia-ops`. Opening public Issues requires a separate policy decision. **No Linear** (the private repo covers it).
 - Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
 
 ## Before pushing
