@@ -2,9 +2,18 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-29.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-30.)
 
 ## One-paragraph state
+
+**Retained-handle stateful coverage (2026-10-30):** the bounded embedding fuzzer
+now interleaves retained exports/functions with replacement, captured-state
+installation rollback, clone/drop, verified collection and decision reset.
+An independent host model checks live values and exact stale-handle epochs
+after every operation. The 25-operation driver retains its 128-byte input,
+4,096-fuel and 2 MiB guest bounds. Explicit and seeded traces cover all four
+profiles; this is local correctness coverage, not a new remote campaign or
+runtime/API change. See [the coverage record](82-error-behaviour-fuzzing.md#retained-exports-and-functions-2026-10-30).
 
 **Documentation and repository identity (2026-10-29):** the cleaned source
 repository is `slowchop/rustia`; the original private repository is
