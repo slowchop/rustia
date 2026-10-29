@@ -47,10 +47,12 @@ more disk space than the focused tests.
 `cargo bench`, benchmark examples, profiling, and quick timing comparisons. Local
 builds, correctness tests, and static checks are allowed; their elapsed times are
 not performance evidence. This source repository currently has hosted correctness
-CI and no `ci-bench` workflow. Measurement and publication workflows are paused
-pending a trusted private benchmark bridge. Only accepted `ci-bench` results can
-support speed claims or benchmark updates; leave measurements pending while that
-service is unavailable.
+CI and no benchmark workflow. Public per-commit/history measurement, landscape
+refresh, and publication remain paused. A separate private maintainer bridge
+supports manually dispatched, reviewed exact-cohort runtime comparisons. Those
+outputs stay private, require independent raw-data review, and do not update
+public history or authorize public performance claims. See
+[the bridge contract](design/81-benchmark-operations.md#public-source-profile).
 
 ## Find your way around
 

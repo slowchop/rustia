@@ -8,19 +8,23 @@
 ## Public-source profile
 
 The public-source tree runs correctness and artifact validation on GitHub-hosted
-runners. Benchmark measurement, benchmark-data publication, and landscape
-refresh are paused pending a reviewed trusted private benchmark bridge. The
-committed benchmark records are historical data; they do not establish current
-runner authority, current performance stability, or permission to publish new
-measurements. No public workflow dispatches a benchmark or publishes benchmark
-data. `design/public-source-profile.json` selects this explicit profile, and
-the public workflow, operations-status, and report validators enforce it.
+runners. Public per-commit/history measurement, benchmark-data publication, and
+landscape refresh remain paused. A separate private maintainer bridge is
+available for manually dispatched, reviewed exact-cohort runtime comparisons
+only. Those comparisons stay private, do not update public history, and do not
+authorize public performance claims. The committed benchmark records remain
+historical data; they do not establish current runner authority or performance
+stability. Bridge availability does not accept a performance result. No public
+workflow dispatches a benchmark or publishes benchmark data.
+`design/public-source-profile.json` records the bridge's narrow
+availability state, while the public workflow, operations-status, and report
+validators continue to enforce hosted correctness only.
 
 The runner and publication procedures below describe the retained private
-operations contract. They are not active public-source automation. A return to
-measurement or publication requires a separate reviewed private bridge and an
-explicitly updated profile; changing the public workflow profile alone cannot
-enable either operation.
+operations contract. They are not active public-source automation. Resuming
+history measurement, landscape refresh, or publication requires a separate
+reviewed private lane and an explicitly updated profile; changing the public
+workflow profile alone cannot enable those operations.
 
 ## Goals
 

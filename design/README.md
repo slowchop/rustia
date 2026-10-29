@@ -27,7 +27,7 @@ These documents describe contracts and intent. Use the code, tests, and
 - [57 — Memory measurement protocol and open requirements](57-memory-benchmarking.md),
   [80 — Benchmark suite](80-bench-suite.md), and
   [81 — Benchmark operations](81-benchmark-operations.md). The
-  [benchmark README](../bench/README.md) explains the paused source profile and timing policy.
+  [benchmark README](../bench/README.md) explains the allowed measurement paths and timing policy.
 - [90 — Release readiness](90-release-readiness.md),
   [91 — Versioning policy](91-semver-policy.md), and
   [92 — First release](92-first-release.md).

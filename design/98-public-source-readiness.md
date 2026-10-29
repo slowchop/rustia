@@ -225,3 +225,19 @@ were compared with the reviewed inventory and a fresh clone was inspected.
 Hosted correctness checks gate acceptance of staged revisions, with exact CI
 evidence retained privately. The repository remains private and packages remain
 unpublished; this is not supported-release acceptance or a visibility decision.
+
+## Private maintainer cohort bridge status (2026-10-29)
+
+A separate private maintainer bridge is available for manually dispatched,
+reviewed exact-cohort runtime comparisons only. It does not add a timing
+authority, runner, credential, or benchmark workflow to the public source
+repository. Public correctness workflows remain hosted and read-only. The
+public coordinator continues to refuse benchmark commands, and automatic
+per-commit/history measurement, landscape refresh, and publication remain
+paused.
+
+The bridge stores comparison output privately. It does not update public
+history or authorize public claims. Comparisons require independent raw-data
+review before acceptance. The profile state records this narrow bridge
+availability, not a successful run, a current performance result, or a change
+to source visibility or package publication.

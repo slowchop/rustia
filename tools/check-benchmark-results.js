@@ -7,6 +7,10 @@ const path = require("path");
 const childProcess = require("child_process");
 
 const root = path.resolve(__dirname, "..");
+const PUBLIC_BRIDGE_STATES = Object.freeze([
+  "pending-private-trusted-pipeline",
+  "private-maintainer-cohorts-v1",
+]);
 const historyPath = path.join(root, "bench", "history", "runs.jsonl");
 const expectedResults = path.join(root, "bench", "RESULTS.md");
 const expectedJson = path.join(root, "bench", "current-results.json");
@@ -666,11 +670,15 @@ function historicalHostForPublicProfile(profile, status) {
   if (profile?.schema !== "rustia.public-source-profile.v1" || profile?.state !== "private-rehearsal"
     || !/^[0-9a-f]{40}$/.test(profile.historical_head ?? "")
     || profile.historical_host_label !== "ci-bench"
-    || profile.benchmark_bridge !== "pending-private-trusted-pipeline"
+    || !PUBLIC_BRIDGE_STATES.includes(profile.benchmark_bridge)
     || profile.package_publication !== false || profile.visibility_authorized !== false) {
     fail("public-source profile must preserve the explicit historical benchmark provenance and paused-publication boundary");
   }
-  if (status?.profile !== "public-source" || status.measurement?.mode !== "paused-pending-private-bridge"
+  const expectedMeasurementMode = profile.benchmark_bridge === "private-maintainer-cohorts-v1"
+    ? "public-automation-paused-private-manual-cohorts"
+    : "paused-pending-private-bridge";
+  if (status?.profile !== "public-source" || status.benchmark_bridge !== profile.benchmark_bridge
+    || status.measurement?.mode !== expectedMeasurementMode
     || status.measurement?.authoritative_runner_classes?.length !== 0
     || status.measurement?.scheduled_billing_allowed !== false
     || status.publication?.state !== "paused" || status.progress?.state !== "paused"
@@ -842,12 +850,22 @@ function selfTest() {
   };
   const pausedPublicStatus = {
     profile: "public-source",
+    benchmark_bridge: "pending-private-trusted-pipeline",
     runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
     measurement: { mode: "paused-pending-private-bridge", authoritative_runner_classes: [], scheduled_billing_allowed: false },
     publication: { state: "paused" }, progress: { state: "paused" }, landscape: { state: "paused" },
   };
   if (historicalHostForPublicProfile(publicProfile, pausedPublicStatus) !== "ci-bench") {
     fail("public profile must validate historical rows against their recorded provenance label");
+  }
+  const manualProfile = { ...publicProfile, benchmark_bridge: "private-maintainer-cohorts-v1" };
+  const manualStatus = {
+    ...pausedPublicStatus,
+    benchmark_bridge: "private-maintainer-cohorts-v1",
+    measurement: { ...pausedPublicStatus.measurement, mode: "public-automation-paused-private-manual-cohorts" },
+  };
+  if (historicalHostForPublicProfile(manualProfile, manualStatus) !== "ci-bench") {
+    fail("manual private comparisons must not grant public timing authority");
   }
   refuses(/must remain paused/, () => historicalHostForPublicProfile(publicProfile, {
     ...pausedPublicStatus, publication: { state: "active" },
@@ -859,6 +877,15 @@ function selfTest() {
   refuses(/preserve the explicit historical benchmark provenance/, () => historicalHostForPublicProfile(
     { ...publicProfile, visibility_authorized: true }, pausedPublicStatus,
   ));
+  refuses(/preserve the explicit historical benchmark provenance/, () => historicalHostForPublicProfile(
+    { ...publicProfile, benchmark_bridge: "enabled" }, pausedPublicStatus,
+  ));
+  refuses(/must remain paused/, () => historicalHostForPublicProfile(publicProfile, {
+    ...pausedPublicStatus, benchmark_bridge: "private-maintainer-cohorts-v1",
+  }));
+  refuses(/must remain paused/, () => historicalHostForPublicProfile(manualProfile, {
+    ...manualStatus, progress: { state: "active" },
+  }));
 
   if (requireSingleHostTable(table([row("rustia", "ci-bench"), row("koto", "ci-bench")], { hosts: ["ci-bench"] }), "fixture", "ci-bench") !== "ci-bench") {
     fail("self-test did not accept a single-host table");
