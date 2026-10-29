@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ANALYSIS_SCHEMA = "rustia.bench.memory-analysis.v1";
+const { MEMORY_PROTOCOL, requireSingleProtocol, validateProtocolMetrics } = require("./memory-protocol.js");
 const COHORT_SCHEMA = "rustia.bench.memory-cohort.v1";
 const CURRENT_SCHEMA = "rustia.bench.memory-current-results.v1";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
@@ -74,11 +75,16 @@ function sha256File(file) {
 }
 
 function validateAnalysis(analysis, config) {
-  if (analysis?.schema_version !== 1 || analysis?.schema !== ANALYSIS_SCHEMA) {
+  const corrected = analysis?.schema_version === 2 && analysis?.schema === "rustia.bench.memory-analysis.v2";
+  if (!corrected && (analysis?.schema_version !== 1 || analysis?.schema !== ANALYSIS_SCHEMA)) {
     fail("analysis uses the wrong schema");
   }
   if (!Array.isArray(analysis.rows) || analysis.rows.length === 0) fail("analysis has no rows");
   if (!Array.isArray(analysis.detector_coverage)) fail("analysis lacks detector coverage");
+  const protocol = requireSingleProtocol(analysis.rows, "memory analysis");
+  if ((protocol === MEMORY_PROTOCOL) !== corrected) fail("analysis schema and row protocol differ");
+  if (corrected && analysis.method?.measurement_protocol !== protocol) fail("analysis method and row protocol differ");
+  analysis.rows.forEach(validateProtocolMetrics);
   for (const row of analysis.rows) {
     if (row.commit !== config.commit) fail("analysis contains a different commit");
     if (typeof row.target !== "string" || row.target === "") fail("analysis row target is missing");
@@ -167,6 +173,8 @@ function publish(config) {
     evidence: config.evidence,
     analysis_sha256: sha256File(config.analysis),
     raw_sample_count: analysis.raw_sample_count,
+    ...(analysis.schema_version === 2 ? { warmup_sample_count: analysis.warmup_sample_count,
+      control_sample_count: analysis.control_sample_count } : {}),
     method: analysis.method,
     detector_coverage: analysis.detector_coverage,
     rows: analysis.rows,
@@ -190,6 +198,8 @@ function publish(config) {
       workloads,
       row_count: analysis.rows.length,
       raw_sample_count: analysis.raw_sample_count,
+      ...(analysis.schema_version === 2 ? { warmup_sample_count: analysis.warmup_sample_count,
+        control_sample_count: analysis.control_sample_count } : {}),
       method: analysis.method,
     },
     detector_coverage: analysis.detector_coverage,

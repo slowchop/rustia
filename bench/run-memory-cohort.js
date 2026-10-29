@@ -9,8 +9,9 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { cgroupBlockerMessage, delegatedCgroupRoot } = require("./cgroup-delegation.js");
 
-const PROTOCOL_SCHEMA = "rustia.bench.memory-protocol.v1";
-const MANIFEST_SCHEMA = "rustia.bench.memory-cohort-evidence.v1";
+const PROTOCOL_SCHEMA = "rustia.bench.memory-protocol.v2";
+const { QUIESCENCE_MS } = require("./memory-protocol.js");
+const MANIFEST_SCHEMA = "rustia.bench.memory-cohort-evidence.v2";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SAFE_ID = /^[A-Za-z0-9._-]{1,128}$/;
 // A label, never an address: no dots and no colons, so it can be neither a
@@ -83,6 +84,8 @@ function validateProtocol(value) {
       "cohort_id",
       "commit",
       "samples",
+      "warmup_rounds",
+      "quiescence_ms",
       "bootstrap_repetitions",
       "bootstrap_seed",
       "growth_thresholds",
@@ -95,6 +98,8 @@ function validateProtocol(value) {
   if (!SAFE_ID.test(value.cohort_id)) fail("protocol.cohort_id is not a safe identifier");
   if (!FULL_COMMIT.test(value.commit)) fail("protocol.commit must be a lowercase full commit");
   positiveInteger(value.samples, "protocol.samples");
+  if (value.warmup_rounds !== 1) fail("protocol requires one separate warmup round");
+  if (value.quiescence_ms !== QUIESCENCE_MS) fail("protocol quiescence must be 100 ms");
   if (value.samples < 9) fail("publication protocol requires at least nine fresh-process samples");
   positiveInteger(value.bootstrap_repetitions, "protocol.bootstrap_repetitions");
   if (!Number.isSafeInteger(value.bootstrap_seed) || value.bootstrap_seed < 0 || value.bootstrap_seed > 0xffffffff) {
@@ -192,6 +197,21 @@ function roundOrder(allCases, round) {
   return round % 2 === 0 ? rotated.reverse() : rotated;
 }
 
+function sampleSchedule(allCases, samples) {
+  const schedule = [];
+  for (let round = 0; round <= samples; round += 1) {
+    const role = round === 0 ? "warmup" : "measurement";
+    for (const testCase of roundOrder(allCases, Math.max(1, round))) {
+      const lanes = round % 2 === 0 ? ["null-control", "workload"] : ["workload", "null-control"];
+      for (const lane of lanes) {
+        schedule.push({ testCase, round, role, lane,
+          sampleId: `${role}-${String(round).padStart(2, "0")}-${lane}-${testCase.engine}-${testCase.workload}` });
+      }
+    }
+  }
+  return schedule;
+}
+
 function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
 }
@@ -239,63 +259,63 @@ function runCohort(config) {
   const allCases = cases(protocol, binaries);
   const rawFiles = [];
   const runLog = [];
-  for (let round = 1; round <= protocol.samples; round += 1) {
-    for (const testCase of roundOrder(allCases, round)) {
-      const sampleId = [
-        `round-${String(round).padStart(2, "0")}`,
+  for (const entry of sampleSchedule(allCases, protocol.samples)) {
+    const { testCase, round, lane, role, sampleId } = entry;
+    const output = path.join(rawDirectory, `${sampleId}.json`);
+    const startedAt = new Date().toISOString();
+    run(
+      "taskset",
+      [
+        "-c",
+        String(protocol.host.supervisor_cpu),
+        process.execPath,
+        SUPERVISOR,
+        "sample",
+        "--binary",
+        testCase.binary,
+        "--engine",
         testCase.engine,
+        "--workload",
         testCase.workload,
-      ].join("-");
-      const output = path.join(rawDirectory, `${sampleId}.json`);
-      const startedAt = new Date().toISOString();
-      run(
-        "taskset",
-        [
-          "-c",
-          String(protocol.host.supervisor_cpu),
-          process.execPath,
-          SUPERVISOR,
-          "sample",
-          "--binary",
-          testCase.binary,
-          "--engine",
-          testCase.engine,
-          "--workload",
-          testCase.workload,
-          "--n",
-          String(testCase.n),
-          "--epochs",
-          String(testCase.epochs),
-          "--output",
-          output,
-          "--commit",
-          protocol.commit,
-          "--sample-id",
-          sampleId,
-          "--benchmark-cpu",
-          String(protocol.host.benchmark_cpu),
-          "--supervisor-cpu",
-          String(protocol.host.supervisor_cpu),
-          "--sample-interval-ms",
-          String(protocol.host.sample_interval_ms),
-          "--timeout-ms",
-          String(protocol.host.timeout_ms),
-          ...(cgroupRoot === null ? ["--allow-root-cgroup"] : ["--cgroup-root", cgroupRoot]),
-        ],
-        { capture: false },
-      );
-      rawFiles.push(output);
-      runLog.push({
-        sample_id: sampleId,
-        round,
-        engine: testCase.engine,
-        workload: testCase.workload,
-        binary_role: testCase.binaryRole,
-        started_at: startedAt,
-        finished_at: new Date().toISOString(),
-        sha256: sha256File(output),
-      });
-    }
+        "--n",
+        String(testCase.n),
+        "--epochs",
+        String(testCase.epochs),
+        "--output",
+        output,
+        "--commit",
+        protocol.commit,
+        "--sample-id",
+        sampleId,
+        "--lane", lane,
+        "--role", role,
+        "--round", String(round),
+        "--quiescence-ms", String(protocol.quiescence_ms),
+        "--benchmark-cpu",
+        String(protocol.host.benchmark_cpu),
+        "--supervisor-cpu",
+        String(protocol.host.supervisor_cpu),
+        "--sample-interval-ms",
+        String(protocol.host.sample_interval_ms),
+        "--timeout-ms",
+        String(protocol.host.timeout_ms),
+        ...(cgroupRoot === null ? ["--allow-root-cgroup"] : ["--cgroup-root", cgroupRoot]),
+      ],
+      { capture: false },
+    );
+    rawFiles.push(output);
+    runLog.push({
+      sample_id: sampleId,
+      round,
+      lane,
+      role,
+      engine: testCase.engine,
+      workload: testCase.workload,
+      binary_role: testCase.binaryRole,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      sha256: sha256File(output),
+    });
   }
   writeJson(path.join(config.outputDirectory, "run-order.json"), runLog);
   const analysisPath = path.join(config.outputDirectory, "analysis.json");
@@ -329,7 +349,7 @@ function runCohort(config) {
     fs.readdirSync(rawDirectory).sort().map((file) => [file, sha256File(path.join(rawDirectory, file))]),
   );
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     schema: MANIFEST_SCHEMA,
     cohort_id: protocol.cohort_id,
     created_at: new Date().toISOString(),
@@ -343,12 +363,15 @@ function runCohort(config) {
     },
     case_count: allCases.length,
     samples_per_case: protocol.samples,
+    warmup_sample_count: allCases.length * 2,
+    control_sample_count: allCases.length * protocol.samples,
+    measurement_protocol_sha256: sha256File(path.join(__dirname, "memory-protocol.js")),
     raw_sample_count: rawFiles.length,
     evidence_sha256: evidenceHashes,
   };
   writeJson(path.join(config.outputDirectory, "manifest.json"), manifest);
   process.stdout.write(
-    `memory cohort complete: ${allCases.length} cases × ${protocol.samples} samples = ${rawFiles.length}\n`,
+    `memory cohort complete: ${allCases.length} cases × ${protocol.samples} work/control pairs plus warmups = ${rawFiles.length} processes\n`,
   );
 }
 
@@ -359,6 +382,8 @@ function selfTest() {
     cohort_id: "fixture",
     commit,
     samples: 9,
+    warmup_rounds: 1,
+    quiescence_ms: QUIESCENCE_MS,
     bootstrap_repetitions: 100,
     bootstrap_seed: 7,
     growth_thresholds: {
@@ -383,6 +408,15 @@ function selfTest() {
   assert.deepEqual(roundOrder(fixtures, 1), fixtures);
   assert.deepEqual(roundOrder(fixtures, 2), fixtures);
   assert.throws(() => validateProtocol({ ...protocol, samples: 8 }));
+  assert.throws(() => validateProtocol({ ...protocol, warmup_rounds: 0 }));
+  assert.throws(() => validateProtocol({ ...protocol, quiescence_ms: 0 }));
+  const schedule = sampleSchedule(fixtures, 9);
+  assert.equal(schedule.length, fixtures.length * 20);
+  assert.equal(schedule.filter(entry => entry.role === "warmup").length, fixtures.length * 2);
+  assert(schedule.slice(0, fixtures.length * 2).every(entry => entry.role === "warmup"));
+  assert.equal(new Set(schedule.map(entry => entry.sampleId)).size, schedule.length);
+  assert.deepEqual(schedule.filter(entry => entry.round === 1).slice(0, 2).map(entry => entry.lane), ["workload", "null-control"]);
+  assert.deepEqual(schedule.filter(entry => entry.round === 2).slice(0, 2).map(entry => entry.lane), ["null-control", "workload"]);
   // Every row this cohort publishes carries protocol.host.name, so a protocol
   // that cannot name its machine must not start a run: the label has to be
   // frozen before the first sample, not chosen when the rows are published.

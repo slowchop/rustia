@@ -141,10 +141,11 @@ One action list; completing work does not authorize source or package publicatio
    [00](00-constraints.md), [90](90-release-readiness.md) and [96](96-browser-platform-acceptance.md).
 4. **Finish memory policy and evidence:** tune GC intervals against the maintained
    mixed-heap correctness gate; deterministic intervals are replay-ABI choices.
-   Add external allocator/RSS history and resolve four prospective protocol gaps:
-   null-control-adjusted retention, anonymous-memory area, separate warmup process,
-   and bounded idle/collection opportunity before the quiescent marker. Historical
-   values/thresholds remain unchanged. [57](57-memory-benchmarking.md),
+   Protocol v2 implements paired control-adjusted retention, anonymous-memory area,
+   separate warmup processes and 100 ms natural idle before quiescent sampling.
+   Add external allocator/RSS history and obtain fresh Linux memory evidence through
+   an authorized memory lane; the private bridge currently supports runtime comparisons
+   only. Historical values/thresholds remain unchanged. [57](57-memory-benchmarking.md),
    [drift review](../2026-10-29_DRIFT_REPORT.md).
 5. **Resolve benchmark repeatability and extend trusted evidence:** use the private
    bridge within scope; preserve raw samples/acceptance rules and one history for

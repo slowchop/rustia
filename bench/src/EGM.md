@@ -7,6 +7,7 @@ This directory contains the native Rust benchmark executable. The Cargo target a
 ## Interface
 
 - [`main.rs`](main.rs) is the internal `script-bench` CLI entrypoint, not Rustia's public embedding API. Engine adapters are feature-gated; the default feature is `rustia-engine` ([Cargo manifest](../Cargo.toml#L16)).
+- Memory-child events use v2 schema metadata. `--memory-null-control` requires memory-child mode: it prepares and warms the same source but skips guest epoch execution while retaining every handshake. The supervisor supplies the common natural-idle interval before the quiescent event. Unit coverage proves the no-work path does not call the epoch executor.
 - The VM string-memory binary is a separate target documented in [`bin/EGM.md`](bin/EGM.md).
 - The normal Rustia adapter is behind `rustia-engine`. Its supplemental `string_opcodes` preparation compiles a top-level program with `BENCH_N`; a correctness test requires all nine specialized string opcodes. Other workloads retain their returned-function adapters.
 

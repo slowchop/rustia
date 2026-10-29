@@ -17,7 +17,7 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 535,
+      "file_count": 537,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
@@ -451,6 +451,8 @@
         "history/series/ci-bench-main.json",
         "memory/current-results.json",
         "memory/history/runs.jsonl",
+        "memory-protocol.js",
+        "memory-protocol.test.js",
         "operations-policy.json",
         "operations-status.json",
         "pr-screening.json",
