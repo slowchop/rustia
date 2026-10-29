@@ -599,7 +599,7 @@ facility is finished. The highest-impact gaps are:
    programs maintain live totals; VM control state uses a cached aggregate with local refresh after structural
    changes. Current GC root refreshes adjust that cached live total by the root-vector length delta when the
    census is clean; dirty state still defers to the exact cached census. This changes accounting work only,
-   not root contents, order, fuel, or collection boundaries, and has no performance acceptance yet. Quota
+   not root contents, order, fuel, or collection boundaries, and requires separate paired CI evidence. Quota
    admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
    reserved telemetry remains on demand. Script-visible `gcinfo`/`collectgarbage("count")` read that same
    maintained logical-live total. Public retained-root registry nodes are also admitted against the quota and

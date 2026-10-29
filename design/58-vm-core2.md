@@ -718,7 +718,7 @@ includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, 
 The current implementation keeps this refresh's memory accounting local: when the cached control census is
 clean, it adjusts live bytes by the root vector's length delta rather than recounting unchanged call-frame
 fields. Dirty accounting still uses the existing full cached census. Root contents, copy order, and collection
-boundaries are unchanged. This is a bookkeeping change only; it has no performance acceptance yet.
+boundaries are unchanged. This bookkeeping change requires separate paired CI evidence before performance acceptance.
 
 **Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
 the prize was bounded before committing to the rewrite. Both arms disable deterministic collection
