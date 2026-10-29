@@ -1,22 +1,29 @@
-# Rustia Live Wasm Demo
+# Rustia bare-Wasm browser demo
 
-This is a standalone browser demo for the current P1 Rustia engine. It is intentionally outside
-the root Cargo workspace membership so normal workspace gates do not build browser artifacts.
+This standalone browser demo evaluates Luau source with Rustia's standard
+environment. It instantiates raw Wasm with an empty import object and disables
+Rustia's default `web-live` feature. The directory name `live-wasm` does not mean
+that it selects `RustiaBuilder::live()` or JavaScript host services. The runner
+disables stdout, so the page displays returned values rather than script `print`
+output.
+
+For a complete `wasm-bindgen` setup using the default JavaScript adapters and
+`RustiaBuilder::live()`, follow [the JavaScript-services recipe](../web-live/README.md).
+
+The demo remains outside the root Cargo workspace. Run these commands from the
+repository root.
 
 Build the wasm runner:
 
 ```sh
-cargo build --locked --manifest-path demos/live-wasm/wasm-runner/Cargo.toml --target wasm32-unknown-unknown --release
+cargo build --locked --manifest-path demos/live-wasm/wasm-runner/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/live-wasm/wasm-runner/target
 ```
 
 Serve the static page:
 
 ```sh
-python3 -m http.server 8787 --directory demos/live-wasm
+python3 -m http.server 8787 --bind 127.0.0.1 --directory demos/live-wasm
 ```
 
-Then open <http://127.0.0.1:8787/>.
-
-The runner deliberately disables Rustia's default `web-live` feature because this page uses
-`WebAssembly.instantiate(..., {})` directly. Applications using `RustiaBuilder::live()` in a
-browser should keep the default feature and use the wasm-bindgen toolchain instead.
+Then open [the local demo](http://127.0.0.1:8787/). Its source is in
+[index.html](./index.html) and [the runner](./wasm-runner/src/lib.rs).

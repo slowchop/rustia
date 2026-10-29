@@ -28,7 +28,7 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Benchmark sources and artifacts | [bench](./bench/EGM.md) | Workloads, engine adapters, memory protocols, analysis, and report generation. |
 | Repository tooling | [tools](./tools/EGM.md) | Validation, release/package audits, pinned oracle tooling, and controlled benchmark operations. |
 | Fuzzing | [fuzz](./fuzz/EGM.md) | Separate workspace for bounded frontend/VM, stateful embedding, and differential fuzzing. |
-| Browser demonstration | [demos](./demos/EGM.md) | Interactive WebAssembly example using the standard preset. |
+| Browser examples | [demos](./demos/EGM.md) | Bare-Wasm standard demo and wasm-bindgen recipe using JavaScript services. |
 | Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
 
@@ -38,9 +38,13 @@ applied corrections and remaining memory-protocol requirements; it is not releas
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).
 Tests, fixture-only trees, vendored code, generated output, ignored directories, and
-symlinks have no separate maps. Hidden configuration is outside the bootstrap tree;
-[CI workflows](./.github/workflows/) and [Justfile](./Justfile) remain operational entry
-points. The ignored private sibling is a separate repository and is outside this map.
+symlinks have no separate maps. Hidden configuration is outside the bootstrap tree. Hosted
+CI workflows under [.github/workflows](./.github/workflows/) are operational correctness
+entry points; the macOS arm64 runtime job installs its pinned Rust toolchain and target with
+the same commit-pinned setup action used by the build matrix, then verifies the native host
+before running shared correctness suites. The [Justfile](./Justfile) remains the local
+validation entry point. The ignored private sibling is a separate repository and is outside
+this map.
 
 ## Invariants
 

@@ -34,8 +34,24 @@ callback-state choices and the failure/reuse boundaries of ordinary execution,
 installation, typed invocations and hardened entries. The correctness-only
 `hardened_decision` example uses one compiled entry for success, bounded record
 overflow without publication, and reuse after automatic reset. It is part of
-release preflight. These additions explain existing contracts; browser setup and
-the broader API-reference gaps in [100](100-documentation-review.md) remain open.
+release preflight. These additions explain existing contracts; the broader
+API-reference gaps in [100](100-documentation-review.md) remain open.
+
+**Browser embedding recipe (2026-10-30):** [the standalone application](../demos/web-live/README.md)
+documents the pinned Rust/wasm-bindgen build, generated JavaScript initialization,
+loopback HTTP server, returned value and console output. It keeps default
+`web-live` adapters and explicitly selects bounded `live()` execution; the
+existing raw-Wasm demo remains standard-profile and silent. Local Playwright
+1.64.1/WebKit 27.2 executed two calls and a reload, verifying returned `42` and
+`Hello from Luau` output. The existing hosted WebKit gate builds and executes
+this recipe. This is correctness evidence, not timing or Safari/mobile acceptance.
+
+**Introductory example guidance (2026-10-30):** embedding, chunk-builder,
+mutable-object and live-value examples now state their purpose, repository-root
+run command and expected outcome, with comments at integration boundaries and
+the direct Serde derive dependency named. `just check-examples` and release
+preflight execute all six correctness examples successfully; broader conversion
+guidance remains open in [100](100-documentation-review.md).
 
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
@@ -255,6 +271,12 @@ against the five extracted runtime archives with only facade/Serde dependencies
 and candidate-lock package identities. Native Mac and Node jobs have executed
 the integrated candidate; the complete job logs and Linux/final acceptance gates
 are linked from the acceptance record.
+The 2026-10-30 macOS 15 arm64 hosted job (run 40898224525, job 123533077626)
+failed before tests because the runner image did not provide `rustup` at the
+expected path. The workflow now uses the same commit-pinned Rust setup action as
+the build matrix, with Rust 1.95.0 and the native target; Darwin/arm64/compiler-host
+checks and both correctness command sets are unchanged. This changes bootstrap
+selection only; successful native execution remains required for CI acceptance.
 PR #60's stale generated benchmark-progress report was repaired in
 [PR #61](https://github.com/slowchop/rustia-historic/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The

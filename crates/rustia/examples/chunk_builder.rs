@@ -1,14 +1,23 @@
+//! Name script source, supply a custom environment, and execute side effects.
+//!
+//! Run from the repository root:
+//! `cargo run --locked -p rustia --example chunk_builder`
+//! Expected result: both evaluations return 42 and the guest flag becomes true.
+//! The example exits without printing output after its assertions pass.
+
 use rustia::RustiaBuilder;
 
 fn main() -> rustia::Result<()> {
     let mut rustia = RustiaBuilder::standard().build()?;
 
+    // Label source for diagnostics; eval converts its returned value to Rust.
     let answer: f64 = rustia
         .load("return 40 + 2")
         .source_name("answer.luau")
         .eval()?;
     assert_eq!(answer, 42.0);
 
+    // This table replaces the environment; default globals are not inherited.
     let environment = rustia.create_table()?;
     environment.set(&mut rustia, "input", 21)?;
     let doubled: f64 = rustia
@@ -18,6 +27,7 @@ fn main() -> rustia::Result<()> {
         .eval()?;
     assert_eq!(doubled, 42.0);
 
+    // Use exec when the script changes guest state but Rust needs no return value.
     rustia
         .load("chunk_builder_ran = true")
         .source_name("side-effect.luau")

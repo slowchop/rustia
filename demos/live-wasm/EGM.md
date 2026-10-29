@@ -2,13 +2,14 @@
 
 ## Overview
 
-Standalone browser demo for evaluating Luau source with the Rustia Wasm runner.
+Standalone bare-Wasm browser demo for evaluating Luau source with the standard preset and no stdout.
 
 ## Interface
 
 - [index.html](./index.html) is the browser UI.
 - Runner package: [wasm-runner](./wasm-runner/EGM.md).
 - Build and serving notes: [README.md](./README.md).
+- The sibling [JavaScript-services recipe](../web-live/README.md) uses wasm-bindgen and the live preset.
 
 ## Invariants
 

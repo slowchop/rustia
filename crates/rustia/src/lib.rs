@@ -115,6 +115,9 @@
 //! The default `web-live` feature supplies JavaScript services for browser Wasm.
 //! Disable default features for bare Wasm and provide services explicitly through
 //! [`RustiaBuilder`]. Enabling this feature does not select the live preset.
+//! Follow the [browser setup recipe] for a complete `wasm-bindgen` application
+//! that returns `42` to the page and prints to the browser console. The
+//! [bare-Wasm demo] instead uses raw Wasm with the standard preset and no stdout.
 //!
 //! The API is currently unpublished. The [first-release checklist] tracks the
 //! remaining work before a stable 1.0 contract.
@@ -126,6 +129,8 @@
 //! [game-object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs
 //! [hot-reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
 //! [hardened-decision example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs
+//! [browser setup recipe]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
+//! [bare-Wasm demo]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
 
 #[cfg(doctest)]
 mod brand_contract;

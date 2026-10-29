@@ -1,3 +1,12 @@
+//! Pass Rust data and callbacks to Luau, read Serde data, and reset guest state.
+//!
+//! Run from the repository root:
+//! `cargo run --locked -p rustia --example embedding`
+//! Expected output: `embedding example ok` after all assertions pass.
+//!
+//! When copying this into an application, add a direct Serde dependency for the
+//! derives: `serde = { version = "1", features = ["derive"] }`.
+
 use rustia::{FromRustia, Profile, Rustia, RustiaExtension};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +24,7 @@ struct Enemy {
 }
 
 fn main() -> rustia::Result<()> {
+    // Register host callbacks as persistent configuration for deterministic runs.
     let host = RustiaExtension::new("host")
         .fn_slot_read("bias", || 2.0)
         .fn_effect("score", |value: f64| value + 1.0);
@@ -39,6 +49,7 @@ fn main() -> rustia::Result<()> {
         .eval()?;
     assert_eq!(f64::from_rustia(value)?, 12.0);
 
+    // Installation retains exports so Rust can call the script's functions later.
     let exports = rustia
         .load(
             "\
@@ -58,6 +69,7 @@ return {
     let clamped: f64 = decide.call(&mut rustia, (9.0,))?;
     assert_eq!(clamped, 10.0);
 
+    // Deserialize into Rust-owned structs, then send the data back to Luau.
     let scenario: Scenario = rustia
         .load(
             "\
@@ -98,6 +110,7 @@ return {
         .eval()?;
     assert_eq!(String::from_rustia(value)?, "brute:2");
 
+    // Host-owned compiled code remains reusable after guest state is reset.
     let next_decision = Rustia::compile_module(
         "next_decision.luau",
         "return clamp(input + host.bias(), 0, 10)",

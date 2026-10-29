@@ -47,13 +47,11 @@ The concurrent [design/source drift review](../2026-10-29_DRIFT_REPORT.md) is re
 
 ### 1. One complete browser setup recipe
 
-The README advertises WebAssembly, but the [browser demo](../demos/live-wasm/README.md) uses bare Wasm with default features disabled. Its instruction to use the wasm-bindgen toolchain for JavaScript services is not a complete alternative setup path. The crate introduction explains `web-live` but does not show how an application loads it.
+Implemented as [the browser setup recipe](../demos/web-live/README.md), linked from README and Rustdoc. The standalone application pins its dependencies, uses the matching wasm-bindgen CLI, initializes the generated JavaScript module, returns `42` to the page, and prints `Hello from Luau` to the browser console. It sets explicit fuel and memory limits and explains default `web-live` features separately from selecting `RustiaBuilder::live()`.
 
-Add a short recipe showing one tested integration: exact prerequisites, Cargo features, build command, loading code, a returned value and output behavior. Explicitly distinguish enabling JavaScript adapters from selecting `RustiaBuilder::live()`. Label the existing raw-Wasm demo by what it does. Do not claim browser support from a compile-only check.
+The existing [raw-Wasm demo](../demos/live-wasm/README.md) is labeled as bare Wasm using the standard preset without stdout. No Rustia API or timing tool was added. The new application's exported function is its own JavaScript boundary.
 
-Place it beside the demo or in an existing reader-facing document, then link it from README and Rustdoc. Do not add a separate website, tool wrapper or browser API for documentation alone.
-
-Acceptance: a reader can follow the commands, see a result, and explain whether the example uses bare Wasm or JavaScript services. Verify the generated artifact in a browser before calling the recipe complete.
+Local Playwright 1.64.1/WebKit 27.2 executed the generated application on 2026-10-30: returned value and console output pass on two calls and after reload, with no page errors. The existing hosted WebKit job builds the documented artifact and executes [the same correctness check](../tools/browser/web-live-example.cjs); workflow fixtures reject missing build or execution commands. This evidence does not close real Safari or mobile release gates.
 
 ### 2. A small failure and reuse comparison
 
@@ -79,11 +77,11 @@ The nominal one-paragraph state spans hundreds of lines, and the file contains c
 
 Keep one current summary, implemented contract links, genuine open gates and one next-action list. Move completed chronology into its existing dated acceptance/audit record, preserving citations and decisions. Review this as its own change: CURRENT is authoritative, so a wholesale rewrite without checking every retained requirement would be risky. Do not delete evidence to achieve a line target.
 
-### Turn existing examples into teaching tools
+### Finish teaching guidance for examples
 
-Add short purpose/run/expected-result headers and a few comments marking the important steps. Introduce simple mutable objects before deterministic staged game changes. Remove redundant selection of default profiles and incidental `unwrap` calls from introductory examples when changing those examples; use their existing correctness checks to verify the edits.
+The introductory pass is implemented in [embedding](../crates/rustia/examples/embedding.rs), [chunk builder](../crates/rustia/examples/chunk_builder.rs), [mutable objects](../crates/rustia/examples/mutable_objects.rs) and [live values](../crates/rustia/examples/live_values.rs). Each starts with its purpose, repository-root run command and expected outcome, with a few comments marking the integration boundaries. README already presents simple mutable objects before staged game objects. The live-value example removes redundant default-profile selection, propagates builder errors, and requires the typed `StaleRetainedValue` error after reset. `just check-examples` and release preflight execute all four assertion sets alongside game objects and hardened decisions; all six pass.
 
-The first Serde recipe should list the application's direct `serde` dependency and derive feature. Show dense arrays versus sparse/mixed tables, checked integer conversion, and copied versus identity-preserving results where readers choose a conversion. Method-level details belong beside the methods, not in a new serialization chapter.
+The embedding header now lists the application's direct `serde` dependency and derive feature. Remaining conversion guidance should show dense arrays versus sparse/mixed tables, checked integer conversion, and copied versus identity-preserving results where readers choose a conversion. Extend useful headers to the more advanced examples when touching them. Method-level details belong beside the methods, not in a new serialization chapter.
 
 ### Treat the progress dashboard as a dated snapshot
 

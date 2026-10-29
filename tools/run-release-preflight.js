@@ -64,6 +64,8 @@ for (const manifest of lockedManifests()) {
   run("cargo", ["fetch", "--locked", "--manifest-path", manifest]);
 }
 run("cargo", ["fmt", "--all", "--", "--check"]);
+run("cargo", ["fmt", "--manifest-path", "demos/web-live/Cargo.toml", "--", "--check"]);
+run("cargo", ["clippy", "--locked", "--manifest-path", "demos/web-live/Cargo.toml", "--target", "wasm32-unknown-unknown", "--all-targets", "--", "-D", "warnings"]);
 run("cargo", ["clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
 // The three builds that otherwise compile only on the owned benchmark host,
 // for the weekly matrix and the memory lanes: the competitor engines, the Lua
@@ -188,9 +190,9 @@ run("cargo", [
 ]);
 run("cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]);
 run("cargo", ["test", "--locked", "-p", "rustia", "--examples", "--no-run"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "game_objects"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "mutable_objects"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "hardened_decision"]);
+for (const example of ["embedding", "chunk_builder", "mutable_objects", "live_values", "game_objects", "hardened_decision"]) {
+  run("cargo", ["run", "--locked", "-p", "rustia", "--example", example]);
+}
 run("cargo", ["test", "--locked", "--workspace"]);
 run("cargo", [
   "clippy",
