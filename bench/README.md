@@ -11,7 +11,14 @@ The harness writes one JSONL record per completed engine/workload measurement,
 so history can be committed, served statically, or uploaded by CI without needing
 a hosted metrics service.
 
-The active performance product is deliberately narrower than Rustia's build
+This checkout runs hosted correctness CI only. Measurement and publication
+workflows are paused until a trusted private bridge exists; new measurements
+remain pending. The pipeline descriptions below record the predecessor private
+repository. Run measurement commands only on its authorized `ci-bench` host,
+never on a development machine. Offline analyzer and artifact checks are allowed.
+See [the active source profile](https://github.com/slowchop/rustia/blob/main/design/public-source-profile.json).
+
+The retained performance product is deliberately narrower than Rustia's build
 support: native measurements are `linux-x86_64` on the owned benchmark host
 labelled `ci-bench`, and the wasm runtimes are measured under Node/V8 on that
 same host, inside the cross-engine matrix lane. macOS and Windows timings are
@@ -52,7 +59,8 @@ behavior are unchanged.
 The JSONL summary stores only the stable min/median values. Direct harness runs
 may append rows, while the owned-host matrix coordinator
 (`weekly-matrix-bench.yml`, through `tools/run-dedicated-benchmark.js matrix`)
-atomically publishes a fresh, complete Linux cohort. For local analysis, write
+atomically publishes a fresh, complete Linux cohort in the predecessor pipeline.
+For a measurement on that authorized host, write
 the raw per-repetition `ns/unit` values to a separate JSON sidecar:
 
 ```sh
@@ -91,7 +99,8 @@ cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes
 just bench-memory-self-test
 ```
 
-Fresh memory rows come from `.github/workflows/rustia-memory.yml`: dispatch-only, with a required `commit_sha`
+In the predecessor private pipeline, fresh memory rows come from
+`.github/workflows/rustia-memory.yml`: dispatch-only, with a required `commit_sha`
 input and a `cohort` choice — `rustia-only`, the default 11-row per-commit cohort, or `cross-engine`, the
 110-row thirteen-engine cohort under the same protocol — on the `bench-solo` runner group, pinning two isolated
 cores so the supervisor never shares a core with the benchmark. Its rows are pushed to the published data

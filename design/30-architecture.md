@@ -143,7 +143,7 @@ O(1), and it has no cycle reclamation). Two API rules: (i) hosts parallelize wit
 immutable compiled artifacts/configuration, not by moving live VMs; (ii) DeterministicSim collection uses the
 instruction counter, never byte-debt, while Standard/LuauCompat may use allocation debt.
 
-**Production implementation gap (2026-07-27):** ordinary reachability and generation-safe reuse cover tables,
+**Production implementation update (2026-07-27):** ordinary reachability and generation-safe reuse cover tables,
 functions, upvalues, atomized runtime strings, userdata, buffers, and vectors; retained host values are explicit
 roots. Host-requested quiescence also prunes unreachable coroutine state and releases spare heap/interner/stack
 capacity. Loaded programs use generation-safe reusable handles and host-requested quiescence drops obsolete
@@ -228,9 +228,11 @@ Determinism work splits in two, and only the second part needs a flag:
   deliberately selects Luau-style hash iteration over the same authoritative storage.
   The Luau spec leaves transcendentals/NaN-bits/iteration-order unspecified, and PCG32+Schubfach are *what
   Luau already does* — so these are a legit (better, reproducible) Luau implementation, removing nothing.
-- **Group B — restricted in `DeterministicSim`:** `collectgarbage`, `gcinfo`, `os.*`, optional host-supplied
-  `loadstring`, and host registrations that read external mutable state or emit nondeterministic effects. Weak
-  tables remain supported and are swept on deterministic instruction-count boundaries.
+- **Group B — restricted in `DeterministicSim`:** `collectgarbage`, `gcinfo`, optional host-supplied
+  `loadstring`, and host registrations that read external mutable state or emit nondeterministic effects.
+  `os` is absent by default; all four members are registered when at least one deterministic clock provider
+  is supplied. Deterministic output and entropy providers are also admitted. Weak tables remain supported
+  and are swept on deterministic instruction-count boundaries.
 
 ⇒ **ONE engine with THREE concrete `Profile` variants** (review M1; a fourth source-compat variant,
 `Puc51Compat`, was added 2026-07-31 — see below):
@@ -264,12 +266,13 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 
 **GC scheduling per profile (review M2): two triggers over the current hybrid heap.**
 - **ReproducibleStandard/LuauCompat:** allocation-debt-driven gc-arena pacing and weak sweeping are implemented.
-  This is not yet a bounded-pause collector for ordinary language objects because their side stores are not
-  reclaimed. Add reclamation/accounting first, then expose and tune a pacing multiplier.
+  Ordinary objects and programs are reclaimed with maintained logical-live accounting. Bounded-pause
+  behavior and pacing/interval tuning remain open; use the landed mixed-heap correctness gate.
 - **DeterministicSim:** an instruction-count trigger finishes the gc-arena cycle and sweeps weak tables (never
   byte-debt, because object sizes differ 32/64-bit). **Version the collection interval as part of the determinism
-  ABI.** Add ordinary-object reclamation, then tune on realistic heaps. Weak-table disappearance can occur at a
-  different point than Standard by design, but remains deterministic within this profile.
+  ABI.** Ordinary-object reclamation is implemented; interval tuning on realistic heaps remains open.
+  Weak-table disappearance can occur at a different point than Standard by design, but remains deterministic
+  within this profile.
 
 ## 3b. Determinism + snapshot spec (operational — applies to the Deterministic profile)
 
@@ -277,9 +280,10 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
    **exercises the f64 path** (`0/0`, `inf-inf`, `sqrt(-1)`, `0*inf`, `-0.0`, large/small), not just integers.
 2. Tables iterate array slots in ascending order followed by hash entries in **insertion order**; logical
    deletion retains a tombstone so `next(t, k)` can resume.
-3. **f64 / Value soundness:** canonicalize NaN at **every** f64→`Value` ingress (arith, `FORNLOOP`, host-fn
-   return, serde-in, coercion, literal, constant fold). `-0.0` canon only at table keys. No FMA/fast-math/
-   relaxed-SIMD. *(Tagged Value removes the NaN-aliasing memory-soundness angle; canon remains required for
+3. **f64 / Value soundness:** canonicalize NaN at ordinary numeric ingress and arithmetic results (arith,
+   `FORNLOOP`, host-fn return, serde-in, coercion, literal, constant fold). Raw `buffer.readf32`/`readf64`
+   preserve deterministic input payload bits for immediate write-back; subsequent arithmetic canonicalizes
+   its results. `-0.0` canon only at table keys. No FMA/fast-math/relaxed-SIMD. *(Tagged Value removes the NaN-aliasing memory-soundness angle; canon remains required for
    cross-engine determinism — wasm NaN payloads are nondeterministic.)*
 4. **Deterministic fuel** (instruction-count) + recursion cap; fusion-invariant or versioned.
 5. **GC determinism:** collection driven **only by the instruction counter** (never byte-debt); **full
@@ -324,14 +328,15 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   parse, no typecheck) + compiler
   (constant-fold w/ pinned libm+canon, generic-superinstruction fusion, regalloc, O0 mode); `rustia-vm` with
   the **16-byte tagged Value**, thread-affine hybrid VM heap with gc-arena scheduling/owned long-string storage
-  plus the explicitly tracked append-only object-store gap, big-match dispatch, fuel + recursion cap, and a
-  stackless trampoline. Host-columnar rollback region. Prepare the
+  plus generation-safe object/program reclamation and maintained logical-live accounting, big-match
+  dispatch, fuel + recursion cap, and a stackless trampoline. Host-columnar rollback region. Prepare the
   cross-arch golden (incl. f64) for the FULL target matrix (§C0): native macOS-arm64/**x86_64-Intel**/Windows/
   Linux-x86_64/arm64/iOS-arm64/Android-arm64, and wasm in **V8 (Chrome) + SpiderMonkey (Firefox) + JSC
   (Safari/iOS)**. Hosted CI now
   runs release preflight; reproducible performance measurement remains operator-started on dedicated Linux.
-  Fixture-driven differential hardening against the pinned reference is ongoing; a dedicated fuzz harness is
-  still planned.
+  Fixture-driven differential hardening against the pinned reference is ongoing. The bounded frontend/VM,
+  stateful embedding, and pinned-oracle differential fuzz harness is implemented; independent-frontend
+  comparison remains planned.
 - **P2 — minimum-viable Luau (substantial; named core landed, semantic tail remains).** Broad opcode surface;
   full grammar + Luau niceties; libs
   math/table/string(+format+patterns)/bit32/coroutine + base globals; metatable OOP; floored `%`. Byte-compat:
@@ -344,9 +349,9 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   standalone library surface are already conformance-backed. Object/program reclamation and reuse,
   memory accounting/quotas/OOM behavior, deterministic reset semantics, host-provided output/time services,
   VM memory telemetry, host-owned `require` resolution/cache, and the native/Node-V8 mixed-heap gate are in
-  place. The remaining release-critical work is
-  transactional guest-module install/hot-reload failure semantics, live-object constructors/serde,
-  diagnostic and semantic-tail hardening, the full
+  place. Transactional guest-module installation/hot reload, live-object constructors, and snapshot-free
+  live serde are also implemented. The remaining release-critical work includes diagnostic and semantic-tail
+  hardening, the full
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual

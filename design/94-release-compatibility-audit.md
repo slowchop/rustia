@@ -1,6 +1,6 @@
 # Release compatibility and API audit
 
-Status: implementation and measurement complete; documentation delivery pending. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
+Status: compatibility, measurement, closeout, and diagnostic follow-ups delivered; the wider public-release audit remains open. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
 This follows the private acceptance recorded in [93](93-private-api-acceptance.md).
 Public benchmark dashboard updates were approved on 2026-10-22. Package
 publication and version changes remain outside this milestone.
@@ -129,19 +129,21 @@ builtin expansion/order tests, ten deferred-call tests and strict workspace
 Clippy pass. The initial full corpus passed (725 fixtures / 519 refs); it predates the
 local-receiver/append-vararg follow-up and is not final-candidate evidence.
 
-## Completion evidence still required
+## Completion evidence
 
-- Required CI on the final documentation changes. Independent runtime review is complete.
+Closeout PR #72 merged after required checks; diagnostic follow-up PR #73 merged
+as `90bc2ae4` after required CI and remote screening. See [CURRENT](CURRENT.md)
+and the delivery records below. Wider parity and public-release gates remain open.
 
 ## Delivery status
 
-The method/vararg/yield batch merged in [PR #70](https://github.com/slowchop/rustia/pull/70).
+The method/vararg/yield batch merged in [PR #70](https://github.com/slowchop/rustia-historic/pull/70).
 Its initial head passed eight target builds, native macOS arm64, Node/V8 and
 differential CI. Preflight found stale generated publishability file counts;
 those counts have been regenerated. A subsequent malformed-metadata regression
 also made hardened-program validation reject out-of-range late receiver registers
 at construction, matching runtime validation. Final-head checks passed in
-[CI run 39715901379](https://github.com/slowchop/rustia/actions/runs/39715901379).
+[CI run 39715901379](https://github.com/slowchop/rustia-historic/actions/runs/39715901379).
 
 The method fixture now contains 31 cases, including a local receiver changed
 after argument suspension, an upvalue control, and a parenthesized local. All
@@ -163,7 +165,7 @@ cross-engine comparison is recorded below.
 ## Dense-table regression investigation
 
 All release checks passed on `897bfddb`. Its stronger
-[CI acceptance comparison](https://github.com/slowchop/rustia/actions/runs/39694175435)
+[CI acceptance comparison](https://github.com/slowchop/rustia-historic/actions/runs/39694175435)
 against `07f3ee7a` confirmed dense tables at +4.62% (99% interval +4.17% to
 +5.04%), beyond the calibrated 2.08% screening threshold. Closures/upvalues
 improved by 7.64%; the other three workload intervals include zero. A successful
@@ -190,7 +192,7 @@ Rustia API addition or dependency change was needed. Grabby and civfun retain
 the accepted application contracts recorded in document 93.
 
 
-The [first isolation comparison](https://github.com/slowchop/rustia/actions/runs/39706980966)
+The [first isolation comparison](https://github.com/slowchop/rustia-historic/actions/runs/39706980966)
 measured `189ae963` against the baseline with four legs per side: dense tables
 -0.59% (99% interval -1.21% to +1.45%), with no slowdown detected. The later
 VM delta moves receiver bounds validation into `descriptor`; it does not add
@@ -203,12 +205,12 @@ The following remote measurement rejected that candidate.
 
 
 The constructor-only candidate `53ec889a` did not fix the regression:
-[eight-leg acceptance](https://github.com/slowchop/rustia/actions/runs/39709187008)
+[eight-leg acceptance](https://github.com/slowchop/rustia-historic/actions/runs/39709187008)
 measured dense tables +4.43% (99% interval +4.04% to +6.14%). Static dispatch
 size is not performance evidence. That candidate was withdrawn.
 
 The receiver-binding candidate `b13e9914` had
-[screened at +0.04%](https://github.com/slowchop/rustia/actions/runs/39707621551)
+[screened at +0.04%](https://github.com/slowchop/rustia-historic/actions/runs/39707621551)
 for dense tables (interval -0.40% to +0.69%). Its reviewed implementation is
 restored for full acceptance: retain a traced capture cell or stable uncaptured
 value in the continuation and remove caller-register arguments from resumed
@@ -219,7 +221,7 @@ comparison below supplies the final performance evidence.
 
 ## Accepted receiver-state measurements
 
-The [final eight-leg comparison](https://github.com/slowchop/rustia/actions/runs/39712053958)
+The [final eight-leg comparison](https://github.com/slowchop/rustia-historic/actions/runs/39712053958)
 measured runtime candidate `8b8bc17bd9008a8e9d0a540146e4c0f7ad5b3828`
 against baseline `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
 All measurements are remote CI results; local compilation supplied only static
@@ -245,15 +247,15 @@ the continuation driver. It is the same reviewed VM source that screened at
 `b13e9914`; the constructor-only alternative is absent. Method-order regressions,
 malformed-metadata checks, continuation cloning/root coverage, full VM tests and
 strict Clippy pass. Required CI gates final PR delivery; its status is available
-on [PR #70](https://github.com/slowchop/rustia/pull/70).
+on [PR #70](https://github.com/slowchop/rustia-historic/pull/70).
 
 
 ## Fresh cross-engine comparison and closeout
 
-[Matrix run 39719875275](https://github.com/slowchop/rustia/actions/runs/39719875275)
+[Matrix run 39719875275](https://github.com/slowchop/rustia-historic/actions/runs/39719875275)
 measured the merged runtime `9b12a5a8540f69fe7c0f6daebe467c795bb576c3`.
 The accepted cohort contains 65 native rows (13 engine variants, five workloads)
-and 15 WebAssembly adapter rows. Publication [PR #71](https://github.com/slowchop/rustia/pull/71)
+and 15 WebAssembly adapter rows. Publication [PR #71](https://github.com/slowchop/rustia-historic/pull/71)
 merged as `7a1b67640a71b5e987260aab0dba27c936f47ec5`.
 The native measurement window is 2026-10-22 04:09:41–04:14:05 UTC.
 
@@ -287,7 +289,7 @@ are merged. The facade inventory still has SHA-256
 matching the accepted baseline. The README's 20 numeric cells match history,
 its three executable examples pass, and project-status and generated benchmark
 report checks pass. Required CI on publication merge `7a1b6764` also passed
-([run 39721705546](https://github.com/slowchop/rustia/actions/runs/39721705546)).
+([run 39721705546](https://github.com/slowchop/rustia-historic/actions/runs/39721705546)).
 
 
 ## Diagnostic parity follow-up
@@ -306,8 +308,9 @@ historical JSON observations remain unchanged so the original failures remain
 reviewable. CI reruns the audit against the pinned oracle and fails on any new
 difference. The expanded 85-case diagnostic fixture also checks aliases, source prefixes,
 argument side effects and competing validation failures across all four profiles
-and after reset. Final review, full CI and remote screening gate delivery.
-This closes the enumerated findings, not the wider public-release parity gate.
+and after reset. This follow-up merged in PR #73 as `90bc2ae4` after final
+review, full CI, and remote screening. This closes the enumerated findings,
+not the wider public-release parity gate.
 
 Independent runtime review found no blocker and checked additional competing
 errors and thread/buffer type names. It also identified a separate, pre-existing
@@ -316,5 +319,7 @@ numeric-conversion difference: `return string.sub(12,0/0)` and
 Rustia rejects the nonfinite index through the unchanged `string_library_index`.
 The subsequent [numeric-index contract](95-numeric-index-contract.md) resolves
 this policy question with checked signed-64 conversion and an exclusive upper
-bound; its cross-target CI and delivery checks remain required. It is not
-covered by the claim that the 13 diagnostic findings are fixed.
+bound. Its final runtime passed cross-target correctness and the direct
+original-baseline acceptance comparison before delivery in PR #74 as `b5982752`;
+see [95](95-numeric-index-contract.md) and [96](96-browser-platform-acceptance.md).
+It is not covered by the claim that the 13 diagnostic findings are fixed.

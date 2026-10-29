@@ -24,7 +24,7 @@ fuzz/Cargo.toml --features oracle --bin error-oracle-worker`, then set
 the deterministic generated corpus. Normal fuzz-workspace tests need no oracle.
 
 The Error behaviour and fuzzing workflow runs the differential smoke on PRs.
-Explicit dispatch (or the `run-error-fuzz` PR label) runs 30 minutes per target, then two additional hours for
+Explicit workflow dispatch runs 30 minutes per target, then two additional hours for
 stateful and differential. It retains revision, toolchain, seed-bearing logs,
 corpora and findings. These are correctness runs, not performance evidence.
 Timeouts, abnormal worker exits and mismatches require triage. The current

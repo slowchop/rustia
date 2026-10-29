@@ -87,8 +87,9 @@ This is an interpreter design. It emits no native code, allocates no executable 
 
 - Keep the current interpreter as the differential oracle.
 - Record static bytecode counts and effect boundaries for all five tracked workloads.
-- Keep developer/self-hosted machines correctness-only. Controlled timings run only on operator-started
-  DigitalOcean droplets, which must be deleted before evidence promotion.
+- Keep developer machines and shared correctness runners correctness-only. Controlled timings belong
+  only to the authorized owned `ci-bench` protocol. The active source profile pauses measurement pending
+  a trusted private bridge; leave fresh evidence pending. The cloud runs below are historical evidence.
 
 ### C2.1 — stop dispatching avoidable register work (implemented, falsified, removed)
 
@@ -383,8 +384,10 @@ hints, and unknown/unretained frames retain the scan. Resume and stackless
 self-calls retain the same immutable function proof. Fuel, collection guards,
 mutation and logical instruction accounting are unchanged. The proof travels with
 the existing caller-site cache lookup on eligible scalar calls; frames without
-such calls do not perform an extra program/prototype lookup. This is a candidate
-for the measured PR #74 closure regression; remote acceptance is still required.
+such calls do not perform an extra program/prototype lookup. This is part of the final PR #74
+runtime whose direct original-baseline and supplemental string comparisons passed; see
+[95](95-numeric-index-contract.md#direct-completion-handoff-and-original-baseline-acceptance).
+That combined acceptance does not attribute the full change to this proof alone.
 
 Frame entry synchronizes saved register cells before applying child results and
 rebuilding stackless roots. `resumed_callers_observe_mutated_capture_cells`
@@ -397,7 +400,9 @@ operations are unchanged. The separate table-probe and fresh-frame scan changes
 were reverted after failed remote acceptance; their tests and evidence remain.
 The vector-only table-probe guard was subsequently isolated and reverted again,
 as described below.
-The isolated math change still requires remote acceptance.
+The isolated math experiment did not establish overall acceptance. The final combined PR #74 runtime,
+including the shared unary value operation, passed the direct original-baseline and supplemental string
+comparisons recorded in [95](95-numeric-index-contract.md#direct-completion-handoff-and-original-baseline-acceptance).
 
 The full-corpus conformance gate (`rustia-conformance/tests/o2_conformance.rs`, threaded through
 `run_repository_with_experimental_o2`) then split the families by an empirical reachability boundary:
@@ -838,10 +843,11 @@ end-to-end Luau tests for both table layouts covering `__newindex` bypass on pre
 dispatch on absent and present-nil keys, in-place nil clearing, `table.freeze` rejection, and the
 `table.sort` mutation guard.
 
-**Measured hit coverage: zero.** A default-off `table-write-diagnostics` feature censuses which lane serves
-each numeric array-slot write, so no production or benchmark build carries hot-path instrumentation. The
-census (`just check-array-slot-coverage`) reports that the direct lane is reached **0 times by all 17
-runnable benchmark workloads**. Every numeric array-slot write in the suite is an append or a deferral:
+**Initial hit coverage: zero before `array_mutation` was added.** A default-off `table-write-diagnostics`
+feature censuses which lane serves each numeric array-slot write, so no production or benchmark build carries
+hot-path instrumentation. The initial census (`just check-array-slot-coverage`) found the direct lane reached
+**0 times by all 17 then-runnable benchmark workloads**. Every numeric array-slot write in that set was an
+append or a deferral:
 `dense_tables` performs 16,384 writes per 64 units and all 16,384 grow the array, `stdlib_math_table`
 performs 4,000 and all grow, `sparse_tables` defers all 8,191, and `memory_burst` performs 266,240 with 0
 direct. Each tracked workload rebuilds its tables from `{}` and walks an ascending index, so it never
@@ -963,8 +969,9 @@ Every phase is an independently revertible commit with an exact candidate hash.
 
 - Correctness validation may use local and CPU-busy self-hosted runners; no latency result from those machines is
   evidence.
-- DigitalOcean A/B uses fixed work, identical toolchain/lockfile/harness inputs, counterbalanced order, retained
-  raw samples, checksum equality, idle/steal qualification, and automatic droplet/SSH-key cleanup.
+- When authorized by the active profile, `ci-bench` A/B uses fixed work, identical
+  toolchain/lockfile/harness inputs, counterbalanced order, retained raw samples, checksum equality, and
+  the owned-host qualification gates. Retired cloud lifecycle instructions are not a current measurement path.
 - A point estimate is not enough. Publish the conservative interval and the predeclared material-regression
   decision.
 - Retain a slice that excludes the material regression threshold and has architectural value, but describe it as
@@ -999,8 +1006,10 @@ cache mutation. Capture selection failure is handled at the original guard-exit
 point, preserving cache-fill/hit diagnostics. Captures are never cached across
 calls, and malformed incomplete captures fall back without changing upvalues.
 The polymorphic-handle/live-step and incomplete-capture regressions cover these
-invariants. This removes a second handle lookup; performance is unaccepted until
-remote comparison, as recorded in [95](95-numeric-index-contract.md).
+invariants. This removes a second handle lookup and is included in the final combined PR #74 runtime
+whose original-baseline and supplemental string comparisons passed, as recorded in
+[95](95-numeric-index-contract.md#direct-completion-handoff-and-original-baseline-acceptance).
+Its earlier isolated results remain recorded separately.
 
 ### Reusing iterator function resolution
 
@@ -1050,4 +1059,6 @@ reason, refreshes roots and bypasses fast admission and repeated accounting.
 No new executor, opcode, cache or policy is added. Existing guard-error, collection,
 HotIR and instruction-parity tests cover these boundaries; the scalar-leaf test
 also verifies a real tape-to-call handoff against both optimizations disabled.
-Remote performance acceptance remains pending; see [95](95-numeric-index-contract.md).
+The final direct-completion runtime passed original-baseline and supplemental string acceptance; see
+[95](95-numeric-index-contract.md#direct-completion-handoff-and-original-baseline-acceptance).
+The first tape-first handoff remains a rejected experiment in that record.

@@ -40,8 +40,10 @@ engines, so the first run may need more disk space than the focused tests.
 `cargo bench`, benchmark examples, profiling, and quick timing comparisons. Local
 builds, correctness tests, and static checks are welcome; their elapsed times are
 not performance evidence. Push your branch and open a pull request to use its
-remote `ci-bench` check. Only results from that check can support speed claims or
-benchmark updates. If it is unavailable, leave the measurement pending.
+remote `ci-bench` check when available. This cleaned-history checkout currently
+runs hosted correctness CI only; measurement and publication workflows are
+paused until a trusted private bridge exists. Leave new measurements pending.
+Only accepted `ci-bench` results can support speed claims or benchmark updates.
 
 ## Find your way around
 

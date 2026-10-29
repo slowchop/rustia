@@ -26,8 +26,11 @@ Add this to your application's `Cargo.toml` (Rust 1.95 or newer):
 
 ```toml
 [dependencies]
-rustia = { git = "https://github.com/slowchop/rustia", rev = "92a85d65eb33724c17103d43477d34a633392768" }
+rustia = { git = "https://github.com/slowchop/rustia", rev = "b84b5f6715e31756f00d1f39e72c8246f179b174" }
 ```
+
+This pin selects the verified cleaned-source baseline. Historical benchmark
+source IDs remain unchanged in the evidence.
 
 Put this in `src/main.rs` and run `cargo run`:
 
@@ -185,9 +188,9 @@ steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
 
 These workloads exercise different languages and runtime features, so they don't
 provide a universal ranking. Rustia trails the upstream Luau interpreter in each
-of these tests. The [full results](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/RESULTS.md) include more engines, JIT modes,
-startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/current-results.json).
-See the [benchmark limitations](https://github.com/slowchop/rustia/blob/7a1b67640a71b5e987260aab0dba27c936f47ec5/bench/CLAIMS.md) for the scope of these comparisons.
+of these tests. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md) include more engines, JIT modes,
+startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/current-results.json).
+See the [benchmark limitations](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md) for the scope of these comparisons.
 
 ## Examples and API reference
 

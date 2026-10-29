@@ -1,6 +1,6 @@
 # rustia — cross-engine memory benchmark design
 
-> **Status: [PROTOCOL, RECLAMATION, ACCOUNTING, AND QUOTAS IMPLEMENTED] (2026-07-29).** The isolated child/supervisor, cgroup-v2 sampler,
+> **Status: [MEMORY COHORT, RECLAMATION, ACCOUNTING, AND QUOTAS IMPLEMENTED] (updated 2026-10-29).** The isolated child/supervisor, cgroup-v2 sampler,
 > repeated-epoch analyzer, portable controls, deterministic todo-app workloads, publication schema, and
 > dashboard are implemented. The published cohort is `rustia-ci-070c387b173c`: 11 rustia rows from 99 raw
 > samples, measured on the owned host ci-bench on 2026-09-05 through a delegated cgroup-v2 subtree. The
@@ -17,6 +17,14 @@
 > `vm-string-memory` evidence rather than replacing it. Canonical project state remains
 > [`CURRENT.md`](CURRENT.md).
 
+The active public-source profile runs hosted correctness and artifact checks;
+memory measurement and publication are paused pending a reviewed trusted private
+benchmark bridge. The owned-host procedures below describe retained private
+capabilities, not an available workflow in this tree. Existing cohorts remain
+historical evidence. The protocol gaps identified below remain open; the status
+above does not declare the entire memory-work acceptance gate complete. See
+[benchmark operations](81-benchmark-operations.md#public-source-profile).
+
 ## Goal
 
 Make memory a first-class benchmark dimension for rustia and every applicable competitor:
@@ -27,9 +35,10 @@ Make memory a first-class benchmark dimension for rustia and every applicable co
 - retain reproducible raw phase/timeline evidence and publish compact current/history summaries;
 - show memory in the benchmark dashboard without collapsing speed and memory into one opaque score.
 
-The first rule is **measure before redesign**. Record the current append-only rustia behavior and the competitor
-baselines with this protocol before implementing reclamation. That gives the memory work an honest before/after
-gate and prevents a local heap counter from becoming the only definition of success.
+The first rule is **measure before redesign**. The pre-reclamation cohort recorded the earlier append-only
+behavior and competitor baselines before reclamation landed. Its removal from the active product does not turn
+today's reclaiming engine back into that baseline. Future comparisons need retained before/after evidence and
+must not treat a local heap counter as the only definition of success.
 
 ## Measurement decisions
 
@@ -102,11 +111,20 @@ The dashboard publishes several independent metrics:
 | **idle footprint** | spawned anonymous PSS and total PSS | cost of starting this engine mode |
 | **prepared delta** | prepared anonymous minus spawned anonymous | source/compiler/program cost |
 | **peak working-set delta** | maximum cgroup charge after phase reset minus phase-start charge | short-term headroom required |
-| **quiescent retained delta** | quiescent anonymous minus warmed anonymous, adjusted by the null-control lane | memory still resident after work |
+| **quiescent retained delta** | quiescent-marker anonymous minus warmed anonymous, without null-control adjustment | raw memory still resident at the marker |
 | **recovery ratio** | `(peak delta - quiescent delta) / peak delta` | how much of a burst was recovered |
 | **tail growth** | robust KiB/epoch slope over the predeclared tail window | plateau versus sustained retention signal |
-| **memory area** | integral of excess anonymous memory over time and per completed unit | memory-time cost; kept separate from peak |
+| **memory area** | integral of excess cgroup current charge above the spawned baseline, from warmed to quiescent marker, per completed unit | cgroup charge-time cost; kept separate from peak |
 | **minimum completion limit** | smallest tested `memory.max` bucket that completes correctly | periodic memory-pressure capability, not every-commit data |
+
+The retained-delta and memory-area rows describe the implemented calculations. Null-control-adjusted retention
+and an anonymous-memory area remain unimplemented design goals. The current child
+also emits its `quiescent` marker immediately after the final epoch, without the
+bounded idle/collection opportunity required by the phase model above. A future
+protocol must add that opportunity before claiming the corresponding quiescent
+acceptance gate. Preserve the existing raw definitions and historical values;
+introducing the intended metrics requires prospective versioning and separate
+evidence, not relabeling or recalculating past cohorts.
 
 Absolute and incremental values are both retained. Incremental values answer “what did the script cost?” while
 absolute values answer “how much memory must a host provision?” JIT/native code pages remain part of the absolute
@@ -127,6 +145,12 @@ For each epoch workload:
 - bootstrap at the fresh-process level, never at individual timeline-point level;
 - require a bounded-live null control and an intentionally retained positive control in the same cohort;
 - predeclare an absolute KiB/epoch and proportional percent/epoch material threshold.
+
+The separate warmup process remains an implementation gap: the coordinator
+currently records exactly the configured sample count, and each accepted child
+warms one invocation internally. That does not satisfy the additional fresh
+warmup-process requirement above. Retain the requirement and implement a separate,
+identified warmup process before claiming complete protocol acceptance.
 
 Dashboard states:
 

@@ -14,6 +14,12 @@ requirements tracked in [98-public-source-readiness.md](98-public-source-readine
 Preparing source access does not authorize visibility changes or waive this
 release checklist.
 
+The active public-source profile runs hosted correctness and artifact checks.
+Benchmark measurement and publication are paused pending a reviewed trusted
+private bridge. Retained private-lane procedures below remain protocol and
+release-evidence requirements; they are not active workflows in this tree.
+Missing fresh evidence stays pending. See [the operations profile](81-benchmark-operations.md#public-source-profile).
+
 These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
 caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
 providers/capabilities, and `live()` is a first-class intentionally non-reproducible builder preset. The same
@@ -35,7 +41,8 @@ VMs avoid batched execution paths and use the scalar dispatcher's existing
 instruction-boundary checks. Cross-profile append regressions compare unmetered
 execution with a fuel-forced scalar reference; execution counters verify the
 admission policy without instrumentation. See [`58-vm-core2.md`](58-vm-core2.md).
-Remote screening remains part of final PR validation; no new speed claim is made.
+Remote screening was part of the recorded private delivery. Fresh screening is
+pending the trusted bridge; no new speed claim is made.
 
 1. Complete the release value ergonomics on the implemented VM/epoch-safe,
    graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
@@ -53,10 +60,10 @@ Remote screening remains part of final PR validation; no new speed claim is made
    concrete release consumer promotes them.
 2. Finish the wider compiler/runtime error-phase audit. The 13 enumerated
    diagnostic findings now match the pinned oracle in the diagnostic follow-up
-   ([94](94-release-compatibility-audit.md#diagnostic-parity-follow-up)); its final
-   CI and remote screening gate delivery. The nonfinite `string.sub` index finding is resolved by the explicit
+   ([94](94-release-compatibility-audit.md#diagnostic-parity-follow-up)); its recorded
+   CI and remote screening passed before merge. The nonfinite `string.sub` index finding is resolved by the explicit
    deterministic conversion policy in [95](95-numeric-index-contract.md); the
-   exclusive signed-64 boundary fix and its cross-target checks gate delivery. Preserve the implemented
+   exclusive signed-64 boundary fix and its exact-runtime checks are accepted for that candidate. Preserve the implemented
    yieldable `require` contract, and retain differential/coverage-guided fuzz evidence before stabilizing and publishing
    the API. The stable bounded baseline already mutates 2,048 frontend cases
    and 2,048 VM byte streams while covering all 131 production opcodes. Exact
@@ -290,9 +297,10 @@ registry installation, public release, or complete platform matrix is implied.
 - Public benchmark claims are stated per workload in `bench/CLAIMS.md`, not as
   a single blanket multiplier. The current generated claim gate approves no
   global speed headline.
-- Fresh performance data comes only from the owned benchmark host lanes
-  (`ci-bench`, Linux/x86_64). macOS and Windows remain build targets, not active
-  benchmark targets, until dedicated hosts exist.
+- Fresh performance data requires the reviewed trusted private bridge and the
+  retained owned-host protocol (`ci-bench`, Linux/x86_64). The active profile
+  produces no timing evidence. macOS and Windows correctness execution does not
+  make them benchmark targets.
 
 ## Release Process Gate
 
@@ -342,17 +350,18 @@ registry installation, public release, or complete platform matrix is implied.
   on Node 22/V8. Native macOS arm64 also executes the shared contracts.
   [Browser acceptance](96-browser-platform-acceptance.md) records real Firefox
   and Safari runs in both feature modes and 120 native Windows correctness tests, including
-  matching default/bare golden transcripts. Linux arm64, Intel Mac and
-  mobile platforms still need execution evidence. Cross-compilation does not close those gates.
+  matching default/bare golden transcripts. Exact-runtime Linux arm64 shared-contract
+  execution is also recorded there.
+  Intel Mac and mobile platforms still need execution evidence; broader final-candidate
+  and full-matrix acceptance remain required. Cross-compilation does not close those gates.
 - Release preflight formats and strictly lints the separate fuzz workspace,
   then runs its seed tests plus deterministic 2,048-case frontend and VM
   mutation sweeps. The VM decoder covers every production opcode exactly once
   under bounded input, fuel, recursion, and a 512 KiB logical-live limit.
-- The cross-engine matrix workflow measures on the owned benchmark host,
-  validates, and only then promotes a coherent single-revision native-plus-wasm
-  Linux result set; it lands that cohort on `main` through the repository's
-  single sanctioned CI contents-write grant. No workflow can provision a billed
-  resource.
+- A future trusted matrix lane must preserve owned-host attestation, validation
+  and coherent single-revision native-plus-wasm Linux promotion. The active
+  hosted profile has no matrix/publication workflow or CI contents-write grant.
+  No workflow can provision a billed resource.
 - `cargo test --workspace` passes on the release toolchain.
 - `just check-examples` passes and compiles the public `rustia` examples.
 - `just check-package-files` passes and `design/package-files.json` is current.

@@ -1,7 +1,7 @@
 # Human-friendly script diagnostics
 
 Status: runtime/API/CLI implementation merged as `759060b70c8e4f8c29a5bc48782d4e7b304bd204`
-in [Rustia PR #32](https://github.com/slowchop/rustia/pull/32). Its full release preflight,
+in [Rustia PR #32](https://github.com/slowchop/rustia-historic/pull/32). Its full release preflight,
 correctness/conformance tests, platform and Node/V8 checks, and remote PR screening pass.
 The controlled-client delivery record is below; this is not the entire public-release gate.
 
