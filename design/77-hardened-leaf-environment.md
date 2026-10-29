@@ -17,8 +17,8 @@ Rustia may provide deterministic computation and a transactional output lane,
 but it must not provide a second cross-tick state store, ambient authority, or
 guest-visible mutation path around the host capture/commit protocol.
 
-This is a **guest surface layered on `DeterministicSim`**, not a fourth runtime
-profile. The three canonical `Profile` variants remain unchanged.
+This is a **guest surface layered on `DeterministicSim`**, not another runtime
+profile. It does not add a `Profile` variant.
 
 ## Public construction
 

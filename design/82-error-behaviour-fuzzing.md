@@ -197,9 +197,10 @@ dead-branch, and uncalled forms across all four profiles. It also asserts
 preceding guest effects, ordered/exactly-once evaluation of ignored arguments,
 and thrown extra arguments. Existing syntax/uncalled-`break` regressions retain
 true frontend rejection. The differential generator now includes these call
-shapes rather than only ordinary arithmetic/table failures. Full CI and
-independent review remain pending; broader language parity and yieldable
-`require` remain open.
+shapes rather than only ordinary arithmetic/table failures. This follow-up merged in PR #64
+after required CI and independent review; the evidence is recorded in
+[93](93-private-api-acceptance.md). Yieldable `require` is also implemented under
+module-resolution ABI v3. Broader language parity remains open.
 
 ### Expanded arguments and builtin lookup order
 
@@ -254,8 +255,9 @@ replaced callees, source-later global writes, and metamethod effects. Twelve
 additional oracle-derived cases suspend first in the argument and again in
 the callee across fixed, return, append, nested, method and vararg forms, under a quota
 and after reset. The bounded differential generator includes expansion and
-lookup-order shapes. Full CI and new independent review remain pending; this
-is a focused compatibility fix rather than a claim of complete language parity.
+lookup-order shapes. Required CI and independent review passed for the merged PR #64
+follow-up, as recorded in [93](93-private-api-acceptance.md); this is a focused
+compatibility fix rather than a claim of complete language parity.
 
 ### Nested expansion and recursive calls
 

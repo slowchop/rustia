@@ -24,6 +24,10 @@ serves them.
 
 ## Benchmark policy
 
+- This checkout uses the hosted correctness profile in `design/public-source-profile.json`.
+  Benchmark measurement and publication workflows are paused until a trusted private bridge exists.
+  Keep measurements pending; the owned-host pipeline descriptions record the predecessor repository.
+
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
 - Local compilation, correctness tests, and static validation are allowed, but their durations must not be treated or reported as performance evidence.
 - Obtain performance measurements by pushing a branch, opening a pull request, and using the PR's `ci-bench` workflow.
@@ -37,7 +41,7 @@ serves them.
   auto-merge settings await separate approval; do not describe them as already enforced.
   Check every applicable PR check and independent review before merging. Historical
   benchmark publication permissions belong to the private historic repository and do not
-  grant a bypass in this repository.
+  grant a bypass in this repository. See `design/81-benchmark-operations.md`.
 - Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the repository settings still offer squash and rebase.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)

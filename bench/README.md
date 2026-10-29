@@ -99,6 +99,13 @@ pending/ready dashboard integration are now implemented; the published cohort is
 cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes) among them, were removed on
 2026-09-06. Throughput and instrumented memory measurements remain separate.
 
+The cohort machinery does not complete the intended memory protocol. The
+[remaining requirements](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#4-published-metrics)
+include null-control-adjusted retention, anonymous-memory area, a separate
+warmup process, and a bounded idle/collection opportunity before the quiescent
+marker. Existing rows retain their recorded metrics and values; protocol changes
+need versioning and fresh accepted evidence before claiming those requirements.
+
 ```sh
 just bench-memory-self-test
 ```

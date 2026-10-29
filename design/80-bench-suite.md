@@ -1,10 +1,12 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [IMPLEMENTED — measurements ongoing; standalone split pending] (updated 2026-10-26).** Initially scoped by the `bench-scoping` agent (clone+read of
+> **Status: [HARNESS IMPLEMENTED — measurement paused; standalone split pending] (updated 2026-10-29).** Initially scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
-> tooling) under dedicated ephemeral-Linux constraints. Current measurement uses the owned `ci-bench` host;
-> cloud provisioning is retired. Operationalises principle #3 ("measure, don't assert — the bench suite is a
-> CI gate"). See [`CURRENT.md`](CURRENT.md) and [benchmark operations](81-benchmark-operations.md).
+> tooling) under dedicated ephemeral-Linux constraints. The active public-source profile runs hosted
+> correctness and artifact checks. New measurement and publication await a reviewed trusted private
+> benchmark bridge; committed results are historical. The owned-host procedures below describe the
+> retained private protocol. Cloud provisioning is retired. See [`CURRENT.md`](CURRENT.md) and
+> [benchmark operations](81-benchmark-operations.md#public-source-profile).
 
 ## Decision 1 — REWRITE, not fork (LOCKED, gak + license evidence)
 `khvzak/script-bench-rs` has **no LICENSE / no `license` field** → all-rights-reserved → vendoring into a
@@ -19,10 +21,11 @@ Split by what's measurable; never use one for the other's job:
   generated markdown/JSON/HTML, wasm gate artifacts, and the claim policy without taking fresh noisy timings.
 - **Headline numbers = harness wall clock**, with fresh prepared state, untimed warmup, checksum validation, and
   min/median summaries on the owned, attested `ci-bench` host. Claims remain per target/workload.
-- **History/tracking = checked benchmark artifacts and published series.** The per-commit workflow records
-  accepted main-branch measurements; the weekly matrix publishes complete accepted cohorts through a pull
-  request. [The coordinator](../tools/run-dedicated-benchmark.js) attests the owned host before building and
-  measuring. No lane provisions or deletes a cloud instance. See [the operations contract](81-benchmark-operations.md).
+- **History/tracking = checked benchmark artifacts and historical series.** The retained private protocol
+  records accepted main-branch measurements and publishes complete matrix cohorts through a pull request.
+  Those workflows are absent from the active profile. [The coordinator](../tools/run-dedicated-benchmark.js)
+  retains host attestation before building and measuring; resumption requires the trusted bridge.
+  No lane provisions or deletes a cloud instance. See [the operations contract](81-benchmark-operations.md).
 - **Dashboard = generated `bench/RESULTS.md`, current-results JSON/HTML, and claim markdown**, all derived from
   the same history.
 - *Graduate-to later:* add instruction-count regression alerts or a queryable dashboard if the
@@ -32,9 +35,9 @@ Split by what's measurable; never use one for the other's job:
 - **engine:** `rustia` · `boa` · `koto` · `luaur` · `mlua-luau` · `mlua-luau-jit` · `mlua-lua54` · `rhai` · `roto` · `ruau` ·
   `rquickjs` · `wasmi` · `wasmtime`; feature gates keep adapters independently buildable and Lua 5.4 separate
   from Luau.
-- **active performance targets:** native `linux-x86_64` on the owned benchmark host `ci-bench`, the single
-  timing authority; wasm32 under Node/V8 on that same host, measured inside the weekly cross-engine matrix
-  lane. The accepted Deno/V8, Bun/JavaScriptCore, and SpiderMonkey matrix is historical portability evidence.
+- **retained performance protocol:** native `linux-x86_64` on the owned benchmark host `ci-bench`, plus
+  wasm32 under Node/V8 on that same host. The active public-source profile has no timing authority; all
+  recorded results, including Deno/V8, Bun/JavaScriptCore and SpiderMonkey portability evidence, are historical.
   The broader platform support matrix in `00-constraints.md` remains a correctness/build concern, not a
   license to mix noisy macOS or Windows timings into the active benchmark product.
 - **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
@@ -71,20 +74,19 @@ a conservative-envelope verdict that is retained with accepted evidence.
 
 ## Automation structure
 
-1. Correctness pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
-2. Every fresh timing runs on the owned host `ci-bench`, reached only through the `bench-solo` runner group:
-   the per-commit series, pull-request screening and calibration, the weekly cross-engine matrix, and the
-   dispatch-only A/B acceptance and memory lanes. Nothing in the repository creates or pays for a cloud instance.
-3. The owned host builds the feature-gated comparison matrix, including the separate Lua 5.4 binary, then
-   measures the recurring wasm adapters and dispatch check under Node/V8 on the same machine.
-4. Matrix promotion requires a complete single-revision Linux matrix. PR screening and A/B acceptance
-   produce summaries without publishing history rows.
+1. Active correctness pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
+2. Measurement and publication are paused pending a reviewed trusted private bridge. No active workflow
+   invokes the retained per-commit, screening/calibration, matrix, A/B acceptance or memory lanes.
+3. The retained private protocol confines timing to the attested owned host `ci-bench`, including the
+   separate Lua 5.4 binary, wasm adapters and dispatch check. Nothing creates or pays for a cloud instance.
+4. Resumption must preserve the complete single-revision Linux matrix promotion gate. PR screening and
+   A/B acceptance remain summary-only evidence and cannot publish history rows.
 
 **Current implementation slice:** [correctness CI](../.github/workflows/ci.yml) runs release preflight
-without fresh benchmark measurements. Separate workflows run [per-commit tracking](../.github/workflows/main-bench.yml),
-[PR screening](../.github/workflows/pr-bench.yml), the [weekly matrix](../.github/workflows/weekly-matrix-bench.yml),
-[A/B acceptance](../.github/workflows/acceptance-bench.yml), and [memory cohorts](../.github/workflows/rustia-memory.yml)
-on `ci-bench` through the owned-host coordinator. The `bench` crate enumerates thirteen engine modes,
+without fresh benchmark measurements. The [explicit profile](public-source-profile.json) and
+[workflow validator](../tools/check-public-workflow-profile.js) allow hosted correctness/fuzz workflows only.
+Private measurement workflows are absent; their [retained coordinator](../tools/run-dedicated-benchmark.js)
+does not make them active or authorize a dispatch. The `bench` crate enumerates thirteen engine modes,
 including separate Luau interpreter/JIT modes, five default measured workloads, and 20 workload entries including cross-adapter source
 coverage for #15 `string_building`, portable memory probes #16–#18, deterministic todo-app probes #19–#21,
 and the supplemental #24 `string_opcodes` probe. The string probe runs a top-level program with `BENCH_N`
@@ -160,7 +162,8 @@ default `rustia-engine` feature while the external adapters stay independently g
 Production rustia wasm now runs through the bench wasm adapter runner, with koto and rhai as wasm-compatible
 comparison adapters. The recurring public benchmark uses Node/V8. Accepted V8, Bun/JavaScriptCore-family, and
 SpiderMonkey measurements show `call_ref` behind `br_table` and remain archived as portability evidence. The
-pre-lock wasm gate is closed; keep the Node/V8 measurements fresh as the harness changes.
+pre-lock wasm gate is closed. A future trusted bridge must refresh Node/V8 evidence as the harness changes;
+that requirement remains pending while measurement is paused.
 
 ## Where it lives
 ```

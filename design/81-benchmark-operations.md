@@ -717,8 +717,10 @@ ratio is an observation against a separately measured matrix, not proof that
 all historical differences are code changes. Repeated controls against one
 original row are not independent shifts and must not be compounded.
 
-These changes are local pending delivery; the investigation distinguishes
-retained evidence, fresh private calibration and eventual deployed behavior.
+These changes were delivered to the existing private benchmark graph through
+PR #77 and verified live, as recorded in [99](99-benchmark-history-integrity.md).
+That legacy deployment does not activate measurement or publication in this
+cleaned-source profile. The failed calibration remains retained and unresolved.
 
 - Keep cold preparation, first call, warmed execution, throughput, and memory
   as separate dimensions.

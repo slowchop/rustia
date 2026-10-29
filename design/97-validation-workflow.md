@@ -42,8 +42,9 @@ Evidence-regeneration overrides are rejected during validation. Partial stage
 runs never authorize the pre-push guard.
 
 This changes validation scheduling, not runtime performance. Benchmark
-measurements continue only on the dedicated CI runner. CI job durations can
-show whether scheduling helps; they are not interpreter performance evidence.
+measurement is paused in the active profile pending the reviewed trusted private
+bridge; retained private procedures do not authorize a new run. CI job durations
+can show whether scheduling helps; they are not interpreter performance evidence.
 
 ## First CI observation
 

@@ -102,14 +102,14 @@ context authority through the typed surface, misclassified operations fail close
 explicit versioned fuel policy remains auditable. The legacy `RustiaExtension` label-taking surface remains
 available only to `Rustia<()>`.
 
-**8. Two-class f64 ingress (buffer/pack store RAW bytes; canon only when bytes become a *number*).** *(determinism #4 · compat #4)* Name the canon point as an invariant: a NaN/`-0` is canonicalized **when it becomes
-a number `Value`**, never when it's byte-reinterpreted — so `buffer`/`string.pack` memory stores the exact
-bytes (`writeu32`→`readu32`, `pack`→`unpack` round-trip arbitrary bytes losslessly); `readf64`/unpack-`d`
-canonicalize on the *read* (producing a number). **Why better:** a naïve "canon at every f64 ingress" reading
-would corrupt buffer/pack byte-fidelity and break Luau parity — an easy-to-write differential test and a real
-landmine; stating the boundary now prevents the whole bug class. **Conformant:** byte storage is SPECIFIED-
-lossless (matched exactly); NaN-bits *as a number* are UNSPECIFIED (canon is within-spec). **Cost:** low if
-designed in when `buffer`/`pack` land (P4).
+**8. Separate ordinary numeric ingress from exact buffer-bit ingress.** *(determinism #4 · compat #4)*
+Ordinary numeric ingress and arithmetic results canonicalize NaN; `-0.0` remains intact except at table-key
+normalization. `buffer.readf64` preserves the supplied IEEE payload, and `readf32` uses an explicit cross-target
+widening/narrowing rule so immediate read/write round trips preserve payload and sign bits. These bytes are
+already deterministic script input, so subsequent arithmetic, rather than the raw read, is the canonicalization
+boundary. `string.unpack` numeric results still use ordinary canonicalized ingress; it is not an opaque-byte
+NaN-payload round-trip channel. **Why better:** this preserves the pinned buffer byte contract without weakening
+canonical arithmetic. Native and bare-Wasm regressions cover exact f32/f64 payload round trips.
 
 **9. Frozen, `Arc`-shared sandboxed stdlib/global base environment.** *(memory #2 · wasm #3 · DX #5 · Send fit)*
 Build the immutable stdlib (builtins, shared number/string metatables, interned method atoms) **once per
@@ -122,19 +122,17 @@ Standard layers mutable globals via COW (base never mutated); the frozen image h
 fn-pointers/`Arc` (never shared `Gc`) → the live VM remains thread-affine. **Cost:** medium (child-env indirection + COW
 seam; couple with #2 at P1).
 
-**10. Structured error (kind + span + chunkname + traceback) with one byte-exact Luau-message renderer + typed
-capability-removed errors.** *(DX #5 · compat #4 · LSP)* Replace `VmError::Runtime(String)` with a structured
-error carrying kind / source span / chunkname / name-enrichment / traceback (cheap under the stackless
-trampoline — the frame stack *is* the traceback). Two renderers: rich `Display` for host/LSP, and
-`.luau_message()` returning the **byte-exact** Luau string (the only thing `pcall`/`error` observe). Gated
-builtins in `Deterministic` raise a distinct `ErrorKind::CapabilityRemoved{feature,profile}`. **Why better:**
-one renderer collapses the conformance corpus's *dozens* of exact-string rows (conf-3/4/5/8/10) into a single
-differential-tested function, while embedders + the future luau-lsp get spans/traceback for free; turns the
-confusing "works in Standard, dies in Deterministic" into a precise diagnostic. **Conformant:** the
-`pcall`-visible string is exactly Luau's; extra structure is host-side only (never script-observable); fuel
-exhaustion stays a distinct, `pcall`-**uncatchable** kind (axis G); capability-removed errors are ordinary
-catchable errors → Deterministic stays a pure restriction. **Cost:** medium (needs compiler span/name metadata,
-already required by conf-8).
+**10. Structured errors (kind + span + chunkname + traceback) with shared message rendering and typed
+host-capability errors.** *(DX #5 · compat #4 · LSP)* Structured runtime errors, source diagnostics, and
+bounded tracebacks are implemented. The VM's `Error::message()` renders the message without a source prefix;
+`Display` adds the available source location or low-level PC. Focused oracle fixtures pin guest-visible
+messages and validation order; broader error-phase and diagnostic parity remain hardening work.
+`ErrorKind::CapabilityRemoved` reports rejected host capabilities. Removed environment globals are absent
+and produce ordinary nil-access/call errors, rather than capability-error stubs. **Why better:** one shared
+rendering path and structured host metadata keep diagnostics consistent without exposing engine internals.
+Fuel exhaustion remains a distinct, `pcall`-**uncatchable** kind (axis G). See
+[`79-script-diagnostics.md`](79-script-diagnostics.md) and the diagnostic follow-up in
+[`94-release-compatibility-audit.md`](94-release-compatibility-audit.md).
 
 ## Strong runners-up (several worth doing later)
 > **PROMOTED per review M3:** the two below are no longer "P4 runner-ups" — **hot/cold opcode split → P1**

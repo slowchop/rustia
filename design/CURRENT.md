@@ -20,6 +20,16 @@ evidence, not an anonymously accessible public verification service. The
 entry-point/reference fixes and prioritized reader-facing additions and cuts;
 API-reference completion remains open.
 
+**Design/source drift audit (2026-10-29):** current contracts, source references
+and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
+The cleaned repository's hosted correctness profile is active; benchmark workflows
+and publication are paused, and main protection/auto-merge settings are not enabled.
+Retained memory cohorts do not satisfy four intended protocol requirements:
+null-control-adjusted retention, anonymous-memory area, a separate warmup process,
+and a bounded idle/collection opportunity before the quiescent marker. These remain
+prospective protocol work under [57](57-memory-benchmarking.md); historical values
+and thresholds are unchanged. This audit adds no runtime or performance acceptance.
+
 **Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
 repository for inspection separately from package publication or a supported
 0.1/1.0 release. The user has authorized private staging in a new repository;
@@ -661,8 +671,8 @@ unreachable suspended-coroutine frames.
 1. **Finish the host-facing runtime boundary and ordered advanced API track.** Follow
    [`75-embedded-api.md`](75-embedded-api.md#build-order): the composable chunk builder is now implemented on
    the graph-preserving live `Value`/`Table`/`Function` spine and its live globals/table constructors. Build
-   on the implemented synchronous host-function API and verified controlled-client integrations by finishing
-   stack diagnostics. Transactional installation and host-owned
+   on the implemented synchronous host-function API, source/stack diagnostics, and verified controlled-client
+   integrations; settle the remaining release contracts before freezing the API. Transactional installation and host-owned
    replacement are implemented. The worker-local/per-call host
    context is already implemented. Keep the existing typed facade as the simple layer, keep the advanced layer
    available to all builder presets, and do not leak grabby-specific types, internal GC lifetimes, or a raw C
@@ -792,6 +802,9 @@ unreachable suspended-coroutine frames.
    The run used a simplified protocol without the paired qualification, idle gate or cooldowns; those
    should be wired into a runner workflow before it becomes the standing protocol.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
+   This checkout's hosted source profile pauses measurement and publication until a trusted private bridge
+   exists. The operational description below records the predecessor private pipeline and retained history;
+   its workflow names and automatic triggers are not active in this repository.
    The runner already exposes the requested engine matrix, five default workloads, 20 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
    a standalone HTML report, an explicit closed wasm pre-lock gate artifact, a wasm target bench for rustia+koto+rhai, a `call_ref`
@@ -866,8 +879,9 @@ unreachable suspended-coroutine frames.
 6. **Keep the executable conformance corpus green**. The current repo has 726 executable fixtures covering 520
    behavior refs with no pending rows: 708/502 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
-7. **Maintain benchmark operations** — one owned, attested machine times everything; the shared pool times
-   nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
+7. **Keep benchmark operations paused in this checkout** until a trusted private bridge exists; leave new
+   measurements pending. The remaining paragraph records the predecessor pipeline's operational baseline:
+   one owned, attested machine times everything; the shared pool times nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
    asserted: cores held off the scheduler, SMT disabled, each pinned core held at its ceiling with boost off,
    timed work pinned to one isolated core, one job on
    the box at a time, and every run attested against the frozen config before it builds. Each of those properties is a
@@ -965,8 +979,8 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
 - **Perf — state it PER-WORKLOAD, not as a blanket "~5× koto"** (review H2). The historical 11-workload seed
   found reference Luau **~4.7–9× faster than koto** on tables/closures/coroutines/stdlib-math, approximately at
   parity on generic iteration, and slower than koto on pcall/xpcall; those results set must-match workloads, not
-  a rustia claim. In the current five-workload Linux snapshot, rustia trails `mlua-luau` by 2.615x-5.880x by
-  minimum time with a 3.944x geometric mean, and the generated gate approves no blanket speed headline. Two distinct historical
+  a rustia claim. Use the generated [claim gate](../bench/CLAIMS.md) for the committed five-workload Linux
+  snapshot's current ratios and date; it approves no blanket speed headline. Two distinct historical
   koto multipliers remain useful context: the **float-path ~5–9×** (measured) and the
   **deterministic-path ~30–40×** (the sim's *real* incumbent — host fxmul/curve, per `ai_bakeoff`). The fused-op
   sub-µs (~0.2 µs) is **bespoke/private-fork, kernel-specific**. The committed benchmark crate now has five
@@ -1003,11 +1017,10 @@ implemented. Benchmark publication and the `LuauIntegerType2` watch remain ongoi
   closure-call/direct-immutable-upvalue slice reduced `closures_upvalues` Linux median latency by 15.036%
   (270.427 to 229.766 ns/call). The cached length-border slice was then exactly gated, measured no win on
   either length-heavy workload (+1.76% dense and +0.62% sparse candidate deltas), and was reverted; its
-  spare-capacity mutation-version correctness fix survives. The current generated minimum-time
-  geometric-mean gaps are 3.944x against `mlua-luau` and 4.336x against Luaur; rustia beats Ruau on three of
-  five tracked workloads by minimum time. The local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
-  protocol-specific results, not blanket speed or RSS claims. Next come bounded object reclamation/quotas,
-  broader long-run history, Linux-specific profiling of HotIR, verified multi-effect/control-flow HotIR growth,
+  spare-capacity mutation-version correctness fix survives. Current snapshot ratios and ranks are generated
+  in [CLAIMS.md](../bench/CLAIMS.md); the dated comparisons above remain historical evidence. The local -29.31% dense result did not reproduce on Linux and remains directional only. These are workload- and
+  protocol-specific results, not blanket speed or RSS claims. Object reclamation and quotas are implemented;
+  next come broader long-run history, Linux-specific profiling of HotIR, verified multi-effect/control-flow HotIR growth,
   superinstructions/O2, and type-directed wasm/AOT. Native copy-and-patch/JIT
   work remains a research reference unless it can satisfy the public
   `unsafe_code = "forbid"` gate.
@@ -1078,7 +1091,7 @@ invocation, and a separately versioned guest ABI.
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **transactional install, coherent execution API, and synchronous function construction implemented** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/target-first report/package metadata and owned-host measurement workflows implemented; cloud lifecycle retired; standalone split pending** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/report implemented; hosted correctness profile active; measurement/publication paused pending private bridge; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for all workspace packages | **current audit: 8 packages / metadata policy ok / publish=false** |
@@ -1130,5 +1143,6 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 
 These span the remaining engine hardening and product/release work. The architecture decisions are
 complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
-already active. Fresh performance measurements use the owned `ci-bench` workflows;
-local timings and the retired cloud lifecycle are not release evidence.
+already implemented. This checkout runs hosted correctness and committed-artifact checks; fresh performance
+measurements and publication are paused until a trusted private `ci-bench` bridge exists. Leave measurement
+requirements pending. Local timings and the retired cloud lifecycle are not release evidence.

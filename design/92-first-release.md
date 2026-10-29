@@ -254,9 +254,10 @@ contract; this documentation pass does not close the full API-reference gate.
 - [ ] Present disadvantages as clearly as strengths. A speed lead over every
   other engine is not a release requirement; accurate evidence is.
 
-No performance benchmarks run on a developer's machine. PR screening and any
-fresh measurements use the repository's remote benchmark workflows. A missing
-remote result remains pending.
+No performance benchmarks run on a developer's machine. The active hosted
+profile has no benchmark workflows: PR screening and fresh measurements remain
+pending until a reviewed trusted private bridge is enabled. The final-candidate
+benchmark requirements above remain in force; missing evidence stays pending.
 
 ## 6. Ship a candidate, then 1.0
 
