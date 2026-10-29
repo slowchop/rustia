@@ -6,10 +6,24 @@
 
 ## One-paragraph state
 
+**Documentation and repository identity (2026-10-29):** the cleaned source
+repository is `slowchop/rustia`; the original private repository is
+`slowchop/rustia-historic`. Both remain private and packages remain unpublished.
+Source visibility does not imply accepting outside contributions. Contribution,
+issue-reporting and support policies are undecided; documentation must not invite
+participation or promise maintainer review. Main protections and auto-merge
+settings for the cleaned repository still await separate approval. Its hosted
+correctness CI has passed; historical benchmark automation remains separate.
+Older PR and CI links target the private historic repository; they are retained
+evidence, not an anonymously accessible public verification service. The
+[documentation review](100-documentation-review.md) records the completed
+entry-point/reference fixes and prioritized reader-facing additions and cuts;
+API-reference completion remains open.
+
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
-The cleaned repository's hosted correctness profile is active; benchmark workflows
-and publication are paused, and main protection/auto-merge settings are not enabled.
+The cleaned repository's hosted correctness profile is active; public benchmark
+automation and publication are paused, and main protection/auto-merge settings are not enabled.
 Retained memory cohorts do not satisfy four intended protocol requirements:
 null-control-adjusted retention, anonymous-memory area, a separate warmup process,
 and a bounded idle/collection opportunity before the quiescent marker. These remain

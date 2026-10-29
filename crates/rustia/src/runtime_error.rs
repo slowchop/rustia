@@ -27,70 +27,138 @@ pub(crate) struct RuntimeLocation {
 ///
 /// Include a fallback arm: future versions may add categories. Script-thrown
 /// objects are represented by their message here; their VM storage is private.
+/// Match a kind instead of parsing the displayed message.
+///
+/// ```
+/// use rustia::{Rustia, VmErrorKind};
+///
+/// let mut vm = Rustia::builder().fuel(1_000).build()?;
+/// let error = vm.exec("while true do end").expect_err("the budget is finite");
+/// assert!(matches!(
+///     error.as_vm_error().map(|error| error.kind()),
+///     Some(VmErrorKind::FuelExhausted { .. })
+/// ));
+/// // Start a fresh decision, discarding the failed script's guest state.
+/// vm.reset_decision()?;
+/// assert_eq!(vm.eval::<i32>("return 42")?, 42);
+/// # Ok::<(), rustia::Error>(())
+/// ```
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum VmErrorKind {
+    /// The instruction fuel budget was exhausted. Script `pcall` cannot catch it.
     FuelExhausted {
+        /// The exhausted budget, in instruction-fuel units rather than time.
         limit: u64,
     },
+    /// Nested script calls reached the configured depth. Script `pcall` cannot catch it.
     RecursionLimit {
+        /// The configured maximum script call depth.
         limit: usize,
     },
+    /// Bytecode referred to a register outside its register file.
     RegisterOutOfBounds {
+        /// The zero-based register index that was requested.
         register: usize,
+        /// The number of available registers; valid indices are less than this value.
         max: usize,
     },
+    /// Bytecode referred to a constant outside its constant pool.
     ConstantOutOfBounds {
+        /// The zero-based constant index that was requested.
         index: usize,
+        /// The number of available constants.
         len: usize,
     },
+    /// An operation received a value of an incompatible type.
     TypeError {
+        /// A description of the value type the operation expected.
         expected: &'static str,
     },
+    /// A guest allocation failed or exceeded the VM's logical memory quota.
+    /// This does not identify an operating-system memory limit.
     OutOfMemory,
+    /// A typed callback was called without an invocation for its host schema.
     HostDispatcherUnavailable,
+    /// A bounded host-invocation resource was exhausted.
     HostResourceExhausted {
+        /// The resource name, such as a record-count or record-byte budget.
         resource: &'static str,
+        /// The configured ceiling, in the units identified by `resource`.
         limit: u64,
     },
+    /// A host callback's unwinding panic was contained and the VM was poisoned.
+    /// Reset the decision before executing more guest code.
     HostPanicked {
+        /// The callback name reported at the host boundary.
         function: String,
     },
+    /// Execution was rejected after an earlier host panic.
+    /// [`crate::Rustia::reset_decision`] clears the poisoned state.
     VmPoisoned,
+    /// A coroutine attempted to yield across a boundary that cannot suspend.
     YieldAcrossBoundary,
+    /// Decision reset was requested while the interpreter was executing.
     DecisionResetWhileRunning,
+    /// A persistent host configuration change was requested during execution or a guest savepoint.
     HostConfigurationWhileRunning,
+    /// Decision reset could not advance the finite epoch counter.
     DecisionEpochExhausted,
+    /// A retained guest handle was used after its decision epoch ended.
     StaleRetainedValue {
+        /// The epoch in which the handle was created.
         retained_epoch: u64,
+        /// The interpreter's current epoch.
         current_epoch: u64,
     },
+    /// A retained guest handle was used with a different interpreter.
     RetainedValueFromDifferentVm,
+    /// A table write used `nil` as its key.
     TableIndexNil,
+    /// A table write used NaN as its key.
     TableIndexNaN,
+    /// `next` received a key that is not valid for the supplied table.
     InvalidKeyToNext,
+    /// A script assertion failed.
     AssertionFailed {
+        /// The assertion's message.
         message: String,
     },
+    /// An ordinary script operation failed with a textual message.
     RuntimeError {
+        /// The message without an added source-location prefix.
         message: String,
     },
+    /// A script raised an error value, represented here by its original text.
+    /// The original guest object's identity does not cross the facade boundary.
     GuestError {
+        /// The textual representation of the script's error value.
         message: String,
     },
+    /// Execution requested a feature that the engine does not implement.
     Unsupported {
+        /// The unsupported feature's name.
         feature: &'static str,
     },
+    /// The selected profile does not permit a requested capability.
     CapabilityRemoved {
+        /// The unavailable capability or service.
         feature: &'static str,
+        /// The specific operation, when the failure identifies one.
         operation: Option<String>,
+        /// The profile that rejected the request.
         profile: Profile,
     },
+    /// The hardened-leaf environment does not permit a requested operation or setting.
     HardenedLeafViolation {
+        /// The rejected operation or setting.
         feature: &'static str,
     },
+    /// An operation tried to change the sealed hardened-leaf guest environment.
     GuestEnvironmentSealed,
+    /// A bytecode or program-state invariant was invalid.
     InvalidProgram {
+        /// A description of the violated bytecode invariant.
         reason: &'static str,
     },
 }

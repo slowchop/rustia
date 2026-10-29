@@ -207,4 +207,3 @@ No drift detected.
 ## tools/EGM.md
 
 - Fixed: main-series publication and 30-day acceptance-artifact workflow claims were not scoped to predecessor private operations. The map now identifies their historical scope and the README source-reference validation boundary.
-

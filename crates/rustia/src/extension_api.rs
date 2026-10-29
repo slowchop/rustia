@@ -348,8 +348,12 @@ impl RustiaBuilder {
     /// Installs the host-owned resolver behind script-visible `require`.
     ///
     /// The resolver chooses a canonical module identity and source for every
-    /// request. Successful modules execute once per decision epoch and are
-    /// cached by that identity; [`Rustia::reset_decision`] clears the cache.
+    /// request. Successful results are cached by identity within the calling
+    /// function's module cohort: the cache shared by a module and its dependencies.
+    /// Each installation starts a fresh cohort; retained functions keep using
+    /// their original cohort. A module can therefore execute again in a new
+    /// installation before [`Rustia::reset_decision`] clears all guest state.
+    /// See [`ServiceModuleResolver`] for loading, failure, and suspension rules.
     pub fn module_resolver(mut self, resolver: ServiceModuleResolver) -> Self {
         self.settings.module_resolver = Some(resolver.into_provider());
         self

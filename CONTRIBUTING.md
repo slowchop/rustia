@@ -1,8 +1,9 @@
-# Contributing to Rustia
+# Rustia build and maintenance notes
 
-Thanks for helping make Rustia a useful, dependable scripting engine. Bug reports,
-clearer examples, and small fixes are all welcome. Start with the
-[README](README.md) if you want to try the API first.
+Source access, package releases, and outside contributions are separate decisions.
+The policy for accepting outside contributions has not been decided. These notes
+explain how to build the source and maintain the repository; they do not establish
+an issue-reporting or review service. Start with the [README](README.md) to try the API.
 
 ## Build and test
 
@@ -14,13 +15,19 @@ shortcuts for commands you can also run directly.
 ```sh
 git clone https://github.com/slowchop/rustia.git
 cd rustia
+node tools/install-git-hooks.js
 cargo test --locked -p rustia
 cargo run --locked -p rustia --example embedding
-cargo run --locked -p rustia-cli -- --eval "return 40 + 2"
+cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
 ```
 
-For a change, run the tests closest to the code you edited. Before opening a pull
-request, these checks are a useful baseline:
+`just install-hooks` is equivalent to the Node command above. Install this
+checkout-local guard before pushing. Every push must pass the full
+`just release-preflight` inventory through the hook on the unchanged commit;
+focused checks do not replace it. See [the validation workflow](design/97-validation-workflow.md).
+
+While making a change, run the tests closest to the code you edited. These checks
+are a useful baseline:
 
 ```sh
 cargo fmt --all -- --check
@@ -29,21 +36,24 @@ cargo test --locked --workspace
 node tools/check-readme-examples.js
 ```
 
-The README check compiles and runs its Rust examples, so readers can trust the
-code they copy. The complete release check is `just release-preflight`, or
-`node tools/run-release-preflight.js`. It also checks package contents, generated
-reports, the separate fuzzing workspace, and additional build configurations.
-CI runs it for pull requests. It builds dependencies for several scripting
-engines, so the first run may need more disk space than the focused tests.
+The README check compiles and runs its Rust examples. The complete release check
+is `just release-preflight`, or `node tools/run-release-preflight.js`. It also
+checks package contents, generated reports, the separate fuzzing workspace, and
+additional build configurations. Hosted correctness CI runs it for pull requests.
+It builds dependencies for several scripting engines, so the first run may need
+more disk space than the focused tests.
 
 **Do not run benchmarks on your development machine.** This includes
 `cargo bench`, benchmark examples, profiling, and quick timing comparisons. Local
-builds, correctness tests, and static checks are welcome; their elapsed times are
-not performance evidence. Push your branch and open a pull request to use its
-remote `ci-bench` check when available. This cleaned-history checkout currently
-runs hosted correctness CI only; measurement and publication workflows are
-paused until a trusted private bridge exists. Leave new measurements pending.
-Only accepted `ci-bench` results can support speed claims or benchmark updates.
+builds, correctness tests, and static checks are allowed; their elapsed times are
+not performance evidence. This source repository has hosted correctness CI only,
+with no `ci-bench` workflow or private runner access. Trusted maintainers can
+manually review and dispatch exact-cohort runtime comparisons through a separate
+private bridge. Its outputs remain private and require independent raw-data review
+before acceptance; they do not update public history or authorize public claims.
+Automatic per-commit/history measurement, landscape refresh, and publication remain
+paused. Only accepted `ci-bench` results can support performance decisions; bridge
+availability alone is not a result.
 
 ## Find your way around
 
@@ -59,24 +69,11 @@ other design documents can contain older plans.
 | `conformance` | Small scripts and expected results checked against the pinned language version |
 | `design` | Behavior contracts, decisions, and release plans |
 | `tools` | Repository and release checks |
-| `bench` | Benchmark workloads, reports, and remote measurement tools |
+| `bench` | Benchmark workloads, retained reports, and measurement tools |
 | `fuzz` | Bounded randomized tests for parser and runtime failures |
 | `spikes` | Historical experiments; these are not the supported API |
 
-## Make a change easy to review
-
-Keep changes focused and explain what a user will notice. For a bug report,
-include a small script or Rust example, the result you expected, and the result
-you observed. Include your Rustia revision and platform when they matter. The
-issue tracker is not open during the private preview; include a report with a
-pull request or bring it to a maintainer. Public bugs and features will use this
-repository's GitHub Issues when the project opens for release.
-
-Source access does not mean the crates have been released or the API is stable.
-Support and review are best-effort; a report or contribution does not guarantee
-an implementation or response date. Keep suspected credentials, private data and
-security-sensitive reproduction details out of public reports. Before opening
-the repository, maintainers must establish a private security-reporting channel.
+## Maintain behavior and documentation together
 
 Rustia targets **standalone Luau 0.709**. It does not provide Roblox services.
 When changing language behavior, check the relevant [design document](design/)
@@ -102,26 +99,27 @@ Generated reports name their source and regeneration command. Change the source
 and rerun the generator; avoid editing generated output by hand. CI checks for
 stale output.
 
-## Pull requests and merging
+## Maintainer delivery
 
-Describe the problem, resulting behavior, and checks you ran. Mention any pending
-remote measurement. Required CI checks and independent reviews must pass without
-blocking findings. Enable auto-merge when the pull request is ready so these
-requirements can gate delivery.
+Describe the problem, resulting behavior, and checks run for each change. Record
+pending measurements. Use a **merge commit** to preserve reviewed commit identities.
+Checks and independent reviews must pass without blocking findings; never bypass
+protection, reviews, or failing checks.
 
-Use a **merge commit**. Squash and rebase merging are disabled because benchmark
-history refers to the original reviewed commit identities. Do not bypass branch
-protection, required reviews, or failing checks.
+As of private staging on 2026-10-29, the new repository's protection and merge
+settings await approval: no required-check ruleset is configured, auto-merge is
+off, and squash/rebase remain available. The intended configuration requires
+checks, permits only merge commits, and enables auto-merge when changes are ready.
+That configuration has not yet been applied.
 
-## Keep this repository public-safe
+## Keep committed material public-safe
 
 Everything committed here must be suitable for a public repository. Keep
 credentials, infrastructure addresses, runner configuration, private tasks, and
-client-specific integration details out of commits, issues, and public logs.
-Maintainers keep private operations material in the separately versioned,
-git-ignored `private/` checkout (`rustia-ops`). It is optional and is not needed
-to build or use Rustia. Public workflows identify self-hosted runners only by
-generic labels. Keep local agent notes and caches out of source control too.
+client-specific integration details out of source and hosted logs. Private
+operations material belongs in the separately versioned, git-ignored `private/`
+checkout (`rustia-ops`). It is optional and is not needed to build or use Rustia.
+Keep local agent notes and caches out of source control too.
 
-Contributions use the project's dual **MIT OR Apache-2.0** license; see
+The source uses the dual **MIT OR Apache-2.0** license; see
 [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

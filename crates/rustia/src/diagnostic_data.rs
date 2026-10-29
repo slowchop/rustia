@@ -5,13 +5,21 @@ use std::sync::Arc;
 /// Host-side reporting budgets, separate from script fuel and memory limits.
 ///
 /// Start with [`default`](Self::default) and adjust the limits your application
-/// needs. A zero source budget retains locations without copying source text.
+/// needs. Defaults are 4 MiB of retained-source accounting, 256 KiB per source,
+/// 32 captured frames, and 16 KiB per formatted report. These limits do not
+/// constrain script execution or change the error value received by `pcall`.
+/// A zero source budget omits nonempty source text while retaining available
+/// locations; zero frames disables frame storage, and zero report bytes produces
+/// an empty report for captured diagnostics. Errors without captured diagnostics
+/// use the formatter's fallback budget instead.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct DiagnosticLimits {
-    /// Total bytes retained by compiled scripts and outstanding errors.
+    /// Total budget for retained source snapshots, including accounting overhead,
+    /// shared by compiled scripts and outstanding errors. Measured in bytes.
     pub retained_source_bytes: usize,
-    /// Maximum source size retained for a single script.
+    /// Maximum source length in bytes retained for one script.
+    /// A larger source is omitted rather than stored as a partial snapshot.
     pub source_bytes: usize,
     /// Maximum number of captured script frames.
     pub frames: usize,
@@ -121,7 +129,9 @@ impl SourceSnapshot {
 /// A half-open byte range in the exact input source.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiagnosticSpan {
+    /// The zero-based offset of the first byte in the range.
     pub start: usize,
+    /// The zero-based offset immediately after the range's final byte.
     pub end: usize,
 }
 
@@ -131,15 +141,23 @@ pub struct DiagnosticSpan {
 pub enum DiagnosticReason {
     /// A value could not be indexed.
     Index {
+        /// The runtime type of the value being indexed.
         object_type: &'static str,
+        /// The field name when captured; `None` means no field name is available.
         key: Option<String>,
     },
     /// A value could not be called.
-    Call { value_type: &'static str },
+    Call {
+        /// The runtime type of the value used as a function.
+        value_type: &'static str,
+    },
     /// An arithmetic operation received incompatible values.
     Arithmetic {
+        /// The arithmetic operation's name.
         operation: &'static str,
+        /// The left operand's runtime type.
         left_type: &'static str,
+        /// The right operand's runtime type.
         right_type: &'static str,
     },
 }
@@ -148,8 +166,11 @@ pub enum DiagnosticReason {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct DiagnosticFrame {
+    /// The source label recorded for this call site; not necessarily a filesystem path.
     pub source: Arc<str>,
+    /// The one-based source line of the call site.
     pub line: u32,
+    /// The function's debug name, when available. Long names may be truncated.
     pub function: Option<String>,
 }
 
@@ -160,19 +181,36 @@ pub struct DiagnosticFrame {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Diagnostic {
+    /// Whether runtime call-trace capture has been performed.
+    /// This can be true even when no frames were retained.
     pub trace_captured: bool,
+    /// Structured facts from the failing operation, when they were captured.
     pub reason: Option<DiagnosticReason>,
+    /// The field or array path associated with a data-conversion failure, when known.
     pub data_path: Option<String>,
+    /// Whether the failure falls in generated wrapper text rather than mapped input.
     pub generated_source: bool,
+    /// The original typed host error, when a host cause was preserved.
     pub host_cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    /// The source label, when known; it need not name a file on disk.
     pub source: Option<Arc<str>>,
+    /// The one-based source line, when known.
     pub line: Option<u32>,
-    /// Opening line and the expected closing keyword for an unclosed block.
+    /// The one-based opening line and expected closing keyword for an unclosed block.
     pub unclosed_block: Option<(u32, &'static str)>,
+    /// The half-open source byte range, when known. A source map may adjust it
+    /// to refer to the retained input rather than generated wrapper text.
     pub span: Option<DiagnosticSpan>,
+    /// Retained source text for this failure. It may be absent when the source
+    /// or total retention budget is exceeded, allocation fails, or source is unavailable.
     pub snapshot: Option<Arc<SourceSnapshot>>,
+    /// The maximum UTF-8 byte length of [`crate::Error::report`] output.
+    /// This is a formatting budget, not the current report's length; zero emits nothing.
     pub report_bytes: usize,
+    /// Captured caller frames, starting with the caller nearest the failure.
+    /// An empty list can mean no callers, disabled capture, or unavailable frame data.
     pub frames: Vec<DiagnosticFrame>,
+    /// Whether additional call frames were omitted when capture reached its bound.
     pub frames_truncated: bool,
 }
 

@@ -5,9 +5,12 @@
 Rustia implements a portable Luau interpreter in Rust. Source moves through the lexer,
 parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
 and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
-one engine. The workspace is private and unpublished, with hosted correctness CI and benchmark
-automation paused under the explicit source profile; the pinned conformance corpus
-does not establish full Luau parity or release readiness.
+one engine. The workspace is private and unpublished, with hosted correctness CI under
+the explicit source profile. Public benchmark automation and publication remain paused.
+A separate private maintainer bridge supports only manually dispatched, reviewed
+exact-cohort runtime comparisons; its outputs stay private and do not authorize public
+performance claims. Local performance measurements remain prohibited. The pinned
+conformance corpus does not establish full Luau parity or release readiness.
 
 Read [AGENTS.md](./AGENTS.md), [CURRENT](./design/CURRENT.md), the
 [pillars](./design/02-pillars.md), and the relevant design documents before changes.

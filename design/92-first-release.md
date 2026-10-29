@@ -215,16 +215,17 @@ record; the broader public matrix below remains open.
 - [ ] Keep the public workspace free of unsafe code and all required correctness,
   formatting, lint, and independent-review checks green.
 
-## 4. Make the project welcoming
+## 4. Document use and maintenance
 
 - [x] Lead the README with a short explanation and executable API examples.
 - [x] Explain common environment choices and error handling in everyday language.
 - [x] Show feature tradeoffs and per-workload speed comparisons with source links.
-- [x] Add a contributor guide and keep local worktrees out of Git's untracked list.
+- [x] Add maintainer build/validation notes and keep local worktrees out of Git's untracked list.
 - [ ] Complete the API reference: defaults, failure behavior, lifetime/reset rules,
   and at least one useful example for each supported public workflow.
-- [ ] Open the public bug tracker and provide a clear way to report problems
-  before inviting public users. Issues are disabled during the private preview.
+- [ ] Decide the outside contribution, issue-reporting and support policy before
+  inviting participation. Source visibility does not require accepting contributions;
+  Issues remain disabled during private staging.
 - [ ] Check all documentation links in the packaged crates and build the docs
   with warnings treated as errors. Both checks now run in release preflight;
   final candidate verification remains required.

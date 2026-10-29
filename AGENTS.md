@@ -3,7 +3,7 @@
 rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby).
 Public source access is separate from package publication and supported-release acceptance; full Luau parity
 is not implied by source visibility. **This is an LLM-first codebase** — written and maintained mostly by agents, read and
-contributed to by humans. Optimise for *both*: code an agent can reason about locally and a human can trust.
+reviewed by humans. Outside contribution and support policies are undecided. Optimise for *both*: code an agent can reason about locally and a human can trust.
 
 **Start every session here:** read [`design/CURRENT.md`](design/CURRENT.md) (the single canonical state), then
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
@@ -25,20 +25,27 @@ serves them.
 ## Benchmark policy
 
 - This checkout uses the hosted correctness profile in `design/public-source-profile.json`.
-  Benchmark measurement and publication workflows are paused until a trusted private bridge exists.
-  Keep measurements pending; the owned-host pipeline descriptions record the predecessor repository.
-
+  Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
+  Its correctness workflows and public coordinator provide no timing authority.
+- A separate private maintainer bridge is available only for manually dispatched,
+  reviewed exact-cohort runtime comparisons on `ci-bench`. Keep its outputs private and
+  review raw data independently before accepting a comparison. Bridge availability is
+  not a performance result; private comparisons do not update public history or authorize public claims.
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
 - Local compilation, correctness tests, and static validation are allowed, but their durations must not be treated or reported as performance evidence.
-- Obtain performance measurements by pushing a branch, opening a pull request, and using the PR's `ci-bench` workflow.
-- Only `ci-bench` results may be reported as benchmark evidence or used to update benchmark results and performance claims.
-- If `ci-bench` is unavailable, report the benchmark as pending; never substitute a local run.
+- Obtain measurements through the separate private maintainer bridge; pushing a source PR
+  here does not run benchmarks. Only authorized `ci-bench` results count as performance evidence.
+- If that measurement service is unavailable, report the benchmark as pending; never substitute a local run.
 
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
-- The cleaned repository runs hosted correctness CI. Main-branch protection and auto-merge settings are not yet enabled; follow required validation and independent review before delivery without assuming GitHub enforces those gates. The hosted profile has no benchmark publication workflow or app-token exception; see `design/81-benchmark-operations.md`.
-- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the cleaned repository settings still offer squash and rebase.
+- The cleaned source repository uses hosted correctness CI. Its main-branch ruleset and
+  auto-merge settings await separate approval; do not describe them as already enforced.
+  Check every applicable PR check and independent review before merging. Historical
+  benchmark publication permissions belong to the private historic repository and do not
+  grant a bypass in this repository. See `design/81-benchmark-operations.md`.
+- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the repository settings still offer squash and rebase.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)
 
@@ -113,14 +120,14 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
   confusing split API.
 
 ## Where things live (public vs private boundary)
-- **This repo `rustia` (public-bound):** code + `design/` (the spec) + public GitHub Issues. **Nothing secret
+- **This repo `rustia` (public-bound):** code + `design/` (the spec). Public issue and contribution policies are undecided. **Nothing secret
   or infra-identifying ever lands here** (no runner hostnames/IPs/config, no credentials).
 - **`private/` — the `rustia-ops` private sibling repo, git-ignored mount** (separate git history → the
   self-hosted CI/infra can never appear in public history by construction). Holds private notes, the CI-runner
   setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
 - **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
-- **Tasks:** public bugs/features = GitHub Issues on this repo; private/infra tasks = files (or Issues) in
-  `rustia-ops`. **No Linear** (the private repo covers it).
+- **Tasks:** keep source maintenance in this repo; private/infra tasks = files (or Issues) in
+  `rustia-ops`. Opening public Issues requires a separate policy decision. **No Linear** (the private repo covers it).
 - Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
 
 ## Before pushing
