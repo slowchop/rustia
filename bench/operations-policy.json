@@ -23,15 +23,15 @@
     }
   },
   "measurement": {
-    "mode": "paused-pending-private-bridge",
+    "mode": "public-automation-paused-private-manual-cohorts",
     "authoritative_runner_classes": [],
     "scheduled_billing_allowed": false,
-    "reason": "Measurement is paused pending a trusted private benchmark bridge. Historical measurements remain recorded but do not authorize current timing or stability claims."
+    "reason": "Public per-commit, history, and landscape automation remain paused. A trusted private benchmark bridge is available for manually dispatched, reviewed exact-cohort runtime comparisons only; outputs remain private and do not authorize public claims."
   },
   "publication": {
     "state": "paused",
-    "reason": "Benchmark-data publication is paused pending a trusted private benchmark bridge.",
-    "next_action": "Resume only after a trusted private benchmark bridge is reviewed and enabled."
+    "reason": "Public benchmark-data publication remains paused; private benchmark bridge comparisons are not published.",
+    "next_action": "Keep publication paused and review private benchmark bridge evidence separately before any public claim."
   },
   "progress": {
     "state": "paused",
@@ -45,12 +45,12 @@
       "crates/rustia-parser/src",
       "crates/rustia-vm/src"
     ],
-    "next_action": "Benchmark progress is paused pending a trusted private benchmark bridge."
+    "next_action": "Public progress history remains paused; private benchmark bridge comparisons do not add rows."
   },
   "landscape": {
     "state": "paused",
     "refresh_interval_days": 35,
-    "reason": "Landscape refresh is paused with benchmark measurement and publication.",
-    "next_action": "Resume after a trusted private benchmark bridge is reviewed and enabled."
+    "reason": "The public engine landscape remains historical; private benchmark bridge comparisons do not refresh it.",
+    "next_action": "Keep landscape refresh paused until a separately reviewed refresh workflow is approved."
   }
 }

@@ -87,7 +87,7 @@ function fail(message) {
 function pausedProfileCommandProblem(command, root = REPO) {
   if (command === "self-test") return null;
   if (!fs.existsSync(path.join(root, "design/public-source-profile.json"))) return null;
-  return `benchmark command ${command} is disabled while the public-source profile is paused pending a trusted private benchmark bridge`;
+  return `benchmark command ${command} is disabled while the public-source profile is paused; use the separately reviewed private maintainer bridge`;
 }
 
 function sshDestination() {
@@ -2661,9 +2661,15 @@ function selfTest() {
     const profile = JSON.parse(fs.readFileSync(publicProfilePath, "utf8"));
     assert.equal(profile.schema, "rustia.public-source-profile.v1");
     assert.equal(profile.state, "private-rehearsal");
-    assert.equal(profile.benchmark_bridge, "pending-private-trusted-pipeline");
+    assert.ok([
+      "pending-private-trusted-pipeline",
+      "private-maintainer-cohorts-v1",
+    ].includes(profile.benchmark_bridge));
     assert.equal(operationsStatus.profile, "public-source");
-    assert.equal(operationsStatus.measurement?.mode, "paused-pending-private-bridge");
+    assert.equal(operationsStatus.benchmark_bridge, profile.benchmark_bridge);
+    assert.equal(operationsStatus.measurement?.mode, profile.benchmark_bridge === "private-maintainer-cohorts-v1"
+      ? "public-automation-paused-private-manual-cohorts"
+      : "paused-pending-private-bridge");
     assert.equal(operationsStatus.publication?.state, "paused");
     assert.equal(authorities.length, 0, "paused public operations status must not declare a current timing authority");
     for (const runner of Object.values(operationsStatus.runner_classes)) {
@@ -2823,10 +2829,14 @@ function selfTest() {
   try {
     assert.equal(pausedProfileCommandProblem("self-test", pausedRoot), null);
     assert.equal(pausedProfileCommandProblem("matrix", pausedRoot), null);
-    writeJson(path.join(pausedRoot, "design/public-source-profile.json"), { schema: "rustia.public-source-profile.v1" });
-    for (const command of ["plan", "history", "main", "pr", "profile", "observe", "strings", "accept", "live-serde", "matrix", "memory", "calibrate", "fetch", "unlock", "host-check", "host-fingerprint"]) {
-      assert.match(pausedProfileCommandProblem(command, pausedRoot) ?? "", /disabled while the public-source profile is paused/,
-        `${command} must refuse before any local or SSH work`);
+    for (const bridge of ["pending-private-trusted-pipeline", "private-maintainer-cohorts-v1"]) {
+      writeJson(path.join(pausedRoot, "design/public-source-profile.json"), {
+        schema: "rustia.public-source-profile.v1", benchmark_bridge: bridge,
+      });
+      for (const command of ["plan", "history", "main", "pr", "profile", "observe", "strings", "accept", "live-serde", "matrix", "memory", "calibrate", "fetch", "unlock", "host-check", "host-fingerprint"]) {
+        assert.match(pausedProfileCommandProblem(command, pausedRoot) ?? "", /disabled while the public-source profile is paused/,
+          `${command} must refuse before any local or SSH work when bridge state is ${bridge}`);
+      }
     }
     assert.equal(pausedProfileCommandProblem("self-test", pausedRoot), null);
   } finally {

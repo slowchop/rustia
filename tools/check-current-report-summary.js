@@ -105,20 +105,21 @@ function main() {
 
   const publicOperationsHtml = operationsStatusSection({
     profile: "public-source",
+    benchmark_bridge: "private-maintainer-cohorts-v1",
     runner_classes: {
       "hosted-linux": { environment: "github-hosted", timing_authority: false },
       "hosted-macos": { environment: "github-hosted", timing_authority: false },
     },
     measurement: {
-      mode: "paused-pending-private-bridge",
+      mode: "public-automation-paused-private-manual-cohorts",
       authoritative_runner_classes: [],
       scheduled_billing_allowed: false,
-      reason: "Measurement is paused pending a trusted private benchmark bridge.",
+      reason: "Public automation remains paused; private maintainer comparisons are manual only.",
     },
     publication: {
       state: "paused",
-      reason: "Benchmark-data publication is paused pending a trusted private benchmark bridge.",
-      next_action: "Resume only after a trusted private benchmark bridge is reviewed and enabled.",
+      reason: "Benchmark-data publication remains paused; private bridge results are not published.",
+      next_action: "Keep publication paused and review private evidence separately.",
     },
     progress: {
       state: "paused",
@@ -126,21 +127,36 @@ function main() {
       measured_at_unix: 100,
       latest_relevant_commit: "b".repeat(40),
       pending_relevant_commit_count: 2,
-      next_action: "Benchmark progress is paused pending a trusted private benchmark bridge.",
+      next_action: "Public progress history remains paused.",
     },
     landscape: {
       state: "paused",
       measured_commit: "a".repeat(40),
       measured_at_unix: 100,
-      reason: "Landscape refresh is paused with benchmark measurement and publication.",
-      next_action: "Resume after a trusted private benchmark bridge is reviewed and enabled.",
+      reason: "The public landscape remains historical.",
+      next_action: "Keep landscape refresh paused.",
     },
   });
-  assert.match(publicOperationsHtml, /Measurement and publication are paused/);
+  assert.match(publicOperationsHtml, /Public automation and publication are paused/);
   assert.match(publicOperationsHtml, /Historical measurements were recorded/);
   assert.match(publicOperationsHtml, /do not establish current runner authority or current performance stability/);
   assert.match(publicOperationsHtml, /No public workflow is authorized to measure or publish/);
+  assert.match(publicOperationsHtml, /available for manually dispatched, reviewed exact-cohort runtime comparisons/);
+  assert.match(publicOperationsHtml, /do not refresh public history or authorize public claims/);
   assert.doesNotMatch(publicOperationsHtml, /ci-bench|self-hosted|isolated core/);
+  const pendingBridgeHtml = operationsStatusSection({
+    profile: "public-source",
+    benchmark_bridge: "pending-private-trusted-pipeline",
+    ...{
+      runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
+      measurement: { mode: "paused-pending-private-bridge", authoritative_runner_classes: [], scheduled_billing_allowed: false },
+      publication: { state: "paused", reason: "Publication paused.", next_action: "Wait for private bridge." },
+      progress: { state: "paused", measured_commit: "a".repeat(40), measured_at_unix: 100, next_action: "Wait." },
+      landscape: { state: "paused", measured_commit: "a".repeat(40), measured_at_unix: 100, reason: "Historical.", next_action: "Wait." },
+    },
+  });
+  assert.match(pendingBridgeHtml, /A reviewed trusted private benchmark bridge is required before any private comparison can run/);
+  assert.doesNotMatch(pendingBridgeHtml, /available for manually dispatched/);
   assert.equal(requireHistoricalHost("ci-bench", "fixture", "ci-bench"), undefined);
   assert.throws(() => requireHistoricalHost("other-machine", "fixture", "ci-bench"), /records "other-machine" but the public-source profile identifies historical rows as "ci-bench"/);
   const publicClaimHtml = claimGateSection([{
