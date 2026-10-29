@@ -5,8 +5,8 @@
 This source checkout uses hosted correctness CI. Benchmark automation is paused
 pending a trusted private bridge; it has no `ci-bench` measurement workflow.
 Displayed results are retained historical evidence, not a current host-health
-or repeatability guarantee. See [CURRENT](../design/CURRENT.md) and the
-[source profile](../design/public-source-profile.json).
+or repeatability guarantee. See [CURRENT](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) and the
+[source profile](https://github.com/slowchop/rustia/blob/main/design/public-source-profile.json).
 
 **Do not run timings or profiling on a development machine.** This includes
 benchmark binaries, examples, Wasm timing scripts, and ad hoc comparisons.
