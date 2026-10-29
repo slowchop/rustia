@@ -88,6 +88,11 @@ The executable corpus has **726 fixtures**, **520 refs**, **0 pending-oracle**
 and **0 pending-impl**: 708 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
+Retained-handle stateful fuzzing now checks replacement, rollback, collection and
+reset against an independent host model in all four profiles, within the existing
+input/fuel/memory bounds. This is correctness coverage, not a new remote campaign
+or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-exports-and-functions-2026-10-30).
+
 Hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
 bounded fuzz/differential smoke, native Linux x86-64 and macOS ARM64, Node/V8 and
 headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.

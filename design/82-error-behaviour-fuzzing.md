@@ -80,9 +80,10 @@ The expanded ten-operation stateful harness also passed in
 revision `347b0af7557535227d7b901713f0e3559c621b02`, with the same durations and
 limits: lexer 27,116,785; parser 23,274,567; compiler 13,843,528; VM 462,119;
 stateful 294,889; differential 2,045,334 executions. All six jobs succeeded,
-without reported crashes, timeouts or mismatches. Subsequent changes only
-strengthen integration-test assertions and documentation; production and fuzz
-sources remain identical to that tested revision.
+without reported crashes, timeouts or mismatches. At that campaign closeout,
+subsequent changes only strengthened integration-test assertions and
+documentation; production and fuzz sources remained identical to that tested
+revision. This dated result does not cover later harness expansions below.
 
 Execution counts include rejected mutations, not distinct scripts or unique oracle
 comparisons. Campaign artifacts retain
@@ -338,3 +339,47 @@ allocation check and fails with `OutOfMemory`. The public regression
 `builtin_output_work_checks_fuel_before_allocation_across_call_shapes` checks
 direct, aliased and parenthesized calls in all four profiles, plus reset/recovery.
 These are embedding-policy tests, not standalone Luau oracle expectations.
+
+## Retained exports and functions (2026-10-30)
+
+The stateful driver now covers the existing [replacement contract](75-embedded-api.md#4-compiled-module-and-transactional-replacement-api)
+with retained `Exports` and `Function` handles. It adds seven operations to the
+existing eighteen: install a captured version, reject a mutating candidate,
+detach a function, drop both export slots, clone exports, force collection, and
+drop the detached function. After every operation an independent fixed host
+array checks each retained version and mutable captured value.
+
+The failed-install operation checks the changed value inside the candidate
+before its deliberate runtime error. The post-operation check then proves the
+change was rolled back in both its scalar upvalue and exported state table.
+Collection first proves a weak witness is stored, removes its strong root, then
+allocates eight discarded 256 KiB buffers. Their total plus the VM baseline
+exceeds the 2 MiB guest quota, forcing collection even in `DeterministicSim`;
+the missing weak witness proves collection happened. A detached function is
+checked afterward while both export slots and the temporary guest alias are
+absent.
+
+Reset checks `Exports`, `Function`, live `Value`, `Table` and Rust-object handles
+against exact retained/current decision epochs. At most one stale export and
+one stale function survive to later operations, so fresh allocations and new
+installations cannot silently revive them. Persistent live handles are bounded
+to current/previous exports and one detached function. The 128-byte input,
+4,096 fuel per execution and 2 MiB guest quota remain the driver limits.
+
+The two added smoke tests execute 296 traces across all four profiles: nine
+explicit sequences per profile, one maximum-length collection trace per
+profile, and 64 seeded 32-byte traces per profile. They mix retained handles
+with the existing failure, object, yielded-module, close and reset operations.
+The complete regular fuzz-workspace tests and strict Clippy validate the change;
+no production runtime/API behavior or conformance inventory changes.
+
+```sh
+cargo test --locked --manifest-path fuzz/Cargo.toml
+cargo clippy --locked --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
+```
+
+Independent review caught and corrected two vacuous-proof risks: an unchecked
+in-candidate mutation and an unchecked initial weak insertion. The resulting
+source/tests have no remaining review findings. This records local correctness
+coverage. No new coverage-guided remote campaign, benchmark measurement,
+publication or supported-release acceptance is claimed.

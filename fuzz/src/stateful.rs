@@ -1,6 +1,6 @@
 use rustia::{
-    Error, HostFunction, ModuleSource, NewObject, ObjectType, Profile, RustiaBuilder,
-    ServiceModuleResolver, VmErrorKind,
+    Error, Exports, Function, HostFunction, ModuleSource, NewObject, ObjectType, Profile, Rustia,
+    RustiaBuilder, ServiceModuleResolver, VmErrorKind,
 };
 
 struct ObjectPayload(i64);
@@ -14,6 +14,62 @@ fn object_type(scale: i64) -> ObjectType<ObjectPayload> {
 }
 
 pub const MAX_STATEFUL_INPUT_BYTES: usize = 128;
+
+struct RetainedExports {
+    exports: Exports,
+    version: usize,
+    epoch: u64,
+}
+
+struct RetainedFunction {
+    function: Function,
+    version: usize,
+    epoch: u64,
+}
+
+fn assert_stale(error: Error, retained_epoch: u64, current_epoch: u64) {
+    assert!(
+        matches!(
+            error.as_vm_error().map(|error| error.kind()),
+            Some(VmErrorKind::StaleRetainedValue {
+                retained_epoch: actual_retained,
+                current_epoch: actual_current,
+            }) if *actual_retained == retained_epoch && *actual_current == current_epoch
+        ),
+        "expected epochs {retained_epoch}/{current_epoch}: {error:?}"
+    );
+}
+
+fn verify_exports(vm: &mut Rustia, retained: &RetainedExports, expected: i64, epoch: u64) {
+    assert_eq!(retained.epoch, epoch);
+    assert_eq!(retained.exports.decision_epoch(), epoch);
+    assert_eq!(
+        retained.exports.get::<i64>(vm, "version").unwrap(),
+        retained.version as i64 + 1
+    );
+    let state = retained
+        .exports
+        .get::<rustia::OwnedTable>(vm, "state")
+        .unwrap();
+    assert_eq!(state.get_string_as::<i64>("value").unwrap(), Some(expected));
+    let read = retained.exports.function(vm, "read").unwrap();
+    assert_eq!(
+        read.call::<_, (i64, i64, i64)>(vm, ()).unwrap(),
+        (retained.version as i64 + 1, expected, expected)
+    );
+}
+
+fn verify_function(vm: &mut Rustia, retained: &RetainedFunction, expected: i64, epoch: u64) {
+    assert_eq!(retained.epoch, epoch);
+    assert_eq!(retained.function.decision_epoch(), epoch);
+    assert_eq!(
+        retained
+            .function
+            .call::<_, (i64, i64, i64)>(vm, ())
+            .unwrap(),
+        (retained.version as i64 + 1, expected, expected)
+    );
+}
 
 /// Each byte selects an operation; a host-side model tracks decision-local state.
 /// Sources are bounded, with a fuel-limited loop testing hard-abort recovery.
@@ -56,8 +112,16 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
     let mut retained = None;
     let mut module_loading = false;
     let mut module_answer = None;
+    let mut current: Option<RetainedExports> = None;
+    let mut previous: Option<RetainedExports> = None;
+    let mut detached: Option<RetainedFunction> = None;
+    let mut stale_exports: Option<RetainedExports> = None;
+    let mut stale_function: Option<RetainedFunction> = None;
+    let mut captured_values = [0i64; MAX_STATEFUL_INPUT_BYTES];
+    let mut epoch = 0;
+    assert_eq!(vm.decision_epoch(), epoch);
     for (index, operation) in data.iter().enumerate() {
-        match operation % 18 {
+        match operation % 25 {
             0 => {
                 vm.exec("counter = counter + 1").unwrap();
                 expected += 1;
@@ -79,10 +143,79 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
             }
             3 => {
                 let old = vm.create_table().unwrap();
+                let old_epoch = epoch;
+                let old_exports = [current.take(), previous.take()];
+                let old_export_handles: Vec<_> = old_exports
+                    .iter()
+                    .flatten()
+                    .map(|retained| {
+                        let function = RetainedFunction {
+                            function: retained.exports.function(&mut vm, "read").unwrap(),
+                            version: retained.version,
+                            epoch: retained.epoch,
+                        };
+                        let value = retained.exports.as_value();
+                        let state = retained.exports.get_live(&mut vm, "state").unwrap();
+                        let table = state.as_table(&vm).unwrap().unwrap();
+                        (function, value, state, table)
+                    })
+                    .collect();
+                let old_detached = detached.take();
                 vm.reset_decision().unwrap();
-                assert!(old.get(&mut vm, "anything").is_err());
+                epoch += 1;
+                assert_eq!(vm.decision_epoch(), epoch);
+                assert_stale(old.get(&mut vm, "anything").unwrap_err(), old_epoch, epoch);
                 if let Some((old, _, _)) = object.take() {
-                    assert!(old.call_method::<_, i64>(&mut vm, "value", ()).is_err());
+                    assert_stale(
+                        old.call_method::<_, i64>(&mut vm, "value", ()).unwrap_err(),
+                        old_epoch,
+                        epoch,
+                    );
+                }
+                for retained in old_exports.iter().flatten() {
+                    assert_stale(
+                        retained.exports.get::<i64>(&mut vm, "version").unwrap_err(),
+                        retained.epoch,
+                        epoch,
+                    );
+                    assert_stale(
+                        retained.exports.function(&mut vm, "read").unwrap_err(),
+                        retained.epoch,
+                        epoch,
+                    );
+                }
+                for (retained, value, state, table) in &old_export_handles {
+                    assert_stale(
+                        retained
+                            .function
+                            .call::<_, (i64, i64, i64)>(&mut vm, ())
+                            .unwrap_err(),
+                        retained.epoch,
+                        epoch,
+                    );
+                    assert_stale(value.type_name(&vm).unwrap_err(), retained.epoch, epoch);
+                    assert_stale(state.type_name(&vm).unwrap_err(), retained.epoch, epoch);
+                    assert_stale(
+                        table.get(&mut vm, "value").unwrap_err(),
+                        retained.epoch,
+                        epoch,
+                    );
+                }
+                if let Some(retained) = old_detached {
+                    assert_stale(
+                        retained
+                            .function
+                            .call::<_, (i64, i64, i64)>(&mut vm, ())
+                            .unwrap_err(),
+                        retained.epoch,
+                        epoch,
+                    );
+                    stale_function = Some(retained);
+                } else if let Some((retained, _, _, _)) = old_export_handles.into_iter().next() {
+                    stale_function = Some(retained);
+                }
+                if let Some(retained) = old_exports.into_iter().flatten().next() {
+                    stale_exports = Some(retained);
                 }
                 expected = 0;
                 vm.insert_global("counter", expected).unwrap();
@@ -213,7 +346,7 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                         .unwrap_err();
                 }
             }
-            _ => {
+            17 => {
                 if module_loading && profile != Profile::DeterministicSim {
                     vm.exec(
                         "module_owner = nil; collectgarbage('collect'); collectgarbage('collect')",
@@ -222,6 +355,116 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
                     module_loading = false;
                 }
             }
+            18 => {
+                // Each installation closes over a distinct version and mutable
+                // value. The host model never derives expectations from reads.
+                captured_values[index] = (index as i64 + 1) * 10;
+                let source = format!(
+                    "local version={}; local value={}; local state={{value=value}}; \
+                     local function read(delta) if delta~=nil then value=value+delta; state.value=value end; \
+                     return version,value,state.value end; return {{version=version,state=state,read=read}}",
+                    index + 1,
+                    captured_values[index],
+                );
+                let exports = vm
+                    .load(&source)
+                    .source_name("stateful-retained.luau")
+                    .install()
+                    .unwrap();
+                previous = current.take();
+                current = Some(RetainedExports {
+                    exports,
+                    version: index,
+                    epoch,
+                });
+            }
+            19 => {
+                let target = if let Some(retained) = current.as_ref().or(previous.as_ref()) {
+                    Some((
+                        retained.exports.function(&mut vm, "read").unwrap(),
+                        retained.version,
+                    ))
+                } else {
+                    detached
+                        .as_ref()
+                        .map(|retained| (retained.function.clone(), retained.version))
+                };
+                if let Some((target, version)) = target {
+                    vm.globals()
+                        .unwrap()
+                        .set_live(&mut vm, "retained_target", &target.as_value())
+                        .unwrap();
+                    let source = format!(
+                        "local version,value,table_value=retained_target(1000); \
+                         assert(version=={} and value=={} and table_value==value); error('retained candidate',0)",
+                        version + 1,
+                        captured_values[version] + 1000,
+                    );
+                    let error = vm.load(&source).install().unwrap_err();
+                    assert!(
+                        matches!(
+                            error.as_vm_error().map(|error| error.kind()),
+                            Some(VmErrorKind::RuntimeError { message }) if message == "retained candidate"
+                        ),
+                        "candidate must execute before failing: {error:?}"
+                    );
+                    vm.globals()
+                        .unwrap()
+                        .set(&mut vm, "retained_target", None::<i64>)
+                        .unwrap();
+                }
+            }
+            20 => {
+                let target = if operation & 32 == 0 {
+                    current.as_ref().or(previous.as_ref())
+                } else {
+                    previous.as_ref().or(current.as_ref())
+                };
+                if let Some(retained) = target {
+                    let function = retained.exports.function(&mut vm, "read").unwrap();
+                    captured_values[retained.version] += 1;
+                    assert_eq!(
+                        function.call::<_, (i64, i64, i64)>(&mut vm, (1,)).unwrap(),
+                        (
+                            retained.version as i64 + 1,
+                            captured_values[retained.version],
+                            captured_values[retained.version],
+                        )
+                    );
+                    detached = Some(RetainedFunction {
+                        function,
+                        version: retained.version,
+                        epoch,
+                    });
+                }
+            }
+            21 => {
+                // No guest alias or live Value/Table survives the failed-install
+                // operation. A detached function can now be the only live root.
+                current = None;
+                previous = None;
+            }
+            22 => {
+                if let Some(retained) = current.as_ref().or(previous.as_ref()) {
+                    previous = Some(RetainedExports {
+                        exports: retained.exports.clone(),
+                        version: retained.version,
+                        epoch,
+                    });
+                }
+            }
+            23 => {
+                // Two MiB of buffers plus the VM baseline exceed the quota.
+                // A weak witness proves collection in every profile.
+                vm.exec(
+                    "local weak=setmetatable({}, {__mode='v'}); local witness={}; \
+                     weak[1]=witness; assert(weak[1]==witness); witness=nil; \
+                     for i=1,8 do local pressure=buffer.create(262144) end; \
+                     if collectgarbage then collectgarbage('collect') end; assert(weak[1]==nil)",
+                )
+                .unwrap();
+            }
+            _ => detached = None,
         }
         assert_eq!(vm.eval::<i32>("return shared.value").unwrap(), 7);
         if let Some((value, payload, scale)) = &object {
@@ -240,6 +483,29 @@ pub fn fuzz_stateful(data: &[u8]) -> bool {
         );
         if let Some((error, report)) = &retained {
             assert_eq!(&error.report().to_string(), report);
+        }
+        for retained in current.iter().chain(previous.iter()) {
+            verify_exports(&mut vm, retained, captured_values[retained.version], epoch);
+        }
+        if let Some(retained) = &detached {
+            verify_function(&mut vm, retained, captured_values[retained.version], epoch);
+        }
+        if let Some(retained) = &stale_exports {
+            assert_stale(
+                retained.exports.get::<i64>(&mut vm, "version").unwrap_err(),
+                retained.epoch,
+                epoch,
+            );
+        }
+        if let Some(retained) = &stale_function {
+            assert_stale(
+                retained
+                    .function
+                    .call::<_, (i64, i64, i64)>(&mut vm, ())
+                    .unwrap_err(),
+                retained.epoch,
+                epoch,
+            );
         }
     }
     drop(vm);

@@ -141,6 +141,48 @@ fn deterministic_stateful_failure_and_recovery_sequences() {
     ));
 }
 
+#[test]
+fn retained_exports_and_functions_survive_stateful_lifecycle_interleavings() {
+    // 18 install, 19 reject a mutating replacement, 20 detach a function,
+    // 21 drop both export slots, 22 clone exports, 23 collect, 24 drop function.
+    const SEQUENCES: &[&[u8]] = &[
+        &[18, 20, 18, 19, 22, 19, 23, 24],
+        &[18, 20, 18, 45, 19, 20, 23, 45, 19],
+        &[18, 20, 21, 23, 23, 18, 19, 23],
+        &[18, 22, 20, 21, 23, 24, 18, 22],
+        &[18, 20, 18, 3, 18, 20, 22, 23, 3, 18],
+        &[13, 18, 20, 16, 19, 14, 23, 21, 23, 3, 18],
+        &[18, 20, 7, 19, 1, 21, 23, 3, 18],
+        &[10, 18, 20, 11, 12, 19, 18, 23, 3, 18, 12],
+        &[19, 20, 21, 22, 23, 24, 3, 18, 20, 21, 19],
+    ];
+    for profile in 0..4 {
+        for operations in SEQUENCES {
+            let mut data = vec![profile];
+            data.extend_from_slice(operations);
+            assert!(rustia_fuzz::fuzz_stateful(&data), "{data:?}");
+        }
+        // The detached function is the only remaining export-related root.
+        // Repeated verified collections fill the maximum accepted input size.
+        let mut data = vec![profile, 18, 20, 21];
+        data.resize(rustia_fuzz::MAX_STATEFUL_INPUT_BYTES, 23);
+        assert!(rustia_fuzz::fuzz_stateful(&data), "{data:?}");
+    }
+}
+
+#[test]
+fn retained_handle_lifecycle_mutations_remain_bounded() {
+    let mut random = DeterministicBytes::new(0x726f_6f74_6564);
+    for profile in 0..4 {
+        for _ in 0..64 {
+            // Start with a detached function whose exports have been dropped.
+            let mut data = vec![profile, 18, 20, 21];
+            data.extend((0..28).map(|_| random.byte()));
+            assert!(rustia_fuzz::fuzz_stateful(&data), "{data:?}");
+        }
+    }
+}
+
 impl DeterministicBytes {
     const fn new(seed: u64) -> Self {
         Self(seed)

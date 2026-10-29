@@ -9,12 +9,22 @@ compiler, VM, stateful embedding, and differential execution.
 | `parser` | 32 KiB | raw bytes through `parse_source_bytes` |
 | `compiler` | 16 KiB | only successfully parsed chunks reach `compile` |
 | `vm` | 2 KiB | 256 decoded instructions, 16 registers, fixed small constants, one prototype, recursion depth 32, and 4,096 fuel |
-| `stateful` | 128 bytes | bounded API sequences, object replacement/aliases/fresh results/reset, 2 MiB guest quota, 4,096 fuel per execution |
+| `stateful` | 128 bytes | bounded API sequences, retained exports/functions, object replacement/aliases/reset, 2 MiB guest quota, 4,096 fuel per execution |
 | `differential` | 64 bytes | generated loop-free source, 8 MiB guest quotas, 100,000 Rustia fuel, isolated five-second oracle worker |
 
 The VM decoder covers every production opcode with a 512 KiB logical-live quota.
 It exercises bytecode validation, control flow, registers, arithmetic, tables, calls,
 closures, imports, inline-cache instructions, and all four runtime profiles.
+
+The stateful target has 25 operations. Its retained-handle model checks current
+and previous exports plus one detached function after every operation, including
+successful replacement, a rejected installation that first mutates captured
+state, cloned/dropped roots, collection and reset. A weak witness proves actual
+collection under the quota in every profile. One stale export/function pair
+remains across later allocations to check the exact reset epochs and prevent
+handle revival. Live and stale slots are bounded; guest input is still limited
+to 128 bytes. Explicit lifecycle traces and seeded mutation runs execute in the
+ordinary fuzz-workspace tests; they require no Luau worker or nightly toolchain.
 
 The differential worker pins `mlua` 0.11.6 and `luau0-src` 0.18.3+luau709 in
 this independent lockfile. Build it with `cargo build --locked --manifest-path
