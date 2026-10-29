@@ -30922,6 +30922,27 @@ mod inline_cache_tests {
     fn upvalue_counter_requires_live_mutable_first_capture_before_reading_step() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let value_cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let stale_cell = vm.heap.alloc_upvalue(Value::number(11.0)).unwrap();
+        let root_function = vm
+            .heap
+            .alloc_function(
+                None,
+                0,
+                vec![FunctionCapture::from_cell(value_cell)],
+                vm.globals,
+            )
+            .unwrap();
+        vm.heap
+            .collect_weak_tables_with_roots(&[Value::function(root_function)]);
+        assert_eq!(
+            vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+            Some(7.0)
+        );
+        assert!(vm.heap.upvalue_get(stale_cell).is_none());
+        let replacement_cell = vm.heap.alloc_upvalue(Value::number(13.0)).unwrap();
+        assert_ne!(replacement_cell, stale_cell);
+        assert!(vm.heap.upvalue_get(stale_cell).is_none());
+
         let plan = LeafCallPlan::UpvalueCounter {
             value_upvalue: 0,
             step_upvalue: 1,
@@ -30932,7 +30953,7 @@ mod inline_cache_tests {
         // step is inspected, whether that capture is valid or stale.
         for second in [
             FunctionCapture::direct(Value::number(2.0)),
-            FunctionCapture::from_cell(u32::MAX),
+            FunctionCapture::from_cell(stale_cell),
         ] {
             assert!(vm
                 .try_leaf_call_outcome(plan, FunctionCapture::direct(Value::number(5.0)), second,)
@@ -30944,11 +30965,11 @@ mod inline_cache_tests {
             );
         }
 
-        // A stale mutable-cell handle also falls back without touching state.
+        // A stale mutable-cell handle in the first position also falls back.
         assert!(vm
             .try_leaf_call_outcome(
                 plan,
-                FunctionCapture::from_cell(u32::MAX),
+                FunctionCapture::from_cell(stale_cell),
                 FunctionCapture::direct(Value::number(2.0)),
             )
             .unwrap()
