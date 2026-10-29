@@ -1,6 +1,6 @@
 # Release compatibility and API audit
 
-Status: implementation and measurement complete; documentation delivery pending. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
+Status: compatibility, measurement, closeout, and diagnostic follow-ups delivered; the wider public-release audit remains open. Baseline: `07f3ee7ae30b5803251a3b1d736760361f52a8b7`.
 This follows the private acceptance recorded in [93](93-private-api-acceptance.md).
 Public benchmark dashboard updates were approved on 2026-10-22. Package
 publication and version changes remain outside this milestone.
@@ -129,9 +129,11 @@ builtin expansion/order tests, ten deferred-call tests and strict workspace
 Clippy pass. The initial full corpus passed (725 fixtures / 519 refs); it predates the
 local-receiver/append-vararg follow-up and is not final-candidate evidence.
 
-## Completion evidence still required
+## Completion evidence
 
-- Required CI on the final documentation changes. Independent runtime review is complete.
+Closeout PR #72 merged after required checks; diagnostic follow-up PR #73 merged
+as `90bc2ae4` after required CI and remote screening. See [CURRENT](CURRENT.md)
+and the delivery records below. Wider parity and public-release gates remain open.
 
 ## Delivery status
 
@@ -306,8 +308,9 @@ historical JSON observations remain unchanged so the original failures remain
 reviewable. CI reruns the audit against the pinned oracle and fails on any new
 difference. The expanded 85-case diagnostic fixture also checks aliases, source prefixes,
 argument side effects and competing validation failures across all four profiles
-and after reset. Final review, full CI and remote screening gate delivery.
-This closes the enumerated findings, not the wider public-release parity gate.
+and after reset. This follow-up merged in PR #73 as `90bc2ae4` after final
+review, full CI, and remote screening. This closes the enumerated findings,
+not the wider public-release parity gate.
 
 Independent runtime review found no blocker and checked additional competing
 errors and thread/buffer type names. It also identified a separate, pre-existing
@@ -316,5 +319,7 @@ numeric-conversion difference: `return string.sub(12,0/0)` and
 Rustia rejects the nonfinite index through the unchanged `string_library_index`.
 The subsequent [numeric-index contract](95-numeric-index-contract.md) resolves
 this policy question with checked signed-64 conversion and an exclusive upper
-bound; its cross-target CI and delivery checks remain required. It is not
-covered by the claim that the 13 diagnostic findings are fixed.
+bound. Its final runtime passed cross-target correctness and the direct
+original-baseline acceptance comparison before delivery in PR #74 as `b5982752`;
+see [95](95-numeric-index-contract.md) and [96](96-browser-platform-acceptance.md).
+It is not covered by the claim that the 13 diagnostic findings are fixed.

@@ -78,8 +78,9 @@ Emit specialized wasm for hot, type-stable functions, either ahead-of-time or af
 and deopt back to bytecode for dynamic cases. This is the best "better than C++ Luau interpreter" path because it
 turns stable numeric/table kernels into direct wasm code without native executable memory or Rust `unsafe`.
 Current plan delta: the table/IC base has landed. Production promotion of the validated
-[`65-wasmjit.md`](65-wasmjit.md) direction waits for bounded memory/reset, semantic parity, guard/deopt, and
-interpreter-equivalence gates rather than more one-off kernel code.
+[`65-wasmjit.md`](65-wasmjit.md) direction has its bounded memory/reset prerequisites in place; production
+promotion still requires semantic parity, guard/deopt, and interpreter-equivalence gates rather than more
+one-off kernel code.
 Expected gain: 10x-100x on monomorphic kernels; on those kernels rustia can plausibly beat the C++ Luau
 interpreter by multiples. General Luau code still depends on guard quality and fallback cost.
 
@@ -161,7 +162,10 @@ Expected gain: 1.2x-3x broad speedup; higher on small-loop wasm workloads.
 Add constant folding, builtin folding, branch simplification, local slot tightening, import pre-resolution, and
 typed lowering that feeds both the interpreter and wasm/AOT tier. This should mirror Luau's optimizer where
 compatibility demands it and specialize more aggressively only when guards/deopts preserve semantics.
-Current plan delta: present as a future compiler idea, but it needs to become part of the performance gate.
+Current plan delta: default-disabled O2 families and logical receipts are implemented. The
+reachability-exact track has a full-corpus correctness gate; standalone dead-clear elision remains blocked
+on C2.4 root liveness, and default enablement still needs the owned-host measurement described in
+[`58-vm-core2.md`](58-vm-core2.md#c23--complete-compiler-o2-and-cleanup-liveness-receipts-connected-reachability-exact-track-corpus-green).
 Expected gain: 1.1x-2x generally, with much larger wins on code that currently repeats avoidable work.
 
 **8. Call, closure, and upvalue fast paths.**

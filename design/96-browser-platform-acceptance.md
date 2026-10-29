@@ -19,11 +19,13 @@ passed all 88 tests in 16 groups with matching bare/default golden transcripts
 on WebKit 27.2 (Playwright build 2370). Remote execution is also verified
 for the checked-cast candidate in the evidence below.
 
-WebKit is not the Safari product shipped by Apple. The manually dispatched
-`browser-correctness.yml` remains release-candidate acceptance in real Firefox
-and Safari. Safari requires a prepared, logged-in desktop session and explicit
-automation permission; it is never launched by routine PR CI. Keep its version
-and execution evidence separate from Playwright WebKit.
+WebKit is not the Safari product shipped by Apple. Real Firefox and Safari
+remain release-candidate acceptance requirements. The private
+`browser-correctness.yml` workflow is historical and is absent from the active
+hosted profile; the retained local runner supports explicit real-browser checks.
+Safari requires a prepared, logged-in desktop session and explicit automation
+permission; routine PR CI never launches it. Keep its version and execution
+evidence separate from Playwright WebKit.
 
 
 The first browser acceptance runs the same fixed transcript as native and Node
@@ -40,12 +42,12 @@ wasm-bindgen 0.2.126 tools and Rust 1.95.0. Firefox's checked binary is passed
 explicitly to geckodriver. Alternative engine overrides are rejected. No Node,
 Chrome or simulated-browser fallback is accepted.
 
-The manual `browser-correctness.yml` workflow uses generic Linux and Mac pools.
-Exact installed browser versions are dispatch inputs; browser installation and
-Safari automation permission are host prerequisites, not implicit CI mutations.
-Every eligible pool member must satisfy the prerequisites before enabling these
-jobs for ordinary pull requests. Local browser success does not prove remote
-runner readiness.
+The historical private `browser-correctness.yml` workflow used generic Linux
+and Mac pools with exact browser versions as dispatch inputs. It is absent from
+this tree. The retained local script accepts those versions explicitly; browser
+installation and Safari automation permission remain prerequisites, not implicit
+mutations. The active PR gate uses headless WebKit. Local real-browser success
+does not prove remote Firefox/Safari runner readiness; that requirement remains open.
 
 ## Observed evidence
 

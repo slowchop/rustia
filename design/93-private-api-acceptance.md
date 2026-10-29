@@ -77,8 +77,8 @@ The [wider platform matrix](00-constraints.md), including real Firefox/Safari
 and native/mobile execution, remains open. Cross-compilation covers buildability.
 General language parity, the wider error-order/message audit, public package and
 docs.rs validation, and the stable compatibility decision remain public-release
-gates. The broader audit must close or recheck the previously recorded method-lookup
-order and yielded-lookup error-prefix differences.
+gates. The later [compatibility audit](94-release-compatibility-audit.md) closed
+the previously recorded method-lookup order and yielded-lookup error-prefix differences.
 
 Mutable Rust payload snapshots, async/scoped callbacks, custom object fields or
 metamethods, a JIT and a documentation site remain outside this milestone.

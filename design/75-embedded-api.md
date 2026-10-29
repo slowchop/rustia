@@ -1,6 +1,6 @@
 # rustia - embedded API goal and plan
 
-> **Status: [COHERENT EXECUTION + SYNCHRONOUS HOST FUNCTIONS + TYPED RUST OBJECTS IMPLEMENTED; OBJECT ROLLOUT/REVIEW PENDING] (updated 2026-10-18).**
+> **Status: [COHERENT EXECUTION + SYNCHRONOUS HOST FUNCTIONS + TYPED RUST OBJECTS IMPLEMENTED; CONTROLLED-CLIENT ROLLOUT VERIFIED] (updated 2026-10-29).**
 > This records the public Rust embedding API direction and its honest implementation boundary after comparing
 > rustia's constraints with current Rust scripting/runtime APIs. It refines the locked
 > architecture axis H in [`30-architecture.md`](30-architecture.md) and the grabby bridge contract in
@@ -49,10 +49,10 @@ Heap functions own their callbacks; guest aliases keep replaced functions callab
 unreachable callbacks, and reset releases disposable captures while restoring persistent registrations.
 Typed Rust-object construction and methods are implemented through `ObjectType<T, H>`,
 `register_object_type`, `create_object`, and VM/epoch-bound `Object<T>` handles. Objects reuse the same
-conversions and borrowed capability views; `NewObject<T>` constructs callback results. Final checks,
-independent reviews, and real-consumer object integration remain pending under the
-[API and consumer-readiness milestone](92-first-release.md). The [object contract](83-rust-objects.md)
-records lifetime, mutation, validation, and quota behavior.
+conversions and borrowed capability views; `NewObject<T>` constructs callback results. The
+[private acceptance record](93-private-api-acceptance.md) records the accepted source, checks,
+reviews, and real-consumer rollout, including civfun Player integration. The
+[object contract](83-rust-objects.md) records lifetime, mutation, validation, and quota behavior.
 The composable `load(source).source_name(...).environment(...)` builder provides borrowed
 text/byte source, diagnostic names, exact rooted lexical environments, `eval`, `eval_live`, `eval_serde`,
 `exec`, and `install` terminals,
@@ -107,9 +107,9 @@ External contract tests cover settings readback/identity, error ownership,
 callback bounds and custom conversions. Private unit tests preserve the
 collector and conformance control cases that applications no longer configure.
 The facade boundary merged in [PR #63](https://github.com/slowchop/rustia-historic/pull/63)
-as `8f8558ab`. WOTS and civfun adopted its exact reviewed revision; Grabby's rollout
-awaits its own CI. Object validation and consumer use, the full private milestone,
-and the eventual 1.0 freeze remain open.
+as `8f8558ab`. WOTS, civfun, and Grabby completed the common-candidate rollout recorded in
+[the private acceptance record](93-private-api-acceptance.md). The eventual 1.0 freeze
+and wider public-release gates remain open.
 
 ## Non-Negotiable Requirements
 
@@ -175,8 +175,8 @@ one engine:
    string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
    on a real host-side scheduling caller. Reclaimable synchronous host-function construction and the
-   composable chunk builder are implemented. Typed Rust-object methods are implemented and await final
-   validation and consumer use; custom fields/metamethods, `Scope`, and async remain later layers.
+   composable chunk builder are implemented. Typed Rust-object methods and consumer use are verified
+   in [the private acceptance record](93-private-api-acceptance.md); custom fields/metamethods, `Scope`, and async remain later layers.
 
 The advanced layer is not a raw Luau C stack API and must not expose internal GC lifetimes. Handles belong to
 one VM, are real GC roots while alive, fail safely when used with another VM, and carry an epoch contract:
@@ -655,7 +655,7 @@ store authoritative state on the GC heap instead of in captured host slots.
 3. ✅ returned-table `Exports` facade — landed with VM/epoch-safe rooted accessors.
 4. ✅ owned serde deserialize/serialize plus snapshot-free live-value deserialization — landed.
 5. ✅ extension/linker with capability and fuel metadata — first slice landed.
-6. ✅ host-owned hot replacement and diagnostics — atomic installation and reclamation landed; stack traces remain.
+6. host-owned hot replacement and diagnostics — atomic installation, reclamation, and bounded logical call traces landed.
 7. ✅ early declarative macro sugar — landed; broader attribute/codegen expansion is deferred.
 8. ✅ runtime output/time services — landed per [`72-host-services.md`](72-host-services.md): environment
    presets, `ServiceClock`/`ServiceEntropy` provider sockets, real `print` composition, pinned-epoch and
@@ -693,15 +693,15 @@ store authoritative state on the GC heap instead of in captured host slots.
     execute-once caching, cycle diagnostics, shared caller fuel, reset-aware cache lifetime, and
     host-controlled resolution rather than an ambient core filesystem API. The behavior is versioned by
     `RUSTIA_MODULE_RESOLUTION_ABI_VERSION`; the host must separately bind its resolver content.
-16. 🔨 **Complete rich integration and failure semantics:** transactional extension/module/replacement
+16. **Complete rich integration and failure semantics:** transactional extension/module/replacement
     installation, explicit replacement/reset lifetimes, source diagnostics, and resumable
-    `require` are implemented. Final correctness checks, independent review, and private-platform
-    acceptance remain delivery gates.
-17. 🔨 **Validate the implemented typed Rust-object methods in a real consumer.** Registration, live
+    `require` are implemented. The accepted candidate, correctness checks, independent reviews,
+    and private-platform evidence are recorded in [93](93-private-api-acceptance.md).
+17. **Validate the implemented typed Rust-object methods in a real consumer.** Registration, live
     handles, method dispatch, read-only replay-stable input plus staged actions, and explicit
-    direct mutation in standard/live applications are implemented. Final checks, independent reviews,
-    and civfun object integration remain pending. Follow the
-    [object contract](#typed-rust-object-methods) and the canonical
+    direct mutation in standard/live applications are implemented. Checks, independent reviews,
+    and the merged civfun Player integration are recorded in [93](93-private-api-acceptance.md).
+    Follow the [object contract](#typed-rust-object-methods) and the canonical
     [milestone](92-first-release.md). A full mlua-style object system, fields/metamethods, borrowed `Scope`,
     and VM-owned mutable-object snapshots remain optional later work.
 18. ⏳ **Make async an optional advanced layer, not a core assumption:** Rust futures may bridge to Luau

@@ -5,7 +5,8 @@
 Rustia implements a portable Luau interpreter in Rust. Source moves through the lexer,
 parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
 and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
-one engine. The workspace is private and unpublished; the pinned conformance corpus
+one engine. The workspace is private and unpublished, with hosted correctness CI and benchmark
+automation paused under the explicit source profile; the pinned conformance corpus
 does not establish full Luau parity or release readiness.
 
 Read [AGENTS.md](./AGENTS.md), [CURRENT](./design/CURRENT.md), the
@@ -27,6 +28,9 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Browser demonstration | [demos](./demos/EGM.md) | Interactive WebAssembly example using the standard preset. |
 | Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
+
+The latest [drift report](./2026-10-29_DRIFT_REPORT.md) records this static design/source audit,
+applied corrections and remaining memory-protocol requirements; it is not release acceptance.
 
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).

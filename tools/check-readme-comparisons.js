@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("assert/strict");
+const { execFileSync } = require("node:child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -24,6 +25,52 @@ function requireFact(condition, message) {
 function tableCells(line) {
   requireFact(/^\|.*\|$/.test(line), "snapshot table must use pipe-delimited rows");
   return line.slice(1, -1).split("|").map((cell) => cell.trim());
+}
+
+// Installation pins and immutable source links must resolve in this checkout's
+// history. Measurement source IDs remain unchanged: the history projection is
+// provenance, not an automatic rewrite of a user's Cargo dependency or URL.
+function verifySourceReferences(readme, checkReference) {
+  const dependencies = [...readme.matchAll(/\brustia\s*=\s*\{[^}\n]*\}/g)]
+    .map((match) => match[0])
+    .filter((value) => /git\s*=\s*"https:\/\/github\.com\/slowchop\/rustia(?:\.git)?"/.test(value));
+  requireFact(dependencies.length === 1, "README must contain one pinned Rustia Git dependency");
+  const pin = dependencies[0].match(/\brev\s*=\s*"([a-f0-9]{40})"/);
+  requireFact(pin, "README Git dependency needs a full source commit SHA");
+  checkReference(pin[1], null);
+  for (const match of readme.matchAll(/https:\/\/github\.com\/slowchop\/rustia\/(blob|tree|commit)\/([a-f0-9]{40})(\/[^\s)>\]"`#]+)?/g)) {
+    const sourcePath = match[3] ? decodeURIComponent(match[3].slice(1)) : null;
+    requireFact(match[1] === "commit" || sourcePath, "immutable source links need a file or directory");
+    checkReference(match[2], sourcePath);
+  }
+}
+
+function checkSourceReferences(readme) {
+  const git = (args) => execFileSync("git", args, {
+    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  const reachable = new Set(git(["rev-list", "HEAD"]).trim().split("\n"));
+  const checkReference = (commit, sourcePath) => {
+    requireFact(reachable.has(commit), `README source commit is unreachable: ${commit}`);
+    if (sourcePath) {
+      try { git(["cat-file", "-e", `${commit}:${sourcePath}`]); }
+      catch (_error) { throw new Error(`README source target is absent: ${commit}:${sourcePath}`); }
+    }
+  };
+  verifySourceReferences(readme, checkReference);
+  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, 'rev = "main"'), checkReference),
+    /full source commit SHA/);
+  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, `rev = "${"f".repeat(40)}"`), checkReference),
+    /source commit is unreachable/);
+  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, 'branch = "main"'), checkReference),
+    /full source commit SHA/);
+  const immutable = readme.match(/https:\/\/github\.com\/slowchop\/rustia\/blob\/([a-f0-9]{40})\/[^\s)>]+/);
+  requireFact(immutable, "README must link immutable benchmark evidence");
+  assert.throws(() => verifySourceReferences(readme.replace(immutable[0],
+    `https://github.com/slowchop/rustia/blob/${immutable[1]}/__missing_readme_artifact__`), checkReference),
+    /source target is absent/);
+  assert.throws(() => verifySourceReferences(readme.replace(immutable[1], "f".repeat(40)), checkReference),
+    /source commit is unreachable/);
 }
 
 // A dated README may remain useful after weekly current-results publication.
@@ -125,9 +172,10 @@ try {
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
   const history = fs.readFileSync(path.join(root, "bench/history/runs.jsonl"), "utf8")
     .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  checkSourceReferences(readme);
   selfTest(readme, history);
   const { count, snapshot } = verify(readme, history);
-  console.log(`README comparison ok: ${count} cells match ci-bench history at ${snapshot.commit.slice(0, 7)}`);
+  console.log(`README sources reachable; ${count} cells match ci-bench history at ${snapshot.commit.slice(0, 7)}`);
 } catch (error) {
   console.error(`check-readme-comparisons: ${error.message}`);
   process.exit(1);

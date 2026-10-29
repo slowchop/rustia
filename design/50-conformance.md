@@ -17,8 +17,9 @@
 > 2. **`getfenv` / `setfenv` — PRESENT** in the 0.709 base lib (`getfenv(0)==_G`). Provide in Standard/LuauCompat.
 >    They disable environment-assuming compile-time builtin folds, but rustia's live-slot `GETIMPORT` remains
 >    valid because every access starts from the current environment and revalidates shape/key before reading the
->    live value. Deterministic may capability-remove them (raising `ErrorKind::CapabilityRemoved`, never silent
->    `nil`). Delete the "absent" body rows.
+>    live value. The ordinary `DeterministicSim` surface retains both functions. `HardenedLeaf` omits them;
+>    missing globals follow ordinary nil-access/call behavior. `CapabilityRemoved` applies to rejected host
+>    capabilities. These corrections supersede the "absent" body rows.
 > 3. **`math.map` — PRESENT** (linear remap *with extrapolation*, no clamp): `math.map(15,0,10,0,100)=150`.
 >    **rustia MUST implement it.** (Resolves open-decision c7 = INCLUDE. Siblings `lerp`/`noise`/`round`/`clamp`/
 >    `sign` also confirmed present.)
@@ -30,9 +31,11 @@
 >    recursion cap must error like Luau; do **not** implement unbounded tail-call frame reuse. (Also why Wasm
 >    `return_call` is irrelevant to Luau semantics.)
 > 7. **`DeterministicSim` SUPPORTS weak tables.** `__mode` is honored and entries are swept at deterministic
->    instruction-count collection boundaries. The profile removes the `collectgarbage`/`gcinfo` globals and
->    `os` library, disables optional host-supplied `loadstring`, and rejects external/nondeterministic host
->    capabilities; historical rows that say weak tables themselves are forbidden are superseded.
+>    instruction-count collection boundaries. The profile removes the `collectgarbage`/`gcinfo` globals,
+>    disables optional host-supplied `loadstring`, and rejects external/nondeterministic host capabilities.
+>    `os` is absent by default but all four members are registered when at least one deterministic clock
+>    provider is supplied; deterministic output and entropy providers are also admitted. Historical rows
+>    that say weak tables themselves are forbidden are superseded.
 >
 > 8. **Valid builtin calls are runtime operations.** A missing library field or an invalid argument list
 >    must not become a compiler rejection merely because the compiler recognizes the library. Unexecuted
@@ -763,7 +766,7 @@ no portable contract outside its representable domain; see
 | **`require(module)` — resolution** | impl-defined | Luau require-by-string: resolves a module path/alias to a chunk; standalone uses filesystem, Roblox uses instance tree. Resolution policy is host-defined. | Standard: host-provided resolver; the CLI tries an explicit extension, then `.luau`, `.lua`, `init.luau`, and `init.lua`, canonicalizes the selected path, and never scans a directory. Deterministic: resolver restricted to a **host-supplied replay-stable module map** (no ambient CLI filesystem), or disabled. | both (capability differs) | grabby loads scripts via host at setup, not FS require in-sim. Resolution semantics are host-defined; the fixed candidate order avoids directory-scan ordering leaks. |
 | **`require` caching** | specified | Each resolved module is executed **once**; subsequent requires return the cached result; cyclic require errors. Standalone Luau's registry representation does not retain a nil/zero-result cache entry, so such a module can execute again. | Both: execute-once + cache by resolved key, including zero-result/nil modules; cyclic require raises. | both | Intentional edge divergence: rustia applies the public execute-once contract consistently to zero-result/nil modules instead of inheriting standalone Luau's registry-nil artifact. |
 | **`require` error on cycle** | host policy | Cyclic dependency raises a "requiring a module that is in the process of being required" error. | Both: a nested request for the same owner's active identity reports the cycle path. Another coroutine's in-progress identity is rejected without taking ownership. | both | ABI v3 uses coroutine-owned loading entries within the executing function's cache cohort. Native/Node `yieldable_require` tests cover retry after cycles and cancellation. |
-| **yield from a required module** | host policy | Luau's host loader has a continuation and can suspend before returning its result; see pinned `Require/src/RequireImpl.cpp`. | ABI v3 retains a loading continuation through guest coroutine yields and commits the zero/one-result cache only after completion. Close, abandonment, hard abort and reset release loading ownership. Ordinary failed loads keep completed writes; an enclosing failed installation restores its savepoint. | both | Implemented; final checks/review pending. Covered by native/Node `yieldable_require` tests and stateful embedding sequences. Host-module policy is outside the standalone language oracle, per design/05. |
+| **yield from a required module** | host policy | Luau's host loader has a continuation and can suspend before returning its result; see pinned `Require/src/RequireImpl.cpp`. | ABI v3 retains a loading continuation through guest coroutine yields and commits the zero/one-result cache only after completion. Close, abandonment, hard abort and reset release loading ownership. Ordinary failed loads keep completed writes; an enclosing failed installation restores its savepoint. | both | Implemented and included in the scoped private acceptance recorded in [93](93-private-api-acceptance.md). Covered by native/Node `yieldable_require` tests and stateful embedding sequences. Host-module policy is outside the standalone language oracle, per design/05. |
 | **`math.random` RNG algorithm** | specified | **PCG32** stored in `global_State->rngstate` (per-VM). `random()`→[0,1); `random(n)`→[1,n]; `random(l,u)`→[l,u]. | Both: PCG32 byte-matching Luau's stream/transform, per-VM state. | both | Sequence-after-seed must byte-match Luau (discrete porting-risk item). WATCH: the int-range mapping (`random(l,u)` rejection/scaling) must match Luau exactly. |
 | **`math.random` default (unseeded) seed** | impl-defined | Seeded at `luaopen_math` from **pointer ^ time(NULL) ^ clock()** → different every run/process. | Both: **fixed deterministic seed** (no time/address entropy). | both | Default seed is impl-defined → rustia legitimately fixes it. WATCH: an unseeded `math.random()` gives a *fixed* sequence in rustia but a *random* one in reference standalone Luau — a deliberate, spec-legal divergence (Group A determinism). |
 | **`math.random` state scope (per-VM vs global)** | specified | Per-`global_State` (per-VM), not a process-global C `rand()`. | Both: per-VM PCG32 state (matches Luau). | both | N VMs across the thread pool each carry independent RNG state — no shared global RNG. Matches Luau and required for Send/multi-VM. |
@@ -990,9 +993,10 @@ Accepted divergences from stock PUC 5.1.5 under this profile:
   dead-key pointer-identity rule (ltable.c `findindex`), rustia via its equivalent `PucNodeKey::Dead` —
   the divergence is only in GC-timing-observable channels (when a *second* weak structure holding the
   same key object clears), not in iteration or lookup results.
-- Runtime error messages carry rustia's `pc N:` prefix (plus host-side rich diagnostics) where PUC
-  prints the bare `chunk:line: message`; cosmetic, and the script-visible `pcall` message text otherwise
-  matches.
+- Runtime diagnostics follow the shared Luau-oriented renderer: source-bearing errors use
+  `chunk:line: message`, while low-level programs without source metadata may fall back to `pc N:`.
+  Focused four-profile fixtures pin message and prefix behavior; exhaustive PUC diagnostic parity is
+  not claimed.
 - Known gap, not a divergence: there is no public size-hinted host table API (the `lua_createtable`
   analog). Host-built tables (e.g. a mock host's `plot:*` tables) currently grow incrementally and so
   accumulate a different rehash history than PUC would. Add the API alongside the first host that needs
@@ -1026,9 +1030,10 @@ production VM and therefore still contains prompts whose decisions are now imple
 example the pinned 0.709 target, vector width, deterministic reference IDs, fuel/OOM policy, signed-zero key
 normalization, buffer bit operations, and f64 buffer payload preservation). Do **not** treat every bullet below
 as a current gap. [`CURRENT.md`](CURRENT.md) is authoritative; unresolved candidates become release work only
-after a focused 0.709 source/oracle check promotes them there. The currently promoted semantic-tail items are
-error-phase/diagnostic fidelity and final verification of resumable module
-loading and transactional installation/reload behavior.
+after a focused 0.709 source/oracle check promotes them there. Current semantic-tail work includes focused
+error-phase/diagnostic hardening. Resumable module loading and transactional installation/reload are
+implemented, with scoped acceptance recorded in [93](93-private-api-acceptance.md); broader release gates
+remain open.
 
 - **[c1]** BOM handling: strip a leading UTF-8 BOM (ergonomic, but a superset of Luau) vs reject it to match Luau exactly. Recommend match-Luau (reject) for strict parity; revisit if real tooling emits BOMs.
 - **[c1]** Parser resource limits: do we mirror Luau's exact caps (≈200 locals, depth limits) for byte-for-byte error parity, or set our own (≥Luau) limits? Affects only near-limit scripts; needs an explicit policy.

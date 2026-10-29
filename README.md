@@ -24,6 +24,9 @@ Add this to your application's `Cargo.toml` (Rust 1.95 or newer):
 rustia = { git = "https://github.com/slowchop/rustia", rev = "b84b5f6715e31756f00d1f39e72c8246f179b174" }
 ```
 
+This pin selects the verified cleaned-source baseline. Historical benchmark
+source IDs remain unchanged in the evidence.
+
 Put this in `src/main.rs` and run `cargo run`:
 
 ```rust

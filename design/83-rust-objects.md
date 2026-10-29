@@ -149,8 +149,8 @@ immediate mutation, and the shared typed journal. Private VM tests in
 destruction, frozen methods, quota rejection, rollback, and reset reconstruction.
 `object_context.rs` tests borrowed views and context validation.
 
-These tests define the implemented contract; final CI and reviews still gate
-delivery. The accepted deterministic game-turn example and real immediate civfun
-integration must exercise the object API against the exact candidate. Wider
-runtime parity, yieldable `require`, and the private platform acceptance remain
-open under [the release plan](92-first-release.md).
+These tests define the implemented contract. Final CI, reviews, the deterministic
+game-turn example, and the merged civfun Player integration are recorded against
+the exact candidate in [93](93-private-api-acceptance.md), alongside yieldable
+`require` and private-platform acceptance. Wider runtime parity and the remaining
+public-release gates stay open under [the release plan](92-first-release.md).
