@@ -51,9 +51,9 @@
     "measured_commit": "90bc2ae4c397f6e2bbb1af687cc8e30688010123",
     "projected_measured_commit": "df240799de22ea8588865a7f594262053c2e92f1",
     "measured_at_unix": 1792952860,
-    "latest_relevant_commit": "ef2d29f040a62694bbda277bd9ca174d10ef93a2",
-    "latest_relevant_committed_at_unix": 1793269812,
-    "pending_relevant_commit_count": 27,
+    "latest_relevant_commit": "5f0b90a7b57b651d155d3b5386607c9adcd432ae",
+    "latest_relevant_committed_at_unix": 1793270819,
+    "pending_relevant_commit_count": 28,
     "next_action": "Benchmark progress is paused pending a trusted private benchmark bridge."
   },
   "landscape": {
