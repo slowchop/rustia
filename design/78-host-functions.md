@@ -1,8 +1,8 @@
 # Synchronous host functions
 
 Status: synchronous API and controlled-client integrations implemented and verified (2026-09-08).
-Typed object methods are implemented in the current private API change; their final validation and
-consumer rollout remain pending (2026-10-18).
+Typed object methods merged in PR #65, with civfun Player integration merged in #52;
+[the private acceptance record](93-private-api-acceptance.md) records their candidate, validation, and rollout.
 
 The authorized rollout completes synchronous function construction and migrates the controlled
 civfun, WOTS, and Grabby clients. A callback has one definition and one set of conversion,
@@ -76,8 +76,8 @@ Rust payload allocations retain the callback-capture host-memory boundary; VM-ow
 receive atomic quota admission. Captures remain a semantic trust boundary, and destructors must not panic.
 VM-owned mutable-object snapshot/rollback, custom fields/metamethods, borrowed scopes, and async methods
 are outside this milestone. See the [object contract](75-embedded-api.md#typed-rust-object-methods).
-Object unit/integration tests are present; final CI, independent review, and a real civfun object integration
-still gate the private milestone.
+Object unit/integration tests, final CI, independent review, and the real civfun Player integration
+are recorded in [the private acceptance record](93-private-api-acceptance.md).
 
 ## Verification and rollout
 
@@ -91,7 +91,7 @@ or result transformations, and verify all active clients in the same rollout.
 
 ### Delivery record
 
-The runtime merged in [Rustia #30](https://github.com/slowchop/rustia/pull/30) as
+The runtime merged in [Rustia #30](https://github.com/slowchop/rustia-historic/pull/30) as
 `fc0d19a56ba7cc58a4d4c2f03cd32bf3a6d352c9`, after the canonical release preflight,
 platform checks, native/wasm execution and PR benchmark screening passed. Client pins and vendor
 copies use that exact merged runtime revision, not an unmerged implementation branch.
@@ -111,5 +111,5 @@ any client repository's merge gate or include production deployment.
 
 No runtime performance improvement is claimed by this rollout. Async callbacks, borrowed scopes,
 and custom fields/metamethods remain separate follow-on work. The object implementation described above
-is a later change under the [current milestone](92-first-release.md), with its own consumer, review,
-and CI gates; the historical synchronous-function rollout does not close those gates.
+was delivered later, with its own consumer, review, and CI evidence in
+[the private acceptance record](93-private-api-acceptance.md).

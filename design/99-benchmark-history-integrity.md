@@ -7,9 +7,9 @@ Baseline: `a62ef708e63c02fdea5630c32e3f8c78d173b82a`.
 ## Failure and evidence
 
 The per-commit measurement and artifact publisher both started on the merge push.
-The [publisher](https://github.com/slowchop/rustia/actions/runs/40423316604)
+The [publisher](https://github.com/slowchop/rustia-historic/actions/runs/40423316604)
 finished before the
-[measurement](https://github.com/slowchop/rustia/actions/runs/40423316647)
+[measurement](https://github.com/slowchop/rustia-historic/actions/runs/40423316647)
 saved five new rows. The graph build used data from before those rows existed.
 The data repository subsequently contained 70 live rows across 14 commits, ending
 at the baseline above, while the graph stopped at `90bc2ae4`. Both workflows
@@ -40,7 +40,7 @@ not be added together.
 
 These are execution-time differences in the retained controls, not accepted
 source-change regressions. Positive values mean more time. The 24 October
-[failed run](https://github.com/slowchop/rustia/actions/runs/40018239279)
+[failed run](https://github.com/slowchop/rustia-historic/actions/runs/40018239279)
 retained its finding as designed. Its package-set fingerprint changed while
 the kernel, microcode and binary matched the preceding control's recorded
 metadata. This narrows the observed change to software/measurement conditions;
@@ -91,7 +91,7 @@ before making any new statement about current repeatability. No benchmark is
 run locally. Do not replace the historical ledger with a fresh calibration or
 treat today's repeatability as proof that an older host transition was harmless.
 
-The completed [fresh calibration](https://github.com/slowchop/rustia/actions/runs/40462439654)
+The completed [fresh calibration](https://github.com/slowchop/rustia-historic/actions/runs/40462439654)
 failed its balanced A/A canary on sparse tables: +0.920%, with a 99% interval of
 +0.30% to +1.29% for split `1,4 vs 2,3`. All four passes produced the same binary.
 The non-straddling math/table split `1,2 vs 3,4` also excluded zero, at +0.882%
@@ -126,9 +126,9 @@ Publication sequencing, failure gating, ledger validation, graph segmentation,
 reconstruction measurement-time handling and warning text have focused regression
 checks. Full release preflight passed on the final reviewed commit through the
 pre-push hook; independent workflow and history-arithmetic reviews found no
-remaining issues. [PR #77](https://github.com/slowchop/rustia/pull/77) merged through
+remaining issues. [PR #77](https://github.com/slowchop/rustia-historic/pull/77) merged through
 required CI as `891c29cb498811318825ef073f082ea9e90a0167`. Its tree matches the
-reviewed commit. The [publication run](https://github.com/slowchop/rustia/actions/runs/40467806897)
+reviewed commit. The [publication run](https://github.com/slowchop/rustia-historic/actions/runs/40467806897)
 succeeded, Pages built the corresponding data commit `5563a654`, and the
 [served history](https://slowchop.github.io/rustia-bench-data/#history) was inspected
 in a browser: 89 points, four nonempty periods, 13 controls, the latest per-commit
@@ -137,7 +137,7 @@ visibility was verified private and package publication remains disabled.
 
 After deployment verification, the existing private acceptance workflow was
 dispatched for a predeclared eight-leg-per-side control:
-[run 40468299067](https://github.com/slowchop/rustia/actions/runs/40468299067), comparing
+[run 40468299067](https://github.com/slowchop/rustia-historic/actions/runs/40468299067), comparing
 `a62ef708` with graph-change commit `ccb71374`. Their runtime and harness sources
 are unchanged, but new build hashes must match before interpreting it as A/A.
 It retains balanced order, five repetitions per leg and 99% intervals. The
@@ -183,7 +183,7 @@ during the earlier timed windows. Those conditions and process/cache placement
 remain unresolved; a future diagnostic should record them during measurement.
 
 The acceptance workflow previously uploaded evidence only for profile and
-string modes. [PR #78](https://github.com/slowchop/rustia/pull/78) extends the
+string modes. [PR #78](https://github.com/slowchop/rustia-historic/pull/78) extends the
 existing private 30-day artifact retention to completed acceptance exports and
 summaries, including failures. Its exact-commit full pre-push inventory and
 independent workflow review passed. All required CI checks passed and merge-commit
@@ -199,7 +199,7 @@ Allocation and collection execute inside that call. Heap/cache locality,
 scheduling and effective frequency remain hypotheses rather than findings.
 
 The existing private profile mode was dispatched on trusted main as
-[run 40580638855](https://github.com/slowchop/rustia/actions/runs/40580638855).
+[run 40580638855](https://github.com/slowchop/rustia-historic/actions/runs/40580638855).
 It failed before timing because the existing `perf_event_paranoid=4` policy
 refused hardware counters. Its failed export was successfully downloaded from
 CI, verifying PR #78's retention on an actual failed run. No permission or host
@@ -219,7 +219,7 @@ thresholds or graph history. Missing observations and failed legs are retained.
 
 ### First unprivileged observation result
 
-[Run 40584219256](https://github.com/slowchop/rustia/actions/runs/40584219256)
+[Run 40584219256](https://github.com/slowchop/rustia-historic/actions/runs/40584219256)
 completed at reviewed head `6c987adf`. The retained export hash matches its CI
 log. Independent reconstruction verifies all 80 invocation records, binary
 identity, fixed work/checksums, layouts, child exits and 16 timed gates. The
@@ -270,7 +270,7 @@ identity. The diagnostic changes no normal acceptance or graph history.
 
 ### File-control result and remaining cause boundary
 
-[Run 40591758175](https://github.com/slowchop/rustia/actions/runs/40591758175)
+[Run 40591758175](https://github.com/slowchop/rustia-historic/actions/runs/40591758175)
 completed at reviewed source `f8533bc6`. Independent archive reconstruction
 verified all 120 records, fixed work/checksums, executable hashes, file tokens,
 selection and replay order. All 24 timed gates passed with zero steal ticks.
@@ -301,7 +301,7 @@ The calibration warning and existing thresholds remain unchanged.
 
 ### Approved counter result and capacity admission follow-up
 
-The one approved counter capture [40608798552](https://github.com/slowchop/rustia/actions/runs/40608798552)
+The one approved counter capture [40608798552](https://github.com/slowchop/rustia-historic/actions/runs/40608798552)
 completed at reviewed main `881bdfef`. Export hash verification and independent
 reconstruction pass for 20 counter records, four sampled iteration records and
 eight zero-steal measurement gates. All builds remain byte-identical to the

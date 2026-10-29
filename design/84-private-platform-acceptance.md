@@ -84,6 +84,7 @@ This tests the actual private archives without relying on a
 registry placeholder or allowing a moving dependency update. It establishes
 neither registry installation nor docs.rs publication.
 
-The full private acceptance still requires one final immutable candidate in
-the active clients, runtime-gap closure, all required CI, independent reviews,
-and remote benchmark evidence under [the release plan](92-first-release.md).
+The final immutable candidate, active-client pins, runtime-gap work, required CI,
+independent reviews, and remote benchmark evidence are recorded in
+[the private acceptance record](93-private-api-acceptance.md). Wider public-release
+gates remain in [the release plan](92-first-release.md).
