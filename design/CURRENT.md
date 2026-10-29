@@ -96,9 +96,6 @@ or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-expo
 Hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
 bounded fuzz/differential smoke, native Linux x86-64 and macOS ARM64, Node/V8 and
 headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.
-The Linux workspace job also runs a fixed, default-off executor-accounting
-diagnostic. Setup, warmup and following-call counts describe the diagnostic
-build; they are not timing evidence or a reconstruction of earlier runs.
 Dated Linux ARM64, Windows and real Firefox/Safari passes do not close Intel Mac,
 mobile, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
 
