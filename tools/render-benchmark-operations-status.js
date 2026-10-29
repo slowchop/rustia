@@ -12,6 +12,14 @@ const resultsPath = path.join(root, "bench", "current-results.json");
 const outputPath = path.join(root, "bench", "operations-status.json");
 const publicProfilePath = path.join(root, "design", "public-source-profile.json");
 const checkOnly = process.argv.includes("--check");
+const PUBLIC_BRIDGE_STATES = Object.freeze([
+  "pending-private-trusted-pipeline",
+  "private-maintainer-cohorts-v1",
+]);
+const PUBLIC_MEASUREMENT_MODES = Object.freeze([
+  "paused-pending-private-bridge",
+  "public-automation-paused-private-manual-cohorts",
+]);
 // A runner class that names its machine names it by a provenance label. The
 // timing authority's is the value every published table is pinned to, and this
 // policy is rendered verbatim into bench/operations-status.json, which is
@@ -190,7 +198,7 @@ function validatePublicPolicy(policy) {
   if (policy.schema !== "rustia.bench.operations-policy.public.v1" || policy.schema_version !== 1) {
     fail(`${relative(policyPath)} must use rustia.bench.operations-policy.public.v1`);
   }
-  if (policy.profile !== "public-source" || policy.measurement?.mode !== "paused-pending-private-bridge"
+  if (policy.profile !== "public-source" || !PUBLIC_MEASUREMENT_MODES.includes(policy.measurement?.mode)
     || policy.measurement?.authoritative_runner_classes?.length !== 0
     || policy.measurement?.scheduled_billing_allowed !== false) {
     fail("public-source measurement must remain paused with no timing-authoritative runner or scheduled billing");
@@ -312,20 +320,32 @@ function renderStatus(policy, results) {
   };
 }
 
-function renderPublicStatus(policy, results) {
+function renderPublicStatus(policy, results, bridgeState = "pending-private-trusted-pipeline") {
   validatePublicPolicy(policy);
+  validatePublicBridgeState(bridgeState);
   const measured = measuredCohort(results);
   const projectedMeasuredCommit = resolveHistoricalCommit(measured.commit, root);
   git(["merge-base", "--is-ancestor", projectedMeasuredCommit, "HEAD"]);
   const pending = relevantCommits(projectedMeasuredCommit, policy.progress.relevant_paths);
   const newestRelevant = pending[0] ?? commitRecord(projectedMeasuredCommit);
+  const manualCohortsAvailable = bridgeState === "private-maintainer-cohorts-v1";
+  const measurement = { ...policy.measurement };
+  const publication = { ...policy.publication };
+  if (manualCohortsAvailable) measurement.mode = "public-automation-paused-private-manual-cohorts";
+  if (!manualCohortsAvailable) {
+    measurement.mode = "paused-pending-private-bridge";
+    measurement.reason = "Public measurement and history automation remain paused pending a reviewed trusted private benchmark bridge. Historical measurements do not authorize current timing or stability claims.";
+    publication.reason = "Public benchmark-data publication remains paused pending a reviewed trusted private benchmark bridge.";
+    publication.next_action = "Wait for a trusted private benchmark bridge review; keep publication disabled.";
+  }
   return {
     schema: "rustia.bench.operations-status.v1",
     schema_version: 1,
     profile: "public-source",
+    benchmark_bridge: bridgeState,
     runner_classes: policy.runner_classes,
-    measurement: policy.measurement,
-    publication: policy.publication,
+    measurement,
+    publication,
     progress: {
       state: "paused",
       measured_commit: measured.commit,
@@ -334,7 +354,9 @@ function renderPublicStatus(policy, results) {
       latest_relevant_commit: newestRelevant.commit,
       latest_relevant_committed_at_unix: newestRelevant.committed_at_unix,
       pending_relevant_commit_count: pending.length,
-      next_action: policy.progress.next_action,
+      next_action: manualCohortsAvailable
+        ? policy.progress.next_action
+        : "Public benchmark progress remains paused pending a trusted private benchmark bridge.",
     },
     landscape: {
       state: "paused",
@@ -342,8 +364,12 @@ function renderPublicStatus(policy, results) {
       projected_measured_commit: projectedMeasuredCommit,
       measured_at_unix: measured.measuredAtUnix,
       refresh_interval_days: policy.landscape.refresh_interval_days,
-      reason: policy.landscape.reason,
-      next_action: policy.landscape.next_action,
+      reason: manualCohortsAvailable
+        ? policy.landscape.reason
+        : "Public engine landscape refresh remains paused pending a trusted private benchmark bridge.",
+      next_action: manualCohortsAvailable
+        ? policy.landscape.next_action
+        : "Wait for a separate trusted private benchmark bridge review before resuming landscape refresh.",
     },
   };
 }
@@ -416,6 +442,36 @@ function selfTest(policy) {
 
 function selfTestPublicPolicy(policy) {
   validatePublicPolicy(policy);
+  validatePublicPolicy({ ...policy, measurement: { ...policy.measurement, mode: "paused-pending-private-bridge" } });
+  for (const mode of ["enabled", "active", ""]) {
+    let message = null;
+    try { validatePublicPolicy({ ...policy, measurement: { ...policy.measurement, mode } }); }
+    catch (error) { message = error.message; }
+    if (message == null) fail(`public policy self-test accepted measurement mode ${JSON.stringify(mode)}`);
+  }
+  for (const state of PUBLIC_BRIDGE_STATES) validatePublicBridgeState(state);
+  for (const state of ["enabled", "available", "", null]) {
+    let message = null;
+    try { validatePublicBridgeState(state); } catch (error) { message = error.message; }
+    if (message == null) fail(`public bridge self-test accepted unknown state ${JSON.stringify(state)}`);
+  }
+  const results = readJson(resultsPath);
+  const pendingStatus = renderPublicStatus(policy, results, "pending-private-trusted-pipeline");
+  const manualStatus = renderPublicStatus(policy, results, "private-maintainer-cohorts-v1");
+  if (pendingStatus.benchmark_bridge !== "pending-private-trusted-pipeline"
+    || pendingStatus.measurement.mode !== "paused-pending-private-bridge"
+    || !/pending a reviewed trusted private benchmark bridge/i.test(pendingStatus.measurement.reason)
+    || manualStatus.benchmark_bridge !== "private-maintainer-cohorts-v1"
+    || !/manual.*exact-cohort runtime comparisons/i.test(manualStatus.measurement.reason)
+    || manualStatus.measurement.mode !== "public-automation-paused-private-manual-cohorts"
+    || manualStatus.measurement.authoritative_runner_classes.length !== 0
+    || manualStatus.measurement.scheduled_billing_allowed !== false
+    || manualStatus.publication.state !== "paused"
+    || manualStatus.progress.state !== "paused"
+    || manualStatus.landscape.state !== "paused"
+    || !/do not authorize public claims/i.test(manualStatus.measurement.reason)) {
+    fail("public bridge self-test did not preserve paused public automation and publication states");
+  }
   const refuses = (pattern, edit) => {
     const copy = JSON.parse(JSON.stringify(policy));
     edit(copy);
@@ -434,26 +490,33 @@ function selfTestPublicPolicy(policy) {
   refuses(/correctness-only class/, (copy) => { copy.runner_classes["hosted-linux"].allowed_roles.push("build"); });
 }
 
-function publicProfileActive() {
+function validatePublicBridgeState(state) {
+  if (!PUBLIC_BRIDGE_STATES.includes(state)) {
+    fail(`${relative(publicProfilePath)} must use a reviewed public benchmark bridge state`);
+  }
+  return state;
+}
+
+function publicBridgeState() {
   if (!fs.existsSync(publicProfilePath)) return false;
   const marker = readJson(publicProfilePath);
   if (marker.schema !== "rustia.public-source-profile.v1" || marker.state !== "private-rehearsal"
     || !/^[0-9a-f]{40}$/.test(marker.historical_head ?? "")
     || marker.historical_host_label !== "ci-bench"
-    || marker.benchmark_bridge !== "pending-private-trusted-pipeline"
     || marker.package_publication !== false || marker.visibility_authorized !== false) {
     fail(`${relative(publicProfilePath)} must declare the public-source private-rehearsal profile and exact historical head`);
   }
-  return true;
+  return validatePublicBridgeState(marker.benchmark_bridge);
 }
 
 function main() {
   const policy = readJson(policyPath);
-  const publicProfile = publicProfileActive();
+  const bridgeState = publicBridgeState();
+  const publicProfile = bridgeState !== false;
   if (publicProfile) selfTestPublicPolicy(policy);
   else selfTest(policy);
   const results = readJson(resultsPath);
-  const status = publicProfile ? renderPublicStatus(policy, results) : renderStatus(policy, results);
+  const status = publicProfile ? renderPublicStatus(policy, results, bridgeState) : renderStatus(policy, results);
   const output = `${JSON.stringify(status, null, 2)}\n`;
   if (checkOnly) {
     let current;

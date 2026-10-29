@@ -16,6 +16,10 @@ const memoryResultsPath = path.join(__dirname, "memory", "current-results.json")
 const memoryHistoryPath = path.join(__dirname, "memory", "history", "runs.jsonl");
 const operationsStatusPath = path.join(__dirname, "operations-status.json");
 const publicProfilePath = path.join(__dirname, "../design/public-source-profile.json");
+const PUBLIC_BRIDGE_STATES = Object.freeze([
+  "pending-private-trusted-pipeline",
+  "private-maintainer-cohorts-v1",
+]);
 const calibrationReviewPath = path.join(root, "design", "99-benchmark-host-calibration.json");
 const outputPath = path.join(__dirname, "current-results.html");
 const checkOnly = process.argv.includes("--check");
@@ -156,13 +160,19 @@ function readOperationsStatus(data) {
     if (marker.schema !== "rustia.public-source-profile.v1" || marker.state !== "private-rehearsal"
       || !/^[0-9a-f]{40}$/.test(marker.historical_head ?? "")
       || marker.historical_host_label !== "ci-bench"
-      || marker.benchmark_bridge !== "pending-private-trusted-pipeline"
+      || !PUBLIC_BRIDGE_STATES.includes(marker.benchmark_bridge)
       || marker.package_publication !== false || marker.visibility_authorized !== false) {
       fail(`${relative(publicProfilePath)} must declare the public-source private-rehearsal profile and exact historical head`);
     }
+    if (status.benchmark_bridge !== marker.benchmark_bridge) {
+      fail(`${relative(operationsStatusPath)} must match the reviewed private bridge availability state`);
+    }
     const classes = status.runner_classes;
     const expectedClasses = ["hosted-linux", "hosted-macos", "hosted-windows"];
-    if (status.profile !== "public-source" || status.measurement?.mode !== "paused-pending-private-bridge"
+    const expectedMeasurementMode = marker.benchmark_bridge === "private-maintainer-cohorts-v1"
+      ? "public-automation-paused-private-manual-cohorts"
+      : "paused-pending-private-bridge";
+    if (status.profile !== "public-source" || status.measurement?.mode !== expectedMeasurementMode
       || status.measurement?.authoritative_runner_classes?.length !== 0
       || status.measurement?.scheduled_billing_allowed !== false
       || !classes || Object.keys(classes).length === 0
@@ -1770,7 +1780,7 @@ function undrawnCohortsNote(records, host) {
 // `authorityHost` is the machine the operations policy qualifies to produce
 // numbers. It is only spoken of when there are no cohorts to read a host from;
 // once there are, the section names the machine the cohorts name.
-function memoryHistorySection(records, authorityHost, publicSource = false) {
+function memoryHistorySection(records, authorityHost, publicSource = false, manualCohortsAvailable = false) {
   if (records.length === 0) {
     return `
       <section class="panel history-axis-panel memory-history-panel" id="memory-history">
@@ -1781,7 +1791,9 @@ function memoryHistorySection(records, authorityHost, publicSource = false) {
           </div>
         </div>
         <p class="pending-note">${publicSource
-          ? "Memory-history records are historical. Measurement and publication remain paused pending a trusted private benchmark bridge."
+          ? manualCohortsAvailable
+            ? "Memory-history records are historical. Memory cohort measurement and publication remain paused; the private maintainer bridge supports runtime A/B comparisons only."
+            : "Memory-history records are historical. Memory cohort measurement and publication remain paused pending a trusted private benchmark bridge."
           : `<strong>The series starts again on <code>${escapeHtml(authorityHost)}</code>.</strong> Every earlier cohort was measured on a rented cloud host and has been removed, so there is nothing this chart could plot that belongs beside the rest of this page.`}</p>
       </section>
     `;
@@ -2031,7 +2043,7 @@ function coldStartSection(rows) {
 // numbers; it is named only while the table is pending. A ready table names
 // the machine its rows name, which readMemoryResults has already required to
 // be a single one.
-function memoryResultsSection(data, authorityHost, publicSource = false) {
+function memoryResultsSection(data, authorityHost, publicSource = false, manualCohortsAvailable = false) {
   if (data.status === "pending") {
     return `
       <section class="panel" id="memory">
@@ -2042,7 +2054,9 @@ function memoryResultsSection(data, authorityHost, publicSource = false) {
           </div>
         </div>
         <p class="pending-note">${publicSource
-          ? "No current memory cohort is authorized. Historical memory records remain unchanged; measurement is paused pending a trusted private benchmark bridge."
+          ? manualCohortsAvailable
+            ? "No current memory cohort is authorized. Historical memory records remain unchanged; the private maintainer bridge does not run memory cohorts."
+            : "No current memory cohort is authorized. Historical memory records remain unchanged; measurement is paused pending a trusted private benchmark bridge."
           : `<strong>No accepted memory cohort.</strong> Every previous row was measured on a rented cloud host between 2026-07-26 and 2026-07-28, carried no host identity, and has been removed. Memory returns when a cohort is measured on <code>${escapeHtml(authorityHost)}</code>, the machine every other number on this page comes from.`}</p>
       </section>
     `;
@@ -2070,7 +2084,9 @@ function memoryResultsSection(data, authorityHost, publicSource = false) {
         </div>
       </div>
       ${comparative ? "" : `<p class="pending-note">${publicSource
-        ? "Competitor memory comparisons are not part of this historical cohort. New measurements remain paused pending a trusted private benchmark bridge."
+        ? manualCohortsAvailable
+          ? "Competitor memory comparisons are not part of this historical cohort. The private maintainer bridge supports runtime A/B comparisons only; memory measurement remains paused."
+          : "Competitor memory comparisons are not part of this historical cohort. New measurements remain paused pending a trusted private benchmark bridge."
         : `<strong>No competitor engines yet.</strong> Every competitor memory row was measured on a rented cloud host between 2026-07-26 and 2026-07-28 and has been removed, so these are absolute figures rather than a comparison. Competitors return with the first cross-engine memory cohort measured on <code>${escapeHtml(host[0])}</code>.`}</p>`}
       ${comparative ? `<div class="memory-cohorts">
         ${memoryComparisonCharts(rows)}
@@ -2435,12 +2451,13 @@ function operationsStatusSection(status) {
   const landscape = status.landscape;
   const publication = status.publication;
   if (status.profile === "public-source") {
+    const manualCohortsAvailable = status.benchmark_bridge === "private-maintainer-cohorts-v1";
     return `
     <section class="panel operations-panel" id="operations-status">
       <div class="operations-banner state-paused">
         <div>
           <p class="eyebrow">Benchmark operations</p>
-          <h2>Measurement and publication are paused</h2>
+          <h2>Public automation and publication are paused</h2>
           <p>${escapeHtml(publication.reason)}</p>
         </div>
         <span class="operations-state state-paused">Paused</span>
@@ -2461,7 +2478,9 @@ function operationsStatusSection(status) {
         <article class="operations-card">
           <div class="operations-card-head"><h3>Measurement and publication</h3><span class="operations-state state-paused">Paused</span></div>
           <p>No public workflow is authorized to measure or publish benchmark results. Hosted CI is for correctness and artifact validation only.</p>
-          <p>Resumption depends on a reviewed trusted private benchmark bridge.</p>
+          <p>${manualCohortsAvailable
+            ? "A private maintainer bridge is available for manually dispatched, reviewed exact-cohort runtime comparisons. Results stay private and do not refresh public history or authorize public claims."
+            : "A reviewed trusted private benchmark bridge is required before any private comparison can run."}</p>
           <p class="operations-next">${escapeHtml(publication.next_action)}</p>
         </article>
       </div>
@@ -2619,6 +2638,7 @@ function requirePublishedHosts(data, memoryResults, memoryHistory, operationsSta
 function render(data, operationsStatus, wasmResults, memoryResults, memoryHistory, historyRecords, cohorts, historyBackfills = []) {
   const authority = requirePublishedHosts(data, memoryResults, memoryHistory, operationsStatus);
   const publicSource = operationsStatus.profile === "public-source";
+  const manualCohortsAvailable = operationsStatus.benchmark_bridge === "private-maintainer-cohorts-v1";
   const wasmRows = wasmTargetRows(wasmResults);
   const summary = summarize(data, wasmRows);
   const history = summarizeHistory(historyRecords);
@@ -3744,7 +3764,9 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
         <p class="eyebrow">${publicSource ? "Historical benchmark snapshot" : "script-bench current snapshot"}</p>
         <h1>${publicSource ? "Historical rustia Benchmark Results and History" : "rustia Benchmark Results and History"}</h1>
         <p class="lead">${publicSource
-          ? "Recorded benchmark data is preserved for reference. Measurement and publication are paused; the figures do not establish current performance stability or authorize new claims."
+          ? operationsStatus.benchmark_bridge === "private-maintainer-cohorts-v1"
+            ? "Recorded benchmark data is historical. Public measurement automation, history refresh, and publication remain paused. A private maintainer bridge supports reviewed exact-cohort runtime comparisons only; its private results do not authorize public claims."
+            : "Recorded benchmark data is historical. Public measurement automation, history refresh, and publication remain paused pending a trusted private benchmark bridge. The figures do not establish current performance stability or authorize new claims."
           : "Committed Linux results with a best-first language headline, workload-level detail, and protocol-aware benchmark history."}</p>
         <p class="source-line">
           <span>Source <code>${escapeHtml(relative(sourcePath))}</code></span>
@@ -3754,7 +3776,9 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
       </div>
     </section>
 
-    ${publicSource ? `<section class="panel operations-banner state-paused" role="note"><div><p class="eyebrow">Historical data only</p><p>All numeric benchmark records on this page are historical. No public workflow may measure or publish benchmark results. A trusted private benchmark bridge is required before new measurements or claims can resume.</p></div><span class="operations-state state-paused">Paused</span></section>` : ""}
+    ${publicSource ? `<section class="panel operations-banner state-paused" role="note"><div><p class="eyebrow">Historical data only</p><p>${operationsStatus.benchmark_bridge === "private-maintainer-cohorts-v1"
+      ? "All numeric benchmark records on this page are historical. No public workflow may measure or publish benchmark results. Private maintainer comparisons do not refresh this page or authorize public claims."
+      : "All numeric benchmark records on this page are historical. No public workflow may measure or publish benchmark results. A trusted private benchmark bridge is required before comparisons or claims can resume."}</p></div><span class="operations-state state-paused">Paused</span></section>` : ""}
 
     <nav class="nav" aria-label="Report sections">
       <a href="#grabby-builds">Grabby Builds</a>
@@ -3772,8 +3796,8 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
     ${operationsStatusSection(operationsStatus)}
     ${optimizationEvidenceSection(cohorts, publicSource)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}
-    ${memoryResultsSection(memoryResults, authority, publicSource)}
-    ${memoryHistorySection(memoryHistory, authority, publicSource)}
+    ${memoryResultsSection(memoryResults, authority, publicSource, manualCohortsAvailable)}
+    ${memoryHistorySection(memoryHistory, authority, publicSource, manualCohortsAvailable)}
     ${coldStartSection(summary.coldStartRows)}
     ${claimGateSection(claimRows, publicSource)}
       ${historySection(history, historyBackfills, data.rows, readLiveSeries(), readCalibrationReview(), publicSource)}
