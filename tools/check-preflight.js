@@ -12,7 +12,9 @@ assert(plan.every(entry => stages.has(entry.stage)));
 const matches = (command, args) => plan.filter(entry => entry.command === command && JSON.stringify(entry.args) === JSON.stringify(args));
 assert.equal(matches("cargo", ["test", "--locked", "--workspace"]).length, 1);
 assert.equal(matches("cargo", ["test", "--locked", "-p", "rustia-compiler", "--lib"])[0].stage, "quick");
-assert.equal(matches("cargo", ["run", "--locked", "-p", "rustia", "--example", "hardened_decision"]).length, 1);
+for (const example of ["embedding", "chunk_builder", "mutable_objects", "live_values", "game_objects", "hardened_decision"]) {
+  assert.equal(matches("cargo", ["run", "--locked", "-p", "rustia", "--example", example]).length, 1);
+}
 assert.equal(matches("cargo", ["fmt", "--manifest-path", "demos/web-live/Cargo.toml", "--", "--check"]).length, 1);
 assert.equal(matches("cargo", ["clippy", "--locked", "--manifest-path", "demos/web-live/Cargo.toml", "--target", "wasm32-unknown-unknown", "--all-targets", "--", "-D", "warnings"]).length, 1);
 for (const script of ["check-package-dry-runs", "verify-conformance-package", "check-external-facade", "check-facade-api"]) {

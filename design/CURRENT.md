@@ -37,6 +37,13 @@ existing raw-Wasm demo remains standard-profile and silent. Local Playwright
 `Hello from Luau` output. The existing hosted WebKit gate builds and executes
 this recipe. This is correctness evidence, not timing or Safari/mobile acceptance.
 
+**Introductory example guidance (2026-10-30):** embedding, chunk-builder,
+mutable-object and live-value examples now state their purpose, repository-root
+run command and expected outcome, with comments at integration boundaries and
+the direct Serde derive dependency named. `just check-examples` and release
+preflight execute all six correctness examples successfully; broader conversion
+guidance remains open in [100](100-documentation-review.md).
+
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
 The cleaned repository's hosted correctness profile is active; public benchmark

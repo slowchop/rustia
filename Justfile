@@ -91,8 +91,11 @@ check-facade-api:
 
 check-examples:
     cargo test --locked -p rustia --examples --no-run
-    cargo run --locked -p rustia --example game_objects
+    cargo run --locked -p rustia --example embedding
+    cargo run --locked -p rustia --example chunk_builder
     cargo run --locked -p rustia --example mutable_objects
+    cargo run --locked -p rustia --example live_values
+    cargo run --locked -p rustia --example game_objects
     cargo run --locked -p rustia --example hardened_decision
 
 # Install the full pre-push guard in this checkout.

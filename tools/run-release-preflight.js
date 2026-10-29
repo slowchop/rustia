@@ -190,9 +190,9 @@ run("cargo", [
 ]);
 run("cargo", ["test", "--locked", "--manifest-path", "fuzz/Cargo.toml"]);
 run("cargo", ["test", "--locked", "-p", "rustia", "--examples", "--no-run"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "game_objects"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "mutable_objects"]);
-run("cargo", ["run", "--locked", "-p", "rustia", "--example", "hardened_decision"]);
+for (const example of ["embedding", "chunk_builder", "mutable_objects", "live_values", "game_objects", "hardened_decision"]) {
+  run("cargo", ["run", "--locked", "-p", "rustia", "--example", example]);
+}
 run("cargo", ["test", "--locked", "--workspace"]);
 run("cargo", [
   "clippy",
