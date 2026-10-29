@@ -13,9 +13,9 @@
 // rustia-only freeze, so the two cohort kinds differ in nothing else: same
 // samples, same bootstrap, same thresholds, same host block, same pinned cores.
 //
-// The engine groups are the protocol the rented lane measured as cohort
-// pre-reclamation-18b58d8. They are not read from that frozen file; the file
-// is history, and this is the one place the live protocol is written down.
+// The engine groups preserve the case inventory measured by the rented lane
+// as cohort pre-reclamation-18b58d8. The measurement version comes from the
+// committed source: v2 adds controls, separate warmups, and natural idle.
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

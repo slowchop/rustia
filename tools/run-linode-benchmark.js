@@ -39,6 +39,8 @@ const FIXED_THROUGHPUT_PROTOCOL = "fixed_throughput_v1";
 const VM_STRING_MEMORY_PROTOCOL = "vm_string_memory_v1";
 const CROSS_ENGINE_MATRIX_PROTOCOL = "cross_engine_matrix_v4";
 const CROSS_ENGINE_MEMORY_PROTOCOL = "cross_engine_memory_v1";
+const CORRECTED_MEMORY_PROTOCOL = "cross_engine_memory_v2";
+const isMemoryProtocol = kind => [CROSS_ENGINE_MEMORY_PROTOCOL, CORRECTED_MEMORY_PROTOCOL].includes(kind);
 const HISTORY_BACKFILL_PROTOCOL = "rustia_history_backfill_v1";
 const MAX_TIMED_ATTEMPTS_PER_GROUP = 3;
 const ALLOWED_PROTOCOLS = new Set([
@@ -46,6 +48,7 @@ const ALLOWED_PROTOCOLS = new Set([
   VM_STRING_MEMORY_PROTOCOL,
   CROSS_ENGINE_MATRIX_PROTOCOL,
   CROSS_ENGINE_MEMORY_PROTOCOL,
+  CORRECTED_MEMORY_PROTOCOL,
   HISTORY_BACKFILL_PROTOCOL,
 ]);
 const MATRIX_NATIVE_TARGET = "linux-x86_64";
@@ -288,7 +291,7 @@ function isCrossEngineMatrix(config) {
 }
 
 function isCrossEngineMemory(config) {
-  return protocolKind(config) === CROSS_ENGINE_MEMORY_PROTOCOL;
+  return isMemoryProtocol(protocolKind(config));
 }
 
 function isHistoryBackfill(config) {
@@ -361,7 +364,7 @@ function validateConfig(value) {
     root,
     kind === VM_STRING_MEMORY_PROTOCOL ||
       kind === CROSS_ENGINE_MATRIX_PROTOCOL ||
-      kind === CROSS_ENGINE_MEMORY_PROTOCOL ||
+      isMemoryProtocol(kind) ||
       kind === HISTORY_BACKFILL_PROTOCOL
       ? ["schema", "provider", "source", "measurement", "host_gate", "publication"]
       : ["schema", "provider", "source", "measurement", "qualification", "host_gate", "publication"],
@@ -400,14 +403,14 @@ function validateConfig(value) {
   const source = requireObject(root.source, "config.source");
   requireExactKeys(
     source,
-    kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === CROSS_ENGINE_MEMORY_PROTOCOL
+    kind === CROSS_ENGINE_MATRIX_PROTOCOL || isMemoryProtocol(kind)
       ? ["benchmark_commit", "expected_sha256"]
       : kind === HISTORY_BACKFILL_PROTOCOL
       ? ["harness_commit", "target_commits", "expected_sha256"]
       : ["baseline_commit", "candidate_commit", "harness_commit", "expected_sha256"],
     "config.source",
   );
-  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL || kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+  if (kind === CROSS_ENGINE_MATRIX_PROTOCOL || isMemoryProtocol(kind)) {
     if (!FULL_COMMIT.test(requireString(source.benchmark_commit, "config.source.benchmark_commit"))) {
       fail("config.source.benchmark_commit must be a lowercase full commit");
     }
@@ -456,7 +459,7 @@ function validateConfig(value) {
           "wasm_dispatch_measure",
           "history_before",
         ]
-      : kind === CROSS_ENGINE_MEMORY_PROTOCOL
+      : isMemoryProtocol(kind)
       ? [
           "bench_manifest",
           "native_harness",
@@ -466,6 +469,7 @@ function validateConfig(value) {
           "memory_analyzer",
           "memory_cohort",
           "memory_publisher",
+          ...(kind === CORRECTED_MEMORY_PROTOCOL ? ["memory_protocol"] : []),
           "memory_history_before",
           "memory_current_before",
         ]
@@ -544,12 +548,13 @@ function validateConfig(value) {
       }
     }
     validateRuntimeArtifacts(measurement.runtime_artifacts, "config.measurement.runtime_artifacts");
-  } else if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+  } else if (isMemoryProtocol(kind)) {
     requireExactKeys(
       measurement,
       [
         "protocol",
         "cohort_id",
+        ...(kind === CORRECTED_MEMORY_PROTOCOL ? ["warmup_rounds", "quiescence_ms"] : []),
         "samples",
         "bootstrap_repetitions",
         "bootstrap_seed",
@@ -560,6 +565,7 @@ function validateConfig(value) {
       ],
       "config.measurement",
     );
+    if (kind === CORRECTED_MEMORY_PROTOCOL && (measurement.warmup_rounds !== 1 || measurement.quiescence_ms !== 100)) fail("memory v2 requires one warmup round and 100 ms quiescence");
     if (!SAFE_WORKLOAD_FILE_COMPONENT.test(requireString(measurement.cohort_id, "config.measurement.cohort_id"))) {
       fail("config.measurement.cohort_id must be a safe identifier");
     }
@@ -762,7 +768,7 @@ function validateConfig(value) {
   const gate = requireObject(root.host_gate, "config.host_gate");
   requireExactKeys(
     gate,
-    kind === CROSS_ENGINE_MEMORY_PROTOCOL
+    isMemoryProtocol(kind)
       ? [
           "benchmark_cpu",
           "supervisor_cpu",
@@ -793,7 +799,7 @@ function validateConfig(value) {
   requireNumber(gate.minimum_idle_percent, "config.host_gate.minimum_idle_percent", 0);
   if (gate.minimum_idle_percent > 100) fail("config.host_gate.minimum_idle_percent must be <= 100");
   requireNumber(gate.maximum_load_1m, "config.host_gate.maximum_load_1m", 0);
-  if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+  if (isMemoryProtocol(kind)) {
     requireInteger(gate.supervisor_cpu, "config.host_gate.supervisor_cpu", 0);
     if (gate.supervisor_cpu === gate.benchmark_cpu) {
       fail("config.host_gate supervisor and benchmark CPUs must differ");
@@ -871,7 +877,7 @@ function validateConfig(value) {
         fail(`config.publication.${field} must remain frozen at ${wanted}`);
       }
     }
-  } else if (kind === CROSS_ENGINE_MEMORY_PROTOCOL) {
+  } else if (isMemoryProtocol(kind)) {
     requireExactKeys(publication, ["mode", "rows"], "config.publication");
     if (!["memory", "rustia_ci_memory"].includes(publication.mode)) {
       fail("cross_engine_memory_v1 publication.mode must be memory or rustia_ci_memory");
@@ -1623,6 +1629,8 @@ async function verifySource(config, configFile = DEFAULT_CONFIG) {
       sha256(await gitBlob(source.benchmark_commit, "bench/publish-memory-analysis.js")),
       expected.memory_publisher,
     ],
+    ...(config.measurement.protocol === CORRECTED_MEMORY_PROTOCOL ? [["memory protocol",
+      sha256(await gitBlob(source.benchmark_commit, "bench/memory-protocol.js")), expected.memory_protocol]] : []),
     [
       "memory history",
       sha256(await gitBlob(source.benchmark_commit, "bench/memory/history/runs.jsonl")),
@@ -1827,7 +1835,7 @@ function sanitizedProviderPlan(config, provider, source) {
         }
       : isCrossEngineMemory(config)
       ? {
-          protocol: CROSS_ENGINE_MEMORY_PROTOCOL,
+          protocol: config.measurement.protocol,
           benchmark_commit: config.source.benchmark_commit,
           cohort_id: config.measurement.cohort_id,
           samples_per_case: config.measurement.samples,
@@ -4994,7 +5002,8 @@ function memoryHostLabel(config) {
 
 function expectedMemoryProtocol(config) {
   return {
-    schema: "rustia.bench.memory-protocol.v1",
+    schema: config.measurement.protocol === CORRECTED_MEMORY_PROTOCOL ? "rustia.bench.memory-protocol.v2" : "rustia.bench.memory-protocol.v1",
+    ...(config.measurement.protocol === CORRECTED_MEMORY_PROTOCOL ? { warmup_rounds: config.measurement.warmup_rounds, quiescence_ms: config.measurement.quiescence_ms } : {}),
     cohort_id: config.measurement.cohort_id,
     commit: config.source.benchmark_commit,
     samples: config.measurement.samples,
@@ -5039,7 +5048,8 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   const rawStat = fs.lstatSync(rawDirectory);
   if (!rawStat.isDirectory() || rawStat.isSymbolicLink()) fail("cross-engine memory raw evidence is unsafe");
   const rawFiles = fs.readdirSync(rawDirectory).sort();
-  const expectedRawCount = config.publication.rows * config.measurement.samples;
+  const corrected = config.measurement.protocol === CORRECTED_MEMORY_PROTOCOL;
+  const expectedRawCount = config.publication.rows * (corrected ? (config.measurement.samples + 1) * 2 : config.measurement.samples);
   if (rawFiles.length !== expectedRawCount || rawFiles.some((file) => !file.endsWith(".json"))) {
     fail(`cross-engine memory evidence has ${rawFiles.length} raw samples, expected ${expectedRawCount}`);
   }
@@ -5050,8 +5060,8 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   );
   const manifest = loadJsonRegular(path.join(evidenceSource, "manifest.json"), "memory manifest");
   if (
-    manifest.schema_version !== 1 ||
-    manifest.schema !== "rustia.bench.memory-cohort-evidence.v1" ||
+    manifest.schema_version !== (corrected ? 2 : 1) ||
+    manifest.schema !== (corrected ? "rustia.bench.memory-cohort-evidence.v2" : "rustia.bench.memory-cohort-evidence.v1") ||
     manifest.commit !== config.source.benchmark_commit ||
     manifest.cohort_id !== config.measurement.cohort_id ||
     manifest.case_count !== config.publication.rows ||
@@ -5060,11 +5070,42 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   ) {
     fail("cross-engine memory manifest has the wrong identity or shape");
   }
+  if (corrected && (manifest.warmup_sample_count !== config.publication.rows * 2 ||
+      manifest.control_sample_count !== config.publication.rows * config.measurement.samples ||
+      manifest.measurement_protocol_sha256 !== config.source.expected_sha256.memory_protocol)) fail("v2 manifest warmup/control/protocol identity differs");
   if (
     manifest.supervisor_sha256 !== config.source.expected_sha256.memory_supervisor ||
     manifest.analyzer_sha256 !== config.source.expected_sha256.memory_analyzer
   ) {
     fail("cross-engine memory manifest script identity is wrong");
+  }
+  if (corrected) {
+    const cases = new Map(config.measurement.groups.flatMap(group => group.engines.flatMap(engine =>
+      group.workloads.map(workload => [`${engine}\0${workload.id}`, { ...workload, binary: group.binary }]))));
+    const build = loadJsonRegular(path.join(evidenceSource, dedicated ? "build.json" : "linode-build.json"), "memory build");
+    for (const role of ["all", "lua54"]) {
+      if (!SHA256.test(manifest.binaries?.[`${role}_sha256`]) || manifest.binaries[`${role}_sha256`] !== build[`${role}_binary_sha256`]) fail("v2 manifest/build binary hashes differ");
+    }
+    if (manifest.protocol_sha256 !== sha256File(path.join(evidenceSource, "protocol.json"))) fail("v2 protocol fingerprint differs");
+    const byId = new Map();
+    for (const file of rawFiles) {
+      const raw = loadJsonRegular(path.join(rawDirectory, file), "v2 raw memory record");
+      const identity = raw.identity ?? {};
+      const expected = cases.get(`${identity.engine}\0${identity.workload}`);
+      if (!expected || identity.commit !== config.source.benchmark_commit || identity.n !== expected.n || identity.epochs !== expected.epochs ||
+          identity.binary_sha256 !== manifest.binaries[`${expected.binary}_sha256`] || file !== `${raw.sample_id}.json` || byId.has(raw.sample_id)) fail("v2 raw memory identity differs from frozen matrix");
+      byId.set(raw.sample_id, { raw, file, binary: expected.binary });
+    }
+    const order = loadJsonRegular(path.join(evidenceSource, "run-order.json"), "memory run order");
+    if (!Array.isArray(order) || order.length !== expectedRawCount || new Set(order.map(entry => entry.sample_id)).size !== expectedRawCount) fail("v2 run-order inventory differs");
+    order.forEach((entry, index) => {
+      const sample = byId.get(entry.sample_id);
+      if (!sample || entry.binary_role !== sample.binary || entry.sha256 !== sha256File(path.join(rawDirectory, sample.file))) fail("v2 run-order source identity differs");
+      for (const key of ["role", "lane", "round", "engine", "workload"]) {
+        if (entry[key] !== sample.raw.identity[key]) fail("v2 run-order sampling identity differs");
+      }
+      if ((index < config.publication.rows * 2) !== (entry.role === "warmup")) fail("v2 warmup processes must precede measurement rounds");
+    });
   }
   const rawHashes = requireObject(
     requireObject(manifest.evidence_sha256, "memory manifest evidence hashes").raw,
@@ -5079,8 +5120,8 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   const analysisFile = path.join(evidenceSource, "analysis.json");
   const analysis = loadJsonRegular(analysisFile, "memory analysis");
   if (
-    analysis.schema_version !== 1 ||
-    analysis.schema !== "rustia.bench.memory-analysis.v1" ||
+    analysis.schema_version !== (corrected ? 2 : 1) ||
+    analysis.schema !== (corrected ? "rustia.bench.memory-analysis.v2" : "rustia.bench.memory-analysis.v1") ||
     analysis.row_count !== config.publication.rows ||
     analysis.raw_sample_count !== expectedRawCount ||
     !Array.isArray(analysis.rows) ||
@@ -5088,6 +5129,9 @@ async function validateCrossEngineMemoryEvidence(config, evidenceSource) {
   ) {
     fail("cross-engine memory analysis has the wrong schema or shape");
   }
+  if (corrected && (analysis.warmup_sample_count !== config.publication.rows * 2 ||
+      analysis.control_sample_count !== config.publication.rows * config.measurement.samples ||
+      analysis.rows.some(row => row.measurement_protocol !== CORRECTED_MEMORY_PROTOCOL))) fail("v2 analysis warmup/control/protocol shape differs");
   if (analysis.rows.some((row) => row.commit !== config.source.benchmark_commit)) {
     fail("cross-engine memory analysis contains a different commit");
   }
@@ -6195,6 +6239,20 @@ async function selfTest(config) {
     publication: { mode: "memory", rows: MEMORY_ROWS },
   };
   assert.equal(validateConfig(crossEngineMemoryConfig), crossEngineMemoryConfig);
+  const v2MemoryConfig = {
+    ...crossEngineMemoryConfig,
+    source: { ...crossEngineMemoryConfig.source, expected_sha256: {
+      ...crossEngineMemoryConfig.source.expected_sha256, memory_protocol: memoryHash,
+    } },
+    measurement: { ...crossEngineMemoryConfig.measurement, protocol: CORRECTED_MEMORY_PROTOCOL,
+      warmup_rounds: 1, quiescence_ms: 100 },
+  };
+  assert.equal(validateConfig(v2MemoryConfig), v2MemoryConfig);
+  assert.equal(expectedMemoryProtocol(v2MemoryConfig).schema, "rustia.bench.memory-protocol.v2");
+  for (const field of ["warmup_rounds", "quiescence_ms"]) {
+    assert.throws(() => validateConfig({ ...v2MemoryConfig, measurement: { ...v2MemoryConfig.measurement, [field]: 0 } }), /one warmup round/);
+  }
+
   assert.equal(expectedTerminalStatus(crossEngineMemoryConfig), "memory_complete");
   assert.equal(benchmarkCommit(crossEngineMemoryConfig), crossEngineMemoryConfig.source.benchmark_commit);
   assert.equal(remoteRunnerForConfig(crossEngineMemoryConfig), MEMORY_REMOTE_RUNNER);

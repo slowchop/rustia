@@ -1,6 +1,6 @@
 # rustia — cross-engine memory benchmark design
 
-> **Status: [MEMORY COHORT, RECLAMATION, ACCOUNTING, AND QUOTAS IMPLEMENTED] (updated 2026-10-29).** The isolated child/supervisor, cgroup-v2 sampler,
+> **Status: [MEMORY PROTOCOL V2 IMPLEMENTED; FRESH MEASUREMENT PENDING] (updated 2026-10-30).** The isolated child/supervisor, cgroup-v2 sampler,
 > repeated-epoch analyzer, portable controls, deterministic todo-app workloads, publication schema, and
 > dashboard are implemented. The published cohort is `rustia-ci-070c387b173c`: 11 rustia rows from 99 raw
 > samples, measured on the owned host ci-bench on 2026-09-05 through a delegated cgroup-v2 subtree. The
@@ -21,8 +21,10 @@ The active public-source profile runs hosted correctness and artifact checks;
 memory measurement and publication are paused pending a reviewed trusted private
 benchmark bridge. The owned-host procedures below describe retained private
 capabilities, not an available workflow in this tree. Existing cohorts remain
-historical evidence. The protocol gaps identified below remain open; the status
-above does not declare the entire memory-work acceptance gate complete. See
+historical evidence. The four protocol gaps identified by the drift audit are implemented
+prospectively in v2 below. A fresh authorized memory cohort and the broader memory-work
+acceptance gate remain pending. The available private bridge supports runtime comparisons,
+not memory cohorts. See
 [benchmark operations](81-benchmark-operations.md#public-source-profile).
 
 ## Goal
@@ -111,20 +113,55 @@ The dashboard publishes several independent metrics:
 | **idle footprint** | spawned anonymous PSS and total PSS | cost of starting this engine mode |
 | **prepared delta** | prepared anonymous minus spawned anonymous | source/compiler/program cost |
 | **peak working-set delta** | maximum cgroup charge after phase reset minus phase-start charge | short-term headroom required |
-| **quiescent retained delta** | quiescent-marker anonymous minus warmed anonymous, without null-control adjustment | raw memory still resident at the marker |
+| **raw quiescent retained delta** | quiescent-marker anonymous minus warmed anonymous | unadjusted residency retained for provenance |
+| **control-adjusted retained delta (v2 headline)** | per-round workload raw delta minus its matched no-work control raw delta, summarized after subtraction | script-attributed retention, including negative residuals |
 | **recovery ratio** | `(peak delta - quiescent delta) / peak delta` | how much of a burst was recovered |
 | **tail growth** | robust KiB/epoch slope over the predeclared tail window | plateau versus sustained retention signal |
-| **memory area** | integral of excess cgroup current charge above the spawned baseline, from warmed to quiescent marker, per completed unit | cgroup charge-time cost; kept separate from peak |
+| **anonymous-memory area (v2)** | trapezoidal integral of excess cgroup `memory.stat anon` above its spawned baseline, from warmed to quiescent, divided by `n × epochs` | anonymous KiB-seconds per completed unit |
+| **total-charge memory area (legacy/corroboration)** | integral of excess cgroup current charge above the spawned baseline over the same interval and units | total charge-time cost, kept distinct from anonymous memory |
 | **minimum completion limit** | smallest tested `memory.max` bucket that completes correctly | periodic memory-pressure capability, not every-commit data |
 
-The retained-delta and memory-area rows describe the implemented calculations. Null-control-adjusted retention
-and an anonymous-memory area remain unimplemented design goals. The current child
-also emits its `quiescent` marker immediately after the final epoch, without the
-bounded idle/collection opportunity required by the phase model above. A future
-protocol must add that opportunity before claiming the corresponding quiescent
-acceptance gate. Preserve the existing raw definitions and historical values;
-introducing the intended metrics requires prospective versioning and separate
-evidence, not relabeling or recalculating past cohorts.
+### Protocol v2: matched controls and bounded natural idle
+
+Fresh configurations use `cross_engine_memory_v2` and `rustia.bench.memory-protocol.v2`.
+Every engine/workload/shape has two lanes: ordinary workload execution and a matched
+no-work control. Both prepare the same source and perform the same initial warm
+invocation; the control then emits all epoch handshakes without running guest work.
+The pair shares source/binary identity, engine mode, work shape and round. Lane order
+alternates each round. The control is separate from the intentional-retention
+workload, which still validates the growth detector.
+
+For each pair, subtract the control's raw anonymous retained delta from the
+workload's delta **before** summarizing. Preserve raw/control statistics and both
+sample-ID sets. Negative residuals are valid observations, not clamped to zero.
+Growth classification and recovery retain their existing unadjusted definitions.
+The dashboard selects adjusted retention only for v2 rows. Its existing relative
+history floor is 1 KiB on each side; absolute deltas remain signed.
+
+At the final epoch handshake, the supervisor holds the still-live child idle for
+100 ms using a monotonic deadline, while the external sampler continues. It then
+acknowledges the epoch, allowing the child to emit `quiescent`. This gives every
+engine the same bounded **natural idle** opportunity. It does not force collection,
+advance guest state, purge an allocator, or promise that a synchronous collector
+runs during idle. The raw record declares the policy and interval; analysis rejects
+an observed final-epoch-to-quiescent interval below 100 ms.
+
+The cadence samples both total cgroup charge and the keyed `memory.stat anon`
+counter, in bytes, and records exact warmed/quiescent endpoint samples. Anonymous
+area uses only anonymous charge, so file/kernel charge cannot inflate it. Missing
+anonymous counters, unordered timelines, missing endpoints, mixed protocol versions,
+or mismatched/missing controls fail validation. Phase retention still uses process
+`smaps_rollup Anonymous`; area uses cgroup anonymous charge and may include descendants.
+
+Historical v1 raw records remain readable with their original unadjusted retention
+and total-charge area. No old row or measurement is rewritten. Raw, child-event,
+analysis and cohort-evidence schemas are version 2 for new runs; the history/current
+container stays version 1, with an explicit `measurement_protocol` on v2 rows and
+in method metadata. Publication, merge, ranking and history-reference selection
+refuse or separate unlike protocols, even on the same host. A protocol upgrade
+therefore requires a new complete comparison cohort, not a Rustia-only refresh
+beside legacy competitor rows. Fresh execution of legacy frozen configs is refused;
+read-only analysis and evidence validation remain supported.
 
 Absolute and incremental values are both retained. Incremental values answer “what did the script cost?” while
 absolute values answer “how much memory must a host provision?” JIT/native code pages remain part of the absolute
@@ -146,11 +183,13 @@ For each epoch workload:
 - require a bounded-live null control and an intentionally retained positive control in the same cohort;
 - predeclare an absolute KiB/epoch and proportional percent/epoch material threshold.
 
-The separate warmup process remains an implementation gap: the coordinator
-currently records exactly the configured sample count, and each accepted child
-warms one invocation internally. That does not satisfy the additional fresh
-warmup-process requirement above. Retain the requirement and implement a separate,
-identified warmup process before claiming complete protocol acceptance.
+V2 runs one separate warmup process **per lane and case** before any accepted
+measurement round, followed by nine workload/control pairs. Warmup raw files and
+run order remain in evidence, but warmups never enter metric statistics. With the
+current nine-sample freeze this is 20 fresh processes per case: two warmups, nine
+workload samples and nine controls. The analyzer requires both warmups, contiguous
+matched rounds, unchanged warm/measurement checksums and exact binary identity.
+The manifest records total raw, warmup and control counts independently.
 
 Dashboard states:
 
@@ -274,12 +313,21 @@ bench/memory/current-results.json
 bench/memory/raw/<commit>/<cohort>.json
 ```
 
-Proposed schemas:
+Implemented schemas:
 
-- `rustia.bench.memory-raw.v1` — every fresh-process phase snapshot, cgroup peak, timeline point, event, and
-  checksum;
-- `rustia.bench.memory-run.v1` — one summarized engine/workload/mode/cohort row;
-- `rustia.bench.memory-current-results.v1` — latest coherent complete cohort selected for the dashboard.
+- `rustia.bench.memory-raw.v2` — every fresh process, including warmup/control role,
+  round, exact phase snapshots, total/anonymous timeline, natural-idle policy and checksum;
+- `rustia.bench.memory-analysis.v2` — paired adjusted metrics plus original raw metrics,
+  source IDs, control IDs and warmup/control counts;
+- `rustia.bench.memory-cohort-evidence.v2` — frozen source/binary/module hashes and the
+  complete raw inventory, including warmups;
+- `rustia.bench.memory-cohort.v1` and `rustia.bench.memory-current-results.v1` — stable
+  containers; v2 rows explicitly name `cross_engine_memory_v2`.
+
+The analyzer retains v1 input/output semantics for historical evidence. Protocol-v2
+correctness is covered by synthetic counter/timestamp fixtures and a Rust null-control
+execution test. These tests take no performance or process-memory measurements.
+Fresh Linux memory acceptance remains pending an authorized memory lane.
 
 Every summary names its source hash, exact commit, host, mode, target, protocol version, sample count, problem
 size, work/epoch count, memory source, and confidence method. Promotion remains fail-closed and runs entirely on the
