@@ -71,11 +71,11 @@ Release preflight and `just check-examples` execute this correctness example. It
 
 ## Change and simplify next
 
-### Shorten CURRENT without losing decisions
+### CURRENT compaction and guide placement (2026-10-30)
 
-The nominal one-paragraph state spans hundreds of lines, and the file contains competing action queues. It mixes current guarantees, completed rollout chronology, dated benchmark experiments and historical plans. Some later paragraphs still describe active benchmark workflows or unfinished diagnostics after the top section records their newer state.
+Implemented: CURRENT now keeps current permissions, compact contract links, validation/measurement scope and one open-work list. The [pre-compaction snapshot](CURRENT-2026-10-30-snapshot.md) preserves its former text verbatim behind a historical banner. Detailed rollout chronology and dated measurement results are no longer prerequisites for reading current status. Active failure, determinism, memory, experimental-optimization and release caveats remain in CURRENT; no evidence or acceptance threshold was deleted.
 
-Keep one current summary, implemented contract links, genuine open gates and one next-action list. Move completed chronology into its existing dated acceptance/audit record, preserving citations and decisions. Review this as its own change: CURRENT is authoritative, so a wholesale rewrite without checking every retained requirement would be risky. Do not delete evidence to achieve a line target.
+Practical library guides belong in the crate Rustdoc introduction, with reference details beside methods. Browser prerequisites, build commands and JavaScript loading belong beside the browser demo, linked from README and Rustdoc. This uses the existing reading path; it does not add a documentation website or another live status page.
 
 ### Finish teaching guidance for examples
 
@@ -111,7 +111,7 @@ Keeping the conventional CONTRIBUTING filename is not a contribution invitation 
 
 1. Create a fresh Rust application from the dependency and hello-world instructions, obtain `42`, then read a small Serde struct without consulting a workspace manifest or design specification.
 2. Set explicit budgets, trigger and classify an error, show a named-source report, and explain whether guest writes, external effects and handles survive.
-3. Get visible CLI output and exit its REPL. Separately, follow the future browser recipe and identify its feature and service choices.
+3. Get visible CLI output and exit its REPL. Separately, follow the browser recipe and identify its feature and service choices.
 4. Find a lifecycle or compatibility rule in Rustdoc, then follow a link to its detailed contract or test without navigating the entire design archive.
 
 Fresh application, README, Rustdoc, CLI and repository preflight checks can establish technical correctness. They do not replace later observation of real readers.
