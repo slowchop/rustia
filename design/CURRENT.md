@@ -8,7 +8,7 @@
 
 **Executor accounting diagnostics (2026-10-30):** the default-off executor
 census partitions GC-root refreshes by control-memory accounting state. A fixed
-hosted Linux CI test reports setup and workload-call counts separately at bounded
+hosted Linux CI test reports setup, warmup and following-call counts separately at bounded
 input sizes. These counts establish path exposure, not elapsed cost or a
 regression cause; ordinary benchmark builds contain no instrumentation. See
 [the validation contract](97-validation-workflow.md).

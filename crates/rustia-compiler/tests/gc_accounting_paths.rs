@@ -4,9 +4,11 @@
 //! `cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture`
 //!
 //! This reports counters, never timings. Each row separates the source's
-//! `Vm::run` setup from one `call_function` invocation on a fresh standard VM,
-//! matching the benchmark adapter lifecycle. Fixed work and checksums make a
-//! missing source, incomplete call, or changed workload visible.
+//! `Vm::run` setup, a full-N warmup, and the following full-N call on the same
+//! standard VM. This matches the warmed sample's adapter lifecycle; the separate
+//! cold metric is excluded. It does not recover counters from prior benchmark
+//! binaries or timed legs. Fixed work and checksums make missing sources,
+//! incomplete calls, or changed workload behavior visible.
 
 #![cfg(feature = "executor-diagnostics")]
 
@@ -155,26 +157,29 @@ fn reports_default_standard_gc_accounting_paths_for_acceptance_workloads() {
         let setup_census = vm.executor_census();
         report(case.workload, case.n, "setup", "function", setup_census);
 
-        let before_call = setup_census;
-        let result = vm
-            .call_function(&program, function, &[Value::number(case.n as f64)])
-            .unwrap_or_else(|error| panic!("call {} n={}: {error}", case.workload, case.n));
-        let checksum = result
-            .as_number()
-            .unwrap_or_else(|| panic!("{} n={} returned a non-number", case.workload, case.n));
-        assert_eq!(
-            checksum, case.expected_checksum,
-            "{} n={}",
-            case.workload, case.n
-        );
-
-        let call_census = counter_delta(vm.executor_census(), before_call);
-        report(
-            case.workload,
-            case.n,
-            "call",
-            &format!("{checksum:.0}"),
-            call_census,
-        );
+        let mut before_call = setup_census;
+        for phase in ["warmup", "post_warmup_call"] {
+            let result = vm
+                .call_function(&program, function, &[Value::number(case.n as f64)])
+                .unwrap_or_else(|error| panic!("{phase} {} n={}: {error}", case.workload, case.n));
+            let checksum = result
+                .as_number()
+                .unwrap_or_else(|| panic!("{} n={} returned a non-number", case.workload, case.n));
+            assert_eq!(
+                checksum, case.expected_checksum,
+                "{} n={} {phase}",
+                case.workload, case.n
+            );
+            let after_call = vm.executor_census();
+            let call_census = counter_delta(after_call, before_call);
+            report(
+                case.workload,
+                case.n,
+                phase,
+                &format!("{checksum:.0}"),
+                call_census,
+            );
+            before_call = after_call;
+        }
     }
 }

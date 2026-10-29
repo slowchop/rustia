@@ -26,7 +26,7 @@ Compilation allocates AST/lowering/bytecode data and returns structured compile 
 
 From the repository root, run `cargo test --locked -p rustia-compiler`.
 The feature-gated `tests/gc_accounting_paths.rs` test uses the actual closure and
-generic-iteration workloads to report setup and call root-accounting/executor
+generic-iteration workloads to report setup, warmup and following-call root-accounting/executor
 counters at fixed work sizes. It asserts exact checksums and emits stable rows,
 but performs no timing; run it only through its explicit release-mode
 `executor-diagnostics` feature command in hosted CI.

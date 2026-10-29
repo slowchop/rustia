@@ -721,12 +721,15 @@ predicate, so opcode classification alone does not give the dynamic refresh coun
 `executor-diagnostics` counters partition actual refresh attempts into clean
 accounting updates, dirty-accounting skips, and calls with no current frame.
 The feature-gated compiler test `gc_accounting_paths.rs` reports setup and
-single-call deltas separately for the real `closures_upvalues` and
+warmup and following-call deltas separately for the real `closures_upvalues` and
 `generic_iteration` Luau sources at `n = 32`, `512`, and their acceptance sizes.
 It also reports closure-fast and dynamic leaf-value entries and asserts fixed
 checksums. This is correctness-only path evidence: it adds no timings, and its
 output must come from the explicit hosted CI diagnostic step before drawing
-conclusions about which path ran in a particular workload.
+conclusions about which path ran in a particular diagnostic invocation. Each
+case uses a fresh standard VM, performs the full-N warmup on that VM, then calls
+again, matching the warmed sample lifecycle. It excludes the separate cold
+metric and does not recover path counts from earlier benchmark binaries.
 
 **Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
 the prize was bounded before committing to the rewrite. Both arms disable deterministic collection
