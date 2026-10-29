@@ -6,6 +6,15 @@
 
 ## One-paragraph state
 
+**Iterator setup candidate (2026-10-29):** a local profile-led prototype reduces
+the call-iterator register window to its base and visible-result count, deriving
+fixed offsets after constructor checks. It preserves bytecode error precedence
+and iterator continuation behavior. This candidate is not performance-accepted
+and must not be merged as an optimisation before fresh paired `ci-bench`
+measurement. The new source repository's trusted benchmark bridge remains
+pending; no runner-policy change or bridge activation is part of this slice.
+See [58](58-vm-core2.md#compact-iterator-register-windows-unaccepted-candidate).
+
 **Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
 repository for inspection separately from package publication or a supported
 0.1/1.0 release. The user has authorized private staging in a new repository;

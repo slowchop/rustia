@@ -19713,7 +19713,7 @@ impl Vm {
                     if instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS {
                         self.sync_register_cells(registers, register_cells)?;
                     }
-                    self.prepare_call_iterator_from_results(registers, window.call, results)?;
+                    self.prepare_call_iterator_from_results(registers, &window, results)?;
                     return self.call_iterator_step(CallIteratorStepContext {
                         program,
                         registers,
@@ -19731,8 +19731,8 @@ impl Vm {
                         window.mode,
                         Value::number(GENERALIZED_ITERATOR_MODE_TABLE),
                     )?;
-                    set_register(registers, window.call.state, subject)?;
-                    set_register(registers, window.call.control, Value::nil())?;
+                    set_register(registers, window.call.state(), subject)?;
+                    set_register(registers, window.call.control(), Value::nil())?;
                     return self
                         .table_iterator_step(registers, register_cells, window.call)
                         .map(CallIteratorStep::Complete);
@@ -19746,8 +19746,8 @@ impl Vm {
                     Value::number(GENERALIZED_ITERATOR_MODE_CALL),
                 )?;
                 set_register(registers, window.call.iterator, subject)?;
-                set_register(registers, window.call.state, Value::nil())?;
-                set_register(registers, window.call.control, Value::nil())?;
+                set_register(registers, window.call.state(), Value::nil())?;
+                set_register(registers, window.call.control(), Value::nil())?;
                 self.call_iterator_step(CallIteratorStepContext {
                     program,
                     registers,
@@ -19799,7 +19799,7 @@ impl Vm {
     fn prepare_call_iterator_from_results(
         &mut self,
         registers: &mut [Value],
-        window: CallIteratorRegisters,
+        window: &GeneralizedIteratorRegisters,
         results: Vec<Value>,
     ) -> Result<()> {
         set_register(
@@ -19809,17 +19809,17 @@ impl Vm {
         )?;
         set_register(
             registers,
-            window.iterator,
+            window.call.iterator,
             results.first().copied().unwrap_or_else(Value::nil),
         )?;
         set_register(
             registers,
-            window.state,
+            window.call.state(),
             results.get(1).copied().unwrap_or_else(Value::nil),
         )?;
         set_register(
             registers,
-            window.control,
+            window.call.control(),
             results.get(2).copied().unwrap_or_else(Value::nil),
         )
     }
@@ -19844,8 +19844,8 @@ impl Vm {
         {
             return Err(iteration_error(iterator));
         }
-        let state = get_register(registers, window.state)?;
-        let control = get_register(registers, window.control)?;
+        let state = get_register(registers, window.state())?;
+        let control = get_register(registers, window.control())?;
         let function = iterator
             .as_function()
             .and_then(|handle| self.heap.function_kind(handle).map(|kind| (handle, kind)));
@@ -19970,7 +19970,7 @@ impl Vm {
         let Some((key, value)) = entry else {
             return Ok(Some(false));
         };
-        set_register(registers, window.control, key)?;
+        set_register(registers, window.control(), key)?;
         for index in 0..window.visible_count {
             let visible = window.visible_register(index)?;
             let value = match index {
@@ -20000,13 +20000,13 @@ impl Vm {
         register_cells: &mut [Option<u32>],
         window: CallIteratorRegisters,
     ) -> Result<bool> {
-        let table = get_table(registers, window.state)?;
+        let table = get_table(registers, window.state())?;
         if !self.heap.has_table(table) {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "generalized iterator table handle is missing",
             }));
         }
-        let control = get_register(registers, window.control)?;
+        let control = get_register(registers, window.control())?;
         let (key, value) = match self.table_next_after(table, control) {
             Some(TableNext::Entry(key, value)) => (key, value),
             Some(TableNext::End) => return Ok(false),
@@ -20017,7 +20017,7 @@ impl Vm {
                 }));
             }
         };
-        set_register(registers, window.control, key)?;
+        set_register(registers, window.control(), key)?;
         for index in 0..window.visible_count {
             let visible = window.visible_register(index)?;
             let value = match index {
@@ -24554,13 +24554,10 @@ struct CallIteratorStepContext<'a, 'call> {
     sync_caller_cells: bool,
 }
 
+// Constructors check the entire fixed prefix before deriving its register indices.
 #[derive(Clone, Copy)]
 struct CallIteratorRegisters {
-    mode: u8,
     iterator: u8,
-    state: u8,
-    control: u8,
-    first_visible: u8,
     visible_count: u8,
 }
 
@@ -24571,52 +24568,32 @@ impl CallIteratorRegisters {
                 reason: "generic call iterator requires at least one visible variable",
             }));
         }
-        let state = iterator.checked_add(1).ok_or_else(|| {
+        iterator.checked_add(3).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "generic call iterator register window overflow",
             })
         })?;
-        let control = iterator.checked_add(2).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "generic call iterator register window overflow",
-            })
-        })?;
-        let first_visible = iterator.checked_add(3).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "generic call iterator register window overflow",
-            })
-        })?;
-        Ok(Self::new(
+        Ok(Self {
             iterator,
-            iterator,
-            state,
-            control,
-            first_visible,
             visible_count,
-        ))
+        })
     }
 
-    const fn new(
-        mode: u8,
-        iterator: u8,
-        state: u8,
-        control: u8,
-        first_visible: u8,
-        visible_count: u8,
-    ) -> Self {
-        Self {
-            mode,
-            iterator,
-            state,
-            control,
-            first_visible,
-            visible_count,
-        }
+    const fn state(self) -> u8 {
+        self.iterator + 1
+    }
+
+    const fn control(self) -> u8 {
+        self.iterator + 2
+    }
+
+    const fn first_visible(self) -> u8 {
+        self.iterator + 3
     }
 
     fn validate(&self, register_count: usize, reason: &'static str) -> Result<()> {
         let addressable_end = usize::from(u8::MAX) + 1;
-        let end = usize::from(self.first_visible)
+        let end = usize::from(self.first_visible())
             .checked_add(usize::from(self.visible_count))
             .ok_or_else(|| Error::new(ErrorKind::InvalidProgram { reason }))?;
         if end > addressable_end {
@@ -24632,7 +24609,7 @@ impl CallIteratorRegisters {
     }
 
     fn visible_register(&self, offset: u8) -> Result<u8> {
-        self.first_visible.checked_add(offset).ok_or_else(|| {
+        self.first_visible().checked_add(offset).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "iterator visible register overflow",
             })
@@ -24651,7 +24628,7 @@ fn apply_call_iterator_results(
         return Ok(false);
     }
 
-    set_register(registers, window.control, first)?;
+    set_register(registers, window.control(), first)?;
     for index in 0..window.visible_count {
         let value = results
             .get(usize::from(index))
@@ -24676,21 +24653,6 @@ impl GeneralizedIteratorRegisters {
                 reason: "generalized iterator requires at least one visible variable",
             }));
         }
-        let iterator = mode.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "generalized iterator register window overflow",
-            })
-        })?;
-        let state = mode.checked_add(2).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "generalized iterator register window overflow",
-            })
-        })?;
-        let control = mode.checked_add(3).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidProgram {
-                reason: "generalized iterator register window overflow",
-            })
-        })?;
         let first_visible = mode.checked_add(4).ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
                 reason: "generalized iterator register window overflow",
@@ -24698,14 +24660,10 @@ impl GeneralizedIteratorRegisters {
         })?;
         Ok(Self {
             mode,
-            call: CallIteratorRegisters::new(
-                mode,
-                iterator,
-                state,
-                control,
-                first_visible,
+            call: CallIteratorRegisters {
+                iterator: first_visible - 3,
                 visible_count,
-            ),
+            },
         })
     }
 
@@ -29552,6 +29510,76 @@ mod inline_cache_tests {
             ErrorKind::RegisterOutOfBounds {
                 register: 7,
                 max: 0
+            }
+        ));
+    }
+
+    #[test]
+    fn iterator_register_windows_preserve_bytecode_boundaries() {
+        for window in [
+            CallIteratorRegisters::generic(252, 1).unwrap(),
+            GeneralizedIteratorRegisters::new(251, 1).unwrap().call,
+        ] {
+            assert_eq!(window.iterator, 252);
+            assert_eq!(window.state(), 253);
+            assert_eq!(window.control(), 254);
+            assert_eq!(window.visible_register(0).unwrap(), 255);
+            window.validate(256, "window overflow").unwrap();
+            assert!(matches!(
+                window.validate(255, "window overflow").unwrap_err().kind,
+                ErrorKind::RegisterOutOfBounds {
+                    register: 256,
+                    max: 255
+                }
+            ));
+            assert!(matches!(
+                window.visible_register(1).unwrap_err().kind,
+                ErrorKind::InvalidProgram {
+                    reason: "iterator visible register overflow"
+                }
+            ));
+        }
+        for window in [
+            CallIteratorRegisters::generic(252, 2).unwrap(),
+            GeneralizedIteratorRegisters::new(251, 2).unwrap().call,
+        ] {
+            // Address-space overflow precedes a short register-file error.
+            assert!(matches!(
+                window.validate(0, "window overflow").unwrap_err().kind,
+                ErrorKind::InvalidProgram {
+                    reason: "window overflow"
+                }
+            ));
+        }
+        assert!(matches!(
+            CallIteratorRegisters::generic(253, 1).err().unwrap().kind,
+            ErrorKind::InvalidProgram {
+                reason: "generic call iterator register window overflow"
+            }
+        ));
+        assert!(matches!(
+            GeneralizedIteratorRegisters::new(252, 1)
+                .err()
+                .unwrap()
+                .kind,
+            ErrorKind::InvalidProgram {
+                reason: "generalized iterator register window overflow"
+            }
+        ));
+        // Empty-result validation precedes fixed-prefix overflow.
+        assert!(matches!(
+            CallIteratorRegisters::generic(255, 0).err().unwrap().kind,
+            ErrorKind::InvalidProgram {
+                reason: "generic call iterator requires at least one visible variable"
+            }
+        ));
+        assert!(matches!(
+            GeneralizedIteratorRegisters::new(255, 0)
+                .err()
+                .unwrap()
+                .kind,
+            ErrorKind::InvalidProgram {
+                reason: "generalized iterator requires at least one visible variable"
             }
         ));
     }

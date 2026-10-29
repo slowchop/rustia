@@ -1016,6 +1016,29 @@ The error-precedence regression covers invalid state/control registers, missing
 handles, depth exhaustion and built-in table errors without capture mutation.
 
 
+### Compact iterator register windows (unaccepted candidate)
+
+Call-iterator setup stores only the iterator base register and visible-result
+count. State, control and first-visible registers are fixed offsets of one,
+two and three from that base. Constructors check the complete fixed prefix
+before deriving those indices; the generalized iterator retains its separate
+mode register. Generalized result preparation receives that enclosing window
+instead of storing a second copy of mode in every call window.
+
+Zero visible results still fail before prefix overflow. The visible end is
+checked against the 256-register bytecode address space before the actual
+register-file length, and result register calculation remains checked. Error
+text, callability checks, continuation payload meaning, caller-cell sync and
+result application are unchanged. A boundary regression covers the last valid
+window, overflowing result counts, short register files and validation order;
+existing iterator error-precedence and four-profile yield/resume tests apply.
+
+This is a profile-led representation candidate, not an accepted performance
+improvement. Retained whole-process `ci-bench` cycle samples identify iterator
+setup as a target but cannot establish its benefit. Fresh paired CI measurement
+is pending the new source repository's trusted benchmark bridge; the candidate
+must not be merged as an optimisation on correctness checks alone.
+
 ### Visible vector-key insertion probe (reverted)
 
 The isolated vector-only vacancy probe failed to establish a sparse-table
