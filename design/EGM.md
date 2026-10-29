@@ -6,7 +6,8 @@ Design specifications, canonical project state, structured evidence, and a gener
 
 ## Interface
 
-- Canonical state: [CURRENT.md](./CURRENT.md).
+- Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and one open-work list.
+- Historical pre-compaction text: [CURRENT-2026-10-30-snapshot.md](./CURRENT-2026-10-30-snapshot.md). Its original authority statements are historical; it must never override CURRENT.
 - Architecture: [30-architecture.md](./30-architecture.md).
 - Error and fuzzing contract: [82-error-behaviour-fuzzing.md](./82-error-behaviour-fuzzing.md).
 - Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).
