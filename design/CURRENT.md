@@ -246,6 +246,12 @@ against the five extracted runtime archives with only facade/Serde dependencies
 and candidate-lock package identities. Native Mac and Node jobs have executed
 the integrated candidate; the complete job logs and Linux/final acceptance gates
 are linked from the acceptance record.
+The 2026-10-30 macOS 15 arm64 hosted job (run 40898224525, job 123533077626)
+failed before tests because the runner image did not provide `rustup` at the
+expected path. The workflow now uses the same commit-pinned Rust setup action as
+the build matrix, with Rust 1.95.0 and the native target; Darwin/arm64/compiler-host
+checks and both correctness command sets are unchanged. This changes bootstrap
+selection only; successful native execution remains required for CI acceptance.
 PR #60's stale generated benchmark-progress report was repaired in
 [PR #61](https://github.com/slowchop/rustia-historic/pull/61), merged after full preflight,
 platform/Node-V8, differential smoke, and remote screening checks passed. The
