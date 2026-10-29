@@ -14,6 +14,7 @@ These examples show the facade's supported embedding shapes: owned values and Se
 - [module_resolution.rs](./module_resolution.rs): host-supplied module resolver.
 - [hot_reload.rs](./hot_reload.rs): candidate installation and host-owned replacement.
 - [mutable_objects.rs](./mutable_objects.rs): immediate standard-profile Rust payload mutation.
+- [hardened_decision.rs](./hardened_decision.rs): correctness-only stateless entry, explicit memory/fuel/record limits, failed-publication check, and automatic reset/reuse.
 - [leaf_lifecycle_bench.rs](./leaf_lifecycle_bench.rs) and [live_serde_bench.rs](./live_serde_bench.rs) are timing examples. Do not run them locally; benchmark policy permits evidence only from `ci-bench`.
 
 ## Invariants
@@ -28,4 +29,4 @@ Examples may print status or diagnostics and execute guest code. The two `_bench
 
 ## Verification
 
-From the repository root, compile examples with `cargo check --locked -p rustia --examples`. Do not run the timing examples.
+From the repository root, compile examples with `cargo check --locked -p rustia --examples`. Run `cargo run --locked -p rustia --example hardened_decision` to check success, record overflow without publication, and reuse after automatic reset. Release preflight runs this correctness example. Do not run the timing examples.

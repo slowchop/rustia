@@ -31,15 +31,71 @@
 //! | Show a script error | [`Error::report`] |
 //! | Set execution and memory limits | [`RustiaBuilder::fuel`], [`RustiaBuilder::memory_limit_bytes`] |
 //! | Borrow application state for a call | [`HostSchema`], [`Rustia::invoke`] |
+//! | Run a bounded stateless decision | [`RustiaBuilder::deterministic_leaf`], [`Rustia::invoke_entry_into`] |
 //! | Reuse an interpreter with fresh guest state | [`Rustia::reset_decision`] |
+//!
+//! # Choose a callback and its state
+//!
+//! Start with an ordinary callback. Add a typed host context when a call needs
+//! to borrow application data or return staged changes.
+//!
+//! | Need | Use | Why and example |
+//! | --- | --- | --- |
+//! | Expose a calculation | [`Rustia::add_fn`] | A plain closure converts arguments and results; it is declared pure. See the [embedding example]. |
+//! | Configure a callback's capability or fuel cost | [`HostFunction`] | Use [`Rustia::register_function`] for a registration that survives reset, or [`Rustia::create_function`] for a live function value. |
+//! | Give mutable Rust data script methods | [`ObjectType::method_mut`], [`Rustia::create_object`] | Standard/live applications can change a Rust payload immediately; later guest failure does not undo the change. See the [mutable-object example]. |
+//! | Borrow data for one request or frame | [`HostSchema`], [`HostContext`], [`Rustia::invoke`] | [`Input`] and [`Slots`] let callbacks read the current context without capturing it. See the [typed-invocation example]. |
+//! | Propose deterministic application changes | [`HostFunction::effect`], [`HostFunction::slot_write`] | [`Effects::emit`] and [`SlotWrites::write`] stage records for the host to apply after success. See the [game-object example]. |
+//!
+//! Stored callback closures must be `Fn + Send + Sync + 'static`. They can own
+//! captured data, but cannot borrow a short-lived request or frame. A
+//! [`HostContext`] may borrow that data for one invocation; Rustia does not store
+//! the context or its borrowed views. Callback captures must still honor the
+//! declared capability: Rustia trusts declarations such as [`HostFunction::pure`]
+//! and cannot detect hidden mutable state or I/O. Captured allocations are outside
+//! the VM memory limit.
+//!
+//! # Choose a failure and reuse boundary
+//!
+//! The table describes an error returned to Rust. Choose installation when a
+//! failed candidate must leave the previous guest state intact, or an invocation
+//! when the host must receive either all staged records or none.
+//!
+//! | Operation | Guest state and staged records after failure | Reuse and reset |
+//! | --- | --- | --- |
+//! | Ordinary [`Chunk::exec`], [`Chunk::eval`], or [`Function::call`] | Completed guest writes remain, including when Rust result conversion fails. There is no staged-record transaction. | Existing live handles remain valid; no automatic reset. |
+//! | [`Chunk::install`] or [`Rustia::install`] | The candidate's guest changes roll back; no candidate exports are published. Previously installed exports and functions are preserved. | Prior handles remain valid; no automatic reset. |
+//! | [`Rustia::invoke`] or [`Rustia::invoke_into`] | No staged records publish. Completed guest writes remain unless covered by an installation savepoint; [`Invocation::install`] adds that guest-state rollback boundary. | Handles that predate the invocation remain valid; no automatic reset. Call [`Rustia::reset_decision`] when fresh guest state is required. |
+//! | Hardened [`Rustia::invoke_entry_into`] | No new records remain in the caller's lane, and decision-local guest state is discarded. | Resets after success and failure; prior live handles become stale. The host-owned [`CompiledEntry`] remains reusable. |
+//!
+//! The runnable [hardened-decision example] shows a successful decision, a
+//! record-limit failure with no new records, and reuse after automatic reset.
+//!
+//! A guest error caught by `pcall` is different from an escaping error: if the
+//! invocation succeeds, records from earlier completed callbacks can publish.
+//! A failing callback discards its own staged records.
+//!
+//! Ordinary script errors do not poison the interpreter. A contained host
+//! callback panic does: further guest execution requires a successful
+//! [`Rustia::reset_decision`]. Panic containment requires an unwinding build;
+//! an aborting build terminates or traps. Resource failures can also prevent
+//! further work until the exhausted budget is restored or the decision is reset;
+//! inspect [`Error::as_vm_error`] and [`VmError::kind`] rather than treating every
+//! error as poisoning.
+//!
+//! Reset discards guest state and invalidates live handles; it does not undo
+//! host I/O, callback-capture changes, [`HostMut`] writes, or Rust payload
+//! mutations. Object payloads are released on reset rather than restored to an
+//! earlier value. Host-owned copies of returned data remain usable. See
+//! [`Rustia::reset_decision`] for what configuration survives, and the
+//! [hot-reload example] for keeping the old module after a rejected candidate.
 //!
 //! # Defaults and values
 //!
 //! [`Rustia::builder`] uses [`RustiaBuilder::standard`]: repeatable defaults with
 //! platform output support. Choose [`RustiaBuilder::live`] for real clocks,
 //! randomness, and runtime compilation, or [`RustiaBuilder::deterministic`] to
-//! reject providers and callbacks declared nondeterministic. Callbacks must
-//! honour their declared capabilities; Rustia cannot inspect captured Rust state.
+//! reject providers and callbacks declared nondeterministic.
 //!
 //! Choose how data crosses the Rust/script boundary:
 //!
@@ -64,6 +120,12 @@
 //! remaining work before a stable 1.0 contract.
 //!
 //! [first-release checklist]: https://github.com/slowchop/rustia/blob/main/design/92-first-release.md
+//! [embedding example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs
+//! [mutable-object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs
+//! [typed-invocation example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs
+//! [game-object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs
+//! [hot-reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
+//! [hardened-decision example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs
 
 #[cfg(doctest)]
 mod brand_contract;

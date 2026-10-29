@@ -20,6 +20,14 @@ evidence, not an anonymously accessible public verification service. The
 entry-point/reference fixes and prioritized reader-facing additions and cuts;
 API-reference completion remains open.
 
+**Practical embedding recipes (2026-10-29):** the crate introduction now compares
+callback-state choices and the failure/reuse boundaries of ordinary execution,
+installation, typed invocations and hardened entries. The correctness-only
+`hardened_decision` example uses one compiled entry for success, bounded record
+overflow without publication, and reuse after automatic reset. It is part of
+release preflight. These additions explain existing contracts; browser setup and
+the broader API-reference gaps in [100](100-documentation-review.md) remain open.
+
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
 The cleaned repository's hosted correctness profile is active; public benchmark
@@ -807,8 +815,9 @@ unreachable suspended-coroutine frames.
    The run used a simplified protocol without the paired qualification, idle gate or cooldowns; those
    should be wired into a runner workflow before it becomes the standing protocol.
 4. **Advance the `bench/` crate into the standalone OSS benchmark project** — [`80-bench-suite.md`](80-bench-suite.md).
-   This checkout's hosted source profile pauses measurement and publication until a trusted private bridge
-   exists. The operational description below records the predecessor private pipeline and retained history;
+   This checkout's hosted source profile keeps public measurement automation and publication paused.
+   A separate private bridge admits reviewed, manually dispatched exact-cohort comparisons only; see [81](81-benchmark-operations.md).
+   The operational description below records the predecessor private pipeline and retained history;
    its workflow names and automatic triggers are not active in this repository.
    The runner already exposes the requested engine matrix, five default workloads, 20 workload entries including
    source-covered `string_building` and six memory probes, a coherent Linux-only JSONL result snapshot, package metadata, split notes,
@@ -884,8 +893,9 @@ unreachable suspended-coroutine frames.
 6. **Keep the executable conformance corpus green**. The current repo has 726 executable fixtures covering 520
    behavior refs with no pending rows: 708/502 are Luau 0.709 oracle-backed and 18/18 are offline PUC 5.1.5
    oracle-backed. New engine work should add focused fixtures rather than re-opening pending inventory.
-7. **Keep benchmark operations paused in this checkout** until a trusted private bridge exists; leave new
-   measurements pending. The remaining paragraph records the predecessor pipeline's operational baseline:
+7. **Keep public benchmark automation and publication paused in this checkout.** The private bridge
+   admits reviewed manual exact-cohort comparisons only; those results remain private and do not update
+   public history or authorize public claims. The remaining paragraph records the predecessor pipeline's operational baseline:
    one owned, attested machine times everything; the shared pool times nothing. `ci-bench` is the sole timing authority, qualified by properties that are checked rather than
    asserted: cores held off the scheduler, SMT disabled, each pinned core held at its ceiling with boost off,
    timed work pinned to one isolated core, one job on
@@ -1096,7 +1106,7 @@ invocation, and a separately versioned guest ABI.
 | [`75-embedded-api.md`](75-embedded-api.md) | Grabby-Compatible Embedded API: public facade + typed schema/context transaction | **transactional install, coherent execution API, and synchronous function construction implemented** ✅ |
 | [`76-koto-migration.md`](76-koto-migration.md) | public migration guide from koto-shaped embeddings to the implemented rustia facade | **first slice** |
 | [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md) | frozen stateless authoritative guest surface, direct compiled entries, and fast isolated reset | **implemented v1** ✅ |
-| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/report implemented; hosted correctness profile active; measurement/publication paused pending private bridge; standalone split pending** |
+| [`80-bench-suite.md`](80-bench-suite.md) | continuous perf-bench suite + CI matrix design | **runner/adapters/history/report implemented; hosted correctness active; public automation/publication paused; private manual cohorts available; standalone split pending** |
 | [`90-release-readiness.md`](90-release-readiness.md) | public crate metadata, publish gates, benchmark/CI gates, and release process checklist | **metadata/checklist/changelog/preflight/CI gates started; publish=false remains** |
 | [`91-semver-policy.md`](91-semver-policy.md) | public crate roles, stability tiers, release-line rules, and publish order | **policy started; 0.0.x remains unstable** |
 | [`crate-metadata.json`](crate-metadata.json) | generated cargo metadata policy audit for all workspace packages | **current audit: 8 packages / metadata policy ok / publish=false** |
@@ -1148,6 +1158,7 @@ The review is actioned (all 8 folded in above + into the docs). The honest resid
 
 These span the remaining engine hardening and product/release work. The architecture decisions are
 complete, but implementation is not release-complete. The cross-engine, conformance, and benchmark gates are
-already implemented. This checkout runs hosted correctness and committed-artifact checks; fresh performance
-measurements and publication are paused until a trusted private `ci-bench` bridge exists. Leave measurement
-requirements pending. Local timings and the retired cloud lifecycle are not release evidence.
+already implemented. This checkout runs hosted correctness and committed-artifact checks. The private
+`ci-bench` bridge admits reviewed manual exact-cohort comparisons; public history measurement,
+landscape refresh and publication remain paused. Bridge availability alone closes no measurement
+requirement and authorizes no public claim. Local timings and the retired cloud lifecycle are not release evidence.

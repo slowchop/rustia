@@ -16,7 +16,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 - [history-projection.json](./history-projection.json) maps the frozen private history to its cleaned projection and fingerprints protected runtime inputs; [public-source-profile.json](./public-source-profile.json) selects hosted correctness CI, keeps public benchmark automation paused, and records the private bridge's exact-cohort-only availability. Original signatures and private metadata bytes are not authenticated by the projection.
 - Benchmark graph publication ordering, host-control investigation and history presentation: [99-benchmark-history-integrity.md](./99-benchmark-history-integrity.md).
 - Latest reviewed host-calibration result used by the graph: [99-benchmark-host-calibration.json](./99-benchmark-host-calibration.json). This is a dated review record, not a live runner-health feed or a replacement for the control ledger.
-- Human documentation audit and add/change/cut recommendations: [100-documentation-review.md](./100-documentation-review.md). This is a dated review, not a separate status authority or contribution policy.
+- Human documentation audit, completed practical embedding recipes and remaining add/change/cut recommendations: [100-documentation-review.md](./100-documentation-review.md). This is a dated review, not a separate status authority or contribution policy.
 - Progress renderer: [render-progress.js](./render-progress.js), input [progress.json](./progress.json), generated output [progress.html](./progress.html).
 
 ## Invariants
