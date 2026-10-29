@@ -25,14 +25,17 @@ serves them.
 ## Benchmark policy
 
 - This checkout uses the hosted correctness profile in `design/public-source-profile.json`.
-  Benchmark measurement and publication workflows are paused until a trusted private bridge exists.
-  Keep measurements pending; the owned-host pipeline descriptions record the predecessor repository.
-
+  Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
+  Its correctness workflows and public coordinator provide no timing authority.
+- A separate private maintainer bridge is available only for manually dispatched,
+  reviewed exact-cohort runtime comparisons on `ci-bench`. Keep its outputs private and
+  review raw data independently before accepting a comparison. Bridge availability is
+  not a performance result; private comparisons do not update public history or authorize public claims.
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
 - Local compilation, correctness tests, and static validation are allowed, but their durations must not be treated or reported as performance evidence.
-- Obtain performance measurements by pushing a branch, opening a pull request, and using the PR's `ci-bench` workflow.
-- Only `ci-bench` results may be reported as benchmark evidence or used to update benchmark results and performance claims.
-- If `ci-bench` is unavailable, report the benchmark as pending; never substitute a local run.
+- Obtain measurements through the separate private maintainer bridge; pushing a source PR
+  here does not run benchmarks. Only authorized `ci-bench` results count as performance evidence.
+- If that measurement service is unavailable, report the benchmark as pending; never substitute a local run.
 
 ## Pull request delivery
 

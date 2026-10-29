@@ -22,8 +22,8 @@ API-reference completion remains open.
 
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
-The cleaned repository's hosted correctness profile is active; benchmark workflows
-and publication are paused, and main protection/auto-merge settings are not enabled.
+The cleaned repository's hosted correctness profile is active; public benchmark
+automation and publication are paused, and main protection/auto-merge settings are not enabled.
 Retained memory cohorts do not satisfy four intended protocol requirements:
 null-control-adjusted retention, anonymous-memory area, a separate warmup process,
 and a bounded idle/collection opportunity before the quiescent marker. These remain
@@ -41,16 +41,21 @@ package-release requirements remain in force. The source-access audit and
 remaining visibility gates are recorded in
 [98-public-source-readiness.md](98-public-source-readiness.md).
 
-**Full-history source projection (2026-10-28):** the user selected a new repository
-with the complete cleaned history; the existing repository stays private. Local
+**Full-history source projection (2026-10-28; bridge status updated
+2026-10-29):** the user selected a new repository with the complete cleaned
+history; the existing repository stays private. Local
 preparation preserves the frozen 1,004-commit graph and attribution, with an
 explicit old-to-new map and protected runtime-input checks. Rewritten signatures
 are not retained. The prepared public profile uses hosted correctness CI and
-pauses benchmark automation pending a trusted bridge. The private staging
+keeps public per-commit/history measurement, landscape refresh, and publication
+paused. A separate private maintainer bridge is available only for manually
+dispatched, reviewed exact-cohort runtime comparisons. Those results remain
+private, do not update public history, and do not authorize public performance
+claims. Bridge availability alone does not establish a performance result. The private staging
 repository received the verified history with Actions disabled during import.
 Its active profile uses hosted correctness CI and the ordinary exact-commit
 push guard; the one-time bootstrap code remains only in history. Public visibility, package
-publication and benchmark automation remain disabled. See
+publication and public benchmark automation remain disabled. See
 [98](98-public-source-readiness.md#full-history-projection-rehearsal-2026-10-28).
 
 **Benchmark history follow-up:** local fixes sequence graph publication after

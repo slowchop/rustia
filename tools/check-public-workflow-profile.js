@@ -54,6 +54,10 @@ const FORBIDDEN_WORKFLOW_TEXT = Object.freeze([
   "twine upload",
 ]);
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+const BENCHMARK_BRIDGE_STATES = Object.freeze([
+  "pending-private-trusted-pipeline",
+  "private-maintainer-cohorts-v1",
+]);
 
 function reject(message) {
   throw new Error(message);
@@ -241,7 +245,7 @@ function checkErrorFuzz(text) {
 function validatePublicProfile({ profile, files, workflows }) {
   if (profile?.schema !== "rustia.public-source-profile.v1" || profile?.state !== "private-rehearsal" ||
       !FULL_COMMIT.test(profile.historical_head ?? "") || profile.historical_host_label !== "ci-bench" ||
-      profile.benchmark_bridge !== "pending-private-trusted-pipeline" || profile.package_publication !== false ||
+      !BENCHMARK_BRIDGE_STATES.includes(profile.benchmark_bridge) || profile.package_publication !== false ||
       profile.visibility_authorized !== false) {
     reject("design/public-source-profile.json must be the valid private-rehearsal public-source profile");
   }
@@ -300,12 +304,16 @@ function selfTest(root) {
   };
   try {
     assert.deepEqual(run(), { files: 2, profile: "private-rehearsal" });
+    assert.deepEqual(run({ ...profile, benchmark_bridge: "private-maintainer-cohorts-v1" }), {
+      files: 2, profile: "private-rehearsal",
+    });
     expectFail("extra workflow", () => run(profile, [...files, "main-bench.yml"], workflows), /active workflows must be exactly/);
     expectFail("missing workflow", () => run(profile, ["ci.yml"], workflows), /active workflows must be exactly/);
     expectFail("bad marker", () => run({ ...profile, state: "public" }), /valid private-rehearsal/);
     for (const [label, key, value] of [
       ["bad historical label", "historical_host_label", "runner.internal"],
-      ["missing private bridge", "benchmark_bridge", "enabled"],
+      ["unknown private bridge state", "benchmark_bridge", "enabled"],
+      ["arbitrary bridge state", "benchmark_bridge", "available"],
       ["package publication", "package_publication", true],
       ["visibility authorization", "visibility_authorized", true],
     ]) {

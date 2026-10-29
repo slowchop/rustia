@@ -39,7 +39,7 @@ EGM maps explain code boundaries. They do not need to become another end-user gu
 | Public error variants and diagnostic fields lacked explanations. | Document triggers, units, missing/truncated data, reporting limits and reset guidance; add a bounded fuel-error example. | Source and existing recovery tests; independent review corrected rejected-change wording and fallback report-budget scope. |
 | Readers had to infer data ownership and threading rules. | Add owned/live/Serde choices, define reset generation, and state the worker-local VM rule. | Existing value and VM contracts; no API or implementation changes. |
 | The design index repeated obsolete counts, rollout labels and research claims. | Categorize links and remove duplicate live-status claims. | Current status remains in CURRENT; specs, raw research and acceptance evidence remain linked. |
-| Benchmark instructions implied local timings and active source workflows. | Put paused source automation and CI-only measurements first; label historical/private protocols. | [Source profile](public-source-profile.json) and project benchmark policy. |
+| Benchmark instructions implied local timings and active source workflows. | Put paused public benchmark automation and CI-only measurements first; distinguish available private manual runtime comparisons from public history and publication. | [Source profile](public-source-profile.json) and project benchmark policy. |
 
 The concurrent [design/source drift review](../2026-10-29_DRIFT_REPORT.md) is retained alongside this review. Integration keeps its protocol gaps and contract corrections; the README source-reference policy has one implementation, with current-path coverage added to its existing reachable-commit checks.
 

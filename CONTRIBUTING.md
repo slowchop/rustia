@@ -46,11 +46,14 @@ more disk space than the focused tests.
 **Do not run benchmarks on your development machine.** This includes
 `cargo bench`, benchmark examples, profiling, and quick timing comparisons. Local
 builds, correctness tests, and static checks are allowed; their elapsed times are
-not performance evidence. This source repository currently has hosted correctness
-CI and no `ci-bench` workflow. Measurement and publication automation are paused
-pending a trusted private benchmark bridge. Only accepted `ci-bench` results can
-support speed claims or benchmark updates; leave measurements pending while that
-service is unavailable.
+not performance evidence. This source repository has hosted correctness CI only,
+with no `ci-bench` workflow or private runner access. Trusted maintainers can
+manually review and dispatch exact-cohort runtime comparisons through a separate
+private bridge. Its outputs remain private and require independent raw-data review
+before acceptance; they do not update public history or authorize public claims.
+Automatic per-commit/history measurement, landscape refresh, and publication remain
+paused. Only accepted `ci-bench` results can support performance decisions; bridge
+availability alone is not a result.
 
 ## Find your way around
 

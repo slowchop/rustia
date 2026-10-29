@@ -211,10 +211,12 @@ identifiers remain valid. This check is part of the full preflight inventory.
 The explicit [public source profile](public-source-profile.json) prepares hosted
 correctness jobs and bounded fuzz checks. It has no benchmark timing authority,
 publication lane, repository write credentials, or persistent private runner
-access. The rendered benchmark page labels its data as historical and the
-public benchmark bridge as pending. The original private benchmark pipeline is
-unchanged. A future trusted bridge needs separate design and authorization;
-opening the source does not require rebuilding that infrastructure first.
+access. The rendered benchmark page labels its data as historical; automatic
+public measurement, history refresh and publication remain paused. The separate
+[private maintainer bridge](#private-maintainer-cohort-bridge-status-2026-10-29)
+is available for reviewed manual runtime comparisons only. Broader automation
+still needs separate design and authorization; source access does not authorize
+that expansion or public performance claims.
 
 The user authorized the private staging repository and its Actions-disabled
 initial transfer. The repository was verified private, empty and Actions-disabled
@@ -225,3 +227,19 @@ were compared with the reviewed inventory and a fresh clone was inspected.
 Hosted correctness checks gate acceptance of staged revisions, with exact CI
 evidence retained privately. The repository remains private and packages remain
 unpublished; this is not supported-release acceptance or a visibility decision.
+
+## Private maintainer cohort bridge status (2026-10-29)
+
+A separate private maintainer bridge is available for manually dispatched,
+reviewed exact-cohort runtime comparisons only. It does not add a timing
+authority, runner, credential, or benchmark workflow to the public source
+repository. Public correctness workflows remain hosted and read-only. The
+public coordinator continues to refuse benchmark commands, and automatic
+per-commit/history measurement, landscape refresh, and publication remain
+paused.
+
+The bridge stores comparison output privately. It does not update public
+history or authorize public claims. Comparisons require independent raw-data
+review before acceptance. The profile state records this narrow bridge
+availability, not a successful run, a current performance result, or a change
+to source visibility or package publication.

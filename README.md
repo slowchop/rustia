@@ -253,8 +253,11 @@ Source preparation: this cleaned-history candidate is not yet public. Packages
 remain unpublished at 0.0.1. Historical benchmark records retain their original
 source IDs through the history projection (`design/history-projection.json`);
 redacted metadata has separate hashes and original commit signatures do not
-survive the rewrite. The prepared hosted CI checks correctness; new performance
-measurements await a trusted private bridge. See `design/98-public-source-readiness.md` in the source checkout.
+survive the rewrite. Hosted CI checks correctness. Maintainers can manually
+review and dispatch exact-cohort runtime comparisons through a separate private
+bridge. Outputs remain private; public benchmark history and publication stay
+paused. Bridge availability does not establish a new performance result. See
+`design/98-public-source-readiness.md` in the source checkout.
 
 Source visibility does not establish an outside contribution or support policy.
 That policy is undecided; this repository does not currently invite pull

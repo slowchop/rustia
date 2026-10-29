@@ -2,16 +2,20 @@
 
 ## Measurement policy and paused source profile
 
-This source checkout uses hosted correctness CI. Benchmark automation is paused
-pending a trusted private bridge; it has no `ci-bench` measurement workflow.
-Displayed results are retained historical evidence, not a current host-health
-or repeatability guarantee. See [CURRENT](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) and the
+This source checkout uses hosted correctness CI only, with no `ci-bench`
+measurement workflow or private runner access. A separate private maintainer
+bridge permits manually dispatched, reviewed exact-cohort runtime comparisons.
+Its outputs remain private; automatic per-commit/history measurement, landscape
+refresh, and publication remain paused. Private comparisons do not update public
+history or authorize public claims. Displayed results remain historical evidence,
+not a current host-health or repeatability guarantee. See
+[CURRENT](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) and the
 [source profile](https://github.com/slowchop/rustia/blob/main/design/public-source-profile.json).
 
 **Do not run timings or profiling on a development machine.** This includes
 benchmark binaries, examples, Wasm timing scripts, and ad hoc comparisons.
-Only `ci-bench` results count as performance evidence. Leave new measurements
-pending while that service is unavailable.
+Only `ci-bench` results count as performance evidence. Bridge comparisons require
+independent raw-data review before acceptance; availability alone is not a result.
 
 The measurement commands and workflow names below document retained protocols
 and the historical private coordinator. Timing commands are reference material
