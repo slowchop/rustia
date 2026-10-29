@@ -11634,16 +11634,19 @@ impl Vm {
     ) -> Result<Option<LeafCallOutcome>> {
         let outcome = match plan {
             LeafCallPlan::UpvalueCounter { .. } => {
-                let Some(value) = self.heap.capture_get(first_capture) else {
+                // This leaf always mutates its first capture. Reject immutable
+                // direct captures before reading capture values; a cell read
+                // also validates that the handle is still live.
+                let Some(value_cell) = first_capture.cell() else {
+                    return Ok(None);
+                };
+                let Some(value) = self.heap.upvalue_get(value_cell) else {
                     return Ok(None);
                 };
                 let Some(step) = self.heap.capture_get(second_capture) else {
                     return Ok(None);
                 };
                 let (Some(value), Some(step)) = (value.as_number(), step.as_number()) else {
-                    return Ok(None);
-                };
-                let Some(value_cell) = first_capture.cell() else {
                     return Ok(None);
                 };
                 let next = Value::number(binary(NumericOp::Add, value, step));
@@ -30913,6 +30916,76 @@ mod inline_cache_tests {
         assert_eq!(fast.dynamic_programs[0].closure_call_guard_exits, 0);
         assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 0);
         assert_eq!(interpreted.dynamic_programs[0].closure_call_fast_entries, 0);
+    }
+
+    #[test]
+    fn upvalue_counter_requires_live_mutable_first_capture_before_reading_step() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let value_cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let plan = LeafCallPlan::UpvalueCounter {
+            value_upvalue: 0,
+            step_upvalue: 1,
+        };
+        let before_instructions = vm.executed_instructions;
+
+        // A direct first capture cannot be mutated. It falls back before the
+        // step is inspected, whether that capture is valid or stale.
+        for second in [
+            FunctionCapture::direct(Value::number(2.0)),
+            FunctionCapture::from_cell(u32::MAX),
+        ] {
+            assert!(vm
+                .try_leaf_call_outcome(plan, FunctionCapture::direct(Value::number(5.0)), second,)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+                Some(7.0)
+            );
+        }
+
+        // A stale mutable-cell handle also falls back without touching state.
+        assert!(vm
+            .try_leaf_call_outcome(
+                plan,
+                FunctionCapture::from_cell(u32::MAX),
+                FunctionCapture::direct(Value::number(2.0)),
+            )
+            .unwrap()
+            .is_none());
+
+        // A valid first cell with a nonnumeric second capture must not mutate.
+        assert!(vm
+            .try_leaf_call_outcome(
+                plan,
+                FunctionCapture::from_cell(value_cell),
+                FunctionCapture::direct(Value::boolean(false)),
+            )
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+            Some(7.0)
+        );
+
+        let outcome = vm
+            .try_leaf_call_outcome(
+                plan,
+                FunctionCapture::from_cell(value_cell),
+                FunctionCapture::direct(Value::number(2.0)),
+            )
+            .unwrap()
+            .expect("live mutable counter capture");
+        assert_eq!(outcome.first.as_number(), Some(9.0));
+        assert!(outcome.second.is_nil());
+        assert_eq!(outcome.mutation_cell, value_cell);
+        assert_eq!(outcome.result_count, 1);
+        assert_eq!(outcome.instruction_count, 8);
+        assert_eq!(
+            vm.heap.upvalue_get(value_cell).and_then(Value::as_number),
+            Some(9.0)
+        );
+        assert_eq!(vm.executed_instructions, before_instructions);
     }
 
     #[test]

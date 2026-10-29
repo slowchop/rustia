@@ -731,6 +731,14 @@ case uses a fresh standard VM, performs the full-N warmup on that VM, then calls
 again, matching the warmed sample lifecycle. It excludes the separate cold
 metric and does not recover path counts from earlier benchmark binaries.
 
+**Mutable-cell guard ordering candidate (2026-10-30).** The `UpvalueCounter`
+leaf now checks that its first capture is a live mutable cell before reading
+the second capture. This removes the later duplicate first-capture cell-kind
+guard while retaining stale-handle, numeric, mutation, result, and instruction
+accounting fallbacks. Synthetic VM tests cover direct/stale captures and valid
+mutation. This is a source-shape experiment only; it requires separate paired
+CI evidence before any performance conclusion.
+
 **Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
 the prize was bounded before committing to the rewrite. Both arms disable deterministic collection
 (`deterministic_gc_interval = u64::MAX`), which lets a build whose `update_current_gc_roots` body is a bare
