@@ -46,6 +46,8 @@ These documents describe contracts and intent. Use the code, tests, and
 These retain the revisions, methods, and limitations of particular reviews. A
 passing historical experiment does not establish a current release or a new performance claim.
 
+- [2026-10-30 — Pre-compaction CURRENT snapshot](CURRENT-2026-10-30-snapshot.md):
+  original chronology and status text retained verbatim; historical, not current authority.
 - [2026-10-29 — Design/source drift review](../2026-10-29_DRIFT_REPORT.md): applied
   documentation corrections and remaining memory-protocol requirements.
 
