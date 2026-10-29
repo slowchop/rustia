@@ -33,7 +33,9 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
 
 The latest [drift report](./2026-10-29_DRIFT_REPORT.md) records this static design/source audit,
-applied corrections and remaining memory-protocol requirements; it is not release acceptance.
+applied corrections and memory-protocol gaps at the audit date. The prospective v2 fixes and
+pending measurement acceptance are tracked in [memory benchmarking](./design/57-memory-benchmarking.md).
+The drift report is not release acceptance.
 
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).

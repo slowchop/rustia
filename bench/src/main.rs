@@ -331,6 +331,7 @@ struct Config {
     check_history: bool,
     refresh_results: bool,
     memory_child: bool,
+    memory_null_control: bool,
     memory_epochs: usize,
 }
 
@@ -363,6 +364,7 @@ impl Default for Config {
             check_history: false,
             refresh_results: false,
             memory_child: false,
+            memory_null_control: false,
             memory_epochs: 1,
         }
     }
@@ -730,6 +732,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             "--check-history" => config.check_history = true,
             "--refresh-results" => config.refresh_results = true,
             "--memory-child" => config.memory_child = true,
+            "--memory-null-control" => config.memory_null_control = true,
             "--no-history" => config.history = None,
             "--no-results" => config.results = None,
             "--no-latest-json" => config.latest_json = None,
@@ -871,6 +874,9 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Config> {
             _ => return Err(Error::new(format!("unknown argument {arg:?}"))),
         }
     }
+    if config.memory_null_control && !config.memory_child {
+        return Err(Error::new("--memory-null-control requires --memory-child"));
+    }
     Ok(config)
 }
 
@@ -891,6 +897,7 @@ fn print_usage() {
     println!("  --check-history");
     println!("  --refresh-results");
     println!("  --memory-child");
+    println!("  --memory-null-control  prepare/warm normally; skip guest work in epochs");
     println!("  --memory-epochs <positive integer>");
     println!("  --engines rustia,koto,mlua-luau");
     println!("  --workloads dense_tables,sparse_tables,closures_upvalues,generic_iteration,stdlib_math_table");
@@ -906,6 +913,18 @@ fn print_usage() {
     println!("  --no-history");
     println!("  --no-results");
     println!("  --no-latest-json");
+}
+
+fn memory_epoch_checksum(
+    null_control: bool,
+    warm_checksum: &str,
+    run: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    if null_control {
+        Ok(warm_checksum.to_owned())
+    } else {
+        run()
+    }
 }
 
 fn run_memory_child(config: &Config) -> Result<()> {
@@ -960,8 +979,9 @@ fn run_memory_child(config: &Config) -> Result<()> {
     let mut emit = |phase: &str, epoch: Option<usize>, checksum: Option<&str>| -> Result<()> {
         sequence += 1;
         let value = serde_json::json!({
-            "schema_version": 1,
-            "schema": "rustia.bench.memory-child-event.v1",
+            "schema_version": 2,
+            "schema": "rustia.bench.memory-child-event.v2",
+            "null_control": config.memory_null_control,
             "sequence": sequence,
             "phase": phase,
             "epoch": epoch,
@@ -1016,7 +1036,9 @@ fn run_memory_child(config: &Config) -> Result<()> {
     wait("warmed")?;
 
     for epoch in 1..=config.memory_epochs {
-        let checksum = prepared.run(n)?;
+        let checksum = memory_epoch_checksum(config.memory_null_control, &warm_checksum, || {
+            prepared.run(n)
+        })?;
         emit("epoch", Some(epoch), Some(&checksum))?;
         wait("epoch")?;
     }
@@ -3360,6 +3382,36 @@ mod tests {
         let error = parse_args(["--fixed-n".to_owned(), "0".to_owned()].into_iter())
             .expect_err("zero fixed n should fail");
         assert!(error.to_string().contains("greater than zero"));
+    }
+
+    #[test]
+    fn null_control_never_executes_epoch_work() {
+        let mut calls = 0;
+        let checksum = memory_epoch_checksum(true, "warm", || {
+            calls += 1;
+            Ok("work".to_owned())
+        })
+        .expect("control checksum");
+        assert_eq!(checksum, "warm");
+        assert_eq!(calls, 0);
+        let checksum = memory_epoch_checksum(false, "warm", || {
+            calls += 1;
+            Ok("work".to_owned())
+        })
+        .expect("work checksum");
+        assert_eq!(checksum, "work");
+        assert_eq!(calls, 1);
+        assert!(memory_epoch_checksum(false, "warm", || Err(Error::new("failed"))).is_err());
+        assert!(parse_args(["--memory-null-control".to_owned()].into_iter()).is_err());
+        let config = parse_args(
+            [
+                "--memory-child".to_owned(),
+                "--memory-null-control".to_owned(),
+            ]
+            .into_iter(),
+        )
+        .expect("memory control flags");
+        assert!(config.memory_null_control);
     }
 
     #[test]

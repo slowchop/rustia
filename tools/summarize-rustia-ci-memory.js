@@ -5,6 +5,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { rowProtocol, retainedMetric, requireSingleProtocol } = require("../bench/memory-protocol.js");
+
 const METRICS = [
   ["peak_delta_kib", "Peak Δ", "KiB", false],
   ["quiescent_retained_delta_anon_kib", "Retained Δ", "KiB", false],
@@ -70,6 +72,8 @@ function identity(row) {
     row.workload,
     row.n,
     row.epochs,
+    row.host ?? "",
+    rowProtocol(row),
   ].join("\0");
 }
 
@@ -108,6 +112,7 @@ function summarize(current, history) {
   // dashboard's business, not this table's.
   const currentRows = current.rows.filter((row) => row.engine === "rustia");
   if (currentRows.length === 0) fail("current CI memory result contains no Rustia rows");
+  requireSingleProtocol(currentRows, "memory summary");
   const cohortId = current.metadata?.cohort_id;
   const previousRows = new Map();
   let comparisonCohort = null;
@@ -140,8 +145,9 @@ function summarize(current, history) {
     const before = previousRows.get(identity(row));
     if (!before) continue;
     for (const [metric, label, unit, higherIsBetter] of METRICS) {
-      const beforeValue = median(before, metric);
-      const afterValue = median(row, metric);
+      const key = metric === "quiescent_retained_delta_anon_kib" ? retainedMetric(row) : metric;
+      const beforeValue = median(before, key);
+      const afterValue = median(row, key);
       lines.push(
         `| ${row.workload} | ${label} (${unit}) | ${formatValue(beforeValue, unit)} | ` +
           `${formatValue(afterValue, unit)} | ${formatChange(beforeValue, afterValue, higherIsBetter)} |`,

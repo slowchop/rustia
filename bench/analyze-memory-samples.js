@@ -7,6 +7,7 @@ const path = require("path");
 
 const RAW_SCHEMA = "rustia.bench.memory-raw.v1";
 const ANALYSIS_SCHEMA = "rustia.bench.memory-analysis.v1";
+const { MEMORY_PROTOCOL, QUIESCENCE_MS } = require("./memory-protocol.js");
 const DEFAULT_BOOTSTRAP_REPETITIONS = 20_000;
 const DEFAULT_BOOTSTRAP_SEED = 1_381_323_604;
 const DEFAULT_ABSOLUTE_GROWTH_KIB_PER_EPOCH = 4;
@@ -168,12 +169,12 @@ function theilSen(points) {
   return median(slopes);
 }
 
-function memoryAreaKibSeconds(timeline, baselineBytes, startMs, endMs) {
+function memoryAreaKibSeconds(timeline, baselineBytes, startMs, endMs, field = "current_bytes") {
   const points = timeline
     .filter((point) => point.elapsed_ms >= startMs && point.elapsed_ms <= endMs)
     .map((point) => ({
       x: finite(point.elapsed_ms, "timeline.elapsed_ms"),
-      y: Math.max(0, nonnegative(point.current_bytes, "timeline.current_bytes") - baselineBytes) / 1024,
+      y: Math.max(0, nonnegative(point[field], `timeline.${field}`) - baselineBytes) / 1024,
     }));
   if (points.length < 2) return 0;
   let area = 0;
@@ -211,7 +212,8 @@ function workloadPeakDeltaKib(raw, spawnedBaselineBytes) {
 }
 
 function sampleMetrics(raw, file) {
-  if (raw?.schema_version !== 1 || raw?.schema !== RAW_SCHEMA) fail(`${file} has the wrong raw schema`);
+  const corrected = raw?.schema_version === 2 && raw?.schema === "rustia.bench.memory-raw.v2";
+  if (!corrected && (raw?.schema_version !== 1 || raw?.schema !== RAW_SCHEMA)) fail(`${file} has the wrong raw schema`);
   if (!Array.isArray(raw.events) || !Array.isArray(raw.timeline)) fail(`${file} lacks events/timeline`);
   if (typeof raw.sample_id !== "string" || raw.sample_id === "") fail(`${file} lacks sample_id`);
   const { identity } = raw;
@@ -228,6 +230,7 @@ function sampleMetrics(raw, file) {
   const quiescent = phaseEvent(raw, "quiescent");
   const dropped = phaseEvent(raw, "dropped");
   const epochs = epochEvents(raw);
+  if (corrected) validateCorrectedSample(raw, file, warmed, quiescent, epochs);
   const spawnedAnon = anonKib(spawned, `${raw.sample_id}.spawned`);
   const warmedAnon = anonKib(warmed, `${raw.sample_id}.warmed`);
   const epochPoints = epochs.map((entry) => ({
@@ -276,7 +279,57 @@ function sampleMetrics(raw, file) {
     tail_growth_percent_per_epoch: warmedAnon > 0 ? (slope / warmedAnon) * 100 : 0,
     memory_area_kib_seconds_per_unit: memoryArea / (identity.n * identity.epochs),
     checksum_sequence: checksumSequence,
+    ...(corrected ? {
+      measurement_protocol: MEMORY_PROTOCOL,
+      lane: identity.lane,
+      role: identity.role,
+      round: identity.round,
+      binary_sha256: identity.binary_sha256,
+      anonymous_memory_area_kib_seconds_per_unit: memoryAreaKibSeconds(
+        raw.timeline, spawned.cgroup_memory.stat_bytes.anon, warmed.elapsed_ms, endMs, "anon_bytes",
+      ) / (identity.n * identity.epochs),
+    } : {}),
   };
+}
+
+function validateCorrectedSample(raw, file, warmed, quiescent, epochs) {
+  const identity = raw.identity;
+  if (!/^[0-9a-f]{40}$/.test(identity.commit) || !/^[0-9a-f]{64}$/.test(identity.binary_sha256)) fail(`${file} lacks exact source/binary identity`);
+  if (!["workload", "null-control"].includes(identity.lane) || !["warmup", "measurement"].includes(identity.role)) fail(`${file} has invalid sampling role/lane`);
+  if (!Number.isSafeInteger(identity.round) || identity.round < 0 || (identity.role === "warmup") !== (identity.round === 0)) fail(`${file} has invalid sampling round`);
+  if (raw.protocol?.quiescence_ms !== QUIESCENCE_MS || raw.protocol.forced_collection !== false || raw.protocol.allocator_purge !== false) fail(`${file} has the wrong quiescence policy`);
+  const shape = ["spawned", "prepared", "warmed", ...epochs.map(() => "epoch"), "quiescent", "dropped"];
+  if (JSON.stringify(raw.events.map(entry => entry.event.phase)) !== JSON.stringify(shape)) fail(`${file} has the wrong phase order`);
+  let previous = -1;
+  for (const entry of raw.events) {
+    for (const key of ["target", "dialect", "execution_mode"]) {
+      if (typeof entry.event[key] !== "string" || !entry.event[key] || entry.event[key] !== raw.events[0].event[key]) fail(`${file} changes event ${key}`);
+    }
+    if (nonnegative(entry.elapsed_ms, "phase time") <= previous) fail(`${file} has unordered phase times`);
+    previous = entry.elapsed_ms;
+    if (entry.event.schema !== "rustia.bench.memory-child-event.v2" || entry.event.schema_version !== 2 || entry.event.null_control !== (identity.lane === "null-control")) fail(`${file} child event lane/schema differs`);
+    for (const key of ["engine", "workload", "commit", "n", "epochs"]) {
+      if (entry.event[key] !== identity[key]) fail(`${file} child event ${key} differs`);
+    }
+    nonnegative(entry.cgroup_memory?.stat_bytes?.anon, "phase anonymous bytes");
+    if (entry.process_memory?.smaps_rollup_kib?.swap !== 0 || entry.cgroup_memory?.swap_current_bytes !== 0) fail(`${file} phase used swap`);
+  }
+  if (quiescent.elapsed_ms - epochs.at(-1).elapsed_ms < QUIESCENCE_MS) fail(`${file} lacks the bounded quiescence interval`);
+  previous = -1;
+  for (const point of raw.timeline) {
+    if (nonnegative(point.elapsed_ms, "timeline time") <= previous) fail(`${file} has unordered timeline times`);
+    previous = point.elapsed_ms;
+    nonnegative(point.anon_bytes, "timeline anonymous bytes");
+    nonnegative(point.current_bytes, "timeline current charge");
+  }
+  for (const entry of [warmed, quiescent]) {
+    const endpoint = raw.timeline.find(point => point.elapsed_ms === entry.elapsed_ms);
+    if (!endpoint || endpoint.anon_bytes !== entry.cgroup_memory.stat_bytes.anon || endpoint.current_bytes !== entry.cgroup_memory.current_bytes) fail(`${file} lacks an exact phase timeline endpoint`);
+  }
+  for (const key of ["oom", "oom_kill", "oom_group_kill", "high", "max"]) {
+    if ((raw.final_cgroup?.events?.[key] ?? 0) !== 0) fail(`${file} has contaminated cgroup events`);
+  }
+  if (raw.final_cgroup?.swap_current_bytes !== 0 || raw.final_cgroup?.pressure?.some?.total !== 0 || raw.final_cgroup?.pressure?.full?.total !== 0) fail(`${file} has swap/pressure contamination`);
 }
 
 function median(values) {
@@ -466,10 +519,50 @@ function detectorCoverage(rows) {
   });
 }
 
+function summarizeCorrectedGroup(samples, config) {
+  const lanes = ["workload", "null-control"];
+  const byLane = new Map();
+  const binaries = new Set(samples.map(sample => sample.binary_sha256));
+  if (binaries.size !== 1) fail("matched memory samples use different binaries");
+  if (new Set(samples.map(sample => sample.dialect)).size !== 1) fail("matched memory samples use different dialects");
+  for (const lane of lanes) {
+    const laneSamples = samples.filter(sample => sample.lane === lane);
+    const warmups = laneSamples.filter(sample => sample.role === "warmup");
+    const measured = laneSamples.filter(sample => sample.role === "measurement").sort((a, b) => a.round - b.round);
+    if (warmups.length !== 1) fail(`${lane} requires exactly one separate warmup process`);
+    if (measured.length < Math.max(9, config.minimumSamples)) fail(`${lane} needs at least nine measurement processes`);
+    measured.forEach((sample, index) => {
+      if (sample.round !== index + 1) fail(`${lane} has duplicate or missing measurement rounds`);
+      if (JSON.stringify(sample.checksum_sequence) !== JSON.stringify(warmups[0].checksum_sequence)) fail(`${lane} warmup/measurement checksum sequence differs`);
+    });
+    byLane.set(lane, measured);
+  }
+  const work = byLane.get("workload");
+  const controls = byLane.get("null-control");
+  if (work.length !== controls.length) fail("memory workload/control sample counts differ");
+  // The null lane warms normally, then retains the callable without executing
+  // guest epochs. Its checksum must remain that of the warm invocation.
+  for (const control of controls) {
+    if (!control.checksum_sequence.every(value => value === control.checksum_sequence[0])) fail("null-control executed epoch work");
+  }
+  if (work.some((sample, index) => sample.checksum_sequence[0] !== controls[index].checksum_sequence[0])) fail("paired warm invocation checksums differ");
+  const row = summarizeGroup(work, config);
+  row.measurement_protocol = MEMORY_PROTOCOL;
+  row.control_sample_ids = controls.map(sample => sample.sample_id);
+  row.metrics.null_retained_delta_anon_kib = stats(controls.map(sample => sample.quiescent_retained_delta_anon_kib));
+  row.metrics.control_adjusted_retained_delta_anon_kib = stats(work.map((sample, index) =>
+    sample.quiescent_retained_delta_anon_kib - controls[index].quiescent_retained_delta_anon_kib));
+  row.metrics.anonymous_memory_area_kib_seconds_per_unit = stats(work.map(sample => sample.anonymous_memory_area_kib_seconds_per_unit));
+  return row;
+}
+
 function analyze(config) {
   const samples = config.inputs.map((file) => sampleMetrics(loadJson(file), file));
+  if (new Set(samples.map(sample => sample.sample_id)).size !== samples.length) fail("duplicate memory sample identity");
+  const corrected = samples[0]?.measurement_protocol === MEMORY_PROTOCOL;
+  if (samples.some(sample => (sample.measurement_protocol === MEMORY_PROTOCOL) !== corrected)) fail("cannot mix legacy and v2 raw memory protocols");
   const rows = [...groupBy(samples, groupKey).values()]
-    .map((group) => summarizeGroup(group, config))
+    .map((group) => corrected ? summarizeCorrectedGroup(group, config) : summarizeGroup(group, config))
     .sort(
       (left, right) =>
         left.target.localeCompare(right.target) ||
@@ -478,10 +571,17 @@ function analyze(config) {
     );
   validatePortableChecksums(rows);
   return {
-    schema_version: 1,
-    schema: ANALYSIS_SCHEMA,
+    schema_version: corrected ? 2 : 1,
+    schema: corrected ? "rustia.bench.memory-analysis.v2" : ANALYSIS_SCHEMA,
     generated_at: new Date().toISOString(),
     method: {
+      ...(corrected ? { measurement_protocol: MEMORY_PROTOCOL,
+        quiescence_ms: QUIESCENCE_MS,
+        retained_adjustment: "paired workload minus same-round null-control anonymous delta",
+        anonymous_memory_area: "excess cgroup memory.stat anon above spawned baseline, warmed through quiescent",
+        legacy_memory_area: "total cgroup charge; retained as a separate corroborating metric",
+        warmup_processes_per_case: 2,
+      } : {}),
       primary_phase_memory: "smaps_rollup Anonymous KiB",
       primary_short_spike_memory:
         "resettable cgroup-v2 phase memory.peak when available; whole-sample memory.peak fallback",
@@ -497,6 +597,10 @@ function analyze(config) {
     },
     host: config.host,
     raw_sample_count: samples.length,
+    ...(corrected ? {
+      warmup_sample_count: samples.filter(sample => sample.role === "warmup").length,
+      control_sample_count: samples.filter(sample => sample.role === "measurement" && sample.lane === "null-control").length,
+    } : {}),
     row_count: rows.length,
     detector_coverage: detectorCoverage(rows),
     rows,
@@ -549,9 +653,12 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`analyze-memory-samples: ${error.message}\n`);
-  process.exitCode = 1;
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`analyze-memory-samples: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+module.exports = { analyze, sampleMetrics, memoryAreaKibSeconds, summarizeCorrectedGroup };
