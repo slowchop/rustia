@@ -14,3 +14,4 @@ tools/puc51-oracle/build/
 bench/history/series/*.jsonl
 
 /tools/browser/node_modules/
+/demos/web-live/pkg/

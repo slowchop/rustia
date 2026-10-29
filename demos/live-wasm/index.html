@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Rustia Live Wasm</title>
+    <title>Rustia bare-Wasm demo</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -156,7 +156,7 @@
   <body>
     <div class="shell">
       <header>
-        <h1>Rustia Live Wasm</h1>
+        <h1>Rustia bare-Wasm demo</h1>
         <div id="status" class="status">loading wasm...</div>
       </header>
       <main>
@@ -278,7 +278,7 @@ return t`,
         run();
       } catch (error) {
         statusEl.textContent = "wasm missing";
-        setOutput(`error\n${error.message}\n\nBuild it with:\ncargo build --manifest-path demos/live-wasm/wasm-runner/Cargo.toml --target wasm32-unknown-unknown --release`);
+        setOutput(`error\n${error.message}\n\nBuild it with:\ncargo build --locked --manifest-path demos/live-wasm/wasm-runner/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/live-wasm/wasm-runner/target`);
       }
     </script>
   </body>

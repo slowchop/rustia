@@ -159,6 +159,7 @@ you do not need to read the VM design documents first.
 | Choose globals and a script environment | [Chunk builder](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/chunk_builder.rs) |
 | Borrow application state and collect staged changes | [Typed invocation](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs) |
 | Run a bounded stateless decision and recover after failure | [Hardened decision](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs) |
+| Load Rustia in a browser with JavaScript services | [Browser setup recipe](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md) |
 | Show source-aware script errors | [Diagnostics](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs) |
 
 Run an example with `cargo run --locked -p rustia --example embedding`.
