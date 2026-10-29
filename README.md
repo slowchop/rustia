@@ -149,17 +149,23 @@ you do not need to read the VM design documents first.
 | Task | Example |
 | --- | --- |
 | Run scripts, pass data and call Rust functions | [Embedding](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs) |
-| Give scripts methods on Rust objects | [Game objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs) or [mutable objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs) |
+| Give scripts methods on Rust objects | [Mutable objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs), then [staged game objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs) |
 | Keep shared tables and script functions alive | [Live values](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs) |
 | Load modules through a Rust resolver | [Module resolution](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs) |
 | Replace a script while keeping the old one if loading fails | [Hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs) |
 | Choose globals and a script environment | [Chunk builder](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/chunk_builder.rs) |
 | Borrow application state and collect staged changes | [Typed invocation](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs) |
+| Run a bounded stateless decision and recover after failure | [Hardened decision](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs) |
 | Show source-aware script errors | [Diagnostics](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs) |
 
 Run an example with `cargo run --locked -p rustia --example embedding`.
 Examples with `_bench` in their name are measurement tools; do not run them on
 a development machine.
+
+The crate introduction in the API reference compares callback-state choices and
+failure/reuse rules. The hardened-decision example runs three calls using one
+compiled entry: success, a rejected record overflow, and successful reuse. Each
+call resets its guest state automatically; only successful calls publish commands.
 
 Use `error.report()` for source-aware diagnostics and `error.kind()` to decide
 how your application responds. The

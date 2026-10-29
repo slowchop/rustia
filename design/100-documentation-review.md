@@ -41,7 +41,7 @@ EGM maps explain code boundaries. They do not need to become another end-user gu
 | The design index repeated obsolete counts, rollout labels and research claims. | Categorize links and remove duplicate live-status claims. | Current status remains in CURRENT; specs, raw research and acceptance evidence remain linked. |
 | Benchmark instructions implied local timings and active source workflows. | Put paused source automation and CI-only measurements first; label historical/private protocols. | [Source profile](public-source-profile.json) and project benchmark policy. |
 
-## Add next: explanations that cross API boundaries
+## Explanations that cross API boundaries
 
 ### 1. One complete browser setup recipe
 
@@ -55,23 +55,19 @@ Acceptance: a reader can follow the commands, see a result, and explain whether 
 
 ### 2. A small failure and reuse comparison
 
-Ordinary execution, transactional installation, typed invocations and hardened entries have different failure boundaries. The details exist in [Chunk](../crates/rustia/src/chunk.rs), [Function](../crates/rustia/src/function.rs), [typed invocations](../crates/rustia/src/invocation.rs) and the [hardened tests](../crates/rustia/tests/hardened_leaf.rs). Readers should not need to reconstruct the differences from all four.
+Implemented in the [crate introduction](../crates/rustia/src/lib.rs). The comparison starts with ordinary execution and installation, then covers typed invocations and hardened entries. It identifies guest-write rollback, staged-record publication, handle validity and reset behavior. The accompanying guidance distinguishes ordinary errors from contained host panics and explains why neither reset nor installation undoes host I/O or mutable Rust payload changes.
 
-Add a compact comparison beside the relevant Rustdoc task links: which guest writes survive, when staged records publish, whether handles remain usable, and whether reset is required or automatic. Start with ordinary execution and installation; put the advanced cases after those. Explain that reset does not undo host I/O or Rust payload mutation. Do not imply that every script error poisons the VM.
-
-Acceptance: a reader can choose the right operation and predict what remains after a failure. Reuse existing recovery tests as the source of truth.
+The existing [recovery tests](../crates/rustia/tests/error_recovery.rs), [installation tests](../crates/rustia/tests/transactional_install.rs), [typed invocation tests](../crates/rustia/tests/typed_invocation.rs) and [hardened lifecycle tests](../crates/rustia/tests/support/hardened_transactions.rs) remain the source of truth. This adds guidance, not a new rollback contract.
 
 ### 3. A callback-state choice recipe
 
-Readers can currently discover `add_fn`, `HostFunction`, borrowed `HostContext` and mutable Rust objects only by comparing several references. Add a short choice table with one-sentence reasons and links to the existing examples. Make clear that the engine trusts declared capabilities; it cannot inspect callback captures. Explain `'static` captures versus data borrowed for one invocation.
-
-Start with the simple callback and mutable-object cases. Put typed staged game changes after them. Avoid presenting a multi-associated-type host schema as a prerequisite for calling one Rust method.
+Implemented beside the failure comparison in the [crate introduction](../crates/rustia/src/lib.rs). A choice table links simple callbacks, mutable objects, shared host definitions, borrowed invocation context and staged effects to the existing examples. It explains that `'static` callbacks may own captures, while `HostContext` borrows application data for one call. Declared capabilities remain an embedding trust boundary; Rustia cannot inspect captures for hidden mutable state.
 
 ### 4. A correctness-only hardened-decision example
 
-The existing leaf lifecycle example is a measurement program and cannot be run on a development machine under project policy. A small non-timing example would make the supported workflow accessible: mandatory memory limit, one compiled entry, a successful decision, a bounded failure, no published records after that failure, and the documented reset behavior.
+Implemented as [hardened_decision.rs](../crates/rustia/examples/hardened_decision.rs), linked from README and Rustdoc. Run `cargo run --locked -p rustia --example hardened_decision`. It prints `success: 7; rejected: record limit; recovered: 9; epochs: 3` after checking all three calls. The example sets explicit memory, fuel, record-count and logical-record-byte budgets; reuses one compiled entry; checks that a second staged command exceeds the record budget without publishing either command; and checks automatic reset after success and failure before successful reuse.
 
-Reuse the existing hardened contract tests. Do not introduce a new execution abstraction or a second hardened API.
+Release preflight and `just check-examples` execute this correctness example. It uses the existing entry lifecycle covered by [hardened transaction tests](../crates/rustia/tests/support/hardened_transactions.rs), introduces no API, and takes no timings. The separate `leaf_lifecycle_bench` remains a CI-only measurement program.
 
 ## Change and simplify next
 

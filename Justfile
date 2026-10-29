@@ -93,6 +93,7 @@ check-examples:
     cargo test --locked -p rustia --examples --no-run
     cargo run --locked -p rustia --example game_objects
     cargo run --locked -p rustia --example mutable_objects
+    cargo run --locked -p rustia --example hardened_decision
 
 # Install the full pre-push guard in this checkout.
 install-hooks:

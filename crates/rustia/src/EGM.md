@@ -6,7 +6,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 
 ## Interface
 
-- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc provides a task index and owned/live/Serde value chooser; `Rustia` documents the thread-affine interpreter boundary.
+- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc provides a task index, callback-state chooser, failure/reuse comparison, and owned/live/Serde value chooser; `Rustia` documents the thread-affine interpreter boundary.
 - `Chunk`: named source, optional rooted lexical environment, then `eval`, `eval_live`, `eval_serde`, `exec`, or transactional `install`.
 - `OwnedValue`/`IntoRustia`/`FromRustia`: owned data conversions; `Value` and `Table`: rooted live guest values.
 - `Function`/`Exports` and `HostFunction`: retained script calls and reusable host callbacks.

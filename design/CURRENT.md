@@ -20,6 +20,14 @@ evidence, not an anonymously accessible public verification service. The
 entry-point/reference fixes and prioritized reader-facing additions and cuts;
 API-reference completion remains open.
 
+**Practical embedding recipes (2026-10-29):** the crate introduction now compares
+callback-state choices and the failure/reuse boundaries of ordinary execution,
+installation, typed invocations and hardened entries. The correctness-only
+`hardened_decision` example uses one compiled entry for success, bounded record
+overflow without publication, and reuse after automatic reset. It is part of
+release preflight. These additions explain existing contracts; browser setup and
+the broader API-reference gaps in [100](100-documentation-review.md) remain open.
+
 **Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
 repository for inspection separately from package publication or a supported
 0.1/1.0 release. The user has authorized private staging in a new repository;
