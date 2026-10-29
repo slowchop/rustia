@@ -11424,6 +11424,18 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> Result<Option<ReturnValues>> {
+        Ok(self
+            .try_leaf_bytecode_handle_outcome(kind, handle, depth, fuel)?
+            .map(leaf_outcome_return_values))
+    }
+
+    fn try_leaf_bytecode_handle_outcome(
+        &mut self,
+        kind: FunctionKind,
+        handle: u32,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<Option<LeafCallOutcome>> {
         let FunctionKind::Bytecode {
             program: Some(program_id),
             prototype,
@@ -11463,7 +11475,7 @@ impl Vm {
         // unlike `try_closure_call_scalar`, which records on the caller's.
         #[cfg(any(test, feature = "executor-diagnostics"))]
         self.record_leaf_call_value_entry(program_id);
-        Ok(Some(leaf_outcome_return_values(outcome)))
+        Ok(Some(outcome))
     }
 
     /// `call_units` is what the `Call` instruction at `pc` charges under the
@@ -19866,27 +19878,32 @@ impl Vm {
             // Builtin rejection does not execute guests or mutate the heap.
             // Reuse its resolution, but keep ordinary non-iterator calls on
             // their existing entry path. Both routes use the same executors.
-            if let Some(results) = self.try_leaf_bytecode_handle(kind, handle, depth, fuel)? {
-                VmFlow::Return(results)
-            } else {
-                let (kind, bytecode_data) =
-                    self.heap.function_dispatch_data(handle).ok_or_else(|| {
-                        Error::new(ErrorKind::InvalidProgram {
-                            reason: "function handle is missing",
-                        })
-                    })?;
-                self.call_function_kind_with_site_resumable(
-                    program,
-                    iterator,
-                    handle,
-                    kind,
-                    bytecode_data,
-                    &[state, control],
-                    depth,
-                    None,
-                    fuel,
-                )?
+            if let Some(outcome) =
+                self.try_leaf_bytecode_handle_outcome(kind, handle, depth, fuel)?
+            {
+                if sync_caller_cells {
+                    self.sync_register_cells(registers, register_cells)?;
+                }
+                return apply_call_iterator_outcome(registers, register_cells, window, outcome)
+                    .map(CallIteratorStep::Complete);
             }
+            let (kind, bytecode_data) =
+                self.heap.function_dispatch_data(handle).ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidProgram {
+                        reason: "function handle is missing",
+                    })
+                })?;
+            self.call_function_kind_with_site_resumable(
+                program,
+                iterator,
+                handle,
+                kind,
+                bytecode_data,
+                &[state, control],
+                depth,
+                None,
+                fuel,
+            )?
         } else {
             self.call_value_with_site_resumable(
                 program,
@@ -24647,16 +24664,53 @@ fn apply_call_iterator_results(
     results: &[Value],
 ) -> Result<bool> {
     let first = results.first().copied().unwrap_or_else(Value::nil);
+    apply_call_iterator_values(registers, register_cells, window, first, |index| {
+        results.get(index).copied().unwrap_or_else(Value::nil)
+    })
+}
+
+fn apply_call_iterator_outcome(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    outcome: LeafCallOutcome,
+) -> Result<bool> {
+    let result_count = usize::from(outcome.result_count);
+    if result_count == 0 {
+        // `first` still holds the advanced index used to mutate the captured
+        // cell. It is not a returned value when the iterator is exhausted.
+        return Ok(false);
+    }
+    if result_count > 2 {
+        unreachable!("leaf-call plans return at most two values");
+    }
+    apply_call_iterator_values(
+        registers,
+        register_cells,
+        window,
+        outcome.first,
+        |index| match index {
+            0 => outcome.first,
+            1 if result_count == 2 => outcome.second,
+            _ => Value::nil(),
+        },
+    )
+}
+
+fn apply_call_iterator_values(
+    registers: &mut [Value],
+    register_cells: &mut [Option<u32>],
+    window: CallIteratorRegisters,
+    first: Value,
+    mut result_at: impl FnMut(usize) -> Value,
+) -> Result<bool> {
     if first.kind() == ValueKind::Nil {
         return Ok(false);
     }
 
     set_register(registers, window.control, first)?;
     for index in 0..window.visible_count {
-        let value = results
-            .get(usize::from(index))
-            .copied()
-            .unwrap_or_else(Value::nil);
+        let value = result_at(usize::from(index));
         let register = window.visible_register(index)?;
         set_register(registers, register, value)?;
         clear_register_cell(register_cells, register)?;
@@ -30317,6 +30371,23 @@ mod inline_cache_tests {
         )
     }
 
+    fn closure_call_counter_closure_program() -> Program {
+        let counter = closure_call_counter_program();
+        Program::with_functions(
+            Function::new(
+                vec![
+                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                    Instruction::with_aux(Opcode::LoadFunction, 2, 0, 0, 0),
+                    Instruction::new(Opcode::Return, 2, 1, 0),
+                ],
+                3,
+            ),
+            vec![Constant::Number(0.0), Constant::Number(1.0)],
+            counter.functions,
+        )
+    }
+
     fn closure_call_loop_program() -> Program {
         let mut program = closure_call_counter_program();
         program.main = Function::new(
@@ -30506,6 +30577,267 @@ mod inline_cache_tests {
             fast.executed_instructions,
             interpreted.executed_instructions
         );
+    }
+
+    fn call_iterator_step_with_two_visible_registers(
+        vm: &mut Vm,
+        program: &Program,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+    ) -> Result<CallIteratorStep> {
+        test_execution!(fuel = None);
+        let step = vm.call_iterator_step(CallIteratorStepContext {
+            program,
+            registers,
+            register_cells,
+            window: CallIteratorRegisters::generic(0, 2)?,
+            depth: 0,
+            fuel: &mut fuel,
+            invalid_callee: InvalidIteratorCallee::Call,
+            sync_caller_cells: true,
+        })?;
+        let request = match step {
+            CallIteratorStep::Call(request) => request,
+            other => return Ok(other),
+        };
+        let results = vm.call_value_with_site(
+            program,
+            request.callee,
+            &request.args,
+            request.depth,
+            request.call_site,
+            &mut fuel,
+        )?;
+        vm.sync_register_cells(registers, register_cells)?;
+        apply_call_iterator_results(
+            registers,
+            register_cells,
+            CallIteratorRegisters::generic(0, 2)?,
+            &results,
+        )
+        .map(CallIteratorStep::Complete)
+    }
+
+    fn iterator_registers(iterator: Value) -> Vec<Value> {
+        vec![
+            iterator,
+            Value::nil(),
+            Value::nil(),
+            Value::number(88.0),
+            Value::number(99.0),
+        ]
+    }
+
+    fn settle_iterator_leaf_vm(vm: &mut Vm, roots: &[Value]) {
+        vm.executed_instructions = vm.next_weak_collection_instruction;
+        vm.maybe_collect_with_roots(roots).unwrap();
+    }
+
+    fn assert_iterator_state_matches(
+        fast_registers: &[Value],
+        interpreted_registers: &[Value],
+        fast_cells: &[Option<u32>],
+        interpreted_cells: &[Option<u32>],
+    ) {
+        assert_eq!(fast_registers.len(), interpreted_registers.len());
+        for (fast, interpreted) in fast_registers.iter().zip(interpreted_registers) {
+            assert_eq!(fast.kind(), interpreted.kind());
+            assert_eq!(fast.as_number(), interpreted.as_number());
+            assert_eq!(fast.is_nil(), interpreted.is_nil());
+        }
+        assert_eq!(
+            fast_cells.iter().map(Option::is_some).collect::<Vec<_>>(),
+            interpreted_cells
+                .iter()
+                .map(Option::is_some)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn iterator_leaf_outcome_handoff_matches_return_values_for_two_and_zero_results() {
+        let program = closure_call_array_iterator_closure_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_iterator = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        interpreted.tape_mode = TapeTestMode::Off;
+        let interpreted_iterator = interpreted.run(&program).unwrap();
+
+        let fast_index_cell = fast
+            .heap
+            .function_capture(fast_iterator.as_function().unwrap(), 0)
+            .and_then(FunctionCapture::cell)
+            .unwrap();
+        let interpreted_index_cell = interpreted
+            .heap
+            .function_capture(interpreted_iterator.as_function().unwrap(), 0)
+            .and_then(FunctionCapture::cell)
+            .unwrap();
+        let fast_visible_cell = fast.heap.alloc_upvalue(Value::number(77.0)).unwrap();
+        let interpreted_visible_cell = interpreted.heap.alloc_upvalue(Value::number(77.0)).unwrap();
+        let mut fast_registers = iterator_registers(fast_iterator);
+        let mut interpreted_registers = iterator_registers(interpreted_iterator);
+        let mut fast_cells = vec![None; fast_registers.len()];
+        let mut interpreted_cells = vec![None; interpreted_registers.len()];
+        fast_cells[1] = Some(fast_index_cell);
+        interpreted_cells[1] = Some(interpreted_index_cell);
+        fast_cells[4] = Some(fast_visible_cell);
+        interpreted_cells[4] = Some(interpreted_visible_cell);
+        settle_iterator_leaf_vm(
+            &mut fast,
+            &[fast_iterator, Value::capture_cell(fast_visible_cell)],
+        );
+        settle_iterator_leaf_vm(
+            &mut interpreted,
+            &[
+                interpreted_iterator,
+                Value::capture_cell(interpreted_visible_cell),
+            ],
+        );
+
+        for (advanced, expected_index, first, second) in [
+            (true, 1.0, 1.0, 10.0),
+            (true, 2.0, 2.0, 20.0),
+            (false, 3.0, 77.0, 20.0),
+        ] {
+            // On exhaustion, restore a caller cell in a visible slot. The
+            // no-result path syncs it but leaves it attached, as before.
+            if !advanced {
+                fast_cells[3] = Some(fast_visible_cell);
+                interpreted_cells[3] = Some(interpreted_visible_cell);
+                fast_registers[3] = Value::number(-1.0);
+                interpreted_registers[3] = Value::number(-1.0);
+            }
+            let fast_step = call_iterator_step_with_two_visible_registers(
+                &mut fast,
+                &program,
+                &mut fast_registers,
+                &mut fast_cells,
+            )
+            .unwrap();
+            let interpreted_step = call_iterator_step_with_two_visible_registers(
+                &mut interpreted,
+                &program,
+                &mut interpreted_registers,
+                &mut interpreted_cells,
+            )
+            .unwrap();
+            assert!(matches!(fast_step, CallIteratorStep::Complete(value) if value == advanced));
+            assert!(
+                matches!(interpreted_step, CallIteratorStep::Complete(value) if value == advanced)
+            );
+            assert_iterator_state_matches(
+                &fast_registers,
+                &interpreted_registers,
+                &fast_cells,
+                &interpreted_cells,
+            );
+            assert_eq!(fast_registers[1].as_number(), Some(expected_index));
+            assert_eq!(
+                fast_registers[2].as_number(),
+                Some(if advanced { expected_index } else { 2.0 })
+            );
+            assert_eq!(fast_registers[3].as_number(), Some(first));
+            assert_eq!(fast_registers[4].as_number(), Some(second));
+            assert_eq!(
+                fast.executed_instructions,
+                interpreted.executed_instructions
+            );
+        }
+        assert_eq!(fast_cells[3], Some(fast_visible_cell));
+        assert_eq!(fast_cells[4], None);
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 3);
+        assert_eq!(interpreted.dynamic_programs[0].leaf_call_value_entries, 0);
+    }
+
+    #[test]
+    fn iterator_leaf_outcome_handoff_pads_one_result_and_clears_visible_cells() {
+        let program = closure_call_counter_closure_program();
+        let mut fast = Vm::new(Profile::ReproducibleStandard);
+        fast.closure_call_mode = ClosureCallTestMode::Force;
+        let fast_iterator = fast.run(&program).unwrap();
+        let mut interpreted = Vm::new(Profile::ReproducibleStandard);
+        interpreted.closure_call_mode = ClosureCallTestMode::Off;
+        interpreted.tape_mode = TapeTestMode::Off;
+        let interpreted_iterator = interpreted.run(&program).unwrap();
+
+        let fast_index_cell = fast
+            .heap
+            .function_capture(fast_iterator.as_function().unwrap(), 0)
+            .and_then(FunctionCapture::cell)
+            .unwrap();
+        let interpreted_index_cell = interpreted
+            .heap
+            .function_capture(interpreted_iterator.as_function().unwrap(), 0)
+            .and_then(FunctionCapture::cell)
+            .unwrap();
+        let fast_first_cell = fast.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let fast_second_cell = fast.heap.alloc_upvalue(Value::number(8.0)).unwrap();
+        let interpreted_first_cell = interpreted.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let interpreted_second_cell = interpreted.heap.alloc_upvalue(Value::number(8.0)).unwrap();
+        let mut fast_registers = iterator_registers(fast_iterator);
+        let mut interpreted_registers = iterator_registers(interpreted_iterator);
+        let mut fast_cells = vec![None; fast_registers.len()];
+        let mut interpreted_cells = vec![None; interpreted_registers.len()];
+        fast_cells[1] = Some(fast_index_cell);
+        interpreted_cells[1] = Some(interpreted_index_cell);
+        fast_cells[3] = Some(fast_first_cell);
+        fast_cells[4] = Some(fast_second_cell);
+        interpreted_cells[3] = Some(interpreted_first_cell);
+        interpreted_cells[4] = Some(interpreted_second_cell);
+        settle_iterator_leaf_vm(
+            &mut fast,
+            &[
+                fast_iterator,
+                Value::capture_cell(fast_first_cell),
+                Value::capture_cell(fast_second_cell),
+            ],
+        );
+        settle_iterator_leaf_vm(
+            &mut interpreted,
+            &[
+                interpreted_iterator,
+                Value::capture_cell(interpreted_first_cell),
+                Value::capture_cell(interpreted_second_cell),
+            ],
+        );
+
+        let fast_step = call_iterator_step_with_two_visible_registers(
+            &mut fast,
+            &program,
+            &mut fast_registers,
+            &mut fast_cells,
+        )
+        .unwrap();
+        let interpreted_step = call_iterator_step_with_two_visible_registers(
+            &mut interpreted,
+            &program,
+            &mut interpreted_registers,
+            &mut interpreted_cells,
+        )
+        .unwrap();
+        assert!(matches!(fast_step, CallIteratorStep::Complete(true)));
+        assert!(matches!(interpreted_step, CallIteratorStep::Complete(true)));
+        assert_iterator_state_matches(
+            &fast_registers,
+            &interpreted_registers,
+            &fast_cells,
+            &interpreted_cells,
+        );
+        assert_eq!(fast_registers[1].as_number(), Some(1.0));
+        assert_eq!(fast_registers[2].as_number(), Some(1.0));
+        assert_eq!(fast_registers[3].as_number(), Some(1.0));
+        assert!(fast_registers[4].is_nil());
+        assert_eq!(fast_cells[3], None);
+        assert_eq!(fast_cells[4], None);
+        assert_eq!(
+            fast.executed_instructions,
+            interpreted.executed_instructions
+        );
+        assert_eq!(fast.dynamic_programs[0].leaf_call_value_entries, 1);
+        assert_eq!(interpreted.dynamic_programs[0].leaf_call_value_entries, 0);
     }
 
     #[test]

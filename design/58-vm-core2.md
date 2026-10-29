@@ -1024,6 +1024,19 @@ caller-cell synchronization and result application remain in their existing path
 The error-precedence regression covers invalid state/control registers, missing
 handles, depth exhaustion and built-in table errors without capture mutation.
 
+### Iterator leaf outcome handoff
+
+The iterator path applies the existing guarded leaf replay's fixed
+`LeafCallOutcome` directly to its result registers, avoiding `ReturnValues`
+materialization on that path. Other leaf callers keep the existing
+`ReturnValues` wrapper. A zero-result outcome still mutates the captured index
+but ends iteration; a nil first result ends iteration without writing visible
+registers. Successful results retain control assignment, visible-slot nil
+padding, caller-cell synchronization, and visible-cell clearing order. Admission
+guards, instruction accounting, and the leaf-entry census remain in the shared
+path. Correctness checks are focused; this candidate requires separate paired
+CI evidence before performance acceptance.
+
 
 ### Visible vector-key insertion probe (reverted)
 

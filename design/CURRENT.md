@@ -714,6 +714,10 @@ unreachable suspended-coroutine frames.
    runtime-error-phase edges, and close the full native/browser correctness-build-golden matrix without adding
    developer-machine timings to benchmark history.
 3. **Continue measured performance work** using [`56-performance-research.md`](56-performance-research.md).
+   The iterator-only leaf outcome handoff applies fixed leaf results directly to
+   iterator registers while ordinary leaf callers retain `ReturnValues`; it
+   preserves the shared admission/accounting path and requires separate paired
+   CI evidence before performance acceptance (see [`58-vm-core2.md`](58-vm-core2.md)).
    The dense-table, constant field/namecall, shared-string, HotIR, and closure-call slices now have accepted
    Linux evidence; the cached length-boundary slice was exactly gated, falsified (no win on dense or
    sparse), and reverted. Region Engine v1 is implemented as private effect-certified consecutive-instruction
