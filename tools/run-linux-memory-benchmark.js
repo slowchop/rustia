@@ -23,6 +23,7 @@ const EXPORT_ARCHIVE = path.join(ROOT, "export.tar.gz");
 const RUN_LOG = path.join(ROOT, "run.log");
 const EVIDENCE_ROOT = path.join(ROOT, "memory-evidence");
 const PROTOCOL = "cross_engine_memory_v1";
+const CORRECTED_PROTOCOL = "cross_engine_memory_v2";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -161,6 +162,7 @@ function validateConfig(config) {
     "memory_analyzer",
     "memory_cohort",
     "memory_publisher",
+    ...(config.measurement?.protocol === CORRECTED_PROTOCOL ? ["memory_protocol"] : []),
     "memory_history_before",
     "memory_current_before",
   ], "source.expected_sha256");
@@ -170,6 +172,7 @@ function validateConfig(config) {
   const measurement = object(config.measurement, "measurement");
   exactKeys(measurement, [
     "protocol",
+    ...(measurement.protocol === CORRECTED_PROTOCOL ? ["warmup_rounds", "quiescence_ms"] : []),
     "cohort_id",
     "samples",
     "bootstrap_repetitions",
@@ -179,7 +182,8 @@ function validateConfig(config) {
     "sample_timeout_ms",
     "groups",
   ], "measurement");
-  if (measurement.protocol !== PROTOCOL) fail(`measurement.protocol must be ${PROTOCOL}`);
+  if (![PROTOCOL, CORRECTED_PROTOCOL].includes(measurement.protocol)) fail("unsupported memory protocol");
+  if (measurement.protocol === CORRECTED_PROTOCOL && (measurement.warmup_rounds !== 1 || measurement.quiescence_ms !== 100)) fail("v2 memory protocol requires one warmup round and 100 ms quiescence");
   integer(measurement.samples, "measurement.samples", 9);
   integer(measurement.bootstrap_repetitions, "measurement.bootstrap_repetitions", 1000);
   integer(measurement.bootstrap_seed, "measurement.bootstrap_seed", 0);
@@ -230,6 +234,7 @@ function verifySource(config, bundle) {
     memory_analyzer: "bench/analyze-memory-samples.js",
     memory_cohort: "bench/run-memory-cohort.js",
     memory_publisher: "bench/publish-memory-analysis.js",
+    ...(config.measurement.protocol === CORRECTED_PROTOCOL ? { memory_protocol: "bench/memory-protocol.js" } : {}),
     memory_history_before: "bench/memory/history/runs.jsonl",
     memory_current_before: "bench/memory/current-results.json",
   };
@@ -396,7 +401,8 @@ function hostLabel(config) {
 function memoryProtocol(config) {
   const measurement = config.measurement;
   return {
-    schema: "rustia.bench.memory-protocol.v1",
+    schema: config.measurement.protocol === CORRECTED_PROTOCOL ? "rustia.bench.memory-protocol.v2" : "rustia.bench.memory-protocol.v1",
+    ...(measurement.protocol === CORRECTED_PROTOCOL ? { warmup_rounds: measurement.warmup_rounds, quiescence_ms: measurement.quiescence_ms } : {}),
     cohort_id: measurement.cohort_id,
     commit: config.source.benchmark_commit,
     samples: measurement.samples,
@@ -527,13 +533,14 @@ function assertCgroupCapability(source) {
 
 async function execute(configFile, providerFile, bundle) {
   if (process.platform !== "linux") fail("memory runner requires Linux");
+  const config = validateConfig(loadJson(configFile, "protocol config"));
+  if (config.measurement.protocol !== CORRECTED_PROTOCOL) fail("legacy memory protocol is read-only; freeze a v2 candidate before measuring");
+  const provider = object(loadJson(providerFile, "provider metadata"), "provider metadata");
   fs.mkdirSync(ROOT, { recursive: true });
   acquireLock();
   resetWorkingState();
   fs.writeFileSync(RUN_LOG, "", { mode: 0o600 });
   logReady = true;
-  const config = validateConfig(loadJson(configFile, "protocol config"));
-  const provider = object(loadJson(providerFile, "provider metadata"), "provider metadata");
   const evidenceDirectory = EVIDENCE_ROOT;
   let status = {
     schema: "rustia.bench.cloud-run-status.v1",
@@ -703,6 +710,15 @@ function selfTest() {
     );
   }
   assert.equal(memoryProtocol(dedicated).host.name, "ci-bench");
+  const v2Config = { ...dedicated, source: { ...dedicated.source, expected_sha256: {
+    ...dedicated.source.expected_sha256, memory_protocol: "a".repeat(64),
+  } }, measurement: { ...dedicated.measurement, protocol: CORRECTED_PROTOCOL,
+    warmup_rounds: 1, quiescence_ms: 100 } };
+  assert.equal(validateConfig(v2Config), v2Config);
+  assert.equal(memoryProtocol(v2Config).schema, "rustia.bench.memory-protocol.v2");
+  assert.equal(memoryProtocol(v2Config).quiescence_ms, 100);
+  assert.throws(() => validateConfig({ ...v2Config, measurement: { ...v2Config.measurement, quiescence_ms: 0 } }), /quiescence/);
+
   assert.equal(memoryProtocol(rented).host.name, hostLabel(rented));
   // A rented config that cannot name its class is refused before it can label
   // a row "linode-undefined-undefined".

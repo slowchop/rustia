@@ -7,6 +7,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 ## Interface
 
 - Canonical state: [CURRENT.md](./CURRENT.md).
+- Memory measurement contracts, v1 historical semantics and v2 controls/warmups/quiescence: [57-memory-benchmarking.md](./57-memory-benchmarking.md). Fresh measured acceptance remains separate from synthetic correctness tests.
 - Architecture: [30-architecture.md](./30-architecture.md).
 - Error and fuzzing contract: [82-error-behaviour-fuzzing.md](./82-error-behaviour-fuzzing.md).
 - Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).

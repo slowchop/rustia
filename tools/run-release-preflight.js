@@ -158,6 +158,7 @@ node("tools/run-linux-matrix-benchmark.js", "self-test");
 node("tools/land-matrix-publication.js", "self-test");
 node("bench/run-memory-supervisor.js", "self-test");
 node("bench/analyze-memory-samples.js", "self-test");
+run("node", ["--test", "bench/memory-protocol.test.js"]);
 node("bench/run-memory-cohort.js", "self-test");
 node("bench/publish-memory-analysis.js", "self-test");
 node("tools/run-linux-memory-benchmark.js", "self-test");

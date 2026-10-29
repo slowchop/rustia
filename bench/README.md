@@ -103,12 +103,17 @@ pending/ready dashboard integration are now implemented; the published cohort is
 cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes) among them, were removed on
 2026-09-06. Throughput and instrumented memory measurements remain separate.
 
-The cohort machinery does not complete the intended memory protocol. The
-[remaining requirements](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#4-published-metrics)
-include null-control-adjusted retention, anonymous-memory area, a separate
-warmup process, and a bounded idle/collection opportunity before the quiescent
-marker. Existing rows retain their recorded metrics and values; protocol changes
-need versioning and fresh accepted evidence before claiming those requirements.
+The four protocol gaps now have prospective v2 implementation:
+[matched no-work controls, anonymous-memory area, separate warmup processes and a
+bounded natural-idle interval](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#protocol-v2-matched-controls-and-bounded-natural-idle).
+Each case retains two warmups plus nine workload/control pairs; warmups are excluded
+from statistics. Adjusted retention subtracts each same-round control before summary.
+The supervisor holds every child idle for 100 ms before its quiescent marker.
+Historical rows retain their recorded metrics and values; protocol changes
+use explicit v2 schemas/row metadata and cannot be mixed with legacy comparisons.
+Synthetic correctness tests pass without taking local measurements; fresh memory
+acceptance remains pending an authorized memory lane. The current private bridge
+supports runtime A/B comparisons only.
 
 ```sh
 just bench-memory-self-test

@@ -6,6 +6,16 @@
 
 ## One-paragraph state
 
+**Memory benchmark protocol v2 (2026-10-30):** the four drift findings now have
+prospective implementation and correctness coverage: paired no-work controls with
+subtraction before summary, anonymous-charge integration with exact phase endpoints,
+separate warmup processes retained outside statistics, and a common 100 ms natural-idle
+interval before quiescent sampling. New evidence declares `cross_engine_memory_v2`;
+historical v1 calculations remain unchanged and unlike protocols cannot share a
+comparison. See [57](57-memory-benchmarking.md). No fresh memory cohort has been
+measured or accepted. The available private bridge is runtime-comparison-only, so
+memory measurement/publication remains pending and no performance claim is made.
+
 **Documentation and repository identity (2026-10-29):** the cleaned source
 repository is `slowchop/rustia`; the original private repository is
 `slowchop/rustia-historic`. Both remain private and packages remain unpublished.
@@ -50,9 +60,10 @@ The cleaned repository's hosted correctness profile is active; public benchmark
 automation and publication are paused, and main protection/auto-merge settings are not enabled.
 Retained memory cohorts do not satisfy four intended protocol requirements:
 null-control-adjusted retention, anonymous-memory area, a separate warmup process,
-and a bounded idle/collection opportunity before the quiescent marker. These remain
-prospective protocol work under [57](57-memory-benchmarking.md); historical values
-and thresholds are unchanged. This audit adds no runtime or performance acceptance.
+and a bounded idle/collection opportunity before the quiescent marker. Those were
+open at the audit date and are now implemented prospectively by protocol v2 above;
+fresh measured acceptance remains pending. Historical values and thresholds are
+unchanged. The audit itself adds no runtime or performance acceptance.
 
 **Source-access preparation (2026-10-27, updated 2026-10-29):** prepare the
 repository for inspection separately from package publication or a supported
