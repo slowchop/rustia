@@ -65,7 +65,7 @@
 //! | --- | --- | --- |
 //! | Ordinary [`Chunk::exec`], [`Chunk::eval`], or [`Function::call`] | Completed guest writes remain, including when Rust result conversion fails. There is no staged-record transaction. | Existing live handles remain valid; no automatic reset. |
 //! | [`Chunk::install`] or [`Rustia::install`] | The candidate's guest changes roll back; no candidate exports are published. Previously installed exports and functions are preserved. | Prior handles remain valid; no automatic reset. |
-//! | [`Rustia::invoke`] or [`Rustia::invoke_into`] | No staged records publish. Completed guest writes remain unless covered by an installation savepoint; [`Invocation::install`] adds that guest-state rollback boundary. | No automatic reset; call [`Rustia::reset_decision`] when fresh guest state is required. |
+//! | [`Rustia::invoke`] or [`Rustia::invoke_into`] | No staged records publish. Completed guest writes remain unless covered by an installation savepoint; [`Invocation::install`] adds that guest-state rollback boundary. | Handles that predate the invocation remain valid; no automatic reset. Call [`Rustia::reset_decision`] when fresh guest state is required. |
 //! | Hardened [`Rustia::invoke_entry_into`] | No new records remain in the caller's lane, and decision-local guest state is discarded. | Resets after success and failure; prior live handles become stale. The host-owned [`CompiledEntry`] remains reusable. |
 //!
 //! The runnable [hardened-decision example] shows a successful decision, a
