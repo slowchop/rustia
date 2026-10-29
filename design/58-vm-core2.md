@@ -715,6 +715,11 @@ includes `GetIndex`/`SetIndex` unconditionally, plus every call, global access, 
 | `dense_tables` | 222,933 | 86 | 1,290 | 0.006 |
 | `array_mutation` | 166,786 | 16 | 240 | 0.001 |
 
+The current implementation keeps this refresh's memory accounting local: when the cached control census is
+clean, it adjusts live bytes by the root vector's length delta rather than recounting unchanged call-frame
+fields. Dirty accounting still uses the existing full cached census. Root contents, copy order, and collection
+boundaries are unchanged. This is a bookkeeping change only; it has no performance acceptance yet.
+
 **Ceiling on the phase, computed before building it (local screen, 2026-08-26).** Counts are not time, so
 the prize was bounded before committing to the rewrite. Both arms disable deterministic collection
 (`deterministic_gc_interval = u64::MAX`), which lets a build whose `update_current_gc_roots` body is a bare

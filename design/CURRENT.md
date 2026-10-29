@@ -597,7 +597,10 @@ facility is finished. The highest-impact gaps are:
    enforces that logical-live boundary with one forced-collection retry, catchable OOM, preflight for large
    string/table/buffer requests, and candidate-before-commit growing table writes. Heap stores and loaded
    programs maintain live totals; VM control state uses a cached aggregate with local refresh after structural
-   changes. Quota admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
+   changes. Current GC root refreshes adjust that cached live total by the root-vector length delta when the
+   census is clean; dirty state still defers to the exact cached census. This changes accounting work only,
+   not root contents, order, fuel, or collection boundaries, and has no performance acceptance yet. Quota
+   admission and ordinary instruction boundaries therefore avoid a whole-VM census, while exact
    reserved telemetry remains on demand. Script-visible `gcinfo`/`collectgarbage("count")` read that same
    maintained logical-live total. Public retained-root registry nodes are also admitted against the quota and
    fail atomically rather than letting live-handle creation cross the boundary. Exact-commit Linode cohort

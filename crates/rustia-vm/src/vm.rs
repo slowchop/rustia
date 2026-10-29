@@ -15247,13 +15247,22 @@ impl Vm {
         {
             self.gc_root_refreshes = self.gc_root_refreshes.saturating_add(1);
         }
-        let _copied = self.mutate_last_call_stack_frame(|frame| {
+        let _copied = self.call_stack.last_mut().map(|frame| {
+            let before_live_bytes = frame.roots.len().saturating_mul(size_of::<Value>());
             frame.roots.clear();
             frame.roots.extend_from_slice(registers);
             extend_capture_cell_roots(&mut frame.roots, register_cells);
             frame.roots.extend_from_slice(varargs);
             frame.roots.extend_from_slice(pending_return_prefixes);
-            frame.roots.len() as u64
+            let copied = frame.roots.len() as u64;
+            if !self.control_memory_dirty {
+                let after_live_bytes = frame.roots.len().saturating_mul(size_of::<Value>());
+                self.control_live_bytes = self
+                    .control_live_bytes
+                    .saturating_sub(before_live_bytes)
+                    .saturating_add(after_live_bytes);
+            }
+            copied
         });
         #[cfg(any(test, feature = "executor-diagnostics"))]
         {
@@ -33639,4 +33648,125 @@ fn escaped_deferred_call() -> Error {
     Error::new(ErrorKind::InvalidProgram {
         reason: "internal bytecode call escaped its trampoline",
     })
+}
+
+#[cfg(test)]
+mod gc_root_accounting_tests {
+    use super::*;
+
+    fn exact_control_live_bytes(vm: &Vm) -> usize {
+        let mut usage = MemoryUsage::default();
+        add_vm_cached_control_memory(vm, &mut usage);
+        usage.live_bytes
+    }
+
+    fn vm_with_root_frame() -> Vm {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.call_stack.push(CallStackFrame {
+            program: None,
+            function: None,
+            debug_name: Some("root-frame".to_owned()),
+            environment: vm.globals,
+            thread_environment: vm.globals,
+            module_cohort: 0,
+            call_site: Some(ErrorLocation {
+                source: Arc::from("root-accounting-test"),
+                line: 1,
+            }),
+            roots: vec![Value::number(1.0), Value::number(2.0)],
+            stackless_roots: vec![Value::number(3.0); 4],
+            stackless_debug_frames: Vec::new(),
+        });
+        vm.mark_control_memory_dirty();
+        vm.sync_control_memory();
+        vm
+    }
+
+    fn refresh(vm: &mut Vm, registers: &[Value], varargs: &[Value]) {
+        vm.update_current_gc_roots(registers, &[], varargs, &[]);
+        if !vm.control_memory_dirty {
+            assert_eq!(vm.control_live_bytes, exact_control_live_bytes(vm));
+        }
+    }
+
+    fn assert_roots(vm: &Vm, expected: &[Value]) {
+        let actual = &vm.call_stack[0].roots;
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            if let Some(number) = expected.as_number() {
+                assert_eq!(actual.as_number(), Some(number));
+            } else {
+                assert_eq!(actual.as_capture_cell(), expected.as_capture_cell());
+            }
+        }
+    }
+
+    #[test]
+    fn root_refresh_accounting_matches_full_census_for_grow_shrink_and_same_length() {
+        let mut vm = vm_with_root_frame();
+        let first_cell = vm.heap.alloc_upvalue(Value::number(7.0)).unwrap();
+        let second_cell = vm.heap.alloc_upvalue(Value::number(8.0)).unwrap();
+        let third_cell = vm.heap.alloc_upvalue(Value::number(9.0)).unwrap();
+        let first_cell_root = Value::capture_cell(first_cell);
+        let second_cell_root = Value::capture_cell(second_cell);
+        let third_cell_root = Value::capture_cell(third_cell);
+        vm.sync_control_memory();
+
+        // Grow, then shrink, then replace roots without changing the count. The
+        // latter two calls must still copy the root values unchanged.
+        vm.update_current_gc_roots(
+            &[Value::number(10.0), Value::number(11.0)],
+            &[Some(first_cell), None, Some(second_cell)],
+            &[Value::number(12.0)],
+            &[Value::number(13.0)],
+        );
+        assert_eq!(vm.control_live_bytes, exact_control_live_bytes(&vm));
+        assert_roots(
+            &vm,
+            &[
+                Value::number(10.0),
+                Value::number(11.0),
+                first_cell_root,
+                second_cell_root,
+                Value::number(12.0),
+                Value::number(13.0),
+            ],
+        );
+
+        vm.update_current_gc_roots(&[Value::number(20.0)], &[Some(first_cell)], &[], &[]);
+        assert_eq!(vm.control_live_bytes, exact_control_live_bytes(&vm));
+        assert_roots(&vm, &[Value::number(20.0), first_cell_root]);
+
+        vm.update_current_gc_roots(&[Value::number(30.0)], &[Some(third_cell)], &[], &[]);
+        assert_eq!(vm.control_live_bytes, exact_control_live_bytes(&vm));
+        assert_roots(&vm, &[Value::number(30.0), third_cell_root]);
+        assert_eq!(vm.gc_root_refreshes, 3);
+        assert_eq!(vm.gc_root_values_copied, 10);
+    }
+
+    #[test]
+    fn root_refresh_preserves_dirty_and_missing_frame_accounting_paths() {
+        let mut vm = vm_with_root_frame();
+        vm.mark_control_memory_dirty();
+        let stale_live_bytes = vm.control_live_bytes;
+
+        refresh(&mut vm, &[Value::number(40.0); 3], &[]);
+        assert!(vm.control_memory_dirty);
+        assert_eq!(vm.control_live_bytes, stale_live_bytes);
+
+        vm.sync_control_memory();
+        assert_eq!(vm.control_live_bytes, exact_control_live_bytes(&vm));
+
+        vm.call_stack.clear();
+        vm.mark_control_memory_dirty();
+        vm.sync_control_memory();
+        let live_bytes_without_frame = vm.control_live_bytes;
+        let refreshes_before = vm.gc_root_refreshes;
+        let copied_before = vm.gc_root_values_copied;
+        refresh(&mut vm, &[Value::number(50.0)], &[]);
+        assert!(!vm.control_memory_dirty);
+        assert_eq!(vm.control_live_bytes, live_bytes_without_frame);
+        assert_eq!(vm.gc_root_refreshes, refreshes_before + 1);
+        assert_eq!(vm.gc_root_values_copied, copied_before);
+    }
 }
