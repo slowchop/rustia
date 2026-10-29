@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rustia browser embedding example</title>
+  </head>
+  <body>
+    <h1>Rustia browser embedding example</h1>
+    <p>The script returns a number here and prints a message in the browser console.</p>
+    <button id="run" type="button" disabled>Run example</button>
+    <output id="result" aria-live="polite">Loading Wasm…</output>
+    <script type="module">
+      import init, { run_example } from "./pkg/rustia_example.js";
+
+      const button = document.querySelector("#run");
+      const result = document.querySelector("#result");
+      button.addEventListener("click", () => {
+        try {
+          result.textContent = `Result: ${run_example()}`;
+        } catch (error) {
+          result.textContent = `Script failed: ${String(error)}`;
+        }
+      });
+
+      try {
+        // Initialize wasm-bindgen's JavaScript imports before calling Rust.
+        await init();
+        result.textContent = "Ready";
+        button.disabled = false;
+      } catch (error) {
+        result.textContent = `Setup failed: ${String(error)}`;
+      }
+    </script>
+  </body>
+</html>

@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth for "where the project actually is."** Other design docs are
 > staged snapshots and may lag; where they disagree with this file, **this file wins.** (Created 2026-06-30 to
-> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-29.)
+> fix version-drift flagged by 3rd-party review finding H1; updated 2026-10-30.)
 
 ## One-paragraph state
 
@@ -25,8 +25,17 @@ callback-state choices and the failure/reuse boundaries of ordinary execution,
 installation, typed invocations and hardened entries. The correctness-only
 `hardened_decision` example uses one compiled entry for success, bounded record
 overflow without publication, and reuse after automatic reset. It is part of
-release preflight. These additions explain existing contracts; browser setup and
-the broader API-reference gaps in [100](100-documentation-review.md) remain open.
+release preflight. These additions explain existing contracts; the broader
+API-reference gaps in [100](100-documentation-review.md) remain open.
+
+**Browser embedding recipe (2026-10-30):** [the standalone application](../demos/web-live/README.md)
+documents the pinned Rust/wasm-bindgen build, generated JavaScript initialization,
+loopback HTTP server, returned value and console output. It keeps default
+`web-live` adapters and explicitly selects bounded `live()` execution; the
+existing raw-Wasm demo remains standard-profile and silent. Local Playwright
+1.64.1/WebKit 27.2 executed two calls and a reload, verifying returned `42` and
+`Hello from Luau` output. The existing hosted WebKit gate builds and executes
+this recipe. This is correctness evidence, not timing or Safari/mobile acceptance.
 
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).

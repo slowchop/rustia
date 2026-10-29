@@ -188,6 +188,13 @@ function checkCi(text) {
     safeDirectory,
     browserCommand,
   ].join("\n"), `${label} webkit-runtime`);
+  requireText(webkit, [
+    "      - name: Execute documented browser embedding example",
+    "        run: |",
+    "          cargo build --locked --manifest-path demos/web-live/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/web-live/target",
+    "          wasm-bindgen --target web --out-dir demos/web-live/pkg --out-name rustia_example demos/web-live/target/wasm32-unknown-unknown/release/rustia_web_live_example.wasm",
+    "          node tools/browser/web-live-example.cjs",
+  ].join("\n"), `${label} web-live recipe`);
   for (const textFragment of [
     "name: Engine build (${{ matrix.target }})",
     "aarch64-apple-darwin",
@@ -332,6 +339,8 @@ function selfTest(root) {
       ["enabled build cache", "ci.yml", (s) => s.replace("cache: false", "cache: true"), /cache: false/],
       ["missing preflight aggregate", "ci.yml", (s) => s.replace("run: test \"$PREFLIGHT_RESULT\" = success && test \"$WEBKIT_RESULT\" = success", "run: true"), /run: test.*PREFLIGHT_RESULT/],
       ["missing WebKit safe-directory setup", "ci.yml", (s) => s.replace('          git config --global --add safe.directory "$GITHUB_WORKSPACE"\n', ""), /safe\.directory/],
+      ["missing browser recipe build", "ci.yml", (s) => s.replace("cargo build --locked --manifest-path demos/web-live/Cargo.toml", "true"), /web-live recipe/],
+      ["missing browser recipe execution", "ci.yml", (s) => s.replace("node tools/browser/web-live-example.cjs", "true"), /web-live recipe/],
       [
         "wildcard WebKit safe-directory setup",
         "ci.yml",
@@ -342,7 +351,7 @@ function selfTest(root) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
-    return { cases: 20, passed: true };
+    return { cases: 22, passed: true };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

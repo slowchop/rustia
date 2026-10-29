@@ -280,7 +280,7 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.95.0
     steps:
       - name: Install Rust build dependencies
-        run: apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev python3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -301,3 +301,8 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           bash tools/run-browser-correctness.sh webkit 1.64.1
+      - name: Execute documented browser embedding example
+        run: |
+          cargo build --locked --manifest-path demos/web-live/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/web-live/target
+          wasm-bindgen --target web --out-dir demos/web-live/pkg --out-name rustia_example demos/web-live/target/wasm32-unknown-unknown/release/rustia_web_live_example.wasm
+          node tools/browser/web-live-example.cjs
