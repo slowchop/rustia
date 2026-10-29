@@ -6,7 +6,7 @@ This directory holds the benchmark crate, workload programs, memory-analysis too
 
 ## Interface
 
-- [README.md](./README.md) separates paused public automation, the private manual-cohort boundary, and retained trusted-CI protocols. Its timing commands are not developer-machine instructions.
+- [README.md](./README.md) separates the paused source-profile measurement policy from retained trusted-CI protocols. Its timing commands are not developer-machine instructions.
 
 - `Cargo.toml` defines the `script-bench` and `vm-string-memory` binaries and adapter features.
 - [`run-memory-cohort.js`](run-memory-cohort.js) accepts a protocol config and two binaries, then coordinates evidence generation. [`cgroup-delegation.js`](cgroup-delegation.js) locates the usable delegated cgroup-v2 ancestor; [`publish-memory-analysis.js`](publish-memory-analysis.js) validates and writes memory cohort artifacts.

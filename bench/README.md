@@ -2,20 +2,20 @@
 
 ## Measurement policy and paused source profile
 
-This source checkout uses hosted correctness CI and has no benchmark workflow.
-Public per-commit/history measurement, landscape refresh, and publication remain
-paused. A separate private maintainer bridge supports manually dispatched,
-reviewed exact-cohort runtime comparisons only. Outputs stay private, require
-independent raw-data review, and do not update public history or authorize public
-performance claims. See [the bridge contract](https://github.com/slowchop/rustia/blob/main/design/81-benchmark-operations.md#public-source-profile).
-Displayed results are retained historical evidence, not a current host-health
-or repeatability guarantee. See [CURRENT](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) and the
+This source checkout uses hosted correctness CI only, with no `ci-bench`
+measurement workflow or private runner access. A separate private maintainer
+bridge permits manually dispatched, reviewed exact-cohort runtime comparisons.
+Its outputs remain private; automatic per-commit/history measurement, landscape
+refresh, and publication remain paused. Private comparisons do not update public
+history or authorize public claims. Displayed results remain historical evidence,
+not a current host-health or repeatability guarantee. See
+[CURRENT](https://github.com/slowchop/rustia/blob/main/design/CURRENT.md) and the
 [source profile](https://github.com/slowchop/rustia/blob/main/design/public-source-profile.json).
 
 **Do not run timings or profiling on a development machine.** This includes
 benchmark binaries, examples, Wasm timing scripts, and ad hoc comparisons.
-Only accepted `ci-bench` results count as performance evidence. Bridge availability
-alone does not establish a result; leave unperformed measurements pending.
+Only `ci-bench` results count as performance evidence. Bridge comparisons require
+independent raw-data review before acceptance; availability alone is not a result.
 
 The measurement commands and workflow names below document retained protocols
 and the historical private coordinator. Timing commands are reference material
@@ -102,6 +102,13 @@ pending/ready dashboard integration are now implemented; the published cohort is
 (11 rustia rows from 99 raw samples), measured on the owned host `ci-bench` on 2026-09-05. The earlier
 cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes) among them, were removed on
 2026-09-06. Throughput and instrumented memory measurements remain separate.
+
+The cohort machinery does not complete the intended memory protocol. The
+[remaining requirements](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#4-published-metrics)
+include null-control-adjusted retention, anonymous-memory area, a separate
+warmup process, and a bounded idle/collection opportunity before the quiescent
+marker. Existing rows retain their recorded metrics and values; protocol changes
+need versioning and fresh accepted evidence before claiming those requirements.
 
 ```sh
 just bench-memory-self-test

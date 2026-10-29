@@ -30,8 +30,8 @@ the broader API-reference gaps in [100](100-documentation-review.md) remain open
 
 **Design/source drift audit (2026-10-29):** current contracts, source references
 and delivery status were reconciled in the [dated report](../2026-10-29_DRIFT_REPORT.md).
-The cleaned repository's hosted correctness profile is active; public benchmark workflows
-and publication are paused, and main protection/auto-merge settings are not enabled.
+The cleaned repository's hosted correctness profile is active; public benchmark
+automation and publication are paused, and main protection/auto-merge settings are not enabled.
 Retained memory cohorts do not satisfy four intended protocol requirements:
 null-control-adjusted retention, anonymous-memory area, a separate warmup process,
 and a bounded idle/collection opportunity before the quiescent marker. These remain

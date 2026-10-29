@@ -24,10 +24,11 @@ These documents describe contracts and intent. Use the code, tests, and
 
 ## Validation and release
 
-- [57 — Memory measurement protocol and open requirements](57-memory-benchmarking.md),
+- [57 — Memory measurement protocol](57-memory-benchmarking.md),
   [80 — Benchmark suite](80-bench-suite.md), and
-  [81 — Benchmark operations](81-benchmark-operations.md). The
-  [benchmark README](../bench/README.md) explains the allowed measurement paths and timing policy.
+  [81 — Benchmark operations](81-benchmark-operations.md). The cohort machinery
+  has open protocol requirements; the [benchmark README](../bench/README.md)
+  explains those gaps, the paused source profile, and timing policy.
 - [90 — Release readiness](90-release-readiness.md),
   [91 — Versioning policy](91-semver-policy.md), and
   [92 — First release](92-first-release.md).
@@ -45,7 +46,9 @@ These documents describe contracts and intent. Use the code, tests, and
 These retain the revisions, methods, and limitations of particular reviews. A
 passing historical experiment does not establish a current release or a new performance claim.
 
-- [2026-10-29 — Design/source drift audit](../2026-10-29_DRIFT_REPORT.md): applied corrections and unresolved memory-protocol requirements.
+- [2026-10-29 — Design/source drift review](../2026-10-29_DRIFT_REPORT.md): applied
+  documentation corrections and remaining memory-protocol requirements.
+
 - [84 — Private platform acceptance](84-private-platform-acceptance.md).
 - [93 — Private API acceptance](93-private-api-acceptance.md).
 - [94 — Compatibility audit](94-release-compatibility-audit.md) and its

@@ -259,11 +259,11 @@ Source preparation: this cleaned-history candidate is not yet public. Packages
 remain unpublished at 0.0.1. Historical benchmark records retain their original
 source IDs through the history projection (`design/history-projection.json`);
 redacted metadata has separate hashes and original commit signatures do not
-survive the rewrite. Hosted CI checks correctness. Public benchmark automation
-and publication remain paused. A separate private maintainer bridge supports
-manually dispatched, reviewed exact-cohort comparisons; outputs stay private and
-do not update public history or authorize public performance claims. See the
-[source-readiness record](https://github.com/slowchop/rustia/blob/main/design/98-public-source-readiness.md#private-maintainer-cohort-bridge-status-2026-10-29).
+survive the rewrite. Hosted CI checks correctness. Maintainers can manually
+review and dispatch exact-cohort runtime comparisons through a separate private
+bridge. Outputs remain private; public benchmark history and publication stay
+paused. Bridge availability does not establish a new performance result. See
+`design/98-public-source-readiness.md` in the source checkout.
 
 Source visibility does not establish an outside contribution or support policy.
 That policy is undecided; this repository does not currently invite pull

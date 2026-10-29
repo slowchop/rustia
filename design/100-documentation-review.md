@@ -28,7 +28,7 @@ EGM maps explain code boundaries. They do not need to become another end-user gu
 
 | Problem | Change | Evidence or check |
 | --- | --- | --- |
-| The Cargo example pinned an original commit absent from the rewritten repo. | Pin the tested, reachable source baseline. Verify the actual pin and source-link targets before running README fences. | [README checker](../tools/check-readme-examples.js); negative cases cover missing commits and missing source paths. |
+| The Cargo example pinned an original commit absent from the rewritten repo. | Pin the tested, reachable source baseline. Verify the actual pin and source-link targets independently of the Rust fence tests. | [README source checker](../tools/check-readme-comparisons.js); negative cases cover missing commits and missing source paths. |
 | Original PR and Actions links pointed at the reused repository name. | Retarget those Markdown links to `rustia-historic`; map immutable README source links to cleaned commits. | Historical evidence remains private. No measurements or source IDs inside evidence records are rewritten. |
 | Source access was presented as an invitation to contribute. | Remove invitations and review/support promises; state the policy is undecided. Keep useful maintainer instructions. | README, CONTRIBUTING, AGENTS, current state and release/source-access plans agree. |
 | The CLI expression example printed nothing. | Use `print(40 + 2)`, explain discarded returns and the REPL expression form. | The CLI executes source with `exec`; the REPL separately formats expression results. |
@@ -39,7 +39,9 @@ EGM maps explain code boundaries. They do not need to become another end-user gu
 | Public error variants and diagnostic fields lacked explanations. | Document triggers, units, missing/truncated data, reporting limits and reset guidance; add a bounded fuel-error example. | Source and existing recovery tests; independent review corrected rejected-change wording and fallback report-budget scope. |
 | Readers had to infer data ownership and threading rules. | Add owned/live/Serde choices, define reset generation, and state the worker-local VM rule. | Existing value and VM contracts; no API or implementation changes. |
 | The design index repeated obsolete counts, rollout labels and research claims. | Categorize links and remove duplicate live-status claims. | Current status remains in CURRENT; specs, raw research and acceptance evidence remain linked. |
-| Benchmark instructions implied local timings and active source workflows. | Put paused source automation and CI-only measurements first; label historical/private protocols. | [Source profile](public-source-profile.json) and project benchmark policy. |
+| Benchmark instructions implied local timings and active source workflows. | Put paused public benchmark automation and CI-only measurements first; distinguish available private manual runtime comparisons from public history and publication. | [Source profile](public-source-profile.json) and project benchmark policy. |
+
+The concurrent [design/source drift review](../2026-10-29_DRIFT_REPORT.md) is retained alongside this review. Integration keeps its protocol gaps and contract corrections; the README source-reference policy has one implementation, with current-path coverage added to its existing reachable-commit checks.
 
 ## Explanations that cross API boundaries
 

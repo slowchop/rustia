@@ -25,26 +25,26 @@ serves them.
 ## Benchmark policy
 
 - This checkout uses the hosted correctness profile in `design/public-source-profile.json`.
-  Public per-commit/history measurement, landscape refresh, and publication remain paused.
-  A separate private maintainer bridge supports manually dispatched, reviewed exact-cohort
-  runtime comparisons only. Outputs stay private, do not update public history, and do not
-  authorize public performance claims. See [the bridge contract](design/81-benchmark-operations.md#public-source-profile).
-
+  Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
+  Its correctness workflows and public coordinator provide no timing authority.
+- A separate private maintainer bridge is available only for manually dispatched,
+  reviewed exact-cohort runtime comparisons on `ci-bench`. Keep its outputs private and
+  review raw data independently before accepting a comparison. Bridge availability is
+  not a performance result; private comparisons do not update public history or authorize public claims.
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
 - Local compilation, correctness tests, and static validation are allowed, but their durations must not be treated or reported as performance evidence.
-- This source checkout has no benchmark workflow or timing authority. Obtain comparisons only through the separately reviewed private `ci-bench` lane described above.
-- Only accepted `ci-bench` results count as benchmark evidence. Private bridge comparisons require independent raw-data review and do not authorize public history updates or claims.
-- If `ci-bench` is unavailable, report the benchmark as pending; never substitute a local run.
+- Obtain measurements through the separate private maintainer bridge; pushing a source PR
+  here does not run benchmarks. Only authorized `ci-bench` results count as performance evidence.
+- If that measurement service is unavailable, report the benchmark as pending; never substitute a local run.
 
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
 - The cleaned source repository uses hosted correctness CI. Its main-branch ruleset and
-  auto-merge settings are not enabled and await separate approval; do not describe them as already enforced.
+  auto-merge settings await separate approval; do not describe them as already enforced.
   Check every applicable PR check and independent review before merging. Historical
   benchmark publication permissions belong to the private historic repository and do not
-  grant a bypass in this repository. The hosted profile has no benchmark publication
-  workflow or app-token exception; see `design/81-benchmark-operations.md`.
+  grant a bypass in this repository. See `design/81-benchmark-operations.md`.
 - Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the repository settings still offer squash and rebase.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)
