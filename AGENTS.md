@@ -24,7 +24,7 @@ serves them.
 
 ## Benchmark policy
 
-- This checkout uses the hosted correctness profile in `design/public-source-profile.json`.
+- This checkout uses the private self-hosted correctness profile in `design/public-source-profile.json`.
   Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
   Its correctness workflows and public coordinator provide no timing authority.
 - A separate private maintainer bridge is available only for manually dispatched,
@@ -40,7 +40,7 @@ serves them.
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
-- The cleaned source repository uses hosted correctness CI. Its main-branch ruleset and
+- The cleaned source repository uses private self-hosted correctness CI. Its main-branch ruleset and
   auto-merge settings await separate approval; do not describe them as already enforced.
   Check every applicable PR check and independent review before merging. Historical
   benchmark publication permissions belong to the private historic repository and do not

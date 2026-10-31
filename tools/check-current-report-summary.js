@@ -107,8 +107,8 @@ function main() {
     profile: "public-source",
     benchmark_bridge: "private-maintainer-cohorts-v1",
     runner_classes: {
-      "hosted-linux": { environment: "github-hosted", timing_authority: false },
-      "hosted-macos": { environment: "github-hosted", timing_authority: false },
+      "self-hosted-linux": { environment: "self-hosted-shared", timing_authority: false },
+      "self-hosted-macos": { environment: "self-hosted-shared", timing_authority: false },
     },
     measurement: {
       mode: "public-automation-paused-private-manual-cohorts",
@@ -148,7 +148,7 @@ function main() {
     profile: "public-source",
     benchmark_bridge: "pending-private-trusted-pipeline",
     ...{
-      runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
+      runner_classes: { "self-hosted-linux": { environment: "self-hosted-shared", timing_authority: false } },
       measurement: { mode: "paused-pending-private-bridge", authoritative_runner_classes: [], scheduled_billing_allowed: false },
       publication: { state: "paused", reason: "Publication paused.", next_action: "Wait for private bridge." },
       progress: { state: "paused", measured_commit: "a".repeat(40), measured_at_unix: 100, next_action: "Wait." },

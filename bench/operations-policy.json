@@ -3,23 +3,36 @@
   "schema_version": 1,
   "profile": "public-source",
   "runner_classes": {
-    "hosted-linux": {
-      "environment": "github-hosted",
+    "self-hosted-linux": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
-      "allowed_roles": ["build", "correctness-test", "artifact-validation", "fuzz-smoke"]
+      "reason": "Private self-hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
+      "allowed_roles": [
+        "build",
+        "correctness-test",
+        "artifact-validation",
+        "fuzz-smoke"
+      ]
     },
-    "hosted-macos": {
-      "environment": "github-hosted",
+    "self-hosted-macos": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
-      "allowed_roles": ["build", "correctness-test", "artifact-validation"]
+      "reason": "Private self-hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "allowed_roles": [
+        "build",
+        "correctness-test",
+        "artifact-validation"
+      ]
     },
-    "hosted-windows": {
-      "environment": "github-hosted",
+    "self-hosted-windows": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
-      "allowed_roles": ["build", "correctness-test", "artifact-validation"]
+      "reason": "Private self-hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "allowed_roles": [
+        "build",
+        "correctness-test",
+        "artifact-validation"
+      ]
     }
   },
   "measurement": {
