@@ -225,6 +225,19 @@ function checkCi(text) {
   ]) requireText(text, textFragment, label);
   const windows = jobs.get("windows-runtime");
   requireText(windows, `if: ${PRIVATE_MANUAL}`, `${label} windows-runtime`);
+  const macos = jobs.get("macos-arm64-runtime");
+  requireText(macos, [
+    '          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
+    '          if [ ! -x "$cargo_bin/rustup" ]; then',
+    '            echo "::error::Rustup is missing from this account\'s Cargo tools directory."',
+    "            exit 1",
+    "          fi",
+    '          export PATH="$cargo_bin:$PATH"',
+    '          echo "$cargo_bin" >> "$GITHUB_PATH"',
+    "          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update",
+  ].join("\n"), `${label} macOS rustup setup`);
+  forbidText(macos, "brew ", `${label} macOS bootstrap`);
+  forbidText(macos, "uses: actions-rust-lang/setup-rust-toolchain@", `${label} macOS bootstrap`);
   const release = jobs.get("release-preflight");
   if (!release.includes("stage: [quick, workspace, release]")) reject(`${label} must run all canonical preflight stages`);
 }
@@ -345,6 +358,8 @@ function selfTest(root) {
       ["fork PRs permitted", "ci.yml", (s) => s.replace(PRIVATE_PR, "github.event.repository.private == true"), /trusted-event guard/],
       ["hosted fuzz fallback", "error-fuzz.yml", (s) => s.replace(LINUX_RUNNER, "runs-on: ubuntu-24.04"), /must run on/],
       ["unguarded fuzz job", "error-fuzz.yml", (s) => s.replace(`    if: ${PRIVATE_PR}\n`, ""), /trusted-event guard/],
+      ["unpinned macOS setup", "ci.yml", (s) => s.replace("rustup toolchain install 1.95.0 --profile minimal", "rustup toolchain install stable --profile minimal"), /macOS rustup setup/],
+      ["system package write on macOS", "ci.yml", (s) => s.replace('          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"', '          brew install bash\n          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"'), /must not include/],
       ["untrusted action ref", "ci.yml", (s) => s.replace(/actions\/checkout@([0-9a-f]{40})/, "actions/checkout@v7"), /pin every action/],
       ["write permission", "ci.yml", (s) => s.replace("contents: read", "contents: write"), /contents: write/],
       ["secret use", "error-fuzz.yml", (s) => `${s}\n# secrets.X\n`, /secrets/],

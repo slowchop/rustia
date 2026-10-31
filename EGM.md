@@ -42,8 +42,8 @@ The test-only [conformance corpus](./conformance/README.md) is indexed by
 Tests, fixture-only trees, vendored code, generated output, ignored directories, and
 symlinks have no separate maps. Hidden configuration is outside the bootstrap tree. Self-hosted
 CI workflows under [.github/workflows](./.github/workflows/) are operational correctness
-entry points; the macOS arm64 runtime job installs its pinned Rust toolchain and target with
-the same commit-pinned setup action used by the build matrix, then verifies the native host
+entry points; the macOS arm64 runtime job uses its account-provisioned Rustup to install the
+pinned toolchain and target without system package writes, then verifies the native host
 before running shared correctness suites. The [Justfile](./Justfile) remains the local
 validation entry point. The ignored private sibling is a separate repository and is outside
 this map.
