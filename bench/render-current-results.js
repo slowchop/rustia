@@ -170,7 +170,7 @@ function readOperationsStatus(data) {
       fail(`${relative(operationsStatusPath)} must match the reviewed private bridge availability state`);
     }
     const classes = status.runner_classes;
-    const expectedClasses = ["hosted-linux", "hosted-macos", "hosted-windows"];
+    const expectedClasses = ["self-hosted-linux", "self-hosted-macos", "self-hosted-windows"];
     const expectedMeasurementMode = marker.benchmark_bridge === "private-maintainer-cohorts-v1"
       ? "public-automation-paused-private-manual-cohorts"
       : "paused-pending-private-bridge";
@@ -178,14 +178,14 @@ function readOperationsStatus(data) {
       || status.measurement?.authoritative_runner_classes?.length !== 0
       || status.measurement?.scheduled_billing_allowed !== false
       || !classes || Object.keys(classes).length === 0
-      || Object.values(classes).some((runner) => runner?.environment !== "github-hosted"
+      || Object.values(classes).some((runner) => runner?.environment !== "self-hosted-shared"
         || runner?.timing_authority !== false || Object.hasOwn(runner, "host")
         || Object.hasOwn(runner, "qualification") || !Array.isArray(runner.allowed_roles)
         || runner.allowed_roles.some((role) => role.startsWith("measurement-")))) {
       fail("public-source operations status must have no active timing authority or machine qualification");
     }
     if (JSON.stringify(Object.keys(classes).sort()) !== JSON.stringify(expectedClasses.sort())) {
-      fail("public-source operations status must enumerate only the hosted correctness classes");
+      fail("public-source operations status must enumerate only the self-hosted correctness classes");
     }
     for (const lane of ["publication", "progress", "landscape"]) {
       if (status[lane]?.state !== "paused" || typeof status[lane]?.next_action !== "string"

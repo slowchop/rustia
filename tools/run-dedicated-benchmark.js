@@ -2673,7 +2673,7 @@ function selfTest() {
     assert.equal(operationsStatus.publication?.state, "paused");
     assert.equal(authorities.length, 0, "paused public operations status must not declare a current timing authority");
     for (const runner of Object.values(operationsStatus.runner_classes)) {
-      assert.equal(runner?.environment, "github-hosted", "public profile must declare hosted correctness runners only");
+      assert.equal(runner?.environment, "self-hosted-shared", "public profile must declare ordinary self-hosted correctness runners only");
       assert.equal(Object.hasOwn(runner, "host"), false, "public profile must not expose a current runner host");
       assert.equal(Object.hasOwn(runner, "qualification"), false, "public profile must not expose a current host qualification");
     }

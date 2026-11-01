@@ -5,18 +5,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const EXPECTED_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
+const PRIVATE_PR = "github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
+const PRIVATE_MANUAL = "github.event.repository.private == true && github.event_name == 'workflow_dispatch'";
+const LINUX_RUNNER = "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]";
 const CI_JOBS = Object.freeze({
-  "release-preflight": "ubuntu-24.04",
-  "release-gate": "ubuntu-24.04",
-  "macos-arm64-runtime": "macos-15",
-  "portable-engine-build": "ubuntu-24.04",
-  "wasm-node-runtime": "ubuntu-24.04",
-  "windows-runtime": "windows-2022",
-  "webkit-runtime": "ubuntu-24.04",
+  "release-preflight": LINUX_RUNNER,
+  "release-gate": LINUX_RUNNER,
+  "macos-arm64-runtime": "runs-on:\n      group: general-macos\n      labels: [self-hosted, macOS, ARM64, general-macos]",
+  "portable-engine-build": LINUX_RUNNER,
+  "wasm-node-runtime": LINUX_RUNNER,
+  "windows-runtime": "runs-on:\n      group: general-windows\n      labels: [self-hosted, Windows, X64, general-windows]",
+  "webkit-runtime": "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux, docker]",
 });
 const FUZZ_JOBS = Object.freeze({
-  "differential-smoke": "ubuntu-24.04",
-  campaign: "ubuntu-24.04",
+  "differential-smoke": LINUX_RUNNER,
+  campaign: LINUX_RUNNER,
 });
 const PINNED_ACTIONS = new Set([
   "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -25,7 +28,6 @@ const PINNED_ACTIONS = new Set([
   "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
 ]);
 const FORBIDDEN_WORKFLOW_TEXT = Object.freeze([
-  "self-hosted",
   "workflow_run",
   "pull_request_target",
   "schedule:",
@@ -95,9 +97,15 @@ function checkJobRunners(text, expected, label) {
     reject(`${label} jobs must be exactly ${expectedNames.join(", ")}; found ${names.join(", ")}`);
   }
   for (const [name, runner] of Object.entries(expected)) {
-    const declarations = [...blocks.get(name).matchAll(/^    runs-on:\s*(.*?)\s*$/gm)].map((match) => match[1]);
+    const declarations = [...blocks.get(name).matchAll(/^    runs-on:[^\n]*(?:\n      [^\n]*)*/gm)].map((match) => match[0].trimStart());
     if (declarations.length !== 1 || declarations[0] !== runner) {
       reject(`${label} job ${name} must run on ${runner}`);
+    }
+    const guard = name === "campaign" || name === "windows-runtime" ? PRIVATE_MANUAL
+      : name === "release-gate" ? `always() && ${PRIVATE_PR}` : PRIVATE_PR;
+    const conditions = [...blocks.get(name).matchAll(/^    if: (.*)$/gm)].map((match) => match[1]);
+    if (conditions.length !== 1 || conditions[0] !== guard) {
+      reject(`${label} job ${name} must retain its private trusted-event guard`);
     }
   }
 }
@@ -216,7 +224,20 @@ function checkCi(text) {
     "bash tools/run-browser-correctness.sh webkit 1.64.1",
   ]) requireText(text, textFragment, label);
   const windows = jobs.get("windows-runtime");
-  requireText(windows, "if: github.event_name == 'workflow_dispatch'", `${label} windows-runtime`);
+  requireText(windows, `if: ${PRIVATE_MANUAL}`, `${label} windows-runtime`);
+  const macos = jobs.get("macos-arm64-runtime");
+  requireText(macos, [
+    '          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
+    '          if [ ! -x "$cargo_bin/rustup" ]; then',
+    '            echo "::error::Rustup is missing from this account\'s Cargo tools directory."',
+    "            exit 1",
+    "          fi",
+    '          export PATH="$cargo_bin:$PATH"',
+    '          echo "$cargo_bin" >> "$GITHUB_PATH"',
+    "          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update",
+  ].join("\n"), `${label} macOS rustup setup`);
+  forbidText(macos, "brew ", `${label} macOS bootstrap`);
+  forbidText(macos, "uses: actions-rust-lang/setup-rust-toolchain@", `${label} macOS bootstrap`);
   const release = jobs.get("release-preflight");
   if (!release.includes("stage: [quick, workspace, release]")) reject(`${label} must run all canonical preflight stages`);
 }
@@ -233,7 +254,7 @@ function checkErrorFuzz(text) {
   requireText(text, "timeout-minutes: 20", `${label} differential-smoke`);
   const jobs = jobBlocks(text, label);
   const campaign = jobs.get("campaign");
-  requireText(campaign, "if: github.event_name == 'workflow_dispatch'", `${label} campaign`);
+  requireText(campaign, `if: ${PRIVATE_MANUAL}`, `${label} campaign`);
   requireText(campaign, "timeout-minutes: 170", `${label} campaign`);
   requireText(campaign, "-max_total_time=1800", `${label} campaign`);
   requireText(campaign, "-timeout=15", `${label} campaign`);
@@ -244,7 +265,7 @@ function checkErrorFuzz(text) {
     reject(`${label} fuzz campaigns must have exactly two bounded durations, each at most 7200 seconds`);
   }
   if (campaign.includes("github.event.pull_request")) reject(`${label} long campaigns must not run from pull requests`);
-  requireText(campaign, "if: github.event_name == 'workflow_dispatch'", `${label} campaign`);
+  requireText(campaign, `if: ${PRIVATE_MANUAL}`, `${label} campaign`);
   requireText(campaign, "if: always()", `${label} retained fuzz evidence`);
   requireText(campaign, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", `${label} retained fuzz evidence`);
 }
@@ -308,7 +329,9 @@ function selfTest(root) {
     validatePublicProfile({ profile: changedProfile, files: changedFiles, workflows: changedWorkflows });
   const expectFail = (label, fn, pattern) => {
     assert.throws(fn, pattern, label);
+    cases += 1;
   };
+  let cases = 0;
   try {
     assert.deepEqual(run(), { files: 2, profile: "private-rehearsal" });
     assert.deepEqual(run({ ...profile, benchmark_bridge: "private-maintainer-cohorts-v1" }), {
@@ -327,14 +350,23 @@ function selfTest(root) {
       expectFail(label, () => run({ ...profile, [key]: value }), /valid private-rehearsal/);
     }
     for (const [label, file, transform, expected] of [
-      ["self-hosted runner", "ci.yml", (s) => s.replace("runs-on: ubuntu-24.04", "runs-on: [self-hosted, Linux]"), /self-hosted/],
+      ["hosted fallback", "ci.yml", (s) => s.replace(LINUX_RUNNER, "runs-on: ubuntu-24.04"), /must run on/],
+      ["unscoped self-hosted runner", "ci.yml", (s) => s.replace(LINUX_RUNNER, "runs-on: [self-hosted, Linux]"), /must run on/],
+      ["benchmark runner used for correctness", "ci.yml", (s) => s.replace("group: general-linux", "group: bench-solo"), /must run on/],
+      ["missing private guard", "ci.yml", (s) => s.replace(`    if: ${PRIVATE_PR}\n`, ""), /trusted-event guard/],
+      ["public jobs permitted", "ci.yml", (s) => s.replace(PRIVATE_PR, PRIVATE_PR.replace("github.event.repository.private == true && ", "")), /trusted-event guard/],
+      ["fork PRs permitted", "ci.yml", (s) => s.replace(PRIVATE_PR, "github.event.repository.private == true"), /trusted-event guard/],
+      ["hosted fuzz fallback", "error-fuzz.yml", (s) => s.replace(LINUX_RUNNER, "runs-on: ubuntu-24.04"), /must run on/],
+      ["unguarded fuzz job", "error-fuzz.yml", (s) => s.replace(`    if: ${PRIVATE_PR}\n`, ""), /trusted-event guard/],
+      ["unpinned macOS setup", "ci.yml", (s) => s.replace("rustup toolchain install 1.95.0 --profile minimal", "rustup toolchain install stable --profile minimal"), /macOS rustup setup/],
+      ["system package write on macOS", "ci.yml", (s) => s.replace('          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"', '          brew install bash\n          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"'), /must not include/],
       ["untrusted action ref", "ci.yml", (s) => s.replace(/actions\/checkout@([0-9a-f]{40})/, "actions/checkout@v7"), /pin every action/],
       ["write permission", "ci.yml", (s) => s.replace("contents: read", "contents: write"), /contents: write/],
       ["secret use", "error-fuzz.yml", (s) => `${s}\n# secrets.X\n`, /secrets/],
       ["private workflow trigger", "error-fuzz.yml", (s) => s.replace("workflow_dispatch:", "schedule:\n    - cron: '0 0 * * *'\n  workflow_dispatch:"), /schedule/],
       ["benchmark command", "ci.yml", (s) => `${s}\n# node tools/run-dedicated-benchmark.js\n`, /run-dedicated-benchmark/],
       ["unbounded fuzz", "error-fuzz.yml", (s) => s.replace("-max_total_time=7200", "-max_total_time=9000"), /bounded durations/],
-      ["campaign on PR label", "error-fuzz.yml", (s) => s.replace("if: github.event_name == 'workflow_dispatch'", "if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-error-fuzz')"), /long campaigns must not run from pull requests/],
+      ["campaign on PR label", "error-fuzz.yml", (s) => s.replace(`if: ${PRIVATE_MANUAL}`, `if: ${PRIVATE_MANUAL} || contains(github.event.pull_request.labels.*.name, 'run-error-fuzz')`), /trusted-event guard/],
       ["credentials persisted", "ci.yml", (s) => s.replace("persist-credentials: false", "persist-credentials: true"), /persist-credentials: false/],
       ["enabled build cache", "ci.yml", (s) => s.replace("cache: false", "cache: true"), /cache: false/],
       ["missing preflight aggregate", "ci.yml", (s) => s.replace("run: test \"$PREFLIGHT_RESULT\" = success && test \"$WEBKIT_RESULT\" = success", "run: true"), /run: test.*PREFLIGHT_RESULT/],
@@ -351,7 +383,7 @@ function selfTest(root) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
-    return { cases: 22, passed: true };
+    return { cases, passed: true };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

@@ -1,6 +1,7 @@
 name: CI
 
-# This workflow runs on hosted CI with read-only repository access. Manual
+# Correctness uses private self-hosted pools with read-only repository access.
+# Public repositories and fork PRs cannot use these persistent runners. Manual
 # dispatch is retained only for the Windows native correctness job.
 "on":
   pull_request:
@@ -23,7 +24,10 @@ jobs:
       fail-fast: false
       matrix:
         stage: [quick, workspace, release]
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     # Keep all coverage while independent stages use separate runner checkouts.
     # The required aggregate below rejects any failed, cancelled or skipped stage.
     timeout-minutes: 60
@@ -73,8 +77,10 @@ jobs:
   release-gate:
     name: Release preflight
     needs: [release-preflight, webkit-runtime]
-    if: always()
-    runs-on: ubuntu-24.04
+    if: always() && github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     steps:
       - name: Require every preflight stage
         env:
@@ -84,7 +90,10 @@ jobs:
 
   macos-arm64-runtime:
     name: Native runtime (macOS arm64)
-    runs-on: macos-15
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-macos
+      labels: [self-hosted, macOS, ARM64, general-macos]
     timeout-minutes: 20
     env:
       RUSTUP_TOOLCHAIN: 1.95.0
@@ -97,11 +106,16 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
-        with:
-          toolchain: 1.95.0
-          target: aarch64-apple-darwin
-          cache: false
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          if [ ! -x "$cargo_bin/rustup" ]; then
+            echo "::error::Rustup is missing from this account's Cargo tools directory."
+            exit 1
+          fi
+          export PATH="$cargo_bin:$PATH"
+          echo "$cargo_bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update
 
       - name: Verify native arm64 execution and run shared correctness suites
         run: |
@@ -117,7 +131,10 @@ jobs:
 
   portable-engine-build:
     name: Engine build (${{ matrix.target }})
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -151,7 +168,10 @@ jobs:
 
   wasm-node-runtime:
     name: Wasm runtime (Node/V8)
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     timeout-minutes: 15
 
     steps:
@@ -212,9 +232,11 @@ jobs:
           bash tools/run-private-platform-golden.sh wasm default
 
   windows-runtime:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch'
     name: Native runtime (Windows x86-64)
-    runs-on: windows-2022
+    runs-on:
+      group: general-windows
+      labels: [self-hosted, Windows, X64, general-windows]
     timeout-minutes: 30
     defaults:
       run:
@@ -264,7 +286,10 @@ jobs:
 
   webkit-runtime:
     name: Browser runtime (headless WebKit)
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux, docker]
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
     defaults:

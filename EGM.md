@@ -5,7 +5,7 @@
 Rustia implements a portable Luau interpreter in Rust. Source moves through the lexer,
 parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
 and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
-one engine. The workspace is private and unpublished, with hosted correctness CI under
+one engine. The workspace is private and unpublished, with private self-hosted correctness CI under
 the explicit source profile. Public benchmark automation and publication remain paused.
 A separate private maintainer bridge supports only manually dispatched, reviewed
 exact-cohort runtime comparisons; its outputs stay private and do not authorize public
@@ -40,15 +40,19 @@ The drift report is not release acceptance.
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).
 Tests, fixture-only trees, vendored code, generated output, ignored directories, and
-symlinks have no separate maps. Hidden configuration is outside the bootstrap tree. Hosted
+symlinks have no separate maps. Hidden configuration is outside the bootstrap tree. Self-hosted
 CI workflows under [.github/workflows](./.github/workflows/) are operational correctness
-entry points; the macOS arm64 runtime job installs its pinned Rust toolchain and target with
-the same commit-pinned setup action used by the build matrix, then verifies the native host
+entry points; the macOS arm64 runtime job uses its account-provisioned Rustup to install the
+pinned toolchain and target without system package writes, then verifies the native host
 before running shared correctness suites. The [Justfile](./Justfile) remains the local
 validation entry point. The ignored private sibling is a separate repository and is outside
 this map.
 
 ## Invariants
+
+- Correctness workflows use ordinary self-hosted groups only, with private-repository
+  and same-repository PR admission. Benchmark access remains in the separate private
+  bridge; public visibility requires a new isolated execution decision.
 
 - `standard()` has reproducible defaults and permits explicit nondeterministic providers;
   `deterministic()` enforces its replay contract; `live()` intentionally provides live
