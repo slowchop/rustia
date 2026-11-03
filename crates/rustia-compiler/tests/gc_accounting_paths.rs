@@ -1,6 +1,6 @@
 //! Correctness-only census for the real acceptance workload call paths.
 //!
-//! Run in hosted CI with:
+//! Run in private self-hosted CI with:
 //! `cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture`
 //!
 //! This reports counters, never timings. Each row separates the source's

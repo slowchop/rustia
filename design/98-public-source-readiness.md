@@ -119,10 +119,12 @@ ordinary pull-request workflows execute code on persistent self-hosted runners.
 The benchmark workflow's fork guard does not establish isolation for all jobs,
 and editable workflow conditions alone are not a sufficient runner trust boundary.
 
-Keep the current protection in place. Prefer GitHub-hosted isolated correctness
-jobs for source validation, with private measurement infrastructure behind
-a separately reviewed trusted execution path. Preserve required checks and
-reviews; do not bypass them to compensate for runners becoming unavailable.
+The maintainer selected private self-hosted correctness on 2026-11-01, with
+ordinary generic runner groups and no hosted fallback. Keep the organization
+groups private-only and block public repositories and fork PRs in every job.
+Before public visibility, separately review an isolated execution model;
+workflow conditions alone are not a runner trust boundary. Preserve required
+checks and reviews while changing routing. The benchmark group remains separate.
 GitHub describes the risks and private-only default in its
 [runner access documentation](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
 No runner access, Actions permissions or repository protections were changed.
@@ -208,9 +210,9 @@ ignoring them. Historical source IDs resolve through the explicit projection;
 all mapped commits and protected inputs are verified. Existing reachable tree
 identifiers remain valid. This check is part of the full preflight inventory.
 
-The explicit [public source profile](public-source-profile.json) prepares hosted
+The explicit [public source profile](public-source-profile.json) selects private self-hosted
 correctness jobs and bounded fuzz checks. It has no benchmark timing authority,
-publication lane, repository write credentials, or persistent private runner
+publication lane, repository write credentials, or benchmark-runner
 access. The rendered benchmark page labels its data as historical; automatic
 public measurement, history refresh and publication remain paused. The separate
 [private maintainer bridge](#private-maintainer-cohort-bridge-status-2026-10-29)
@@ -224,7 +226,7 @@ before the transfer attempt. The first-history bootstrap guard is retained in
 staging commit `417828e` for provenance and is not part of the current source;
 current pushes use the ordinary exact-HEAD pre-push guard. All 75 hosted refs
 were compared with the reviewed inventory and a fresh clone was inspected.
-Hosted correctness checks gate acceptance of staged revisions, with exact CI
+CI correctness checks gate acceptance of staged revisions, with exact CI
 evidence retained privately. The repository remains private and packages remain
 unpublished; this is not supported-release acceptance or a visibility decision.
 
@@ -233,7 +235,7 @@ unpublished; this is not supported-release acceptance or a visibility decision.
 A separate private maintainer bridge is available for manually dispatched,
 reviewed exact-cohort runtime comparisons only. It does not add a timing
 authority, runner, credential, or benchmark workflow to the public source
-repository. Public correctness workflows remain hosted and read-only. The
+repository. Correctness workflows remain private-only, self-hosted and read-only. The
 public coordinator continues to refuse benchmark commands, and automatic
 per-commit/history measurement, landscape refresh, and publication remain
 paused.

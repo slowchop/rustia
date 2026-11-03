@@ -29,4 +29,4 @@ The feature-gated `tests/gc_accounting_paths.rs` test uses the actual closure an
 generic-iteration workloads to report setup, warmup and following-call root-accounting/executor
 counters at fixed work sizes. It asserts exact checksums and emits stable rows,
 but performs no timing; run it only through its explicit release-mode
-`executor-diagnostics` feature command in hosted CI.
+`executor-diagnostics` feature command in private self-hosted CI.
