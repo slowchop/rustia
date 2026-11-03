@@ -583,7 +583,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 22,
+      "file_count": 23,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -599,6 +599,7 @@
         "src/o2.rs",
         "tests/array_slot_write_coverage.rs",
         "tests/executor_ownership.rs",
+        "tests/gc_accounting_paths.rs",
         "tests/liveness_analysis.rs",
         "tests/o2_corpus_compile.rs",
         "tests/o2_families.rs",

@@ -35,6 +35,18 @@ native goldens remain in the workspace stage. Mac, Node and build-matrix checks
 remain in place. Saved benchmark artifacts are validated offline; the private
 staging profile runs no performance measurements.
 
+The Linux workspace job also checks the default-off `executor-diagnostics`
+feature and runs the fixed `gc_accounting_paths` test with its captured output.
+That CI-only diagnostic partitions root-refresh attempts by control-memory
+accounting state and reports closure/leaf executor counts separately for setup,
+one full-N warmup and the following call on the same VM. It is outside the local
+pre-push command inventory: do not run workload profiling locally. Counts establish
+path exposure, not elapsed
+cost, a regression cause or performance acceptance. Ordinary builds keep the
+instrumentation disabled; timing comparisons still belong to private `ci-bench`.
+The counters describe this diagnostic build and do not recover exact paths from
+previous benchmark binaries or timed legs.
+
 The refactor retains all 68 previous preflight commands. It adds compiler unit
 tests as an early check, plus tests of stage selection and push rejection. No
 fixtures, configurations, corpora, examples or package checks were removed.

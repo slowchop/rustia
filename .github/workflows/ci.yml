@@ -74,6 +74,12 @@ jobs:
           bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu
           bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu
 
+      - name: Check feature-gated executor accounting paths
+        if: matrix.stage == 'workspace'
+        run: |
+          cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings
+          cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture
+
   release-gate:
     name: Release preflight
     needs: [release-preflight, webkit-runtime]
