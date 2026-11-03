@@ -2,8 +2,8 @@
 
 ## Measurement policy and paused source profile
 
-This source checkout uses hosted correctness CI only, with no `ci-bench`
-measurement workflow or private runner access. A separate private maintainer
+This source checkout uses private self-hosted correctness CI only, with no `ci-bench`
+measurement workflow or benchmark-runner access. A separate private maintainer
 bridge permits manually dispatched, reviewed exact-cohort runtime comparisons.
 Its outputs remain private; automatic per-commit/history measurement, landscape
 refresh, and publication remain paused. Private comparisons do not update public
@@ -547,7 +547,7 @@ Only equality is refused, so choose an alias plainly unlike the label rather
 than a variation of it. With `--local` the variable is never read.
 
 The historical private profile kept reconstruction out of GitHub Actions through
-`tools/check-workflows.js`. The source profile permits only hosted correctness
+`tools/check-workflows.js`. The source profile permits only private self-hosted correctness
 workflows; it does not enable reconstruction. Starting a new measurement requires
 the trusted private benchmark service.
 
@@ -806,7 +806,7 @@ target list rather than pretending the measurements happened in the past.
 The historical private workflow policy allowed measurement only on `bench-solo`
 through the attesting entrypoint `tools/run-dedicated-benchmark.js`; the shared
 runner pool validated committed artifacts. The source profile's
-`tools/check-workflows.js` instead permits only hosted correctness CI, with no
+`tools/check-workflows.js` instead permits only private self-hosted correctness CI, with no
 measurement workflow.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and

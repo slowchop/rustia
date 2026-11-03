@@ -725,7 +725,7 @@ warmup and following-call deltas separately for the real `closures_upvalues` and
 `generic_iteration` Luau sources at `n = 32`, `512`, and their acceptance sizes.
 It also reports closure-fast and dynamic leaf-value entries and asserts fixed
 checksums. This is correctness-only path evidence: it adds no timings, and its
-output must come from the explicit hosted CI diagnostic step before drawing
+output must come from the explicit private CI diagnostic step before drawing
 conclusions about which path ran in a particular diagnostic invocation. Each
 case uses a fresh standard VM, performs the full-N warmup on that VM, then calls
 again, matching the warmed sample lifecycle. It excludes the separate cold

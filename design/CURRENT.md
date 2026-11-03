@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-10-30 (Australia/Hobart).
+Updated: 2026-11-01 (Australia/Hobart).
 
 This is the single authority for current project status. Detailed design contracts
 and the pinned oracle remain the specification; dated records explain decisions
@@ -93,9 +93,12 @@ reset against an independent host model in all four profiles, within the existin
 input/fuel/memory bounds. This is correctness coverage, not a new remote campaign
 or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-exports-and-functions-2026-10-30).
 
-Hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
+Private self-hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
 bounded fuzz/differential smoke, native Linux x86-64 and macOS ARM64, Node/V8 and
 headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.
+Ordinary correctness jobs use generic Linux/macOS/Windows self-hosted groups,
+with private-repository and same-repository PR guards. Public visibility requires
+a separate isolation review; there is no hosted fallback or benchmark-runner access.
 Dated Linux ARM64, Windows and real Firefox/Safari passes do not close Intel Mac,
 mobile, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
 
@@ -104,7 +107,7 @@ the full unchanged-commit `just release-preflight` inventory through the normal
 hook. No bypass or evidence regeneration inside validation. [97 — Validation](97-validation-workflow.md)
 defines that inventory; a repaired macOS bootstrap still requires actual native execution.
 
-**Never run performance measurements locally.** The hosted source profile gives
+**Never run performance measurements locally.** The source correctness profile gives
 correctness jobs no timing authority. Public per-commit/history automation,
 landscape refresh and publication remain **paused**. A separate private maintainer
 bridge admits only reviewed, manually dispatched exact-cohort runtime comparisons

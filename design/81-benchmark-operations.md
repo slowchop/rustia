@@ -7,8 +7,9 @@
 
 ## Public-source profile
 
-The public-source tree runs correctness and artifact validation on GitHub-hosted
-runners. Public per-commit/history measurement, benchmark-data publication, and
+The public-source tree runs correctness and artifact validation on ordinary private self-hosted
+runners. Public repositories and fork PRs cannot use these persistent pools,
+and there is no hosted fallback. Public per-commit/history measurement, benchmark-data publication, and
 landscape refresh remain paused. A separate private maintainer bridge is
 available for manually dispatched, reviewed exact-cohort runtime comparisons
 only. Those comparisons stay private, do not update public history, and do not
@@ -18,7 +19,7 @@ stability. Bridge availability does not accept a performance result. No public
 workflow dispatches a benchmark or publishes benchmark data.
 `design/public-source-profile.json` records the bridge's narrow
 availability state, while the public workflow, operations-status, and report
-validators continue to enforce hosted correctness only.
+validators continue to enforce private self-hosted correctness only.
 
 The runner and publication procedures below describe the retained private
 operations contract. They are not active public-source automation. Resuming

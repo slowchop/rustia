@@ -220,22 +220,22 @@ function validatePublicPolicy(policy) {
   }
   const classes = policy.runner_classes;
   if (classes === null || typeof classes !== "object" || Array.isArray(classes) || Object.keys(classes).length === 0) {
-    fail("public-source runner_classes must enumerate hosted correctness classes");
+    fail("public-source runner_classes must enumerate self-hosted correctness classes");
   }
   const expectedRoles = {
-    "hosted-linux": ["build", "correctness-test", "artifact-validation", "fuzz-smoke"],
-    "hosted-macos": ["build", "correctness-test", "artifact-validation"],
-    "hosted-windows": ["build", "correctness-test", "artifact-validation"],
+    "self-hosted-linux": ["build", "correctness-test", "artifact-validation", "fuzz-smoke"],
+    "self-hosted-macos": ["build", "correctness-test", "artifact-validation"],
+    "self-hosted-windows": ["build", "correctness-test", "artifact-validation"],
   };
   if (JSON.stringify(Object.keys(classes).sort()) !== JSON.stringify(Object.keys(expectedRoles).sort())) {
-    fail("public-source runner_classes must enumerate exactly the reviewed hosted classes");
+    fail("public-source runner_classes must enumerate exactly the reviewed self-hosted classes");
   }
   for (const [name, runner] of Object.entries(classes)) {
-    if (runner.environment !== "github-hosted" || runner.timing_authority !== false
+    if (runner.environment !== "self-hosted-shared" || runner.timing_authority !== false
       || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification")
       || !Array.isArray(runner.allowed_roles) || runner.allowed_roles.length === 0
       || JSON.stringify(runner.allowed_roles) !== JSON.stringify(expectedRoles[name])) {
-      fail(`runner_classes.${name} must be a hosted correctness-only class with no host or measurement authority`);
+      fail(`runner_classes.${name} must be a self-hosted correctness-only class with no host or measurement authority`);
     }
   }
   if (!Array.isArray(policy.progress?.relevant_paths) || policy.progress.relevant_paths.length === 0) {
@@ -486,8 +486,9 @@ function selfTestPublicPolicy(policy) {
   refuses(/correctness-only class/, (copy) => { copy.runner_classes[Object.keys(copy.runner_classes)[0]].allowed_roles.push("measurement-candidate"); });
   refuses(/private benchmark bridge dependency/, (copy) => { copy.publication.reason = "Publication is paused."; });
   refuses(/no host or measurement authority/, (copy) => { copy.runner_classes[Object.keys(copy.runner_classes)[0]].host = "runner-name"; });
-  refuses(/exactly the reviewed hosted classes/, (copy) => { copy.runner_classes.extra = copy.runner_classes["hosted-linux"]; });
-  refuses(/correctness-only class/, (copy) => { copy.runner_classes["hosted-linux"].allowed_roles.push("build"); });
+  refuses(/exactly the reviewed self-hosted classes/, (copy) => { copy.runner_classes.extra = copy.runner_classes["self-hosted-linux"]; });
+  refuses(/correctness-only class/, (copy) => { copy.runner_classes["self-hosted-linux"].allowed_roles.push("build"); });
+  refuses(/correctness-only class/, (copy) => { copy.runner_classes["self-hosted-linux"].environment = "github-hosted"; });
 }
 
 function validatePublicBridgeState(state) {
