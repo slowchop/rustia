@@ -33698,6 +33698,7 @@ mod gc_root_refresh_accounting_census_tests {
     fn vm_with_frame() -> Vm {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.call_stack.push(CallStackFrame {
+            instruction: None,
             program: None,
             function: None,
             debug_name: Some("gc-root-refresh-census-test".to_owned()),
