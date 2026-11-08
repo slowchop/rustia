@@ -15,6 +15,8 @@
 
 ## Invariants
 
+- Call frames retain prototype/PC coordinates for the active instruction, including expanded-call dispatch and restored continuations; implicit calls resolve those coordinates lazily for error levels and debug caller locations.
+
 - Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Completed tape runs fall directly into canonical admission at the returned PC, without retrying tape eligibility. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
 
 - Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.

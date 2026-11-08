@@ -2037,6 +2037,7 @@ struct StandardGlobalHandles {
 
 #[derive(Clone)]
 struct CallStackFrame {
+    instruction: Option<(Option<u32>, usize)>,
     program: Option<u32>,
     function: Option<Value>,
     debug_name: Option<String>,
@@ -4104,6 +4105,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<ReturnValues> {
         self.call_stack.push(CallStackFrame {
+            instruction: None,
             program: program_id,
             function: context.current_function,
             debug_name: function.debug_name.clone(),
@@ -4342,6 +4344,11 @@ impl Vm {
                     unwind_stackless_error!(error);
                 }
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
+                    // Deferred and yielded calls resume before fetching another
+                    // instruction; restore the caller site for their implicit calls.
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.instruction = Some((context.prototype, pc.saturating_sub(1)));
+                    }
                     self.update_current_gc_roots(
                         &registers,
                         &register_cells,
@@ -4657,6 +4664,11 @@ impl Vm {
                         }
 
                         pc += 1;
+                        // Keep the suspended operator's site without allocating a
+                        // source string on each instruction. Implicit calls resolve it lazily.
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            frame.instruction = Some((context.prototype, pc - 1));
+                        }
                         if crate::bytecode::supports_call_descriptor(instruction.op) {
                             let call_site = instruction_source_location(program, function, pc - 1);
                             let mut state = ExpandedCallState::new(
@@ -10703,7 +10715,16 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let stack_base = self.call_stack.len();
-        let flow = self.call_value_with_site_resumable(program, callee, args, depth, None, fuel);
+        let call_site = self.call_stack.last().and_then(|frame| {
+            let (prototype, pc) = frame.instruction?;
+            let function = match prototype {
+                Some(index) => program.functions.get(index as usize)?,
+                None => &program.main,
+            };
+            instruction_source_location(program, function, pc)
+        });
+        let flow =
+            self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel);
         match self.drive_deferred_bytecode_flow(flow, stack_base, fuel)? {
             VmFlow::Call(_) => Err(escaped_deferred_call()),
             VmFlow::Return(results) => Ok(results.into_vec()),
@@ -23532,6 +23553,7 @@ fn try_clone_stackless_debug_runs(
 
 fn try_clone_call_stack_frame(frame: &CallStackFrame) -> Result<CallStackFrame> {
     Ok(CallStackFrame {
+        instruction: frame.instruction,
         program: frame.program,
         function: frame.function,
         debug_name: try_clone_optional_string(frame.debug_name.as_deref())?,
@@ -31807,6 +31829,7 @@ mod inline_cache_tests {
             .retain_dynamic_program(program.clone())
             .expect("active top-level program");
         vm.call_stack.push(CallStackFrame {
+            instruction: None,
             program: Some(active_program),
             function: None,
             debug_name: None,
@@ -32193,6 +32216,7 @@ mod inline_cache_tests {
         let environment = vm.globals;
         let snapshot = |root| CoroutineDebugSnapshot {
             frames: vec![CallStackFrame {
+                instruction: None,
                 program: None,
                 function: None,
                 debug_name: None,
@@ -33679,6 +33703,7 @@ mod gc_root_refresh_accounting_census_tests {
     fn vm_with_frame() -> Vm {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         vm.call_stack.push(CallStackFrame {
+            instruction: None,
             program: None,
             function: None,
             debug_name: Some("gc-root-refresh-census-test".to_owned()),
