@@ -4344,6 +4344,11 @@ impl Vm {
                     unwind_stackless_error!(error);
                 }
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
+                    // Deferred and yielded calls resume before fetching another
+                    // instruction; restore the caller site for their implicit calls.
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.instruction = Some((context.prototype, pc.saturating_sub(1)));
+                    }
                     self.update_current_gc_roots(
                         &registers,
                         &register_cells,
@@ -4659,6 +4664,11 @@ impl Vm {
                         }
 
                         pc += 1;
+                        // Keep the suspended operator's site without allocating a
+                        // source string on each instruction. Implicit calls resolve it lazily.
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            frame.instruction = Some((context.prototype, pc - 1));
+                        }
                         if crate::bytecode::supports_call_descriptor(instruction.op) {
                             let call_site = instruction_source_location(program, function, pc - 1);
                             let mut state = ExpandedCallState::new(
@@ -4736,11 +4746,6 @@ impl Vm {
                             }
                             self.sync_register_cells(&mut registers, &register_cells)?;
                             continue;
-                        }
-                        // Keep the suspended operator's site without allocating a
-                        // source string on each instruction. Implicit calls resolve it lazily.
-                        if let Some(frame) = self.call_stack.last_mut() {
-                            frame.instruction = Some((context.prototype, pc - 1));
                         }
                         match instruction.op {
                             Opcode::Halt => {

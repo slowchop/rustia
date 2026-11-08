@@ -382,4 +382,26 @@ local t = setmetatable({}, {__add = function()
     return line
 end})
 assert(t + 1 == 384)
+do
+    local t = setmetatable({}, {__index = function() error("bad lookup", 2) end})
+    local function args() return 1, 2 end
+    local c = coroutine.create(function()
+        return t:missing(args())
+    end)
+    local ok, e = coroutine.resume(c)
+    assert(not ok)
+    assert(string.match(e, ":(%d+):") == "389", e)
+end
+do
+    local t = setmetatable({}, {__index = function() error("bad lookup", 2) end})
+    local function args() coroutine.yield("pause"); return 1, 2 end
+    local c = coroutine.create(function()
+        return t:missing(args())
+    end)
+    local ok, e = coroutine.resume(c)
+    assert(ok and e == "pause")
+    ok, e = coroutine.resume(c)
+    assert(not ok)
+    assert(string.match(e, ":(%d+):") == "399", e)
+end
 return "OK"

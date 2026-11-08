@@ -17,4 +17,10 @@ assert((once() :: {value: number}).value == 7)
 assert(calls == 1)
 local f = (function(a) return a end) :: (number) -> number
 assert(f(9) == 9)
+export type Imported = Module.Type
+export type ImportedBox<T> = Module.Box<T>
+assert((5 :: Module.Type) == 5)
+assert((5 :: Module.type) == 5)
+assert((5 :: Imported) == 5)
+assert((box :: Module.Box<number>).value == 5)
 return "OK"

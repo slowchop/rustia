@@ -2055,7 +2055,14 @@ impl Parser {
             TokenKind::True => Ok(TypeExpr::Boolean(true, token.span)),
             TokenKind::False => Ok(TypeExpr::Boolean(false, token.span)),
             TokenKind::String(value) => Ok(TypeExpr::StringSingleton(value, token.span)),
-            TokenKind::Ident(name) => {
+            TokenKind::Ident(mut name) => {
+                let mut end = token.span.end;
+                if self.eat_simple(SimpleToken::Dot).is_some() {
+                    let member = self.expect_name("expected type name after '.'")?;
+                    name.push('.');
+                    name.push_str(&member.text);
+                    end = member.span.end;
+                }
                 let mut args = Vec::new();
                 if self.eat_simple(SimpleToken::Less).is_some() {
                     loop {
@@ -2064,9 +2071,11 @@ impl Parser {
                             break;
                         }
                     }
-                    self.expect_simple(SimpleToken::Greater, "expected '>' after type arguments")?;
+                    end = self
+                        .expect_simple(SimpleToken::Greater, "expected '>' after type arguments")?
+                        .span
+                        .end;
                 }
-                let end = args.last().map_or(token.span.end, TypeExpr::span_end);
                 Ok(TypeExpr::Named {
                     name,
                     args,
@@ -2629,6 +2638,8 @@ mod tests {
             "export type = number",
             "export type A =",
             "local x = 5 ::",
+            "local x = 5 :: Module.",
+            "local x = 5 :: Module.Type.Inner",
             "local x = 5 :: number :: any",
             "local x = 5 :: {value: number",
             "local x = 5 : : number",

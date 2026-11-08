@@ -168,7 +168,7 @@ no portable contract outside its representable domain; see
 | TYPE: read/write property types `{ read x: T, write y: U }` | impl-defined (parse-then-erase) | Newer RFC: `read`/`write` qualifiers on table props | parse `read`/`write` qualifiers; erase | both | Watch: `read`/`write` are contextual; must not break `read` as a field name elsewhere. |
 | TYPE: singleton types `"literal"`, `true`, `false` | impl-defined (parse-then-erase) | String and boolean singleton types | parse; erase | both | Match. |
 | TYPE: `nil` as a type | impl-defined (parse-then-erase) | `nil` valid type | parse; erase | both | Match. |
-| TYPE: type assertion / cast `expr :: T` | impl-defined (parse-then-erase) | Postfix `::` overrides the static type; runtime is a no-op (no coercion/check) | parse `::`; runtime no-op (one value passes through unchanged); covered by `issues.export-type-assertions` | both | Match: `::` does NOT convert or check at runtime in Luau; pure erase. |
+| TYPE: type assertion / cast `expr :: T` | impl-defined (parse-then-erase) | Postfix `::` overrides the static type; runtime is a no-op (no coercion/check) | parse `::`; runtime no-op (one value passes through unchanged); including module-qualified types, covered by `issues.export-type-assertions` | both | Match: `::` does NOT convert or check at runtime in Luau; pure erase. |
 | The `f<a,b>(c)` disambiguation | specified | In EXPRESSION context Luau has NO value-level generic instantiation: `<` is ALWAYS the comparison operator, so `f<a,b>(c)` parses as comparison/`,` → statement error. `<` begins generic args ONLY in TYPE context after a type name | replicate: `<` = compare in expr context; `<` = generic args only in type context | both | DIVERGENCE RISK vs TypeScript/C++ intuition. Differential-test: ensure no accidental generic-call parsing in value position. |
 | TYPE: generic function expressions `function<T>(x:T)` / `local function f<T>()` | impl-defined (parse-then-erase) | Generic params on function bodies | parse generic params on funcbody; erase | both | Match grammar. |
 | TYPE grammar parse-strictness overall | impl-defined (parse-then-erase) | Luau parser accepts a precise type grammar and rejects malformed types at PARSE time (even though it never typechecks them in `luau` runtime) | match the type grammar exactly; reject what Luau rejects, accept what it accepts | both | KEY DIVERGENCE RISK: if rustia is more lenient, a type rustia accepts but Luau rejects runs only in rustia. Fuzz vs full_moon. |
@@ -1135,4 +1135,5 @@ charges the existing one-unit register/cell read separately.
 
 Focused issue #18 evidence: `issues.metamethod-error-sites` verifies error levels 0–2
 and caller `debug.info` at implicit arithmetic, comparison and indexing calls against
-Luau 0.709. The triggering instruction is the caller location.
+Luau 0.709. The triggering instruction is the caller location, including expanded method lookup
+after a deferred or yielded argument call.
