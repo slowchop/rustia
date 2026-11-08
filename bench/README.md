@@ -2,8 +2,8 @@
 
 ## Measurement policy and paused source profile
 
-This source checkout uses hosted correctness CI only, with no `ci-bench`
-measurement workflow or private runner access. A separate private maintainer
+This source checkout uses private self-hosted correctness CI only, with no `ci-bench`
+measurement workflow or benchmark-runner access. A separate private maintainer
 bridge permits manually dispatched, reviewed exact-cohort runtime comparisons.
 Its outputs remain private; automatic per-commit/history measurement, landscape
 refresh, and publication remain paused. Private comparisons do not update public
@@ -103,12 +103,17 @@ pending/ready dashboard integration are now implemented; the published cohort is
 cloud-measured cohorts, `pre-reclamation-18b58d8` (110 rows, 990 fresh processes) among them, were removed on
 2026-09-06. Throughput and instrumented memory measurements remain separate.
 
-The cohort machinery does not complete the intended memory protocol. The
-[remaining requirements](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#4-published-metrics)
-include null-control-adjusted retention, anonymous-memory area, a separate
-warmup process, and a bounded idle/collection opportunity before the quiescent
-marker. Existing rows retain their recorded metrics and values; protocol changes
-need versioning and fresh accepted evidence before claiming those requirements.
+The four protocol gaps now have prospective v2 implementation:
+[matched no-work controls, anonymous-memory area, separate warmup processes and a
+bounded natural-idle interval](https://github.com/slowchop/rustia/blob/main/design/57-memory-benchmarking.md#protocol-v2-matched-controls-and-bounded-natural-idle).
+Each case retains two warmups plus nine workload/control pairs; warmups are excluded
+from statistics. Adjusted retention subtracts each same-round control before summary.
+The supervisor holds every child idle for 100 ms before its quiescent marker.
+Historical rows retain their recorded metrics and values; protocol changes
+use explicit v2 schemas/row metadata and cannot be mixed with legacy comparisons.
+Synthetic correctness tests pass without taking local measurements; fresh memory
+acceptance remains pending an authorized memory lane. The current private bridge
+supports runtime A/B comparisons only.
 
 ```sh
 just bench-memory-self-test
@@ -542,7 +547,7 @@ Only equality is refused, so choose an alias plainly unlike the label rather
 than a variation of it. With `--local` the variable is never read.
 
 The historical private profile kept reconstruction out of GitHub Actions through
-`tools/check-workflows.js`. The source profile permits only hosted correctness
+`tools/check-workflows.js`. The source profile permits only private self-hosted correctness
 workflows; it does not enable reconstruction. Starting a new measurement requires
 the trusted private benchmark service.
 
@@ -801,7 +806,7 @@ target list rather than pretending the measurements happened in the past.
 The historical private workflow policy allowed measurement only on `bench-solo`
 through the attesting entrypoint `tools/run-dedicated-benchmark.js`; the shared
 runner pool validated committed artifacts. The source profile's
-`tools/check-workflows.js` instead permits only hosted correctness CI, with no
+`tools/check-workflows.js` instead permits only private self-hosted correctness CI, with no
 measurement workflow.
 
 `all-engines` intentionally excludes `mlua-lua54` because `mlua-lua54` and

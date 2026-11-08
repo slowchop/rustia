@@ -8,6 +8,7 @@ const path = require("node:path");
 
 const CURRENT_SCHEMA = "rustia.bench.memory-current-results.v1";
 const COHORT_SCHEMA = "rustia.bench.memory-cohort.v1";
+const { MEMORY_PROTOCOL, rowProtocol, requireSingleProtocol, validateProtocolMetrics } = require("../bench/memory-protocol.js");
 // The machine a merged row names is a provenance label published in row data,
 // and this merge writes the memory table and history that are pushed to the
 // public data repository, so it is the last place an address can be refused
@@ -102,6 +103,8 @@ function validateCurrent(current, label, generated) {
   ) {
     fail(`${label} is not a ready memory-current-results snapshot`);
   }
+  requireSingleProtocol(current.rows, label);
+  current.rows.forEach(validateProtocolMetrics);
   // Both cohorts the lane measures carry Rustia; a cohort without it was
   // produced by something other than the lane and must not be merged.
   if (generated && !current.rows.some((row) => row.engine === "rustia")) {
@@ -181,6 +184,9 @@ function merge(config) {
     fail("generated history must contain exactly one cohort matching generated current results");
   }
   const cohortHost = requireOneMachine(generated, generatedCohorts[0]);
+  if (requireSingleProtocol(generated.rows, "generated snapshot") !== requireSingleProtocol(generatedCohorts[0].rows ?? [], "generated history")) {
+    fail("generated snapshot/history protocols differ");
+  }
 
   const currentPath = path.join(config.dataRoot, "bench", "memory", "current-results.json");
   const historyPath = path.join(config.dataRoot, "bench", "memory", "history", "runs.jsonl");
@@ -203,6 +209,7 @@ function merge(config) {
       left.workload.localeCompare(right.workload) ||
       left.engine.localeCompare(right.engine),
   );
+  requireSingleProtocol(rows, "merged memory comparison");
   // This merge is per-engine: a rustia-only cohort replaces the Rustia rows and
   // keeps every competitor row standing. That is how a table came to hold six
   // weeks of rented-cloud competitor rows under metadata announcing the owned
@@ -250,7 +257,8 @@ function merge(config) {
       workloads: [...new Set(rows.map((row) => row.workload))].sort(),
       row_count: rows.length,
       raw_sample_count: rows.reduce(
-        (total, row) => total + Number(row.metrics?.peak_delta_kib?.sample_count ?? 0),
+        (total, row) => total + (Number(row.metrics?.peak_delta_kib?.sample_count ?? 0) *
+          (rowProtocol(row) === MEMORY_PROTOCOL ? 2 : 1)) + (rowProtocol(row) === MEMORY_PROTOCOL ? 2 : 0),
         0,
       ),
       source_cohorts: sourceCohorts,

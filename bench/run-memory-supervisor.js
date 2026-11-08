@@ -9,8 +9,9 @@ const path = require("path");
 const readline = require("readline");
 const { spawn } = require("child_process");
 
-const RAW_SCHEMA = "rustia.bench.memory-raw.v1";
-const CHILD_SCHEMA = "rustia.bench.memory-child-event.v1";
+const RAW_SCHEMA = "rustia.bench.memory-raw.v2";
+const { QUIESCENCE_MS } = require("./memory-protocol.js");
+const CHILD_SCHEMA = "rustia.bench.memory-child-event.v2";
 const DEFAULT_CGROUP_ROOT = "/sys/fs/cgroup";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_SAMPLE_INTERVAL_MS = 10;
@@ -63,6 +64,8 @@ function parseArgs(argv) {
     return value;
   };
 
+  const lane = take("--lane");
+  if (!["workload", "null-control"].includes(lane)) fail("--lane must be workload or null-control");
   const config = {
     command,
     binary: path.resolve(take("--binary")),
@@ -70,6 +73,10 @@ function parseArgs(argv) {
     workload: take("--workload"),
     n: integer("--n", 1),
     epochs: integer("--epochs", 1),
+    nullControl: lane === "null-control",
+    role: take("--role"),
+    round: integer("--round", 0),
+    quiescenceMs: integer("--quiescence-ms", 1),
     output: path.resolve(take("--output")),
     commit: take("--commit"),
     sampleId: take("--sample-id"),
@@ -81,6 +88,9 @@ function parseArgs(argv) {
     allowRootCgroup: flags.has("--allow-root-cgroup"),
   };
   if (values.size !== 0) fail(`unknown argument(s): ${[...values.keys()].join(", ")}`);
+  if (!["warmup", "measurement"].includes(config.role)) fail("--role must be warmup or measurement");
+  if ((config.role === "warmup") !== (config.round === 0)) fail("warmup uses round zero; measurements use positive rounds");
+  if (config.quiescenceMs !== QUIESCENCE_MS || config.timeoutMs <= config.quiescenceMs) fail("quiescence must be 100 ms and shorter than timeout");
   if (!SAFE_ID.test(config.engine)) fail("--engine is not a safe identifier");
   if (!SAFE_ID.test(config.workload)) fail("--workload is not a safe identifier");
   if (!SAFE_ID.test(config.sampleId)) fail("--sample-id is not a safe identifier");
@@ -98,6 +108,7 @@ function printUsage() {
       "  node bench/run-memory-supervisor.js sample --binary <script-bench> --engine <id> " +
       "--workload <id> --n <units> --epochs <count> --output <raw.json> " +
       "--commit <40-hex> --sample-id <id> --benchmark-cpu <n> --supervisor-cpu <n> " +
+      "--lane <workload|null-control> --role <warmup|measurement> --round <n> --quiescence-ms 100 " +
       "[--sample-interval-ms 10] [--timeout-ms 600000] [--cgroup-root /sys/fs/cgroup] " +
       "[--allow-root-cgroup]\n",
   );
@@ -212,8 +223,15 @@ function processSnapshot(pid) {
   };
 }
 
+function anonymousCharge(directory) {
+  const stat = parseKeyValueIntegers(readText(path.join(directory, "memory.stat")), "memory.stat");
+  requireKeys(stat, ["anon"], "memory.stat");
+  return stat.anon;
+}
+
 function cgroupSnapshot(directory) {
   const memoryStat = parseKeyValueIntegers(readText(path.join(directory, "memory.stat")), "memory.stat");
+  requireKeys(memoryStat, ["anon"], "memory.stat");
   const events = parseKeyValueIntegers(
     readText(path.join(directory, "memory.events.local")),
     "memory.events.local",
@@ -351,7 +369,8 @@ function writeJsonAtomic(file, value) {
 
 function validateChildEvent(value, expected, priorSequence) {
   if (value == null || typeof value !== "object" || Array.isArray(value)) fail("child event must be an object");
-  if (value.schema_version !== 1 || value.schema !== CHILD_SCHEMA) fail("child event schema is invalid");
+  if (value.schema_version !== 2 || value.schema !== CHILD_SCHEMA) fail("child event schema is invalid");
+  if (value.null_control !== expected.nullControl) fail("child control lane does not match the request");
   if (value.sequence !== priorSequence + 1) fail("child event sequence is not contiguous");
   if (value.pid !== expected.pid) fail("child event pid does not match spawned process");
   for (const field of ["engine", "workload", "commit"]) {
@@ -383,6 +402,24 @@ function phaseShape(epochs) {
   ];
 }
 
+async function waitForQuiescence(ms) {
+  const deadline = process.hrtime.bigint() + BigInt(ms) * 1000000n;
+  for (;;) {
+    const remaining = deadline - process.hrtime.bigint();
+    if (remaining <= 0n) return;
+    await new Promise(resolve => setTimeout(resolve, Math.ceil(Number(remaining) / 1e6)));
+  }
+}
+
+async function acknowledgePhase(event, config, acknowledge, delay = waitForQuiescence) {
+  if (event.phase === "epoch" && event.epoch === config.epochs) {
+    // The child is blocked on its last epoch handshake. Give every engine the
+    // same bounded natural idle opportunity; never force engine-specific GC.
+    await delay(config.quiescenceMs);
+  }
+  acknowledge();
+}
+
 async function collectSample(config) {
   if (!fs.existsSync(config.binary) || !fs.statSync(config.binary).isFile()) {
     fail(`benchmark binary does not exist: ${config.binary}`);
@@ -395,6 +432,7 @@ async function collectSample(config) {
     String(config.benchmarkCpu),
     config.binary,
     "--memory-child",
+    ...(config.nullControl ? ["--memory-null-control"] : []),
     "--engines",
     config.engine,
     "--workloads",
@@ -425,6 +463,10 @@ async function collectSample(config) {
   let protocolError = null;
   let sequence = 0;
   let lineChain = Promise.resolve();
+  child.stdin.on("error", error => {
+    if (protocolError == null) protocolError = error;
+    child.kill("SIGKILL");
+  });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
@@ -435,9 +477,11 @@ async function collectSample(config) {
       timeline.push({
         elapsed_ms: Number(process.hrtime.bigint() - startedNs) / 1e6,
         current_bytes: readInteger(path.join(cgroup.directory, "memory.current"), "memory.current"),
+        anon_bytes: anonymousCharge(cgroup.directory),
       });
     } catch (error) {
       if (protocolError == null) protocolError = error;
+      child.kill("SIGKILL");
     }
   };
   sampleTimeline();
@@ -445,7 +489,7 @@ async function collectSample(config) {
 
   const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
   lines.on("line", (line) => {
-    lineChain = lineChain.then(() => {
+    lineChain = lineChain.then(async () => {
       if (protocolError != null) return;
       try {
         const parsed = JSON.parse(line);
@@ -458,6 +502,7 @@ async function collectSample(config) {
             commit: config.commit,
             n: config.n,
             epochs: config.epochs,
+            nullControl: config.nullControl,
           },
           sequence,
         );
@@ -470,15 +515,22 @@ async function collectSample(config) {
         if (cgroupMemory.swap_current_bytes !== 0) fail(`child phase ${value.phase} used cgroup swap`);
         const phasePeakBytes =
           cgroup.peakDescriptor === false ? null : readPeakDescriptor(cgroup.peakDescriptor);
+        const elapsedMs = Number(process.hrtime.bigint() - startedNs) / 1e6;
         events.push({
           event: value,
-          elapsed_ms: Number(process.hrtime.bigint() - startedNs) / 1e6,
+          elapsed_ms: elapsedMs,
           process_memory: processMemory,
           cgroup_memory: cgroupMemory,
           phase_peak_bytes: phasePeakBytes,
         });
+        timeline.push({ elapsed_ms: elapsedMs, current_bytes: cgroupMemory.current_bytes,
+          anon_bytes: cgroupMemory.stat_bytes.anon });
         if (cgroup.peakDescriptor !== false) resetPeakDescriptor(cgroup.peakDescriptor);
-        child.stdin.write("continue\n");
+        await acknowledgePhase(value, config, () => {
+          if (protocolError == null && child.exitCode == null && child.signalCode == null) {
+            child.stdin.write("continue\n");
+          }
+        });
       } catch (error) {
         protocolError = error;
         child.kill("SIGKILL");
@@ -535,7 +587,7 @@ async function collectSample(config) {
   if (finalCgroup.swap_current_bytes !== 0) fail("memory cgroup ended with nonzero swap");
 
   const result = {
-    schema_version: 1,
+    schema_version: 2,
     schema: RAW_SCHEMA,
     sample_id: config.sampleId,
     captured_at: new Date().toISOString(),
@@ -548,6 +600,9 @@ async function collectSample(config) {
       workload: config.workload,
       n: config.n,
       epochs: config.epochs,
+      lane: config.nullControl ? "null-control" : "workload",
+      role: config.role,
+      round: config.round,
     },
     platform: {
       os: process.platform,
@@ -566,6 +621,9 @@ async function collectSample(config) {
     },
     protocol: {
       child_schema: CHILD_SCHEMA,
+      quiescence_ms: config.quiescenceMs,
+      quiescence_policy: "natural idle while blocked on the final epoch handshake",
+      anonymous_timeline_memory: "cgroup memory.stat anon bytes",
       isolation: "fresh process and cgroup-v2 leaf",
       primary_phase_memory: "process_memory.smaps_rollup_kib.anonymous",
       corroborating_phase_memory: ["pss", "private_dirty", "rss"],
@@ -584,7 +642,7 @@ async function collectSample(config) {
   return result;
 }
 
-function selfTest() {
+async function selfTest() {
   assert.deepEqual(parseKeyValueIntegers("anon 1024\npgfault 9\n", "fixture"), {
     anon: 1024,
     pgfault: 9,
@@ -614,6 +672,14 @@ function selfTest() {
     "dropped",
   ]);
   assert.throws(() => parseArgs(["sample", "--engine", "rustia"]));
+  const actions = [];
+  await acknowledgePhase({ phase: "epoch", epoch: 2 }, { epochs: 2, quiescenceMs: 100 },
+    () => actions.push("ack"), async ms => actions.push(ms));
+  assert.deepEqual(actions, [100, "ack"]);
+  actions.length = 0;
+  await acknowledgePhase({ phase: "epoch", epoch: 1 }, { epochs: 2, quiescenceMs: 100 },
+    () => actions.push("ack"), async ms => actions.push(ms));
+  assert.deepEqual(actions, ["ack"]);
   process.stdout.write("memory supervisor self-test passed\n");
 }
 
@@ -624,7 +690,7 @@ async function main() {
     return;
   }
   if (config.command === "self-test") {
-    selfTest();
+    await selfTest();
     return;
   }
   const result = await collectSample(config);

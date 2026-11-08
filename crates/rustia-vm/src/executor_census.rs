@@ -26,8 +26,17 @@ pub struct ExecutorCensus {
     /// Total logical instructions the VM has charged, the denominator every
     /// executor share is measured against.
     pub executed_instructions: u64,
-    /// Times the VM rebuilt the current frame's GC root vector.
+    /// Root-refresh attempts, including attempts made without a current frame.
     pub gc_root_refreshes: u64,
+    /// Refreshes with a frame while control-memory accounting was clean, so
+    /// the refresh updated cached live bytes immediately.
+    pub gc_root_refreshes_clean_accounted: u64,
+    /// Refreshes with a frame while control-memory accounting was already
+    /// dirty, so accounting remained deferred to the next full census.
+    pub gc_root_refreshes_dirty_skip: u64,
+    /// Refresh attempts made without a current call-stack frame. These count
+    /// toward `gc_root_refreshes`, but copy no roots and update no live bytes.
+    pub gc_root_refresh_attempts_no_frame: u64,
     /// Values copied into frame root vectors by those refreshes. This is the
     /// work a C2.4 window scan would replace with a borrow.
     pub gc_root_values_copied: u64,

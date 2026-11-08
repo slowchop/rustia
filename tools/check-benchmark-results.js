@@ -687,7 +687,7 @@ function historicalHostForPublicProfile(profile, status) {
   }
   const authorities = Object.entries(status.runner_classes ?? {}).filter(([, runner]) => runner?.timing_authority === true);
   if (authorities.length !== 0 || Object.values(status.runner_classes ?? {}).some((runner) =>
-    runner?.environment !== "github-hosted" || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification"))) {
+    runner?.environment !== "self-hosted-shared" || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification"))) {
     fail("public-source benchmark status may not declare a current machine or timing authority");
   }
   return profile.historical_host_label;
@@ -851,7 +851,7 @@ function selfTest() {
   const pausedPublicStatus = {
     profile: "public-source",
     benchmark_bridge: "pending-private-trusted-pipeline",
-    runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
+    runner_classes: { "self-hosted-linux": { environment: "self-hosted-shared", timing_authority: false } },
     measurement: { mode: "paused-pending-private-bridge", authoritative_runner_classes: [], scheduled_billing_allowed: false },
     publication: { state: "paused" }, progress: { state: "paused" }, landscape: { state: "paused" },
   };
@@ -872,7 +872,7 @@ function selfTest() {
   }));
   refuses(/may not declare a current machine/, () => historicalHostForPublicProfile(publicProfile, {
     ...pausedPublicStatus,
-    runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false, host: "ci-bench" } },
+    runner_classes: { "self-hosted-linux": { environment: "self-hosted-shared", timing_authority: false, host: "ci-bench" } },
   }));
   refuses(/preserve the explicit historical benchmark provenance/, () => historicalHostForPublicProfile(
     { ...publicProfile, visibility_authorized: true }, pausedPublicStatus,

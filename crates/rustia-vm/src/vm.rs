@@ -514,6 +514,12 @@ pub struct Vm {
     #[cfg(any(test, feature = "executor-diagnostics"))]
     gc_root_refreshes: u64,
     #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refreshes_clean_accounted: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refreshes_dirty_skip: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
+    gc_root_refresh_attempts_no_frame: u64,
+    #[cfg(any(test, feature = "executor-diagnostics"))]
     gc_root_refresh_by_opcode: Vec<u64>,
     #[cfg(any(test, feature = "executor-diagnostics"))]
     gc_root_refreshes_tape_exit: u64,
@@ -2522,6 +2528,12 @@ impl Vm {
             #[cfg(any(test, feature = "executor-diagnostics"))]
             gc_root_refreshes: 0,
             #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refreshes_clean_accounted: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refreshes_dirty_skip: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
+            gc_root_refresh_attempts_no_frame: 0,
+            #[cfg(any(test, feature = "executor-diagnostics"))]
             gc_root_refresh_by_opcode: Vec::new(),
             #[cfg(any(test, feature = "executor-diagnostics"))]
             gc_root_refreshes_tape_exit: 0,
@@ -2639,6 +2651,9 @@ impl Vm {
         let mut census = crate::ExecutorCensus {
             executed_instructions: self.executed_instructions,
             gc_root_refreshes: self.gc_root_refreshes,
+            gc_root_refreshes_clean_accounted: self.gc_root_refreshes_clean_accounted,
+            gc_root_refreshes_dirty_skip: self.gc_root_refreshes_dirty_skip,
+            gc_root_refresh_attempts_no_frame: self.gc_root_refresh_attempts_no_frame,
             gc_root_values_copied: self.gc_root_values_copied,
             gc_root_refreshes_tape_exit: self.gc_root_refreshes_tape_exit,
             ..crate::ExecutorCensus::default()
@@ -15263,6 +15278,8 @@ impl Vm {
         {
             self.gc_root_refreshes = self.gc_root_refreshes.saturating_add(1);
         }
+        #[cfg(any(test, feature = "executor-diagnostics"))]
+        let control_memory_dirty = self.control_memory_dirty;
         let _copied = self.mutate_last_call_stack_frame(|frame| {
             frame.roots.clear();
             frame.roots.extend_from_slice(registers);
@@ -15273,6 +15290,20 @@ impl Vm {
         });
         #[cfg(any(test, feature = "executor-diagnostics"))]
         {
+            match _copied {
+                Some(_) if control_memory_dirty => {
+                    self.gc_root_refreshes_dirty_skip =
+                        self.gc_root_refreshes_dirty_skip.saturating_add(1);
+                }
+                Some(_) => {
+                    self.gc_root_refreshes_clean_accounted =
+                        self.gc_root_refreshes_clean_accounted.saturating_add(1);
+                }
+                None => {
+                    self.gc_root_refresh_attempts_no_frame =
+                        self.gc_root_refresh_attempts_no_frame.saturating_add(1);
+                }
+            }
             self.gc_root_values_copied = self
                 .gc_root_values_copied
                 .saturating_add(_copied.unwrap_or(0));
@@ -33658,4 +33689,70 @@ fn escaped_deferred_call() -> Error {
     Error::new(ErrorKind::InvalidProgram {
         reason: "internal bytecode call escaped its trampoline",
     })
+}
+
+#[cfg(test)]
+mod gc_root_refresh_accounting_census_tests {
+    use super::*;
+
+    fn vm_with_frame() -> Vm {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.call_stack.push(CallStackFrame {
+            program: None,
+            function: None,
+            debug_name: Some("gc-root-refresh-census-test".to_owned()),
+            environment: vm.globals,
+            thread_environment: vm.globals,
+            module_cohort: 0,
+            call_site: None,
+            roots: Vec::new(),
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        });
+        vm.mark_control_memory_dirty();
+        vm.sync_control_memory();
+        vm
+    }
+
+    fn exact_control_live_bytes(vm: &Vm) -> usize {
+        let mut usage = MemoryUsage::default();
+        add_vm_cached_control_memory(vm, &mut usage);
+        usage.live_bytes
+    }
+
+    #[test]
+    fn refresh_census_partitions_clean_dirty_and_missing_frame_attempts() {
+        let mut vm = vm_with_frame();
+
+        vm.update_current_gc_roots(&[Value::number(1.0), Value::number(2.0)], &[], &[], &[]);
+        assert_eq!(vm.call_stack[0].roots.len(), 2);
+        assert_eq!(vm.call_stack[0].roots[0].as_number(), Some(1.0));
+        assert_eq!(vm.call_stack[0].roots[1].as_number(), Some(2.0));
+        assert!(!vm.control_memory_dirty);
+        assert_eq!(vm.control_live_bytes, exact_control_live_bytes(&vm));
+
+        vm.mark_control_memory_dirty();
+        let cached_before_dirty_refresh = vm.control_live_bytes;
+        vm.update_current_gc_roots(&[Value::number(3.0)], &[], &[], &[]);
+        assert_eq!(vm.call_stack[0].roots.len(), 1);
+        assert_eq!(vm.call_stack[0].roots[0].as_number(), Some(3.0));
+        assert_eq!(vm.control_live_bytes, cached_before_dirty_refresh);
+        assert!(vm.control_memory_dirty);
+
+        vm.call_stack.clear();
+        vm.update_current_gc_roots(&[Value::number(4.0)], &[], &[], &[]);
+
+        let census = vm.executor_census();
+        assert_eq!(census.gc_root_refreshes, 3);
+        assert_eq!(census.gc_root_refreshes_clean_accounted, 1);
+        assert_eq!(census.gc_root_refreshes_dirty_skip, 1);
+        assert_eq!(census.gc_root_refresh_attempts_no_frame, 1);
+        assert_eq!(census.gc_root_values_copied, 3);
+        assert_eq!(
+            census.gc_root_refreshes_clean_accounted
+                + census.gc_root_refreshes_dirty_skip
+                + census.gc_root_refresh_attempts_no_frame,
+            census.gc_root_refreshes,
+        );
+    }
 }

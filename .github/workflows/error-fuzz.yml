@@ -14,7 +14,10 @@ concurrency:
 
 jobs:
   differential-smoke:
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -36,8 +39,10 @@ jobs:
 
   campaign:
     # Long campaigns run only after an explicit workflow dispatch.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch'
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux]
     timeout-minutes: 170
     strategy:
       fail-fast: false

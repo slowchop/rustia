@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-10-30 (Australia/Hobart).
+Updated: 2026-11-01 (Australia/Hobart).
 
 This is the single authority for current project status. Detailed design contracts
 and the pinned oracle remain the specification; dated records explain decisions
@@ -104,9 +104,12 @@ reset against an independent host model in all four profiles, within the existin
 input/fuel/memory bounds. This is correctness coverage, not a new remote campaign
 or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-exports-and-functions-2026-10-30).
 
-Hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
+Private self-hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
 bounded fuzz/differential smoke, native Linux x86-64 and macOS ARM64, Node/V8 and
 headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.
+Ordinary correctness jobs use generic Linux/macOS/Windows self-hosted groups,
+with private-repository and same-repository PR guards. Public visibility requires
+a separate isolation review; there is no hosted fallback or benchmark-runner access.
 Dated Linux ARM64, Windows and real Firefox/Safari passes do not close Intel Mac,
 mobile, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
 
@@ -115,7 +118,7 @@ the full unchanged-commit `just release-preflight` inventory through the normal
 hook. No bypass or evidence regeneration inside validation. [97 — Validation](97-validation-workflow.md)
 defines that inventory; a repaired macOS bootstrap still requires actual native execution.
 
-**Never run performance measurements locally.** The hosted source profile gives
+**Never run performance measurements locally.** The source correctness profile gives
 correctness jobs no timing authority. Public per-commit/history automation,
 landscape refresh and publication remain **paused**. A separate private maintainer
 bridge admits only reviewed, manually dispatched exact-cohort runtime comparisons
@@ -152,10 +155,11 @@ One action list; completing work does not authorize source or package publicatio
    [00](00-constraints.md), [90](90-release-readiness.md) and [96](96-browser-platform-acceptance.md).
 4. **Finish memory policy and evidence:** tune GC intervals against the maintained
    mixed-heap correctness gate; deterministic intervals are replay-ABI choices.
-   Add external allocator/RSS history and resolve four prospective protocol gaps:
-   null-control-adjusted retention, anonymous-memory area, separate warmup process,
-   and bounded idle/collection opportunity before the quiescent marker. Historical
-   values/thresholds remain unchanged. [57](57-memory-benchmarking.md),
+   Protocol v2 implements paired control-adjusted retention, anonymous-memory area,
+   separate warmup processes and 100 ms natural idle before quiescent sampling.
+   Add external allocator/RSS history and obtain fresh Linux memory evidence through
+   an authorized memory lane; the private bridge currently supports runtime comparisons
+   only. Historical values/thresholds remain unchanged. [57](57-memory-benchmarking.md),
    [drift review](../2026-10-29_DRIFT_REPORT.md).
 5. **Resolve benchmark repeatability and extend trusted evidence:** use the private
    bridge within scope; preserve raw samples/acceptance rules and one history for

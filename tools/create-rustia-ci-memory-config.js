@@ -120,6 +120,9 @@ function parseOutput(argv) {
 
 
 function createConfig(commit) {
+  // Old commits remain reproducible as v1 configurations. Fresh execution of
+  // those configs is refused by the runner; only committed v2 inputs freeze v2.
+  const corrected = gitText(["ls-tree", "--name-only", commit, "--", "bench/memory-protocol.js"]) !== "";
   const workloads = [
     "dense_tables",
     "sparse_tables",
@@ -154,12 +157,14 @@ function createConfig(commit) {
         memory_analyzer: sourceHash(commit, "bench/analyze-memory-samples.js"),
         memory_cohort: sourceHash(commit, "bench/run-memory-cohort.js"),
         memory_publisher: sourceHash(commit, "bench/publish-memory-analysis.js"),
+        ...(corrected ? { memory_protocol: sourceHash(commit, "bench/memory-protocol.js") } : {}),
         memory_history_before: sourceHash(commit, "bench/memory/history/runs.jsonl"),
         memory_current_before: sourceHash(commit, "bench/memory/current-results.json"),
       },
     },
     measurement: {
-      protocol: "cross_engine_memory_v1",
+      protocol: corrected ? "cross_engine_memory_v2" : "cross_engine_memory_v1",
+      ...(corrected ? { warmup_rounds: 1, quiescence_ms: 100 } : {}),
       cohort_id: `rustia-ci-${commit.slice(0, 12)}`,
       samples: 9,
       bootstrap_repetitions: 20000,

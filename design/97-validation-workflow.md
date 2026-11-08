@@ -10,7 +10,7 @@ The temporary first-history bootstrap guard is retained in staging commit
 `417828e` for provenance and is not part of the current source. Current pushes
 use the ordinary exact-HEAD and full-preflight guard above. The initial private
 transfer was verified with Actions disabled; accepting staged revisions requires
-the hosted correctness checks. This does not authorize public visibility.
+the CI correctness checks. This does not authorize public visibility.
 
 For iteration, `just check-quick` runs formatting, repository/evidence checks,
 tool self-tests and all compiler unit tests. This is early feedback, not release
@@ -34,6 +34,18 @@ action's temporary HOME setting does not carry into that container step. Linux
 native goldens remain in the workspace stage. Mac, Node and build-matrix checks
 remain in place. Saved benchmark artifacts are validated offline; the private
 staging profile runs no performance measurements.
+
+The Linux workspace job also checks the default-off `executor-diagnostics`
+feature and runs the fixed `gc_accounting_paths` test with its captured output.
+That CI-only diagnostic partitions root-refresh attempts by control-memory
+accounting state and reports closure/leaf executor counts separately for setup,
+one full-N warmup and the following call on the same VM. It is outside the local
+pre-push command inventory: do not run workload profiling locally. Counts establish
+path exposure, not elapsed
+cost, a regression cause or performance acceptance. Ordinary builds keep the
+instrumentation disabled; timing comparisons still belong to private `ci-bench`.
+The counters describe this diagnostic build and do not recover exact paths from
+previous benchmark binaries or timed legs.
 
 The refactor retains all 68 previous preflight commands. It adds compiler unit
 tests as an early check, plus tests of stage selection and push rejection. No
@@ -60,8 +72,13 @@ Windows correctness tests executed; this observation does not close that gate.
 
 ## Prepared public source profile
 
-An explicit public-source marker selects hosted correctness CI while retaining
+An explicit public-source marker selects private self-hosted correctness CI while retaining
 the full preflight stages and aggregate gate. Benchmark automation is paused;
 existing measurements are historical records. The full inventory additionally
 checks the history projection and refuses missing benchmark source identifiers.
+All jobs use ordinary self-hosted groups with private-repository and trusted
+same-repository PR guards; the final aggregate retains its always-run failure
+check within that trusted scope. Windows native execution stays manual and
+requires an online Windows runner. Public visibility needs a separate isolated
+execution plan. No hosted fallback or benchmark-runner access is added.
 This does not authorize a package release or replace platform release gates.

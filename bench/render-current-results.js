@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
+const { MEMORY_PROTOCOL, rowProtocol, requireSingleProtocol, retainedMetric, validateProtocolMetrics } = require("./memory-protocol.js");
+
 const fs = require("fs");
 const path = require("path");
 const { readResults: readGrabbyBuilds, renderSection: renderGrabbyBuilds } = require("./grabby-builds/render.js");
@@ -168,7 +170,7 @@ function readOperationsStatus(data) {
       fail(`${relative(operationsStatusPath)} must match the reviewed private bridge availability state`);
     }
     const classes = status.runner_classes;
-    const expectedClasses = ["hosted-linux", "hosted-macos", "hosted-windows"];
+    const expectedClasses = ["self-hosted-linux", "self-hosted-macos", "self-hosted-windows"];
     const expectedMeasurementMode = marker.benchmark_bridge === "private-maintainer-cohorts-v1"
       ? "public-automation-paused-private-manual-cohorts"
       : "paused-pending-private-bridge";
@@ -176,14 +178,14 @@ function readOperationsStatus(data) {
       || status.measurement?.authoritative_runner_classes?.length !== 0
       || status.measurement?.scheduled_billing_allowed !== false
       || !classes || Object.keys(classes).length === 0
-      || Object.values(classes).some((runner) => runner?.environment !== "github-hosted"
+      || Object.values(classes).some((runner) => runner?.environment !== "self-hosted-shared"
         || runner?.timing_authority !== false || Object.hasOwn(runner, "host")
         || Object.hasOwn(runner, "qualification") || !Array.isArray(runner.allowed_roles)
         || runner.allowed_roles.some((role) => role.startsWith("measurement-")))) {
       fail("public-source operations status must have no active timing authority or machine qualification");
     }
     if (JSON.stringify(Object.keys(classes).sort()) !== JSON.stringify(expectedClasses.sort())) {
-      fail("public-source operations status must enumerate only the hosted correctness classes");
+      fail("public-source operations status must enumerate only the self-hosted correctness classes");
     }
     for (const lane of ["publication", "progress", "landscape"]) {
       if (status[lane]?.state !== "paused" || typeof status[lane]?.next_action !== "string"
@@ -455,6 +457,8 @@ function readMemoryResults() {
   if (data.status === "ready" && data.rows.length === 0) {
     fail("ready memory results must contain rows");
   }
+  requireSingleProtocol(data.rows, "memory comparison");
+  data.rows.forEach(validateProtocolMetrics);
   data.rows.forEach((row, index) => {
     const label = `memory results row ${index + 1}`;
     for (const key of ["commit", "target", "host", "engine", "dialect", "execution_mode", "workload", "classification"]) {
@@ -535,6 +539,8 @@ function readMemoryHistory() {
     if (!Array.isArray(record.rows) || record.rows.length === 0) {
       fail(`${label}.rows must be a non-empty array`);
     }
+    requireSingleProtocol(record.rows, label);
+    record.rows.forEach(validateProtocolMetrics);
     records.push({ ...record, host: memoryCohortHost(record, label) });
   }
   return records.sort(
@@ -1721,7 +1727,9 @@ function memoryHistoryModel(records) {
   // drawn on this line, and the section counts them from the records. Null
   // means there is no same-host reference yet, and the section says that too.
   const host = records.at(-1)?.host ?? null;
-  const sameHost = records.filter((record) => (record.host ?? null) === host);
+  const protocol = requireSingleProtocol(records.at(-1)?.rows ?? [], "latest memory cohort");
+  const sameHost = records.filter((record) => (record.host ?? null) === host &&
+    requireSingleProtocol(record.rows, "memory history cohort") === protocol);
   const referenceRecord = sameHost.find((record) => completeRows(record, "mlua-luau-jit") != null);
   if (referenceRecord == null) return null;
   const referenceRows = completeRows(referenceRecord, "mlua-luau-jit");
@@ -1735,9 +1743,11 @@ function memoryHistoryModel(records) {
     const scores = Object.fromEntries(
       Object.entries(metricKeys).map(([metric, key]) => {
         const ratios = rustiaRows.map((row, index) => {
-          const rustia = Number(row.metrics?.[key]?.median);
-          const reference = Number(referenceRows[index].metrics?.[key]?.median);
-          if (!Number.isFinite(rustia) || rustia < 0 || !Number.isFinite(reference) || reference < 0) {
+          const metricKey = metric === "retained" ? retainedMetric(row) : key;
+          const rustia = Number(row.metrics?.[metricKey]?.median);
+          const reference = Number(referenceRows[index].metrics?.[metricKey]?.median);
+          const adjusted = metric === "retained" && rowProtocol(row) === MEMORY_PROTOCOL;
+          if (!Number.isFinite(rustia) || (!adjusted && rustia < 0) || !Number.isFinite(reference) || (!adjusted && reference < 0)) {
             fail(`memory history ${record.cohort_id ?? record.commit} has invalid ${key}`);
           }
           return Math.max(1, reference) / Math.max(1, rustia);
@@ -2069,6 +2079,8 @@ function memoryResultsSection(data, authorityHost, publicSource = false, manualC
       Number(left.metrics.peak_delta_kib.median) - Number(right.metrics.peak_delta_kib.median) ||
       left.engine.localeCompare(right.engine),
   );
+  const protocol = requireSingleProtocol(rows, "memory results panel");
+  const corrected = protocol === MEMORY_PROTOCOL;
   const coverage = new Map(data.detector_coverage.map((entry) => [entry.engine, entry.detector_validated === true]));
   // A best-first ranking needs something to rank against. With one engine the charts collapse to a
   // row of single bars, so the panel reads that engine's own figures instead of claiming a comparison.
@@ -2083,7 +2095,7 @@ function memoryResultsSection(data, authorityHost, publicSource = false, manualC
             : `${publicSource ? "Historical " : ""}Fresh process+cgroup samples recorded on one machine. Peak catches short spikes; retained uses anonymous memory after quiescence.`}</p>
         </div>
       </div>
-      ${comparative ? "" : `<p class="pending-note">${publicSource
+      ${corrected ? '<p class="pending-note">Memory protocol v2: retained values subtract a matched no-work control. Negative deltas are preserved; history ratios floor both sides at 1 KiB. Each case has separate warmup processes and 100 ms of natural idle before the final sample. Legacy protocols are excluded from this comparison.</p>\n      ' : ""}${comparative ? "" : `<p class="pending-note">${publicSource
         ? manualCohortsAvailable
           ? "Competitor memory comparisons are not part of this historical cohort. The private maintainer bridge supports runtime A/B comparisons only; memory measurement remains paused."
           : "Competitor memory comparisons are not part of this historical cohort. New measurements remain paused pending a trusted private benchmark bridge."
@@ -2103,7 +2115,7 @@ function memoryResultsSection(data, authorityHost, publicSource = false, manualC
                 <td>${formatMemoryKib(row.metrics.spawned_anon_kib.median)}</td>
                 <td>${formatSignedMemoryKib(row.metrics.prepared_delta_anon_kib.median)}</td>
                 <td><strong>${formatMemoryKib(row.metrics.peak_delta_kib.median)}</strong></td>
-                <td>${formatSignedMemoryKib(row.metrics.quiescent_retained_delta_anon_kib.median)}</td>
+                <td>${formatSignedMemoryKib(row.metrics[retainedMetric(row)].median)}</td>
                 <td>${formatSignedMemoryKib(row.metrics.tail_growth_kib_per_epoch.median)}/epoch</td>
                 <td>${memoryClassification(row.classification, coverage.get(row.engine) === true, publicSource)}</td>
               </tr>
@@ -2116,6 +2128,7 @@ function memoryResultsSection(data, authorityHost, publicSource = false, manualC
 }
 
 function memoryComparisonCharts(rows) {
+  requireSingleProtocol(rows, "memory charts");
   const cohorts = [
     {
       title: "Shared benchmark workloads",
@@ -2155,7 +2168,7 @@ function memoryCohortCharts(rows, cohort) {
           measurements.map((row) => Number(row.metrics.peak_delta_kib.median)),
         ),
         retained: measurements.reduce(
-          (sum, row) => sum + Number(row.metrics.quiescent_retained_delta_anon_kib.median),
+          (sum, row) => sum + Number(row.metrics[retainedMetric(row)].median),
           0,
         ) / measurements.length,
       };
