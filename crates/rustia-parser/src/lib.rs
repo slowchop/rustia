@@ -1058,6 +1058,17 @@ impl Parser {
         if let Some(function_token) = self.eat_simple(SimpleToken::Function) {
             return self.parse_function_statement(function_token.span.start);
         }
+        // `export` is contextual: ordinary variables with this name remain valid.
+        if matches!(&self.peek().kind, TokenKind::Ident(name) if name == "export")
+            && matches!(
+                self.tokens.get(self.peek_index() + 1).map(|t| &t.kind),
+                Some(TokenKind::Type)
+            )
+        {
+            self.advance();
+            self.advance();
+            return self.parse_type_alias();
+        }
         let type_alias = self.at_simple(SimpleToken::Type)
             && matches!(
                 self.tokens
@@ -1464,6 +1475,16 @@ impl Parser {
             self.parse_primary(depth + 1)?
         };
         lhs = self.parse_postfix(lhs, depth + 1)?;
+        if self.at_type_assertion() {
+            self.advance();
+            self.advance();
+            let annotation = self.parse_type(depth + 1)?;
+            // Like parentheses, assertions produce one value and are not lvalues.
+            lhs = Expr::Paren {
+                span: Span::new(lhs.span_start(), annotation.span_end()),
+                expr: Box::new(lhs),
+            };
+        }
 
         while let Some((op, left_bp, right_bp)) = self.peek_binary_op() {
             if left_bp < min_bp {
@@ -1483,10 +1504,19 @@ impl Parser {
         Ok(lhs)
     }
 
+    fn at_type_assertion(&self) -> bool {
+        let index = self.peek_index();
+        self.at_simple(SimpleToken::Colon)
+            && self.tokens.get(index + 1).is_some_and(|next| {
+                matches!(next.kind, TokenKind::Colon)
+                    && self.tokens[index].span.end == next.span.start
+            })
+    }
+
     fn parse_postfix(&mut self, mut expr: Expr, depth: usize) -> Result<Expr> {
         self.check_depth(depth)?;
         loop {
-            if !expr_accepts_postfix(&expr) {
+            if self.at_type_assertion() || !expr_accepts_postfix(&expr) {
                 break;
             }
             if let Some((args, end)) = self.parse_call_suffix(depth + 1)? {
@@ -2592,6 +2622,22 @@ mod tests {
         parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Stmt,
         TableField, TypeExpr, UnaryOp,
     };
+
+    #[test]
+    fn exported_aliases_and_assertions_require_complete_types() {
+        for source in [
+            "export type = number",
+            "export type A =",
+            "local x = 5 ::",
+            "local x = 5 :: number :: any",
+            "local x = 5 :: {value: number",
+            "local x = 5 : : number",
+        ] {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+        assert!(parse_source("local export = 1; export += 1; return export").is_ok());
+        assert!(parse_source("export type A<T> = {value:T}; return 5 :: A<number>").is_ok());
+    }
 
     #[test]
     fn parses_local_annotation_without_typechecking() {

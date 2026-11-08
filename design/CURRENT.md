@@ -27,6 +27,17 @@ and supported releases have separate gates; full parity and API stability are no
 [98 — Source readiness](98-public-source-readiness.md) records the audit, history
 projection and visibility gates. Historic PR/CI links remain private evidence.
 
+## Issue #18 and #19 corrections
+
+Metamethod calls preserve their triggering instruction location for positive `error`
+levels and `debug.info`. Exported type aliases and `expr :: T` assertions parse and
+have no runtime type-checking effect; assertions select one result. Two focused
+fixtures were checked against the pinned Luau 0.709 oracle and through the facade
+on all four profiles. Related cross-chunk diagnostic snippets, nil writes and
+coroutine report attribution from #18 remain separate follow-up work. The existing
+balanced-token table-type parser remains more permissive than the full type-grammar
+strictness intended by design/50; this change reuses that grammar.
+
 ## Implemented contracts
 
 | Area | Current behavior and detailed contract |
@@ -84,8 +95,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **726 fixtures**, **520 refs**, **0 pending-oracle**
-and **0 pending-impl**: 708 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **728 fixtures**, **520 refs**, **0 pending-oracle**
+and **0 pending-impl**: 710 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and

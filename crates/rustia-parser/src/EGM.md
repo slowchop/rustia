@@ -12,6 +12,8 @@
 
 ## Invariants
 
+- Contextual `export type` uses the alias grammar; `expr :: T` parses the type and lowers to a single-result parenthesized expression without runtime checks.
+
 - Recursive parser paths enforce a maximum depth of 512.
 - AST source spans are byte offsets inherited from lexer tokens.
 - Type syntax is parsed and retained as syntax; this module does not type-check it.

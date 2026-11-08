@@ -197,6 +197,7 @@ impl Vm {
             .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         let environment = self.current_environment()?;
         self.call_stack.push(CallStackFrame {
+            instruction: None,
             program: None,
             function: None,
             debug_name: None,

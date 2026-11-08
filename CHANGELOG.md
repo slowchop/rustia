@@ -18,6 +18,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ### Fixed
 
+- Preserve operator and indexing caller locations for metamethod `error` levels
+  and `debug.info` (#18).
+- Parse contextual `export type` declarations and single-result `::` type
+  assertions, erasing their type syntax at runtime (#19).
+
 - Match Luau method selection after arguments, including local receiver changes,
   expanded results and coroutine suspension. Preserve trailing varargs in
   table-constructor method calls and name missing methods consistently.
