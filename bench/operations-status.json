@@ -4,10 +4,10 @@
   "profile": "public-source",
   "benchmark_bridge": "private-maintainer-cohorts-v1",
   "runner_classes": {
-    "hosted-linux": {
-      "environment": "github-hosted",
+    "self-hosted-linux": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
+      "reason": "Private self-hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
       "allowed_roles": [
         "build",
         "correctness-test",
@@ -15,20 +15,20 @@
         "fuzz-smoke"
       ]
     },
-    "hosted-macos": {
-      "environment": "github-hosted",
+    "self-hosted-macos": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "reason": "Private self-hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
       "allowed_roles": [
         "build",
         "correctness-test",
         "artifact-validation"
       ]
     },
-    "hosted-windows": {
-      "environment": "github-hosted",
+    "self-hosted-windows": {
+      "environment": "self-hosted-shared",
       "timing_authority": false,
-      "reason": "Hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "reason": "Private self-hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
       "allowed_roles": [
         "build",
         "correctness-test",
@@ -52,9 +52,9 @@
     "measured_commit": "90bc2ae4c397f6e2bbb1af687cc8e30688010123",
     "projected_measured_commit": "df240799de22ea8588865a7f594262053c2e92f1",
     "measured_at_unix": 1792952860,
-    "latest_relevant_commit": "719e061b5d6258568abc419db46dc0596915fdad",
-    "latest_relevant_committed_at_unix": 1794174712,
-    "pending_relevant_commit_count": 31,
+    "latest_relevant_commit": "6c3d9094abf2f693cf116b9310f606e49ced6b12",
+    "latest_relevant_committed_at_unix": 1794176071,
+    "pending_relevant_commit_count": 33,
     "next_action": "Public progress history remains paused; private benchmark bridge comparisons do not add rows."
   },
   "landscape": {
