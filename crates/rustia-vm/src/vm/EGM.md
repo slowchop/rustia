@@ -14,6 +14,7 @@ This private module directory separates specialized VM call paths and host integ
 
 ## Invariants
 
+- Public execution boundaries in the parent VM release error tracebacks after the continuation driver completes; protected handlers retain their snapshots until then.
 - Call continuation state is explicit in VM frames so suspension/resumption does not rely on growing the native stack.
 - A required module's zero/one result enters cache only after successful completion. Load ownership belongs to its coroutine/cohort and is released on failure, cancellation, reset, or abandoned coroutine collection.
 - Host object receiver type is checked before callback argument conversion. Host payload state is outside guest savepoint rollback.

@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-01 (Australia/Hobart).
+Updated: 2026-11-11 (Australia/Hobart).
 
 This is the single authority for current project status. Detailed design contracts
 and the pinned oracle remain the specification; dated records explain decisions
@@ -38,6 +38,18 @@ coroutine report attribution from #18 remain separate follow-up work. The existi
 balanced-token table-type parser remains more permissive than the full type-grammar
 strictness intended by design/50; this change reuses that grammar. Tuple-type assertion rejection and defaulted generic
 alias parameters remain shared-parser follow-ups.
+
+## Issue #21 memory recovery
+
+Failed-call traceback state is released at the public execution boundary; saved
+traceback/coroutine debug frames keep debug metadata without rooting discarded
+registers. The next allocating call can reclaim failed-call garbage without a
+second OOM or reset, while published globals, captured locals and external roots
+remain live. Ordinary protected OOM remains catchable; transactional OOM remains
+a hard abort. Host reports identify the stopped instruction without changing the
+bare guest `not enough memory` message. Cross-profile regressions are in
+`crates/rustia/tests/error_recovery.rs`. Full acceptance uses the repository
+preflight and PR CI gates.
 
 ## Implemented contracts
 

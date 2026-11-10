@@ -15,6 +15,8 @@
 
 ## Invariants
 
+- Public execution returns release internal error tracebacks. Debug snapshots preserve function/environment metadata without saved register roots, so failed allocation graphs can be reclaimed before VM reuse. OOM host diagnostics record the stopped instruction while keeping bare guest error text.
+
 - Call frames retain prototype/PC coordinates for the active instruction, including expanded-call dispatch and restored continuations; implicit calls resolve those coordinates lazily for error levels and debug caller locations.
 
 - Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Completed tape runs fall directly into canonical admission at the returned PC, without retrying tape eligibility. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
