@@ -3646,7 +3646,9 @@ impl Vm {
             Function::new(vec![Instruction::new(Opcode::Halt, 0, 0, 0)], 1),
             Vec::new(),
         );
-        self.call_value(&program, function, args, 0, execution)
+        let result = self.call_value(&program, function, args, 0, execution);
+        self.release_host_error_traceback();
+        result
     }
 
     /// Retains a value as an embedder-owned collector root.
@@ -3931,8 +3933,9 @@ impl Vm {
                 None,
                 execution,
             )
-            .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
-        let results = match results {
+            .map_err(|error| attach_existing_instruction_source(program, &program.main, error));
+        self.release_host_error_traceback();
+        let results = match results? {
             VmFlow::Call(_) => return Err(escaped_deferred_call()),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => {
@@ -3980,8 +3983,9 @@ impl Vm {
                 None,
                 execution,
             )
-            .map_err(|error| attach_existing_instruction_source(program, &program.main, error))?;
-        let results = match results {
+            .map_err(|error| attach_existing_instruction_source(program, &program.main, error));
+        self.release_host_error_traceback();
+        let results = match results? {
             VmFlow::Call(_) => return Err(escaped_deferred_call()),
             VmFlow::Return(results) => results,
             VmFlow::Yield(suspension) => {
@@ -4006,8 +4010,9 @@ impl Vm {
             state: &mut state,
             hosts: &mut hosts,
         };
-        let results = self.call_value(program, function, args, 0, &mut execution)?;
-        Ok(first_result_or_nil(results))
+        let results = self.call_value(program, function, args, 0, &mut execution);
+        self.release_host_error_traceback();
+        Ok(first_result_or_nil(results?))
     }
 
     /// Calls a raw function with a borrowed host dispatcher and an
@@ -4027,8 +4032,21 @@ impl Vm {
         self.ensure_hardened_transaction(state)?;
         self.prepare_guest_execution(program)?;
         let mut execution = Execution { state, hosts: host };
-        let results = self.call_value(program, function, args, 0, &mut execution)?;
-        Ok(first_result_or_nil(results))
+        let results = self.call_value(program, function, args, 0, &mut execution);
+        self.release_host_error_traceback();
+        Ok(first_result_or_nil(results?))
+    }
+
+    // Only public execution entry points call this. Native xpcall may invoke
+    // bytecode without an outer bytecode frame and still need its traceback.
+    fn release_host_error_traceback(&mut self) {
+        if self.call_stack.is_empty()
+            && self.active_coroutine_frames.is_empty()
+            && self.running_coroutines.is_empty()
+        {
+            self.last_error_traceback = None;
+            self.mark_control_memory_dirty();
+        }
     }
 
     /// Completes a full collection and releases spare VM-owned allocations.
@@ -4270,7 +4288,7 @@ impl Vm {
             macro_rules! unwind_stackless_error {
                 ($error:expr) => {{
                     let error = attach_existing_instruction_source(program, function, $error);
-                    let error = self.capture_host_diagnostic(error, program_id);
+                    let error = self.capture_host_diagnostic(error, program_id, program, function);
                     if error_is_uncatchable(&error, fuel) {
                         return Err(error);
                     }
@@ -4511,6 +4529,11 @@ impl Vm {
                             })
                             .at_pc(pc)
                         })?;
+                        // Quota checks can fail before semantics begin. Keep
+                        // their stopped site as well as implicit-call sites.
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            frame.instruction = Some((context.prototype, pc));
+                        }
                         if tape_guard_exit {
                             #[cfg(any(test, feature = "executor-diagnostics"))]
                             self.note_root_refresh_trigger(instruction.op, true);
@@ -4664,11 +4687,6 @@ impl Vm {
                         }
 
                         pc += 1;
-                        // Keep the suspended operator's site without allocating a
-                        // source string on each instruction. Implicit calls resolve it lazily.
-                        if let Some(frame) = self.call_stack.last_mut() {
-                            frame.instruction = Some((context.prototype, pc - 1));
-                        }
                         if crate::bytecode::supports_call_descriptor(instruction.op) {
                             let call_site = instruction_source_location(program, function, pc - 1);
                             let mut state = ExpandedCallState::new(
@@ -7522,7 +7540,7 @@ impl Vm {
         })();
         let result = result.map_err(|error| {
             let error = attach_existing_instruction_source(program, function, error);
-            self.capture_host_diagnostic(error, program_id)
+            self.capture_host_diagnostic(error, program_id, program, function)
         });
         if let Err(error) = &result {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
@@ -13573,7 +13591,7 @@ impl Vm {
             .last()
             .copied()
             .unwrap_or(0);
-        self.call_stack.get(base..).unwrap_or(&[]).to_vec()
+        clone_debug_snapshot_frames(self.call_stack.get(base..).unwrap_or(&[]))
     }
 
     fn with_diagnostic_reason(
@@ -13612,11 +13630,17 @@ impl Vm {
         error
     }
 
-    fn capture_host_diagnostic(&self, mut error: Error, program_id: Option<u32>) -> Error {
+    fn capture_host_diagnostic(
+        &self,
+        mut error: Error,
+        program_id: Option<u32>,
+        program: &Program,
+        function: &Function,
+    ) -> Error {
         use crate::diagnostic::{Diagnostic, DiagnosticFrame};
 
         if self.settings.guest_surface.is_hardened_leaf()
-            || error.location_suppressed
+            || (error.location_suppressed && !error_is_out_of_memory(&error))
             || error
                 .diagnostic
                 .as_ref()
@@ -13624,7 +13648,13 @@ impl Vm {
         {
             return error;
         }
-        let Some(location) = &error.location else {
+        // Luau memory errors keep their bare guest message. Host reports can
+        // still identify the stopped instruction without changing that value.
+        let oom_pc = error_is_out_of_memory(&error)
+            .then(|| self.call_stack.last()?.instruction.map(|(_, pc)| pc))
+            .flatten();
+        let oom_location = oom_pc.and_then(|pc| instruction_source_location(program, function, pc));
+        let Some(location) = error.location.as_ref().or(oom_location.as_ref()) else {
             return error;
         };
         let previous = error.diagnostic.clone();
@@ -13764,7 +13794,7 @@ impl Vm {
         let frames = if self.running_coroutines.last().is_some() {
             self.current_coroutine_frames()
         } else {
-            self.call_stack.clone()
+            clone_debug_snapshot_frames(&self.call_stack)
         };
         TracebackSnapshot {
             frames,
@@ -23188,6 +23218,20 @@ fn into_vec_flow(flow: VmFlow<ReturnValues>) -> VmFlow<Vec<Value>> {
 
 fn first_result_or_nil(results: impl AsRef<[Value]>) -> Value {
     results.as_ref().first().copied().unwrap_or_else(Value::nil)
+}
+
+// Debug APIs inspect functions, environments and coordinates, never saved
+// registers. A dead coroutine or protected-error snapshot must not keep its
+// failed allocation graph alive through those execution-only roots.
+fn clone_debug_snapshot_frames(frames: &[CallStackFrame]) -> Vec<CallStackFrame> {
+    frames
+        .iter()
+        .map(|frame| CallStackFrame {
+            roots: Vec::new(),
+            stackless_roots: Vec::new(),
+            ..frame.clone()
+        })
+        .collect()
 }
 
 fn collect_traceback_snapshot_roots(roots: &mut Vec<Value>, snapshot: &TracebackSnapshot) {

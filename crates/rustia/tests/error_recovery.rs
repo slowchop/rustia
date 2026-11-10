@@ -290,3 +290,162 @@ fn retained_reports_survive_reset_without_reviving_handles() {
         assert_eq!(error.report().to_string(), before);
     }
 }
+
+#[test]
+fn quota_oom_releases_failed_call_roots_before_the_next_allocating_call() {
+    use rustia::{InvocationLimits, OwnedValue, VmErrorKind};
+    for profile in profiles() {
+        for transactional in [false, true] {
+            let mut vm = RustiaBuilder::standard()
+                .profile(profile)
+                .without_stdout()
+                .fuel(50_000_000)
+                .memory_limit_bytes(1024 * 1024)
+                .build()
+                .unwrap();
+            let exports = vm
+                .load(
+                    r#"return {
+    bomb = function()
+        local t, i = {}, 0
+        while true do
+            i = i + 1
+            t[i] = { i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i }
+        end
+    end,
+    synth = function(note) return { kind = 'sine', freq = note } end,
+}"#,
+                )
+                .source_name("oom-recovery.luau")
+                .install()
+                .unwrap();
+            let bomb = exports.function(&mut vm, "bomb").unwrap();
+            let synth = exports.function(&mut vm, "synth").unwrap();
+            for _ in 0..2 {
+                let error = if transactional {
+                    vm.invoke(&mut (), InvocationLimits::new(50_000_000), |invocation| {
+                        bomb.call_in::<_, _, ()>(invocation, ())
+                    })
+                    .unwrap_err()
+                } else {
+                    bomb.call::<_, ()>(&mut vm, ()).unwrap_err()
+                };
+                assert!(
+                    matches!(
+                        error.as_vm_error().map(|e| e.kind()),
+                        Some(VmErrorKind::OutOfMemory)
+                    ),
+                    "{profile:?}: {error}"
+                );
+                assert_eq!(
+                    error.as_vm_error().unwrap().to_string(),
+                    "not enough memory"
+                );
+                let report = error.report().to_string();
+                assert!(
+                    report.contains("oom-recovery.luau:6"),
+                    "{profile:?}: {report}"
+                );
+                for _ in 0..3 {
+                    let result: OwnedValue = if transactional {
+                        vm.invoke(&mut (), InvocationLimits::new(1_000_000), |invocation| {
+                            synth.call_in(invocation, 60)
+                        })
+                        .unwrap_or_else(|e| panic!("{profile:?}, transactional: {e}"))
+                        .into_parts()
+                        .0
+                    } else {
+                        synth
+                            .call(&mut vm, 60)
+                            .unwrap_or_else(|e| panic!("{profile:?}, ordinary: {e}"))
+                    };
+                    assert!(matches!(result, OwnedValue::Table(_)));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quota_oom_chunk_recovery_preserves_published_values_and_captured_locals() {
+    for profile in profiles() {
+        let mut vm = RustiaBuilder::standard()
+            .profile(profile)
+            .without_stdout()
+            .fuel(50_000_000)
+            .memory_limit_bytes(1024 * 1024)
+            .build()
+            .unwrap();
+        let retained = vm.load("return { answer = 42 }").eval_live().unwrap();
+        let error = vm
+            .load(
+                r#"published = { answer = 41 }
+local captured = 0
+saved = function() captured += 1; return captured end
+local function bomb()
+    local t, i = {}, 0
+    while true do
+        i += 1
+        t[i] = { i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i }
+    end
+end
+-- Expanded argument evaluation uses the explicit continuation driver.
+return select(1, bomb())"#,
+            )
+            .source_name("expanded-oom.luau")
+            .exec()
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.as_vm_error().map(|e| e.kind()),
+                Some(rustia::VmErrorKind::OutOfMemory)
+            ),
+            "{profile:?}: {error}"
+        );
+        assert_eq!(
+            vm.eval::<i32>("local allocated = { 1 }; return published.answer + saved()")
+                .unwrap(),
+            42
+        );
+        assert_eq!(
+            retained
+                .as_table(&vm)
+                .unwrap()
+                .unwrap()
+                .get(&mut vm, "answer")
+                .unwrap()
+                .as_number(&vm)
+                .unwrap(),
+            Some(42.0)
+        );
+    }
+}
+
+#[test]
+fn protected_and_dead_coroutine_oom_release_local_allocations() {
+    for profile in profiles() {
+        for wrapper in [
+            "local ok, err = pcall(bomb); assert(not ok and err == 'not enough memory')",
+            "local ok, err = xpcall(bomb, function(e) return e end); assert(not ok and err == 'not enough memory')",
+            "worker = coroutine.create(bomb); local ok, err = coroutine.resume(worker); assert(not ok and err == 'not enough memory'); assert(coroutine.status(worker) == 'dead')",
+        ] {
+            let mut vm = RustiaBuilder::standard()
+                .profile(profile)
+                .without_stdout()
+                .fuel(50_000_000)
+                .memory_limit_bytes(1024 * 1024)
+                .build()
+                .unwrap();
+            vm.exec(r#"function bomb()
+    local t, i = {}, 0
+    while true do
+        i += 1
+        t[i] = { i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i }
+    end
+end"#).unwrap();
+            let source = format!("{wrapper}; local fresh = {{ answer = 42 }}; return fresh.answer");
+            assert_eq!(vm.eval::<i32>(&source).unwrap_or_else(|e| panic!("{profile:?}: {wrapper}: {e}")), 42);
+            assert_eq!(vm.eval::<i32>("local fresh = { 42 }; return fresh[1]").unwrap(), 42);
+        }
+    }
+}

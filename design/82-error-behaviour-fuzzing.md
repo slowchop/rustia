@@ -58,6 +58,26 @@ four profiles, repeated execution and reset. The expanded stateful target includ
 callback failures, hard fuel aborts, conversion failures and cyclic live handles.
 Client-specific regressions remain part of the rollout acceptance.
 
+### OOM recovery after failed calls (#21)
+
+VM error tracebacks are internal protected-call state, released when the public
+execution entry returns to the host. Saved traceback and coroutine debug frames
+retain the function/environment metadata required by debug APIs, but exclude
+execution-only register and stackless roots. Collection retries can therefore
+reclaim unreachable failed-call allocations before the next allocating call,
+including after `pcall`, `xpcall` and a retained dead coroutine. This is collection,
+not rollback: published guest writes and externally rooted values stay live.
+
+`quota_oom_releases_failed_call_roots_before_the_next_allocating_call` repeats a
+local-table allocation bomb and immediate allocating function calls under ordinary
+and transactional execution on all four profiles, retaining the original error.
+`quota_oom_chunk_recovery_preserves_published_values_and_captured_locals` covers
+expanded arguments and preservation of globals, captured locals and external
+roots. `protected_and_dead_coroutine_oom_release_local_allocations` covers ordinary
+protected calls and retained coroutine handles. Existing hard-abort/journal tests
+remain required. Host OOM reports include the stopped source line, with the same
+bare Luau guest error value and unchanged hardened-leaf diagnostic policy.
+
 ### Remote campaign evidence
 
 [Run 34312173291](https://github.com/slowchop/rustia-historic/actions/runs/34312173291)
