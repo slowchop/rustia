@@ -48,7 +48,8 @@ second OOM or reset, while published globals, captured locals and external roots
 remain live. Ordinary protected OOM remains catchable; transactional OOM remains
 a hard abort. Host reports identify the stopped instruction without changing the
 bare guest `not enough memory` message. Cross-profile regressions are in
-`crates/rustia/tests/error_recovery.rs`; delivery and CI acceptance are pending.
+`crates/rustia/tests/error_recovery.rs`. Full acceptance uses the repository
+preflight and PR CI gates.
 
 ## Implemented contracts
 

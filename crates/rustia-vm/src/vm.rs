@@ -13725,11 +13725,23 @@ impl Vm {
             .as_ref()
             .and_then(|program| program.diagnostic_mapped_length)
             .and_then(|len| prefix.checked_add(len));
-        let generated_source = error.span.is_some_and(|(start, end)| {
+        let host_span = error.span.or_else(|| {
+            let pc = oom_pc?;
+            let span = function
+                .source_map
+                .iter()
+                .rev()
+                .find(|entry| entry.pc <= pc)?
+                .span?;
+            Some((
+                u32::try_from(span.start).ok()?,
+                u32::try_from(span.end).ok()?,
+            ))
+        });
+        let generated_source = host_span.is_some_and(|(start, end)| {
             (start as usize) < prefix || mapped_end.is_some_and(|limit| end as usize > limit)
         });
-        let span = error
-            .span
+        let span = host_span
             .filter(|_| !generated_source)
             .and_then(|(start, end)| {
                 Some(crate::diagnostic::DiagnosticSpan {

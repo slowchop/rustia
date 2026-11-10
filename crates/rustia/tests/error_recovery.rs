@@ -449,3 +449,47 @@ end"#).unwrap();
         }
     }
 }
+
+#[test]
+fn oom_host_reports_distinguish_generated_wrappers_from_user_expressions() {
+    for profile in profiles() {
+        for generated in [false, true] {
+            let mut vm = RustiaBuilder::standard()
+                .profile(profile)
+                .without_stdout()
+                .fuel(50_000_000)
+                .memory_limit_bytes(1024 * 1024)
+                .build()
+                .unwrap();
+            let prefix = if generated {
+                "local generated = string.rep('x', 2000000); return "
+            } else {
+                "return "
+            };
+            let user = if generated {
+                "42"
+            } else {
+                "string.rep('x', 2000000)"
+            };
+            let error = vm
+                .load(&format!("{prefix}{user}"))
+                .source_name("wrapped.luau")
+                .source_map(rustia::SourceMap::generated_prefix(prefix.len()))
+                .exec()
+                .unwrap_err();
+            assert_eq!(
+                error.as_vm_error().unwrap().to_string(),
+                "not enough memory"
+            );
+            assert_eq!(error.diagnostic().unwrap().generated_source, generated);
+            let report = error.report().to_string();
+            if generated {
+                assert!(report.contains("generated wrapper code"), "{report}");
+                assert!(!report.contains("1 | 42"), "{report}");
+            } else {
+                assert!(report.contains("1 | string.rep"), "{report}");
+                assert!(report.contains('^'), "{report}");
+            }
+        }
+    }
+}

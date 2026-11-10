@@ -77,6 +77,9 @@ roots. `protected_and_dead_coroutine_oom_release_local_allocations` covers ordin
 protected calls and retained coroutine handles. Existing hard-abort/journal tests
 remain required. Host OOM reports include the stopped source line, with the same
 bare Luau guest error value and unchanged hardened-leaf diagnostic policy.
+`oom_host_reports_distinguish_generated_wrappers_from_user_expressions` checks
+that generated prefix failures do not blame mapped user input and that user
+expression reports preserve their mapped spans.
 
 ### Remote campaign evidence
 
