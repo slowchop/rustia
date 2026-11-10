@@ -469,7 +469,7 @@ fn oom_host_reports_distinguish_generated_wrappers_from_user_expressions() {
             let user = if generated {
                 "42"
             } else {
-                "string.rep('x', 2000000)"
+                "(function() return string.rep('x', 2000000) end)()"
             };
             let error = vm
                 .load(&format!("{prefix}{user}"))
@@ -487,7 +487,7 @@ fn oom_host_reports_distinguish_generated_wrappers_from_user_expressions() {
                 assert!(report.contains("generated wrapper code"), "{report}");
                 assert!(!report.contains("1 | 42"), "{report}");
             } else {
-                assert!(report.contains("1 | string.rep"), "{report}");
+                assert!(report.contains("1 | (function()"), "{report}");
                 assert!(report.contains('^'), "{report}");
             }
         }
