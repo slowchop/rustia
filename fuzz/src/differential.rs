@@ -3,6 +3,9 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Shared with CI smoke so new generated shapes are not omitted from its range.
+pub const SOURCE_SHAPE_COUNT: u8 = 48;
+
 pub fn source_from_bytes(data: &[u8]) -> String {
     let byte = |index: usize| data.get(index).copied().unwrap_or(0);
     let n = byte(1);
@@ -34,7 +37,7 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         4 => "next({a=1}, nil, 99)",
         _ => "tonumber('1', 10, 99)",
     };
-    match byte(0) % 40 {
+    match byte(0) % SOURCE_SHAPE_COUNT {
         0 => body.push_str("local function unused() local x = end"),
         1 => body.push_str(failure),
         2 => body.push_str("local t={}; local ok,e=pcall(error,t); return tostring(ok)..':'..tostring(rawequal(t,e))"),
@@ -77,7 +80,33 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         36 => body.push_str("local t=setmetatable({}, {__index=function() coroutine.yield('lookup') end}); local c=coroutine.create(function() return t:missing() end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..e"),
         37 => body.push_str("local t={m=function() return 'old' end}; local function arg() coroutine.yield('argument'); t.m=function() coroutine.yield('method'); return 'new' end; return 1,2 end; local c=coroutine.create(function() return t:m(arg()) end); local a,b=coroutine.resume(c); local d,e=coroutine.resume(c); local f,g=coroutine.resume(c); return tostring(a)..':'..b..':'..tostring(d)..':'..e..':'..tostring(f)..':'..g"),
         38 => body.push_str("local t={m=function() return 'old' end}; local function arg() t={m=function() return 'new' end}; return 1,2 end; return t:m(arg())"),
-        _ => body.push_str("local t={m=function(self,...) return select('#',...) end}; local function run(...) return ({t:m(...)})[1] end; return tostring(run(1,2))"),
+        39 => body.push_str("local t={m=function(self,...) return select('#',...) end}; local function run(...) return ({t:m(...)})[1] end; return tostring(run(1,2))"),
+        40 => {
+            let ty = ["number", "(number)", "((number))", "(number)?", "number | string", "number & unknown", "() -> (number,string)", "Foo<(number,string)>"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("local value = 1 :: {ty}; return tostring(value)"));
+        }
+        41 => {
+            let ty = ["()", "(number,string)", "((number,string))", "(...number)", "number...", "...number", "(number,string)?", "(number,string) | number"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("local value = 1 :: {ty}; return 'invalid assertion'"));
+        }
+        42 => {
+            let params = ["T=number", "T, U=string", "T=number, U=string", "T=(number)", "T=() -> (number,string)", "T=Foo<(number,string)>", "T=typeof(observed)", "T=number, P...=()"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Alias<{params}> = {{value:T}}; return 'default'"));
+        }
+        43 => {
+            let params = ["T=", "T=number,U", "T=number,P...", "P...,T", "T=number,", "T=(number,string)", "T=...number", "T=()"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Alias<{params}> = T; return 'invalid default'"));
+        }
+        44 => {
+            let default = ["()", "(number)", "(number,string)", "...number", "U...", "(number,...string)", "(number,U...)", "...number?"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("export type Alias<P...={default}> = number; return 'pack default'"));
+        }
+        45 => {
+            let default = ["number", "() -> number", "(number) | string", "((number,string))", "(U...,number)", "(...number,string)", "U...?", "(number,)"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Alias<P...={default}> = number; return 'invalid pack default'"));
+        }
+        46 => body.push_str("type Alias<T=number> = T; local function many() return 4,5 end; local fn = many :: () -> (number,number); return tostring(select('#',fn()))..':'..tostring(select('#',fn() :: Alias))"),
+        _ => body.push_str("local function f<T=number>() return 1 end; return 'invalid function default'"),
     }
     body
 }

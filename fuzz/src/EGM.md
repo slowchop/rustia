@@ -18,6 +18,8 @@ Shared bounded fuzz harness library for frontend, VM, stateful embedding and dif
 - Stateful harness checks a host-side model after each operation.
 - Retained versions and captured values come from a fixed host array. Current/previous exports, one detached function and one stale export/function pair bound the persistent handle slots. A stored weak witness verifies actual quota-driven collection.
 
+- Differential generation includes 48 bounded shapes. CI smoke shares `SOURCE_SHAPE_COUNT` with the generator and visits all eight type variants, covering valid/invalid assertions, alias defaults, pack defaults and result adjustment. This is targeted coverage, not a full grammar generator.
+
 ## Side Effects
 
 - Differential harness launches child processes with bounded input/output and a supervisor time limit.
