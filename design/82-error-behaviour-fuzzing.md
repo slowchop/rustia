@@ -406,3 +406,20 @@ in-candidate mutation and an unchecked initial weak insertion. The resulting
 source/tests have no remaining review findings. This records local correctness
 coverage. No new coverage-guided remote campaign, benchmark measurement,
 publication or supported-release acceptance is claimed.
+
+### Targeted type-grammar differential coverage
+
+The generated differential target includes eight type shapes in addition to its
+40 existing runtime shapes. These cover valid/invalid assertions, alias defaults,
+pack defaults, ordering and result adjustment. CI smoke takes its shape bound
+from the generator and exercises all eight type variants. Parser and facade
+negative tests additionally require Source rejection before any guest write in
+all four profiles. The existing `export_type_assertions.luau` pinned fixture now
+also exercises erased defaults and valid pack/grouping boundaries.
+
+This closes two concrete coverage holes, not the full type-grammar gate. The
+balanced-table parser remains permissive and generic function types remain
+unsupported, including as defaults. Raw frontend mutation fuzzing checks robust
+handling, not independent syntactic acceptance; the oracle generator compares
+only the families it generates. Independent-frontend grammar comparison remains
+planned. No new remote fuzz campaign or performance claim is implied.

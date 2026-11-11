@@ -23,4 +23,21 @@ assert((5 :: Module.Type) == 5)
 assert((5 :: Module.type) == 5)
 assert((5 :: Imported) == 5)
 assert((box :: Module.Box<number>).value == 5)
+-- Alias defaults are parsed and erased; packs remain distinct from single types.
+export type DefaultBox<T = number> = { value: T }
+type DefaultPair<T = number, U = string> = { first: T, second: U }
+type DefaultCallback<T = () -> (number, string)> = T
+type EmptyPack<P... = ()> = () -> P...
+type SinglePack<P... = (number)> = () -> P...
+type MultiplePack<T, P... = (number, string)> = (T) -> P...
+type VariadicPack<P... = ...number?> = () -> P...
+type NamedPack<P... = Other...> = () -> P...
+type TailPack<P... = (number, ...string)> = () -> P...
+type ObservedDefault<T = typeof((function() calls += 100; return 1 end)())> = T
+local defaultBox = ({value = 9} :: DefaultBox)
+assert(defaultBox.value == 9 and calls == 1)
+assert((5 :: (number)) == 5 and (5 :: ((number))) == 5)
+assert(select('#', values() :: (number)) == 1)
+local multi = values :: () -> (number, number)
+assert(select('#', multi()) == 2)
 return "OK"
