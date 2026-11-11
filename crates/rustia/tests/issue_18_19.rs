@@ -203,3 +203,42 @@ fn selected_error_level_in_generated_caller_does_not_blame_user_input() {
         assert!(!report.contains("1 | 42"), "{report}");
     }
 }
+
+#[test]
+fn invalid_type_assertions_and_defaults_reject_before_guest_effects() {
+    for profile in profiles() {
+        let mut vm = RustiaBuilder::standard().profile(profile).build().unwrap();
+        vm.insert_global("observed", 0).unwrap();
+        for declaration in [
+            "local value = 1 :: ()",
+            "local value = 1 :: (number, string)",
+            "local value = 1 :: ((number,string))",
+            "local value = 1 :: (number,string)?",
+            "local value = 1 :: (number,string) | number",
+            "local value = 1 :: ...number",
+            "type Box<T = number, U> = T",
+            "type Box<T = number, P...> = T",
+            "type Box<T = (number,string)> = T",
+            "type Box<P... = number> = number",
+            "type Box<P... = (...number, string)> = number",
+            "local function f<T = number>() end",
+        ] {
+            let source = format!("observed = 1; {declaration}; return 'wrong'");
+            let error = vm
+                .load(&source)
+                .source_name("invalid-type.luau")
+                .exec()
+                .unwrap_err();
+            assert!(
+                matches!(error.kind(), rustia::ErrorKind::Source(_)),
+                "{profile:?}: {declaration}: {error}"
+            );
+            assert_eq!(
+                vm.eval::<i32>("return observed").unwrap(),
+                0,
+                "{declaration}"
+            );
+        }
+        assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+    }
+}

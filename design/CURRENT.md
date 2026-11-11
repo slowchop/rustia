@@ -39,8 +39,13 @@ wrappers. Non-table writes use oracle-checked index messages. Wrapped coroutines
 preserve their original host report across yield/resume while keeping the guest
 error value unchanged. Manual string rethrows retain their explicit error site. The existing
 balanced-token table-type parser remains more permissive than the full type-grammar
-strictness intended by design/50; this change reuses that grammar. Tuple-type assertion rejection and defaulted generic
-alias parameters remain shared-parser follow-ups.
+strictness intended by design/50. Assertions now reject bare tuple/variadic packs
+while retaining grouped single types and function/generic pack positions. Alias
+generics accept defaults, enforce regular-before-pack/default ordering, and erase
+defaults at runtime. The differential generator now includes eight targeted type
+shapes and shares its 48-shape bound with CI smoke. Broader grammar coverage,
+including generic function types (`<U>(U)->U`), remains open; these fixes do not
+establish full syntax parity.
 
 ## Issue #21 memory recovery
 

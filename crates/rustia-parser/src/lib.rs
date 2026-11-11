@@ -1422,8 +1422,25 @@ impl Parser {
         let start = name.span.start;
         let mut generics = Vec::new();
         if self.eat_simple(SimpleToken::Less).is_some() {
+            let mut seen_pack = false;
+            let mut seen_default = false;
             loop {
                 generics.push(self.expect_name("expected generic type parameter")?.text);
+                let pack = self.eat_simple(SimpleToken::Ellipsis).is_some();
+                if seen_pack && !pack {
+                    return Err(self.error_here("generic types must precede generic type packs"));
+                }
+                seen_pack |= pack;
+                if self.eat_simple(SimpleToken::Equal).is_some() {
+                    seen_default = true;
+                    if pack {
+                        self.parse_generic_pack_default(0)?;
+                    } else {
+                        self.parse_single_type(0)?;
+                    }
+                } else if seen_default {
+                    return Err(self.error_here("expected a default after generic parameter"));
+                }
                 if self.eat_simple(SimpleToken::Comma).is_none() {
                     break;
                 }
@@ -1478,7 +1495,7 @@ impl Parser {
         if self.at_type_assertion() {
             self.advance();
             self.advance();
-            let annotation = self.parse_type(depth + 1)?;
+            let annotation = self.parse_single_type(depth + 1)?;
             // Like parentheses, assertions produce one value and are not lvalues.
             lhs = Expr::Paren {
                 span: Span::new(lhs.span_start(), annotation.span_end()),
@@ -1919,6 +1936,63 @@ impl Parser {
             span: value.span(),
             value,
         })
+    }
+
+    // Assertions and regular alias defaults take a type, not a type pack.
+    // Function results and named generic arguments retain their pack grammar.
+    fn parse_single_type(&mut self, depth: usize) -> Result<TypeExpr> {
+        let ty = self.parse_type(depth)?;
+        if ty.is_single_type() {
+            Ok(ty)
+        } else {
+            Err(ParseError {
+                unclosed_block: None,
+                span: ty.span(),
+                message: "expected a type, not a type pack".to_owned(),
+            })
+        }
+    }
+
+    fn at_type_pack_tail(&self) -> bool {
+        self.at_simple(SimpleToken::Ellipsis)
+            || (matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+                && matches!(
+                    self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                    Some(TokenKind::Ellipsis)
+                ))
+    }
+
+    fn parse_type_pack_tail(&mut self, depth: usize) -> Result<()> {
+        self.check_depth(depth)?;
+        if self.eat_simple(SimpleToken::Ellipsis).is_some() {
+            self.parse_single_type(depth + 1)?;
+        } else {
+            self.expect_name("expected generic type pack name")?;
+            self.expect_simple(SimpleToken::Ellipsis, "expected '...' after type pack name")?;
+        }
+        Ok(())
+    }
+
+    fn parse_generic_pack_default(&mut self, depth: usize) -> Result<()> {
+        self.check_depth(depth)?;
+        if self.at_type_pack_tail() {
+            return self.parse_type_pack_tail(depth + 1);
+        }
+        self.expect_simple(SimpleToken::LParen, "expected type pack default")?;
+        if !self.at_simple(SimpleToken::RParen) {
+            loop {
+                if self.at_type_pack_tail() {
+                    self.parse_type_pack_tail(depth + 1)?;
+                    break;
+                }
+                self.parse_single_type(depth + 1)?;
+                if self.eat_simple(SimpleToken::Comma).is_none() {
+                    break;
+                }
+            }
+        }
+        self.expect_simple(SimpleToken::RParen, "expected ')' after type pack default")?;
+        Ok(())
     }
 
     fn parse_type(&mut self, depth: usize) -> Result<TypeExpr> {
@@ -2573,6 +2647,20 @@ fn expr_accepts_postfix(expr: &Expr) -> bool {
 }
 
 impl TypeExpr {
+    fn is_single_type(&self) -> bool {
+        match self {
+            Self::TypePack { types, .. } => types.len() == 1 && types[0].is_single_type(),
+            Self::Variadic { .. } => false,
+            Self::Optional { inner, .. } => inner.is_single_type(),
+            Self::Union { types, .. } | Self::Intersection { types, .. } => {
+                types.iter().all(Self::is_single_type)
+            }
+            // Function signatures and generic arguments have their own pack
+            // positions; a pack inside them does not make the outer type a pack.
+            _ => true,
+        }
+    }
+
     pub fn span(&self) -> Span {
         match self {
             Self::Named { span, .. }
@@ -2788,6 +2876,77 @@ mod tests {
         ];
         for source in cases {
             assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn parses_defaulted_alias_generics() {
+        for source in [
+            "type Box<T = number> = { value: T }",
+            "export type Map<K, V = string> = { [K]: V }",
+            "type Pair<T = number, U = string> = { T, U }",
+            "type Callback<T = () -> (number, string)> = T",
+            "type Grouped<T = (number)> = T",
+            "type Packs<T, P... = (number, string)> = T",
+            "type Packs<P... = ()> = number",
+            "type Packs<P... = (number)> = number",
+            "type Packs<P... = (number, ...string)> = number",
+            "type Packs<P... = U...> = number",
+            "type Packs<P... = ...number?> = number",
+        ] {
+            assert!(parse_source(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_alias_generic_defaults() {
+        for source in [
+            "type Box<T = > = T",
+            "type Box<T = number, U> = T",
+            "type Box<T = number, P...> = T",
+            "type Box<P..., T> = T",
+            "type Box<T = number,> = T",
+            "type Box<T = (number, string)> = T",
+            "type Box<T = ...number> = T",
+            "type Box<P... = number> = number",
+            "type Box<P... = (number), Q...> = number",
+            "type Box<P... = (U..., number)> = number",
+            "type Box<P... = (...number, string)> = number",
+            "type Box<P... = ((number,string))> = number",
+            "local function f<T = number>() end",
+        ] {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn assertions_require_one_type_but_preserve_function_and_generic_packs() {
+        for annotation in [
+            "number",
+            "(number)",
+            "((number))",
+            "(number)?",
+            "() -> (number, string)",
+            "(number) -> ()",
+            "(number...) -> number",
+            "Foo<(number, string)>",
+            "Foo<...number>",
+        ] {
+            let source = format!("local x = 1 :: {annotation}");
+            assert!(parse_source(&source).is_ok(), "{source}");
+        }
+        for annotation in [
+            "()",
+            "(number, string)",
+            "((number, string))",
+            "(...number)",
+            "number...",
+            "...number",
+            "(number,string)?",
+            "(number,string) | number",
+        ] {
+            let source = format!("local x = 1 :: {annotation}");
+            assert!(parse_source(&source).is_err(), "{source}");
         }
     }
 

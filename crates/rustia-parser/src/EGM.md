@@ -12,6 +12,8 @@
 
 ## Invariants
 
+- Alias generic defaults are parsed then erased, with regular parameters before packs and a default required after the first default. Pack defaults have explicit fixed/tail grammar. Assertions and regular defaults require a single type; grouped singles, function types and named generic pack arguments retain their own contexts. The shared type grammar still has broader gaps (balanced table types and generic function types).
+
 - Contextual `export type` uses the alias grammar; `expr :: T` parses the type and lowers to a single-result parenthesized expression without runtime checks. Named types accept the module-qualified `Module.Type` form and optional generic arguments.
 
 - Recursive parser paths enforce a maximum depth of 512.
