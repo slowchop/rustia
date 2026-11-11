@@ -6926,7 +6926,7 @@ impl Vm {
                                         callee,
                                         &args,
                                         context.depth,
-                                        None,
+                                        instruction_source_location(program, function, pc - 1),
                                         fuel,
                                     )
                                     .map_err(|e| {
@@ -7066,7 +7066,7 @@ impl Vm {
                                         callee,
                                         &args,
                                         context.depth,
-                                        None,
+                                        instruction_source_location(program, function, pc - 1),
                                         fuel,
                                     )
                                     .map_err(|e| {
@@ -7202,7 +7202,7 @@ impl Vm {
                                         callee,
                                         &args,
                                         context.depth,
-                                        None,
+                                        instruction_source_location(program, function, pc - 1),
                                         fuel,
                                     )
                                     .map_err(|e| {
