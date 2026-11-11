@@ -2,11 +2,11 @@
 
 ## Overview
 
-Design specifications, canonical project state, structured evidence, and a generated HTML progress view. Code behavior remains authoritative for what is built; CURRENT.md is the canonical status document.
+Design specifications, canonical project state, structured evidence, and a generated HTML progress view. Code behavior remains authoritative for what is built; CURRENT.md is the canonical built-state and constraints document; GitHub Issues owns the development backlog.
 
 ## Interface
 
-- Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and one open-work list.
+- Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and links to the GitHub issue backlog.
 - Historical pre-compaction text: [CURRENT-2026-10-30-snapshot.md](./CURRENT-2026-10-30-snapshot.md). Its original authority statements are historical; it must never override CURRENT.
 - Architecture: [30-architecture.md](./30-architecture.md).
 - Memory benchmark protocol v2, historical v1 compatibility and pending measured acceptance: [57-memory-benchmarking.md](./57-memory-benchmarking.md).

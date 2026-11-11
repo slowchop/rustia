@@ -148,7 +148,9 @@ at construction, matching runtime validation. Final-head checks passed in
 The method fixture now contains 31 cases, including a local receiver changed
 after argument suspension, an upvalue control, and a parenthesized local. All
 four profiles pass it before and after reset. The broader diagnostic findings
-are tracked here because GitHub Issues is disabled for this repository.
+were recorded here while GitHub Issues was disabled. Current maintainer follow-up
+is tracked in [semantic coverage #31](https://github.com/slowchop/rustia/issues/31);
+recheck these dated findings against main before filing a focused defect.
 
 Independent reviews of the compiler/VM changes and conformance evidence found
 no blocking issue. Eight additional receiver/argument probes matched the pinned

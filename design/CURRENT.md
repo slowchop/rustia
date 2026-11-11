@@ -2,8 +2,10 @@
 
 Updated: 2026-11-12 (Australia/Hobart).
 
-This is the single authority for current project status. Detailed design contracts
-and the pinned oracle remain the specification; dated records explain decisions
+This is the single authority for implemented state and active project constraints.
+[GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
+priority and progress. Detailed design contracts and the pinned oracle remain the
+specification; dated records explain decisions
 and evidence. When an older status statement disagrees, this file wins.
 
 ## Status and permissions
@@ -17,8 +19,9 @@ and supported releases have separate gates; full parity and API stability are no
 - **Both repositories stay private.** All eight workspace packages remain at
   **`0.0.1`**, **all 8 blocked by publish=false**. Public source visibility,
   package publication and supported releases require separate explicit decisions.
-- Outside contribution, issue-reporting and support policies are **undecided**.
-  Do not invite submissions, open reporting channels or promise maintainer review.
+- GitHub Issues is the private maintainer development backlog. Outside contribution,
+  public issue-reporting and support policies remain **undecided**. Do not invite
+  outside submissions or promise public review/support.
 - Main protections and auto-merge settings still await separate approval.
   Check applicable CI and independent review before merging; use merge commits.
 - Keep private infrastructure and secrets in the separate ignored `private/`
@@ -162,44 +165,26 @@ its cause; prior security policy was restored and verified. Shared-host capacity
 pressure is not proven causality. Further privileged diagnostics require separate
 approval. Preserve observations and thresholds. [99 — History integrity](99-benchmark-history-integrity.md).
 
-## Open work
+## Development backlog
 
-One action list; completing work does not authorize source or package publication.
+[GitHub Issues](https://github.com/slowchop/rustia/issues) is the primary work queue.
+Issue bodies, discussions and linked PRs carry acceptance criteria and progress;
+this section is a navigation index, not a duplicate checklist or priority order.
+The [maintainer workflow](../CONTRIBUTING.md#issue-driven-development) explains
+selection, coordination, review and closure.
 
-1. **Finish source-access preparation:** retain the privacy audit and original
-   history, recheck the exact candidate/settings, and resolve the visibility gates
-   in [98](98-public-source-readiness.md). Public visibility needs explicit approval.
-2. **Finish documentation and stable-API review:** extend conversion guidance and
-   meaningful facade reference coverage; audit 1.0 classifications, extensibility
-   and consumer compatibility before freezing. Settings/errors, live exports and
-   typed objects are implemented. Preserve the simple facade and preset freedom.
-   [Release/API review](92-first-release.md), [documentation review](100-documentation-review.md).
-3. **Harden semantics and platforms:** add focused oracle fixtures and longer
-   coverage-guided/differential campaigns for compiler/runtime error-phase gaps;
-   close actual native/browser/mobile execution and golden requirements in
-   [00](00-constraints.md), [90](90-release-readiness.md) and [96](96-browser-platform-acceptance.md).
-4. **Finish memory policy and evidence:** tune GC intervals against the maintained
-   mixed-heap correctness gate; deterministic intervals are replay-ABI choices.
-   Protocol v2 implements paired control-adjusted retention, anonymous-memory area,
-   separate warmup processes and 100 ms natural idle before quiescent sampling.
-   Add external allocator/RSS history and obtain fresh Linux memory evidence through
-   an authorized memory lane; the private bridge currently supports runtime comparisons
-   only. Historical values/thresholds remain unchanged. [57](57-memory-benchmarking.md),
-   [drift review](../2026-10-29_DRIFT_REPORT.md).
-5. **Resolve benchmark repeatability and extend trusted evidence:** use the private
-   bridge within scope; preserve raw samples/acceptance rules and one history for
-   result/claim/report views. Broader baselines, realistic mixed heaps and public
-   automation remain pending. Benchmark extraction, interop/Serde/fuel workloads
-   and alerts remain deferred. [80](80-bench-suite.md), [99](99-benchmark-history-integrity.md).
-6. **Complete supported-release gates before a separate release decision:** verify
-   package/API/CLI acceptance and exact consumer rollouts, then follow generated
-   dependency order only after publication is authorized. The future 1.0 promise
-   covers embedding API and CLI; lower-level engine APIs remain separately 0.x.
-   [Release plan](92-first-release.md), [acceptance](93-private-api-acceptance.md),
-   [versioning](91-semver-policy.md).
-7. **Maintain the pinned target:** watch `FFlag::LuauIntegerType2`, add focused
-   fixtures, and retain first-release exclusions: Roblox APIs, analyzer/typechecker,
-   bytecode loading and raw-C-API parity. [Target](05-luau-target.md), [pillars](02-pillars.md).
+- Parser defects: [return annotation/type-pack grammar #27](https://github.com/slowchop/rustia/issues/27),
+  [table type validation #28](https://github.com/slowchop/rustia/issues/28).
+- [Source-access readiness #29](https://github.com/slowchop/rustia/issues/29).
+- [Documentation and stable API review #30](https://github.com/slowchop/rustia/issues/30).
+- [Semantic coverage and platform acceptance #31](https://github.com/slowchop/rustia/issues/31).
+- [Memory policy and evidence #32](https://github.com/slowchop/rustia/issues/32).
+- [Benchmark repeatability and trusted evidence #33](https://github.com/slowchop/rustia/issues/33).
+- [Supported-release acceptance #34](https://github.com/slowchop/rustia/issues/34).
+- [Pinned target maintenance #35](https://github.com/slowchop/rustia/issues/35).
+
+Tracking work does not authorize source visibility, publication, measurements or
+private infrastructure actions; the active constraints above still apply.
 
 ## Reading path and retained history
 
@@ -213,8 +198,9 @@ mlua-style `Scope` and a migration shim remain caller-driven optional layers,
 not first-release gates.
 
 For maintainers: [AGENTS](../AGENTS.md) → this file → [pillars](02-pillars.md) → the
-relevant contract in the [design index](README.md). Keep one live status and action
-list. Put completed chronology, run counts and detailed results in dated records.
+relevant contract in the [design index](README.md). Keep built-state facts here and
+work status in GitHub Issues. Put completed chronology, run counts and detailed
+results in dated records.
 
 The [pre-compaction snapshot](CURRENT-2026-10-30-snapshot.md) preserves previous
 CURRENT text verbatim; its old authority/workflow statements are historical.

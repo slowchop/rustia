@@ -68,6 +68,7 @@ diagnostic. Its fixed workload path counts are CI-only and carry no timing claim
   boundaries.
 - Performance evidence comes only from `ci-bench`; local correctness/static checks are
   not measurements. Do not run benchmark binaries or timing/profiling scripts locally.
+- GitHub Issues owns source-development work status and coordination; AGENTS.md and CONTRIBUTING.md define the issue-to-PR workflow. CURRENT links to the backlog and remains authoritative for built state and constraints. Issue/PR templates live under `.github/`.
 - Keep affected maps and parent links current alongside code. Preserve human-facing
   READMEs and report disagreements with authoritative documents explicitly.
 

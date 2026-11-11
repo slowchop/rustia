@@ -131,9 +131,11 @@ No runner access, Actions permissions or repository protections were changed.
 
 ### Remaining public-facing preparation
 
-Issues, wiki and Pages are disabled; there are no GitHub releases. A reviewed
-reporting route and a private vulnerability-reporting channel must exist before
-inviting public reports. The fork-approval setting cannot be inspected through
+At the original audit, Issues, wiki and Pages were disabled and there were no
+GitHub releases. Since 2026-11-12, private maintainer development uses
+[GitHub Issues](https://github.com/slowchop/rustia/issues). Public reporting policy
+remains undecided. A reviewed public reporting route and a private
+vulnerability-reporting channel must exist before inviting public reports. The fork-approval setting cannot be inspected through
 its endpoint while this repository is private; do not claim it is configured.
 Recheck actual settings and protections at the eventual visibility decision.
 

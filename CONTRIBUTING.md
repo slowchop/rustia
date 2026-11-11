@@ -5,6 +5,32 @@ The policy for accepting outside contributions has not been decided. These notes
 explain how to build the source and maintain the repository; they do not establish
 an issue-reporting or review service. Start with the [README](README.md) to try the API.
 
+## Issue-driven development
+
+[GitHub Issues](https://github.com/slowchop/rustia/issues) is the primary development
+backlog. It tracks bugs, features, documentation, maintenance, priorities and work
+in progress. Search existing open and closed issues before creating one. Each
+issue should name a concrete outcome, relevant design/oracle evidence and checks
+that establish completion. Use the bug or work-item template when helpful.
+
+1. Select or create an issue before starting a substantive change. Read its
+   discussion, linked design and existing PRs to avoid duplicate work. Record
+   the working branch or PR and current progress on the issue.
+2. Implement the scoped change with its tests and required design/conformance
+   updates. File newly discovered independent work as linked follow-up issues.
+3. Link the PR with `Closes #N` when it completes the whole issue, or `Refs #N`
+   for partial work. Record validation and remaining acceptance items.
+4. Obtain independent review, pass the full preflight and applicable CI, and merge
+   with a merge commit. Verify the result on main and the issue's final state.
+   A parent tracker stays open until all its acceptance gates are resolved.
+
+Issues own work status and priority. [CURRENT](design/CURRENT.md) records built
+behavior and constraints; design docs and the pinned Luau oracle remain the
+specification. Keep backlog checklists in Issues rather than duplicating them in
+CURRENT or chat. Private infrastructure tasks belong in `rustia-ops`.
+This is the private maintainer workflow; outside contribution and public support
+policies remain undecided.
+
 ## Build and test
 
 Install [Rust through rustup](https://rustup.rs/) and Node.js 22. Rustup selects the
@@ -58,8 +84,8 @@ availability alone is not a result.
 ## Find your way around
 
 Read [AGENTS.md](AGENTS.md) and [the current project state](design/CURRENT.md)
-before changing code. `CURRENT.md` explains what is implemented and what remains;
-other design documents can contain older plans.
+before changing code. `CURRENT.md` explains what is implemented and links to the
+development backlog; other design documents can contain older plans.
 
 | Directory | What you will find |
 | --- | --- |
