@@ -13025,14 +13025,8 @@ impl Vm {
             return Ok(self.heap.intern_string_value_bytes(traceback.as_bytes()));
         }
 
-        let has_current_call_site = call_site.is_some();
         let entries = self.debug_traceback_entries(call_site);
-        let level = if has_current_call_site {
-            level
-        } else {
-            level.saturating_sub(1)
-        };
-        for (location, debug_name) in entries.into_iter().skip(level) {
+        for (location, debug_name) in entries.into_iter().skip(level.saturating_sub(1)) {
             traceback.push_str(&location.source);
             traceback.push(':');
             traceback.push_str(&location.line.to_string());

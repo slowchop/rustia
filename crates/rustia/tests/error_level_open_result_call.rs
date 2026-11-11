@@ -84,3 +84,25 @@ fn uncaught_error_level_reports_the_caller_line_for_a_last_table_item() {
         );
     }
 }
+
+/// `debug.traceback` starts at the function that calls it, whether that call
+/// has fixed results or is an open-result `return debug.traceback(...)`.
+#[test]
+fn traceback_starts_at_its_caller_for_every_call_shape() {
+    let cases = [
+        "function named(...)\nreturn debug.traceback(...)\nend\nreturn named()",
+        "function named(a)\nreturn debug.traceback(a)\nend\nreturn named()",
+        "function named(...)\nlocal s = debug.traceback(...)\nreturn s\nend\nreturn named()",
+        "function named(...)\nlocal t = { debug.traceback(...) }\nreturn t[1]\nend\nreturn named()",
+    ];
+    for profile in profiles() {
+        for source in cases {
+            let mut vm = RustiaBuilder::standard().profile(profile).build().unwrap();
+            let traceback: String = vm.load(source).source_name("user.luau").eval().unwrap();
+            assert!(
+                traceback.starts_with("user.luau:2 function named\n"),
+                "{profile:?}: {source}: {traceback:?}"
+            );
+        }
+    }
+}
