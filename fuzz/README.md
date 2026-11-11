@@ -33,10 +33,10 @@ fuzz/Cargo.toml --features oracle --bin error-oracle-worker`, then set
 `generated_differential_smoke` ignored test with that environment to exercise
 the deterministic generated corpus. Normal fuzz-workspace tests need no oracle.
 
-The generated differential corpus has 48 bounded shapes. CI smoke derives its
+The generated differential corpus has 52 bounded shapes. CI smoke derives its
 shape range from the generator's `SOURCE_SHAPE_COUNT` and includes all eight type
 variants: valid and invalid single/grouped/tuple assertions, alias default ordering,
-pack defaults and assertion result adjustment. These cases compare acceptance or
+pack defaults, generic function binders/named parameters/final tails, and assertion result adjustment. These cases compare acceptance or
 rejection with the oracle before observing execution. Raw frontend fuzzing remains
 a crash/robustness check; neither it nor this targeted generator covers all type grammar.
 

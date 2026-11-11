@@ -12,6 +12,9 @@ fn metamethod_sites_and_erased_types_match_the_oracle_on_each_profile() {
         let mut vm = RustiaBuilder::standard().profile(profile).build().unwrap();
         for source in [
             include_str!(
+                "../../../conformance/fixtures/upstream-luau-0.709/generic_function_types.luau"
+            ),
+            include_str!(
                 "../../../conformance/fixtures/upstream-luau-0.709/metamethod_error_sites.luau"
             ),
             include_str!(
@@ -240,5 +243,45 @@ fn invalid_type_assertions_and_defaults_reject_before_guest_effects() {
             );
         }
         assert_eq!(vm.eval::<i32>("return 42").unwrap(), 42);
+    }
+}
+
+#[test]
+fn generic_function_types_erase_in_assertions_and_alias_defaults() {
+    for profile in profiles() {
+        let mut vm = RustiaBuilder::standard().profile(profile).build().unwrap();
+        assert!(vm
+            .eval::<bool>(
+                r#"
+            type Identity = <T>(T) -> T
+            type Box<F = <T>(T) -> T> = { value: F }
+            local function id(value) return value end
+            local typed = id :: Identity
+            local box = { value = id } :: Box
+            local function many(...) return ... end
+            local packed = many :: <P...>(P...) -> P...
+            return typed(42) == 42 and typed('ok') == 'ok'
+                and box.value(true) and select('#', packed(1,2)) == 2
+                and select('#', packed(1,2) :: (<T>(T)->T)) == 1
+        "#
+            )
+            .unwrap());
+        vm.insert_global("observed", 0).unwrap();
+        for ty in [
+            "<T>(T)",
+            "<T=number>(T)->T",
+            "<P...,T>(P...)->T",
+            "<T>(T...,number)->T",
+            "<T>(x:T...)->T",
+        ] {
+            let error = vm
+                .exec(&format!("observed=1; local value = nil :: ({ty})"))
+                .unwrap_err();
+            assert!(
+                matches!(error.kind(), rustia::ErrorKind::Source(_)),
+                "{profile:?}: {ty}: {error}"
+            );
+            assert_eq!(vm.eval::<i32>("return observed").unwrap(), 0);
+        }
     }
 }

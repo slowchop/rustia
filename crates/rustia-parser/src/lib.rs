@@ -1822,6 +1822,19 @@ impl Parser {
             self.advance();
             if !self.at_simple(SimpleToken::RParen) {
                 loop {
+                    // A named entry is a function signature, not a return
+                    // pack. Reuse its full grammar rather than consuming its
+                    // name as a standalone type before the colon.
+                    if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+                        && matches!(
+                            self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                            Some(TokenKind::Colon)
+                        )
+                    {
+                        self.cursor = checkpoint;
+                        self.parse_type(depth + 1)?;
+                        return Ok(());
+                    }
                     self.parse_type(depth + 1)?;
                     if self.eat_simple(SimpleToken::Comma).is_none() {
                         break;
@@ -1844,9 +1857,14 @@ impl Parser {
             return Ok(());
         }
 
+        let mut seen_pack = false;
         loop {
             self.expect_name("expected generic type parameter")?;
-            self.eat_simple(SimpleToken::Ellipsis);
+            let pack = self.eat_simple(SimpleToken::Ellipsis).is_some();
+            if seen_pack && !pack {
+                return Err(self.error_here("generic types must precede generic type packs"));
+            }
+            seen_pack |= pack;
             if self.eat_simple(SimpleToken::Comma).is_none() {
                 break;
             }
@@ -1962,21 +1980,36 @@ impl Parser {
                 ))
     }
 
-    fn parse_type_pack_tail(&mut self, depth: usize) -> Result<()> {
+    fn parse_type_pack_tail(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
+        let start = self.peek().span.start;
         if self.eat_simple(SimpleToken::Ellipsis).is_some() {
-            self.parse_single_type(depth + 1)?;
+            let inner = self.parse_single_type(depth + 1)?;
+            Ok(TypeExpr::Variadic {
+                span: Span::new(start, inner.span_end()),
+                inner: Box::new(inner),
+            })
         } else {
-            self.expect_name("expected generic type pack name")?;
-            self.expect_simple(SimpleToken::Ellipsis, "expected '...' after type pack name")?;
+            let name = self.expect_name("expected generic type pack name")?;
+            let end = self
+                .expect_simple(SimpleToken::Ellipsis, "expected '...' after type pack name")?
+                .span
+                .end;
+            Ok(TypeExpr::Variadic {
+                span: Span::new(start, end),
+                inner: Box::new(TypeExpr::Named {
+                    name: name.text,
+                    args: Vec::new(),
+                    span: name.span,
+                }),
+            })
         }
-        Ok(())
     }
 
     fn parse_generic_pack_default(&mut self, depth: usize) -> Result<()> {
         self.check_depth(depth)?;
         if self.at_type_pack_tail() {
-            return self.parse_type_pack_tail(depth + 1);
+            return self.parse_type_pack_tail(depth + 1).map(|_| ());
         }
         self.expect_simple(SimpleToken::LParen, "expected type pack default")?;
         if !self.at_simple(SimpleToken::RParen) {
@@ -2083,11 +2116,42 @@ impl Parser {
             });
         }
 
+        // A generic binder forces function syntax, even for one parameter.
+        // Bindings are erased, as they are on value-level function declarations.
+        let generic_start = self
+            .at_simple(SimpleToken::Less)
+            .then(|| self.peek().span.start);
+        if generic_start.is_some() {
+            self.parse_optional_function_generics()?;
+        }
         if let Some(open) = self.eat_simple(SimpleToken::LParen) {
+            let start = generic_start.unwrap_or(open.span.start);
+            let mut force_function = generic_start.is_some();
             let mut types = Vec::new();
             if !self.at_simple(SimpleToken::RParen) {
                 loop {
-                    types.push(self.parse_type(depth + 1)?);
+                    if self.at_type_pack_tail() {
+                        types.push(self.parse_type_pack_tail(depth + 1)?);
+                        // A tail occupies the rest of the parameter/return pack.
+                        if self.at_simple(SimpleToken::Comma) {
+                            return Err(self.error_here("type pack tail must be last"));
+                        }
+                        break;
+                    }
+                    if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+                        && matches!(
+                            self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                            Some(TokenKind::Colon)
+                        )
+                    {
+                        self.expect_name("expected function type parameter name")?;
+                        self.expect_simple(
+                            SimpleToken::Colon,
+                            "expected ':' after parameter name",
+                        )?;
+                        force_function = true;
+                    }
+                    types.push(self.parse_single_type(depth + 1)?);
                     if self.eat_simple(SimpleToken::Comma).is_none() {
                         break;
                     }
@@ -2096,15 +2160,21 @@ impl Parser {
             let close = self.expect_simple(SimpleToken::RParen, "expected ')' in type pack")?;
             if self.eat_simple(SimpleToken::Arrow).is_some() {
                 let result = self.parse_type(depth + 1)?;
-                let span = Span::new(open.span.start, result.span_end());
+                let span = Span::new(start, result.span_end());
                 return Ok(TypeExpr::Function {
                     params: types,
                     result: Box::new(result),
                     span,
                 });
             }
-            let span = Span::new(open.span.start, close.span.end);
+            if force_function {
+                return Err(self.error_here("expected '->' after function type parameters"));
+            }
+            let span = Span::new(start, close.span.end);
             return Ok(TypeExpr::TypePack { types, span });
+        }
+        if generic_start.is_some() {
+            return Err(self.error_here("expected '(' after function type generics"));
         }
 
         if let Some(open) = self.eat_simple(SimpleToken::LBrace) {
@@ -2124,7 +2194,11 @@ impl Parser {
         }
 
         let token = self.advance().clone();
-        match token.kind {
+        let kind = match token.kind {
+            TokenKind::Type => TokenKind::Ident("type".to_owned()),
+            kind => kind,
+        };
+        match kind {
             TokenKind::Nil => Ok(TypeExpr::Nil(token.span)),
             TokenKind::True => Ok(TypeExpr::Boolean(true, token.span)),
             TokenKind::False => Ok(TypeExpr::Boolean(false, token.span)),
@@ -2875,6 +2949,88 @@ mod tests {
             "local x: typeof(`x`) = 1",
         ];
         for source in cases {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn parses_generic_function_types_and_named_parameters() {
+        for ty in [
+            "<T>(T) -> T",
+            "<T>(value:T) -> T",
+            "<T>(T,value:T) -> T",
+            "<T,U...>(T,U...) -> U...",
+            "<T>(T) -> <U>(U) -> T",
+            "<type>(type:type) -> type",
+            "<T,T>(T) -> T",
+            "<T>(T) -> () | nil",
+            "<T>() -> (number,string)?",
+            "(value:number, string) -> number",
+        ] {
+            let source = format!("type F = {ty}");
+            assert!(parse_source(&source).is_ok(), "{source}");
+            assert!(
+                parse_source(&format!("local value = nil :: ({ty})")).is_ok(),
+                "{ty}"
+            );
+        }
+        assert!(parse_source("type Box<F = <T>(T)->T> = F").is_ok());
+        assert!(parse_source("type A = C<B<<T>() -> T>>").is_ok());
+        assert!(parse_source(
+            "local function f(): (x:number)->number return function(x) return x end end"
+        )
+        .is_ok());
+        let source = "type Identity = <T>(value:T) -> T";
+        let chunk = parse_source(source).unwrap();
+        let Stmt::TypeAlias {
+            value: TypeExpr::Function { params, span, .. },
+            ..
+        } = &chunk.statements[0]
+        else {
+            panic!("expected function type");
+        };
+        assert_eq!(params.len(), 1);
+        assert_eq!(span.start, source.find('<').unwrap());
+        assert_eq!(span.end, source.len());
+    }
+
+    #[test]
+    fn rejects_malformed_generic_function_types() {
+        for ty in [
+            "<>(number) -> number",
+            "<T=number>(T) -> T",
+            "<P...=()>() -> ()",
+            "<P...,T>(P...) -> T",
+            "<T,>(T) -> T",
+            "<T>(T)",
+            "<T>()",
+            "<T>number",
+            "<T>(x:T...) -> T",
+            "<T>(x:...T) -> T",
+            "<T>(T...,number) -> T",
+            "<T>((T...)) -> T",
+            "<T>(()) -> T",
+            "<T>((number,string)) -> T",
+            "<T>(T) -> (value:T)",
+        ] {
+            assert!(parse_source(&format!("type F = {ty}")).is_err(), "{ty}");
+        }
+        for annotation in ["(number,string)?", "(number,string) | nil", "() | nil"] {
+            assert!(
+                parse_source(&format!("local function f(): {annotation} return nil end")).is_err(),
+                "{annotation}"
+            );
+        }
+        // Source excerpts from Luau 0.709 tests/Parser.test.cpp, MIT licensed:
+        // function_type_matching_parenthesis, empty_function_type_error_recovery,
+        // and function_type_named_arguments; permission terms in bundled LICENSE-MIT.
+        // Copyright (c) 2019-2025 Roblox Corporation; (c) 1994-2019 Lua.org, PUC-Rio.
+        for source in [
+            "local a: <T>(number -> string",
+            "type Fn = (any, string | number | <a>()) -> any",
+            "type Fn = (any, string | number | <a...>()) -> any",
+            "type MyFunc = (a: number, b: string, c: number) -> (d: number, e: string, f: number)",
+        ] {
             assert!(parse_source(source).is_err(), "{source}");
         }
     }
