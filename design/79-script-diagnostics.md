@@ -114,3 +114,13 @@ selection, reused names, mapped spans, generated caller failures, zero source
 budget, retained reports after reset, wrapped coroutine suspension and manual
 string rethrows. The `index_write_error_messages.luau` oracle fixture also pins
 non-table write messages and wrapped-coroutine guest failure text.
+
+Every bytecode call records its call site on the callee frame, including calls
+whose results stay open: the last item of a table constructor (`{ f() }`,
+`{ f(...) }`) and a vararg return call (`return f(...)`). A level above 1 that
+selects such a caller reports the caller's line, not the line of `error`.
+`crates/rustia/tests/error_level_open_result_call.rs` pins this for each call
+shape on every profile. `debug.traceback` relied on the missing call site of
+`return debug.traceback(...)` to find its first line; it now starts at the
+function that calls it for every call shape (it returned an empty string for a
+fixed-result call before).
