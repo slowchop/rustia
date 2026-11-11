@@ -12,7 +12,9 @@
 
 ## Invariants
 
-- Alias generic defaults are parsed then erased, with regular parameters before packs and a default required after the first default. Pack defaults have explicit fixed/tail grammar. Assertions and regular defaults require a single type; grouped singles, function types and named generic pack arguments retain their own contexts. The shared type grammar still has broader gaps (balanced table types and generic function types).
+- Generic function types parse an erased binder list before the parameter list, require an arrow, accept named/unnamed fixed parameters and one final pack tail, and include the binder in their source span. Function declaration and function type binders share regular-before-pack ordering and reject defaults; no type checker or new runtime representation is introduced.
+
+- Alias generic defaults are parsed then erased, with regular parameters before packs and a default required after the first default. Pack defaults have explicit fixed/tail grammar. Assertions and regular defaults require a single type; grouped singles, function types and named generic pack arguments retain their own contexts. The shared type grammar still has broader gaps (including balanced table types).
 
 - Contextual `export type` uses the alias grammar; `expr :: T` parses the type and lowers to a single-result parenthesized expression without runtime checks. Named types accept the module-qualified `Module.Type` form and optional generic arguments.
 

@@ -14,7 +14,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 ## Invariants
 
-- Fixture identity, references, and status are validated before results are reported.
+- Fixture identity, references, and status are validated before results are reported. Provenance tests validate every comma-separated upstream path, including the explicitly allowed pinned parser and generic-inference test sources.
 - The report counts corpus state; it is not a general claim of full Luau compatibility.
 - Experimental O2 conformance runs compile fixture programs with the selected options; source comments specify that preludes and `loadstring` remain on default lowering.
 

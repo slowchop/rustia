@@ -883,15 +883,40 @@ fn assert_valid_upstream_conformance_source(path: &str, line_number: usize) {
     );
 }
 
-fn assert_valid_upstream_source_path(path: &str, line_number: usize) {
-    assert_safe_slash_path(path, line_number);
-    assert!(
-        path.starts_with("tests/conformance/")
-            || path.starts_with("VM/src/")
-            || path.starts_with("Compiler/src/")
-            || path == "tests/Conformance.test.cpp",
-        "provenance line {line_number} has unclassified upstream source path {path:?}"
+#[test]
+fn upstream_provenance_validates_every_source_in_a_list() {
+    assert_valid_upstream_source_path(
+        "tests/TypeInfer.generics.test.cpp, tests/Parser.test.cpp",
+        1,
     );
+    for invalid in [
+        "tests/Parser.test.cpp,tests/Unclassified.test.cpp",
+        "VM/src/lvmexecute.cpp,../outside.cpp",
+        "tests/Parser.test.cpp,",
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| assert_valid_upstream_source_path(invalid, 1)).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+fn assert_valid_upstream_source_path(paths: &str, line_number: usize) {
+    for path in paths.split(',').map(str::trim) {
+        assert_safe_slash_path(path, line_number);
+        assert!(
+            path.starts_with("tests/conformance/")
+                || path.starts_with("VM/src/")
+                || path.starts_with("Compiler/src/")
+                || matches!(
+                    path,
+                    "tests/Conformance.test.cpp"
+                        | "tests/Parser.test.cpp"
+                        | "tests/TypeInfer.generics.test.cpp"
+                ),
+            "provenance line {line_number} has unclassified upstream source path {path:?}"
+        );
+    }
 }
 
 fn assert_valid_local_provenance_path(

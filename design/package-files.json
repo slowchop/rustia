@@ -615,7 +615,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 754,
+      "file_count": 755,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -794,6 +794,7 @@
         "corpus/conformance/fixtures/upstream-luau-0.709/generic_for_substituted_pairs_error_message.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/generic_for_table_constructor_iteration.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/generic_for_table_value_iteration.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/generic_function_types.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/getfenv_native_function_global_env.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/getfenv_returns_global_environment.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/global_unpack_alias_expands.luau",

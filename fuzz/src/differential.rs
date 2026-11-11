@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Shared with CI smoke so new generated shapes are not omitted from its range.
-pub const SOURCE_SHAPE_COUNT: u8 = 48;
+pub const SOURCE_SHAPE_COUNT: u8 = 52;
 
 pub fn source_from_bytes(data: &[u8]) -> String {
     let byte = |index: usize| data.get(index).copied().unwrap_or(0);
@@ -106,7 +106,23 @@ pub fn source_from_bytes(data: &[u8]) -> String {
             body.push_str(&format!("type Alias<P...={default}> = number; return 'invalid pack default'"));
         }
         46 => body.push_str("type Alias<T=number> = T; local function many() return 4,5 end; local fn = many :: () -> (number,number); return tostring(select('#',fn()))..':'..tostring(select('#',fn() :: Alias))"),
-        _ => body.push_str("local function f<T=number>() return 1 end; return 'invalid function default'"),
+        47 => body.push_str("local function f<T=number>() return 1 end; return 'invalid function default'"),
+        48 => {
+            let ty = ["<T>(T)->T", "<T>(value:T)->T", "<T>(T,value:T)->T", "<T>(T)-><U>(U)->T", "<type>(type:type)->type", "<T,T>(T)->T", "(<T>(T)->T)?", "<T>() -> (number,string)?"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Identity = {ty}; local function id(v) return v end; local typed=id :: Identity; return tostring(typed(42))"));
+        }
+        49 => {
+            let ty = ["<T>(T)", "<T>()", "<>(T)->T", "<T=number>(T)->T", "<P...=()>() -> ()", "<P...,T>(P...)->T", "<T,>(T)->T", "<T>number"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Invalid = {ty}; return 'invalid generic function'"));
+        }
+        50 => {
+            let ty = ["<P...>(P...)->P...", "<P...>(...number)->P...", "<T,P...>(T,P...)->P...", "<T>(x:T,...T)->T", "<T>(T)->() | nil", "<P...,P...>(P...)->P...", "<T>(T)->(x:T)->T", "<T>(x:T,string)->T"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Box<F = {ty}> = F; local function many(...) return ... end; local packed=many :: (<P...>(P...)->P...); return tostring(select('#',packed(1,2)))"));
+        }
+        _ => {
+            let ty = ["<T>(x:T...)->T", "<T>(x:...T)->T", "<T>(T...,number)->T", "<T>(...T,number)->T", "<T>((T...))->T", "<T>(())->T", "<T>((number,string))->T", "<T>(T)->(value:T)"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Invalid = {ty}; return 'invalid function parameter pack'"));
+        }
     }
     body
 }

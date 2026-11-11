@@ -409,17 +409,24 @@ publication or supported-release acceptance is claimed.
 
 ### Targeted type-grammar differential coverage
 
-The generated differential target includes eight type shapes in addition to its
+The generated differential target includes twelve type shapes in addition to its
 40 existing runtime shapes. These cover valid/invalid assertions, alias defaults,
-pack defaults, ordering and result adjustment. CI smoke takes its shape bound
+pack defaults, generic function signatures, ordering and result adjustment. CI smoke takes its shape bound
 from the generator and exercises all eight type variants. Parser and facade
 negative tests additionally require Source rejection before any guest write in
 all four profiles. The existing `export_type_assertions.luau` pinned fixture now
 also exercises erased defaults and valid pack/grouping boundaries.
 
 This closes two concrete coverage holes, not the full type-grammar gate. The
-balanced-table parser remains permissive and generic function types remain
-unsupported, including as defaults. Raw frontend mutation fuzzing checks robust
+balanced-table parser remains permissive and broader syntax parity remains open. Raw frontend mutation fuzzing checks robust
 handling, not independent syntactic acceptance; the oracle generator compares
 only the families it generates. Independent-frontend grammar comparison remains
 planned. No new remote fuzz campaign or performance claim is implied.
+
+Generic function type coverage also ports source excerpts from pinned Luau 0.709
+`tests/TypeInfer.generics.test.cpp` and `tests/Parser.test.cpp`, with named upstream
+tests, exact commit provenance and MIT attribution in `generic_function_types.luau`.
+Scopes and added runtime checks make the runnable excerpts independent; static
+inference expectations are not ported. Malformed generic/named/pack forms are
+checked for rejection before guest effects on all four profiles. The differential
+smoke includes four additional valid/invalid generic-function shapes.

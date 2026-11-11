@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-11 (Australia/Hobart).
+Updated: 2026-11-12 (Australia/Hobart).
 
 This is the single authority for current project status. Detailed design contracts
 and the pinned oracle remain the specification; dated records explain decisions
@@ -42,10 +42,14 @@ balanced-token table-type parser remains more permissive than the full type-gram
 strictness intended by design/50. Assertions now reject bare tuple/variadic packs
 while retaining grouped single types and function/generic pack positions. Alias
 generics accept defaults, enforce regular-before-pack/default ordering, and erase
-defaults at runtime. The differential generator now includes eight targeted type
-shapes and shares its 48-shape bound with CI smoke. Broader grammar coverage,
-including generic function types (`<U>(U)->U`), remains open; these fixes do not
-establish full syntax parity.
+defaults at runtime. Generic function types (`<U>(U)->U`) now parse and erase in
+annotations, assertions, aliases, defaults and nested type arguments, with named
+parameters and final pack tails. The pinned upstream test excerpts and runtime
+checks are in `generic_function_types.luau`; negative parser/facade cases and
+differential shapes cover malformed forms. The differential generator includes
+12 targeted type shapes and shares its 52-shape bound with CI smoke. Broader
+grammar coverage, including the permissive table-type parser, remains open;
+these fixes do not establish full syntax or analyzer parity.
 
 ## Issue #21 memory recovery
 
@@ -116,8 +120,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **729 fixtures**, **520 refs**, **0 pending-oracle**
-and **0 pending-impl**: 711 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **730 fixtures**, **521 refs**, **0 pending-oracle**
+and **0 pending-impl**: 712 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and
