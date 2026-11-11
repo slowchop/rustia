@@ -275,7 +275,7 @@ fn generic_function_types_erase_in_assertions_and_alias_defaults() {
             "<T>(x:T...)->T",
         ] {
             let error = vm
-                .exec(&format!("observed=1; local value = nil :: ({ty})"))
+                .exec(format!("observed=1; local value = nil :: ({ty})"))
                 .unwrap_err();
             assert!(
                 matches!(error.kind(), rustia::ErrorKind::Source(_)),
