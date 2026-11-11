@@ -268,7 +268,8 @@ paused. Bridge availability does not establish a new performance result. See
 
 Source visibility does not establish an outside contribution or support policy.
 That policy is undecided; this repository does not currently invite pull
-requests or promise issue review. Issues remain disabled during private staging.
+requests or promise public issue review. Maintainers track source development in
+[GitHub Issues](https://github.com/slowchop/rustia/issues).
 
 [Maintainer build and validation notes](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md)
 explain the development workflow. The [first-release milestone](https://github.com/slowchop/rustia/blob/main/design/92-first-release.md)

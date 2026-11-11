@@ -9,6 +9,27 @@ reviewed by humans. Outside contribution and support policies are undecided. Opt
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
 serves them.
 
+## Development starts from GitHub Issues
+
+- The [GitHub issue tracker](https://github.com/slowchop/rustia/issues) is the primary
+  development backlog for source bugs, features, documentation and maintenance.
+  Search open and closed issues before starting; reuse an existing issue or create
+  one focused issue with the problem, evidence, scope and acceptance criteria.
+- Read the selected issue, linked design and existing PRs before editing. Record
+  the branch/PR and current progress on the issue so another session can see work
+  already in progress. Split independent follow-ups into linked issues rather
+  than leaving actionable work only in chat, agent memory or a report.
+- PRs link their issues. Use `Closes #N` only when the whole issue is resolved;
+  use `Refs #N` for partial work and keep the remaining acceptance items open.
+  Merge only after independent review and applicable CI pass, then verify both
+  the merged artifact and the issue state. Do not close a tracker for one child fix.
+- Issues own task status, priority and coordination. `design/CURRENT.md` owns
+  implemented state and active constraints; design docs and the pinned oracle own
+  behavior. An issue does not override those contracts or authorize restricted
+  publication, benchmark, infrastructure or repository-setting actions.
+- Keep CURRENT's backlog section as links into Issues, not a second task list.
+  Private infrastructure and sensitive client work stay in `rustia-ops`.
+
 ## EGM code maps
 
 - Before editing a file, read every existing ancestor `EGM.md`, starting at the repository root and
@@ -126,8 +147,8 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
   self-hosted CI/infra can never appear in public history by construction). Holds private notes, the CI-runner
   setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
 - **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
-- **Tasks:** keep source maintenance in this repo; private/infra tasks = files (or Issues) in
-  `rustia-ops`. Opening public Issues requires a separate policy decision. **No Linear** (the private repo covers it).
+- **Tasks:** source development uses GitHub Issues in `slowchop/rustia`; private/infra tasks use files or Issues in
+  `rustia-ops`. This private maintainer workflow does not establish outside contribution or public support policy. **No Linear**.
 - Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
 
 ## Before pushing

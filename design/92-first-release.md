@@ -225,7 +225,8 @@ record; the broader public matrix below remains open.
   and at least one useful example for each supported public workflow.
 - [ ] Decide the outside contribution, issue-reporting and support policy before
   inviting participation. Source visibility does not require accepting contributions;
-  Issues remain disabled during private staging.
+  private maintainer work uses [GitHub Issues](https://github.com/slowchop/rustia/issues);
+  this does not open a public contribution or support channel.
 - [ ] Check all documentation links in the packaged crates and build the docs
   with warnings treated as errors. Both checks now run in release preflight;
   final candidate verification remains required.
