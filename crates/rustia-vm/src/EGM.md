@@ -15,6 +15,8 @@
 
 ## Invariants
 
+- Caller-selected error diagnostics resolve source and mapped spans from the exact caller program/frame, with location-only fallback. Wrapped coroutines carry original handle-free diagnostics across propagation; guest strings and explicit string-rethrow sites are not rewritten. Non-table writes share oracle-checked index errors with reads.
+
 - Public execution returns release internal error tracebacks. Debug snapshots preserve function/environment metadata without saved register roots, so failed allocation graphs can be reclaimed before VM reuse. OOM host diagnostics record the stopped instruction while keeping bare guest error text.
 
 - Call frames retain prototype/PC coordinates for the active instruction, including expanded-call dispatch and restored continuations; implicit calls resolve those coordinates lazily for error levels and debug caller locations.

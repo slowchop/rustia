@@ -9862,7 +9862,7 @@ impl Vm {
         if object.kind() == ValueKind::Userdata {
             return self.set_object_newindex_metamethod(program, object, key, value, depth, fuel);
         }
-        Err(Error::new(ErrorKind::TypeError { expected: "table" }))
+        Err(self.index_error(object, key)?)
     }
 
     fn set_index_value_with_inline_cache(
@@ -12895,7 +12895,58 @@ impl Vm {
                 .and_then(|frame| frame.call_site.clone())
         };
         if let Some(location) = location {
-            error.at_source(&location.source, location.line)
+            let mut error = error.at_source(&location.source, location.line);
+            if level > 1 && !self.settings.guest_surface.is_hardened_leaf() {
+                // The selected call site belongs to the caller's program, not
+                // the program currently executing error(). Resolve by frame
+                // identity; source names can be reused across hot reloads.
+                let caller = self
+                    .call_stack
+                    .len()
+                    .checked_sub(level)
+                    .and_then(|index| self.call_stack.get(index));
+                let selected = caller.and_then(|frame| {
+                    let program_id = frame.program?;
+                    let program = self.dynamic_program(program_id).ok()?;
+                    let (prototype, pc) = frame.instruction?;
+                    let function = match prototype {
+                        Some(index) => program.functions.get(index as usize)?,
+                        None => &program.main,
+                    };
+                    let site = instruction_source_location(&program, function, pc)?;
+                    if site != location {
+                        return None;
+                    }
+                    let mut selected_error = error.clone();
+                    selected_error.span = function
+                        .source_map
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.pc <= pc)
+                        .and_then(|entry| entry.span)
+                        .and_then(|span| {
+                            Some((
+                                u32::try_from(span.start).ok()?,
+                                u32::try_from(span.end).ok()?,
+                            ))
+                        });
+                    let error = attach_instruction_source(&program, function, pc, selected_error);
+                    Some(self.capture_host_diagnostic(error, Some(program_id), &program, function))
+                });
+                if let Some(selected) = selected {
+                    return selected;
+                }
+                // No exact source owner is available: keep a location-only
+                // report instead of quoting the throwing program's source.
+                error.diagnostic = Some(Arc::new(crate::diagnostic::Diagnostic {
+                    trace_captured: true,
+                    source: Some(location.source),
+                    line: Some(location.line),
+                    report_bytes: self.settings.diagnostic_limits.report_bytes,
+                    ..crate::diagnostic::Diagnostic::default()
+                }));
+            }
+            error
         } else {
             error
         }
@@ -14303,12 +14354,17 @@ impl Vm {
                 self.release_module_owner(self.coroutines[coroutine].handle);
                 self.coroutines[coroutine].dead = true;
                 self.coroutines[coroutine].frames.clear();
+                // Wrapping rethrows the original guest value. Keep its host
+                // report as well, without changing guest propagation.
+                let diagnostic = error.diagnostic.clone();
                 let error_value = self.error_object(error);
                 self.coroutines[coroutine].error = Some(error_value);
-                Err(Error::new(ErrorKind::GuestError {
+                let mut error = Error::new(ErrorKind::GuestError {
                     value: error_value,
                     message: self.error_value_message(error_value),
-                }))
+                });
+                error.diagnostic = diagnostic;
+                Err(error)
             }
         };
         self.mark_control_memory_dirty();

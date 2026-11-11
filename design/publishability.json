@@ -209,7 +209,7 @@
       "publish": false,
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 753,
+        "file_count": 754,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [
