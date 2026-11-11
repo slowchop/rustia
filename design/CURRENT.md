@@ -33,8 +33,11 @@ Metamethod calls preserve their triggering instruction location for positive `er
 levels and `debug.info`, including expanded method arguments and resumed calls. Exported type aliases and `expr :: T` assertions (including module-qualified types) parse and
 have no runtime type-checking effect; assertions select one result. Two focused
 fixtures were checked against the pinned Luau 0.709 oracle and through the facade
-on all four profiles. Related cross-chunk diagnostic snippets, nil writes and
-coroutine report attribution from #18 remain separate follow-up work. The existing
+on all four profiles. The #18 follow-up resolves caller-selected error reports
+against the exact caller program, including reused source names and generated
+wrappers. Non-table writes use oracle-checked index messages. Wrapped coroutines
+preserve their original host report across yield/resume while keeping the guest
+error value unchanged. Manual string rethrows retain their explicit error site. The existing
 balanced-token table-type parser remains more permissive than the full type-grammar
 strictness intended by design/50; this change reuses that grammar. Tuple-type assertion rejection and defaulted generic
 alias parameters remain shared-parser follow-ups.
@@ -108,8 +111,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **728 fixtures**, **520 refs**, **0 pending-oracle**
-and **0 pending-impl**: 710 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **729 fixtures**, **520 refs**, **0 pending-oracle**
+and **0 pending-impl**: 711 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and

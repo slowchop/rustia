@@ -93,3 +93,24 @@ Keep extending oracle runtime-error-phase parity independently of presentation. 
 general transpiler source map or reconstruction of metadata lost through guest string rethrows.
 Unicode/tab spans use an honest location-only fallback where a plain-text caret would be misleading.
 Future public-release and real-host/browser goldens remain their own gates.
+
+## Caller-selected and wrapped-coroutine reports (#18)
+
+For positive `error` levels selecting a caller, report source, spans and wrapper
+mapping come from that exact caller frame/program. Source names are labels and
+may be reused by hot reload; matching a name is not proof of source identity.
+When exact caller coordinates are unavailable, omit the excerpt rather than
+quoting the throwing chunk. Source-retention budgets still permit location-only
+reports, and hardened leaves retain their existing diagnostic restrictions.
+
+`coroutine.wrap` retains the original handle-free diagnostic when propagating a
+failure. Its guest error value/text and protected-call identity stay unchanged.
+This metadata survives yield/resume and cross-chunk calls. Explicit guest string
+rethrows after `coroutine.resume` still select the new `error` call's site; reports
+do not parse source locations from strings or reconstruct discarded provenance.
+
+Cross-profile regressions in `crates/rustia/tests/issue_18_19.rs` cover level-2/3
+selection, reused names, mapped spans, generated caller failures, zero source
+budget, retained reports after reset, wrapped coroutine suspension and manual
+string rethrows. The `index_write_error_messages.luau` oracle fixture also pins
+non-table write messages and wrapped-coroutine guest failure text.
