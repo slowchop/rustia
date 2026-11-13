@@ -76,6 +76,21 @@ claiming remote acceptance. Adding the job alone is not execution evidence.
 Remote Safari still requires a prepared logged-in Mac and existing automation
 permission; mobile Safari is a separate physical-device check.
 
+### Observed remote Firefox result — 2026-11-13
+
+Immutable head `65701387649ad51fe59067682030c9a4daa10060` executed real Firefox
+160.0 with geckodriver 0.37.1 on the existing Linux x86-64 Docker correctness
+pool in [manual run 43364203240, job 131684665212](https://github.com/slowchop/rustia/actions/runs/43364203240/job/131684665212).
+Actual raw logs contain eighteen nonzero passing summaries: bare 49, default 47,
+96 tests total, zero failures. Both type-grammar tests executed in each mode.
+Both golden payloads match the retained native reference byte-for-byte, SHA-256
+`cf890817d7b66cc2e8ab61030cbe6d0fe3235efe1c8a3dd7a1e4bf94f3b6a9a8`.
+Rust 1.95.0 and wasm-bindgen/test-runner 0.2.126 were used. The job verified the
+committed official browser/driver archive checksums before extraction; the
+Firefox-only temporary home resolved the runner/container ownership mismatch.
+This establishes remote Firefox shared-contract execution for that exact head,
+not remote Safari, physical-iPad Safari, full language parity or a later release candidate.
+
 ## Observed evidence
 
 On 2026-10-23 (Australia/Hobart), the runtime at
