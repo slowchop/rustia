@@ -21,6 +21,17 @@ fn frontend_targets_accept_seed_programs() {
 }
 
 #[test]
+fn frontend_type_expression_function_cycles_obey_the_shared_recursion_budget() {
+    let mut ty = "number".to_owned();
+    for _ in 0..1200 {
+        ty = format!("typeof(function(): {ty} end)");
+    }
+    let source = format!("type T = {ty}");
+    assert!(source.len() <= MAX_PARSER_INPUT_BYTES);
+    assert!(fuzz_parser(source.as_bytes()));
+}
+
+#[test]
 fn vm_target_accepts_bounded_bytecode_inputs() {
     for data in [
         &b""[..],

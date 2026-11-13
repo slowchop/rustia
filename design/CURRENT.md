@@ -49,8 +49,9 @@ defaults at runtime. Generic function types (`<U>(U)->U`) now parse and erase in
 annotations, assertions, aliases, defaults and nested type arguments, with named
 parameters and final pack tails. The pinned upstream test excerpts and runtime
 checks are in `generic_function_types.luau`; negative parser/facade cases and
-differential shapes cover malformed forms. The differential generator includes
-17 targeted type shapes and shares its 57-shape bound with CI smoke. Broader
+differential shapes cover malformed forms. Typeof annotations validate ordinary expression syntax, permit expression interpolation,
+and erase without executing those expressions. The differential generator includes
+21 targeted type shapes and shares its 61-shape bound with CI smoke. Broader
 grammar coverage remains open;
 these fixes do not establish full syntax or analyzer parity.
 
@@ -123,8 +124,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **732 fixtures**, **523 refs**, **0 pending-oracle**
-and **0 pending-impl**: 714 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **733 fixtures**, **524 refs**, **0 pending-oracle**
+and **0 pending-impl**: 715 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and

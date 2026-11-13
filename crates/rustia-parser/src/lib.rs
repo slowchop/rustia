@@ -974,6 +974,10 @@ pub struct Parser {
     newlines_before: Vec<bool>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
+    active_parse_frames: usize,
+    function_is_vararg: bool,
+    loop_depth: usize,
+    in_erased_type_expression: bool,
     #[cfg(test)]
     type_primary_visits: usize,
 }
@@ -986,6 +990,10 @@ impl Parser {
             newlines_before,
             interpolations: BTreeMap::new(),
             cursor: 0,
+            active_parse_frames: 0,
+            function_is_vararg: true,
+            loop_depth: 0,
+            in_erased_type_expression: false,
             #[cfg(test)]
             type_primary_visits: 0,
         }
@@ -1010,6 +1018,10 @@ impl Parser {
             newlines_before,
             interpolations,
             cursor: 0,
+            active_parse_frames: 0,
+            function_is_vararg: true,
+            loop_depth: 0,
+            in_erased_type_expression: false,
             #[cfg(test)]
             type_primary_visits: 0,
         }
@@ -1046,6 +1058,17 @@ impl Parser {
         start: usize,
         expected: &'static str,
     ) -> Result<Vec<Stmt>> {
+        self.with_parse_frame(|parser| {
+            parser.parse_delimited_block_inner(terminators, start, expected)
+        })
+    }
+
+    fn parse_delimited_block_inner(
+        &mut self,
+        terminators: &[SimpleToken],
+        start: usize,
+        expected: &'static str,
+    ) -> Result<Vec<Stmt>> {
         self.parse_block_until(terminators).map_err(|mut error| {
             if self.at_simple(SimpleToken::Eof) && error.unclosed_block.is_none() {
                 error.unclosed_block = Some(Box::new(UnclosedBlock { start, expected }));
@@ -1055,6 +1078,29 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt> {
+        self.with_parse_frame(|parser| parser.parse_statement_inner())
+    }
+
+    fn parse_statement_inner(&mut self) -> Result<Stmt> {
+        if let Some(if_token) = self.eat_simple(SimpleToken::If) {
+            return self.parse_if(if_token.span.start);
+        }
+        if let Some(while_token) = self.eat_simple(SimpleToken::While) {
+            return self.parse_while(while_token.span.start);
+        }
+        if let Some(for_token) = self.eat_simple(SimpleToken::For) {
+            return self.parse_for(for_token.span.start);
+        }
+        if let Some(repeat_token) = self.eat_simple(SimpleToken::Repeat) {
+            return self.parse_repeat(repeat_token.span.start);
+        }
+        if let Some(do_token) = self.eat_simple(SimpleToken::Do) {
+            return self.parse_do(do_token.span.start);
+        }
+        self.parse_non_control_statement()
+    }
+
+    fn parse_non_control_statement(&mut self) -> Result<Stmt> {
         if let Some(local_token) = self.eat_simple(SimpleToken::Local) {
             if self.eat_simple(SimpleToken::Function).is_some() {
                 return self.parse_local_function(local_token.span.start);
@@ -1086,22 +1132,14 @@ impl Parser {
             self.advance();
             return self.parse_type_alias();
         }
-        if let Some(if_token) = self.eat_simple(SimpleToken::If) {
-            return self.parse_if(if_token.span.start);
-        }
-        if let Some(while_token) = self.eat_simple(SimpleToken::While) {
-            return self.parse_while(while_token.span.start);
-        }
-        if let Some(for_token) = self.eat_simple(SimpleToken::For) {
-            return self.parse_for(for_token.span.start);
-        }
-        if let Some(repeat_token) = self.eat_simple(SimpleToken::Repeat) {
-            return self.parse_repeat(repeat_token.span.start);
-        }
-        if let Some(do_token) = self.eat_simple(SimpleToken::Do) {
-            return self.parse_do(do_token.span.start);
-        }
         if let Some(break_token) = self.eat_simple(SimpleToken::Break) {
+            if self.in_erased_type_expression && self.loop_depth == 0 {
+                return Err(ParseError {
+                    unclosed_block: None,
+                    span: break_token.span,
+                    message: "break statement must be inside a loop".to_owned(),
+                });
+            }
             self.eat_simple(SimpleToken::Semicolon);
             return Ok(Stmt::Break {
                 span: break_token.span,
@@ -1109,6 +1147,13 @@ impl Parser {
         }
         if self.at_ident("continue") && self.next_starts_statement_boundary() {
             let continue_token = self.advance().clone();
+            if self.in_erased_type_expression && self.loop_depth == 0 {
+                return Err(ParseError {
+                    unclosed_block: None,
+                    span: continue_token.span,
+                    message: "continue statement must be inside a loop".to_owned(),
+                });
+            }
             self.eat_simple(SimpleToken::Semicolon);
             return Ok(Stmt::Continue {
                 span: continue_token.span,
@@ -1293,6 +1338,10 @@ impl Parser {
     }
 
     fn parse_if_chain(&mut self, start: usize) -> Result<(Stmt, usize)> {
+        self.with_parse_frame(|parser| parser.parse_if_chain_inner(start))
+    }
+
+    fn parse_if_chain_inner(&mut self, start: usize) -> Result<(Stmt, usize)> {
         let condition = self.parse_expr(0, 0)?;
         self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
         let then_body = self.parse_delimited_block(
@@ -1327,7 +1376,7 @@ impl Parser {
     fn parse_while(&mut self, start: usize) -> Result<Stmt> {
         let condition = self.parse_expr(0, 0)?;
         self.expect_simple(SimpleToken::Do, "expected 'do' after while condition")?;
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after while block")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::While {
@@ -1357,7 +1406,7 @@ impl Parser {
         self.expect_simple(SimpleToken::In, "expected 'in' after generic for variables")?;
         let iter = self.parse_expr_list()?;
         self.expect_simple(SimpleToken::Do, "expected 'do' after generic for iterator")?;
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForGeneric {
@@ -1378,7 +1427,7 @@ impl Parser {
             None
         };
         self.expect_simple(SimpleToken::Do, "expected 'do' after for loop range")?;
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForNumeric {
@@ -1393,7 +1442,7 @@ impl Parser {
     }
 
     fn parse_repeat(&mut self, start: usize) -> Result<Stmt> {
-        let body = self.parse_delimited_block(&[SimpleToken::Until], start, "until")?;
+        let body = self.parse_loop_body(&[SimpleToken::Until], start, "until")?;
         self.expect_simple(SimpleToken::Until, "expected 'until' after repeat block")?;
         let condition = self.parse_expr(0, 0)?;
         let end = condition.span_end();
@@ -1469,8 +1518,29 @@ impl Parser {
     }
 
     fn parse_expr(&mut self, min_bp: u8, depth: usize) -> Result<Expr> {
+        self.with_parse_frame(|parser| parser.parse_expr_inner(min_bp, depth))
+    }
+
+    fn parse_expr_inner(&mut self, min_bp: u8, depth: usize) -> Result<Expr> {
         self.check_depth(depth)?;
-        let mut lhs = if let Some(token) = self.eat_simple(SimpleToken::Minus) {
+        let lhs = self.parse_expr_prefix(depth)?;
+        self.parse_expr_suffix(lhs, min_bp, depth)
+    }
+
+    fn parse_expr_prefix(&mut self, depth: usize) -> Result<Expr> {
+        self.with_parse_frame(|parser| parser.parse_expr_prefix_inner(depth))
+    }
+
+    fn parse_expr_prefix_inner(&mut self, depth: usize) -> Result<Expr> {
+        self.check_depth(depth + 1)?;
+        if let Some(function) = self.eat_simple(SimpleToken::Function) {
+            return self.parse_function_expression(function.span.start);
+        }
+        self.parse_non_function_prefix(depth)
+    }
+
+    fn parse_non_function_prefix(&mut self, depth: usize) -> Result<Expr> {
+        let expr = if let Some(token) = self.eat_simple(SimpleToken::Minus) {
             let expr = self.parse_expr(7, depth + 1)?;
             let span = Span::new(token.span.start, expr.span_end());
             Expr::Unary {
@@ -1497,6 +1567,10 @@ impl Parser {
         } else {
             self.parse_primary(depth + 1)?
         };
+        Ok(expr)
+    }
+
+    fn parse_expr_suffix(&mut self, mut lhs: Expr, min_bp: u8, depth: usize) -> Result<Expr> {
         lhs = self.parse_postfix(lhs, depth + 1)?;
         if self.at_type_assertion() {
             self.advance();
@@ -1525,6 +1599,20 @@ impl Parser {
         }
 
         Ok(lhs)
+    }
+
+    fn parse_function_expression(&mut self, start: usize) -> Result<Expr> {
+        self.with_parse_frame(|parser| parser.parse_function_expression_inner(start))
+    }
+
+    fn parse_function_expression_inner(&mut self, start: usize) -> Result<Expr> {
+        let (params, is_vararg, body, end) = self.parse_function_body(start)?;
+        Ok(Expr::Function {
+            params,
+            is_vararg,
+            body,
+            span: Span::new(start, end),
+        })
     }
 
     fn at_type_assertion(&self) -> bool {
@@ -1694,6 +1782,13 @@ impl Parser {
                 Ok(Expr::Name(name, token.span))
             }
             TokenKind::Type => Ok(Expr::Name("type".to_owned(), token.span)),
+            TokenKind::Ellipsis if self.in_erased_type_expression && !self.function_is_vararg => {
+                Err(ParseError {
+                    unclosed_block: None,
+                    span: token.span,
+                    message: "Cannot use '...' outside of a vararg function".to_owned(),
+                })
+            }
             TokenKind::Ellipsis => Ok(Expr::Varargs(token.span)),
             TokenKind::If => self.parse_if_expression(token.span.start, depth + 1),
             TokenKind::LParen => {
@@ -1705,15 +1800,7 @@ impl Parser {
                     expr: Box::new(expr),
                 })
             }
-            TokenKind::Function => {
-                let (params, is_vararg, body, end) = self.parse_function_body(token.span.start)?;
-                Ok(Expr::Function {
-                    params,
-                    is_vararg,
-                    body,
-                    span: Span::new(token.span.start, end),
-                })
-            }
+            TokenKind::Function => self.parse_function_expression(token.span.start),
             TokenKind::LBrace => self.parse_table_literal(token.span, depth + 1),
             _ => Err(ParseError {
                 unclosed_block: None,
@@ -1761,6 +1848,10 @@ impl Parser {
     }
 
     fn parse_if_expression(&mut self, start: usize, depth: usize) -> Result<Expr> {
+        self.with_parse_frame(|parser| parser.parse_if_expression_inner(start, depth))
+    }
+
+    fn parse_if_expression_inner(&mut self, start: usize, depth: usize) -> Result<Expr> {
         self.check_depth(depth)?;
         let condition = self.parse_expr(0, depth + 1)?;
         self.expect_simple(
@@ -1784,6 +1875,13 @@ impl Parser {
     }
 
     fn parse_function_body(
+        &mut self,
+        start: usize,
+    ) -> Result<(Vec<FunctionParam>, bool, Vec<Stmt>, usize)> {
+        self.with_parse_frame(|parser| parser.parse_function_body_inner(start))
+    }
+
+    fn parse_function_body_inner(
         &mut self,
         start: usize,
     ) -> Result<(Vec<FunctionParam>, bool, Vec<Stmt>, usize)> {
@@ -1813,7 +1911,14 @@ impl Parser {
         if self.eat_simple(SimpleToken::Colon).is_some() {
             self.parse_function_return_annotation(0)?;
         }
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+        let enclosing_vararg = self.function_is_vararg;
+        let enclosing_loops = self.loop_depth;
+        self.function_is_vararg = is_vararg;
+        self.loop_depth = 0;
+        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end");
+        self.function_is_vararg = enclosing_vararg;
+        self.loop_depth = enclosing_loops;
+        let body = body?;
         let end = self
             .expect_simple(SimpleToken::End, "expected 'end' after function body")?
             .span
@@ -1822,10 +1927,18 @@ impl Parser {
     }
 
     fn parse_function_return_annotation(&mut self, depth: usize) -> Result<()> {
+        self.with_parse_frame(|parser| parser.parse_function_return_annotation_inner(depth))
+    }
+
+    fn parse_function_return_annotation_inner(&mut self, depth: usize) -> Result<()> {
         self.parse_return_type(depth).map(|_| ())
     }
 
     fn parse_return_type(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_return_type_inner(depth))
+    }
+
+    fn parse_return_type_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
         if self.at_type_pack_tail() {
             self.parse_type_pack_tail(depth + 1)
@@ -1964,6 +2077,10 @@ impl Parser {
     // Assertions and regular alias defaults take a type, not a type pack.
     // Function results and named generic arguments retain their pack grammar.
     fn parse_single_type(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_single_type_inner(depth))
+    }
+
+    fn parse_single_type_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         let ty = self.parse_type(depth)?;
         if ty.is_single_type() {
             Ok(ty)
@@ -2034,6 +2151,10 @@ impl Parser {
     }
 
     fn parse_type(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_type_inner(depth))
+    }
+
+    fn parse_type_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         if self.interpolations.contains_key(&self.peek().span.start) {
             return Err(ParseError {
                 unclosed_block: None,
@@ -2045,6 +2166,10 @@ impl Parser {
     }
 
     fn parse_type_union(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_type_union_inner(depth))
+    }
+
+    fn parse_type_union_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
         let start = self.peek().span.start;
         let separator = if self.eat_simple(SimpleToken::Pipe).is_some() {
@@ -2106,6 +2231,10 @@ impl Parser {
     }
 
     fn parse_type_postfix(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_type_postfix_inner(depth))
+    }
+
+    fn parse_type_postfix_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
         let ty = self.parse_type_primary(depth + 1)?;
         self.parse_type_postfix_suffix(ty)
@@ -2202,11 +2331,41 @@ impl Parser {
     }
 
     fn parse_type_primary(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_type_primary_inner(depth))
+    }
+
+    fn parse_type_primary_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
         #[cfg(test)]
         {
             self.type_primary_visits += 1;
         }
+        if self.at_ident("typeof") {
+            return self.parse_typeof_expression(depth);
+        }
+        self.parse_non_typeof_primary(depth)
+    }
+
+    fn parse_typeof_expression(&mut self, depth: usize) -> Result<TypeExpr> {
+        self.with_parse_frame(|parser| parser.parse_typeof_expression_inner(depth))
+    }
+
+    fn parse_typeof_expression_inner(&mut self, depth: usize) -> Result<TypeExpr> {
+        let start = self.advance().span.start;
+        self.expect_simple(SimpleToken::LParen, "expected '(' after typeof")?;
+        let enclosing_erasure = self.in_erased_type_expression;
+        self.in_erased_type_expression = true;
+        let expression = self.parse_expr(0, depth + 1);
+        self.in_erased_type_expression = enclosing_erasure;
+        expression?;
+        let close =
+            self.expect_simple(SimpleToken::RParen, "expected ')' after typeof expression")?;
+        Ok(TypeExpr::Typeof {
+            span: Span::new(start, close.span.end),
+        })
+    }
+
+    fn parse_non_typeof_primary(&mut self, depth: usize) -> Result<TypeExpr> {
         if let Some(ellipsis) = self.eat_simple(SimpleToken::Ellipsis) {
             let inner = self.parse_type_postfix(depth + 1)?;
             return Ok(TypeExpr::Variadic {
@@ -2278,15 +2437,6 @@ impl Parser {
 
         if let Some(open) = self.eat_simple(SimpleToken::LBrace) {
             return self.parse_table_type(open.span, depth + 1);
-        }
-
-        if self.at_ident("typeof") {
-            let start = self.advance().span.start;
-            self.expect_simple(SimpleToken::LParen, "expected '(' after typeof")?;
-            let close = self.skip_until_matching_paren(start)?;
-            return Ok(TypeExpr::Typeof {
-                span: Span::new(start, close.span.end),
-            });
         }
 
         let token = self.advance().clone();
@@ -2499,6 +2649,26 @@ impl Parser {
         }
     }
 
+    fn with_parse_frame<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.check_depth(self.active_parse_frames + 1)?;
+        self.active_parse_frames += 1;
+        let result = parse(self);
+        self.active_parse_frames -= 1;
+        result
+    }
+
+    fn parse_loop_body(
+        &mut self,
+        terminators: &[SimpleToken],
+        start: usize,
+        expected: &'static str,
+    ) -> Result<Vec<Stmt>> {
+        self.loop_depth += 1;
+        let result = self.parse_delimited_block(terminators, start, expected);
+        self.loop_depth -= 1;
+        result
+    }
+
     fn check_depth(&self, depth: usize) -> Result<()> {
         if depth > MAX_PARSE_DEPTH {
             Err(ParseError {
@@ -2509,35 +2679,6 @@ impl Parser {
         } else {
             Ok(())
         }
-    }
-
-    fn skip_until_matching_paren(&mut self, start: usize) -> Result<Token> {
-        let mut depth = 1usize;
-        while !self.at_simple(SimpleToken::Eof) {
-            let token = self.advance().clone();
-            if self.interpolations.contains_key(&token.span.start) {
-                return Err(ParseError {
-                    unclosed_block: None,
-                    span: token.span,
-                    message: "interpolated strings are not valid in types".to_owned(),
-                });
-            }
-            match token.kind {
-                TokenKind::LParen => depth += 1,
-                TokenKind::RParen => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(token);
-                    }
-                }
-                _ => {}
-            }
-        }
-        Err(ParseError {
-            unclosed_block: None,
-            span: Span::new(start, self.peek().span.end),
-            message: "unterminated typeof type".to_owned(),
-        })
     }
 }
 
@@ -3010,9 +3151,81 @@ mod tests {
             "return `{{}}`",
             "return `\\q`",
             "return `line\nbreak`",
-            "local x: typeof(`x`) = 1",
         ];
         for source in cases {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn shared_recursion_budget_covers_type_expression_function_cycles() {
+        let mut ty = "number".to_owned();
+        for _ in 0..1200 {
+            ty = format!("typeof(function(): {ty} end)");
+        }
+        let error = parse_source(&format!("type T = {ty}")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("parser recursion limit exceeded"));
+    }
+
+    #[test]
+    fn shared_recursion_budget_covers_nested_statement_blocks() {
+        let blocks = format!("{}{}", "do ".repeat(1200), "end ".repeat(1200));
+        assert!(parse_source(&blocks)
+            .unwrap_err()
+            .to_string()
+            .contains("parser recursion limit exceeded"));
+    }
+
+    #[test]
+    fn typeof_function_bodies_check_context_without_changing_ordinary_error_phase() {
+        for source in [
+            "type T = typeof(function(...) return ... end)",
+            "type T = typeof(function() while true do break end end)",
+            "type T = typeof(function() for i=1,1 do continue end end)",
+            "type T = typeof(function(x:typeof(...)):typeof(...) end)",
+            "local function outer(...) type T = typeof(function(x:typeof(...)) end) end",
+        ] {
+            assert!(parse_source(source).is_ok(), "{source}");
+        }
+        for source in [
+            "type T = typeof(function() break end)",
+            "type T = typeof(function() continue end)",
+            "type T = typeof(function() return ... end)",
+            "type T = typeof(function() local x=... end)",
+            "type T = typeof(function(...) return function() return ... end end)",
+            "type T = typeof(function() while true do local f=function() break end end end)",
+            "local function outer() type T = typeof(function(x:typeof(...)) end) end",
+        ] {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+        assert!(parse_source("local function f() break end").is_ok());
+        assert!(parse_source("local function f() return ... end").is_ok());
+    }
+
+    #[test]
+    fn typeof_annotations_validate_expression_syntax() {
+        for source in [
+            "type T = typeof(1)",
+            "local x: typeof(`x`) = 1",
+            "type T = typeof(error('never execute'))",
+            "type T = typeof(`value {error('never execute')}`)",
+            "type T = typeof(function(x:number):number return x end)",
+            "type T = typeof((function(...):...number return ... end)(1,2))",
+        ] {
+            assert!(parse_source(source).is_ok(), "{source}");
+        }
+        for source in [
+            "type T = typeof()",
+            "type T = typeof(1+)",
+            "type T = typeof(this is not an expression)",
+            "type T = typeof(local x = 1)",
+            "type T = typeof(return 1)",
+            "type T = typeof(1,2)",
+            "type T = typeof(function( end)",
+            "type T = typeof((1)",
+        ] {
             assert!(parse_source(source).is_err(), "{source}");
         }
     }

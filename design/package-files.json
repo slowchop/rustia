@@ -615,7 +615,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 757,
+      "file_count": 758,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1261,6 +1261,7 @@
         "corpus/conformance/fixtures/upstream-luau-0.709/type_string.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/type_table.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/type_true.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/typeof_expressions.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/typeof_nil.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/typeof_number.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/typeof_table.luau",
