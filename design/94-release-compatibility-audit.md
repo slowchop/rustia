@@ -325,3 +325,12 @@ bound. Its final runtime passed cross-target correctness and the direct
 original-baseline acceptance comparison before delivery in PR #74 as `b5982752`;
 see [95](95-numeric-index-contract.md) and [96](96-browser-platform-acceptance.md).
 It is not covered by the claim that the 13 diagnostic findings are fixed.
+
+## Diagnostic inventory triage — 2026-11-13
+
+The active #27/#28 parser candidate re-ran the locked 27-case inventory with
+`node tools/audit-release-errors.mjs`: **27 matches, zero differences**. Only
+the documented oracle source-name wrapper was normalized. The historical thirteen
+differences above are not current defects in this fixed inventory. This is local
+correctness evidence, not complete semantic or platform acceptance; review,
+preflight and PR CI still gate delivery. Remaining work is tracked in issue #31.

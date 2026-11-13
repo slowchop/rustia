@@ -109,6 +109,19 @@ fn generated_differential_smoke() {
             ]));
         }
     }
+    for atom in 0..8 {
+        for wrapper in 0..8 {
+            for context in 0..4 {
+                assert!(rustia_fuzz::differential::fuzz_differential(&[
+                    rustia_fuzz::differential::SOURCE_SHAPE_COUNT - 1,
+                    1,
+                    atom,
+                    wrapper,
+                    context,
+                ]));
+            }
+        }
+    }
     let mut random = DeterministicBytes::new(0x6572_726f_7273);
     for _ in 0..256 {
         let data: Vec<_> = (0..16).map(|_| random.byte()).collect();
