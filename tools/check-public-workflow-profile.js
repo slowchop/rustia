@@ -15,6 +15,7 @@ const CI_JOBS = Object.freeze({
   "portable-engine-build": LINUX_RUNNER,
   "wasm-node-runtime": LINUX_RUNNER,
   "windows-runtime": "runs-on:\n      group: general-windows\n      labels: [self-hosted, Windows, X64, general-windows]",
+  "firefox-runtime": "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux, docker]",
   "webkit-runtime": "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux, docker]",
 });
 const FUZZ_JOBS = Object.freeze({
@@ -101,7 +102,7 @@ function checkJobRunners(text, expected, label) {
     if (declarations.length !== 1 || declarations[0] !== runner) {
       reject(`${label} job ${name} must run on ${runner}`);
     }
-    const guard = name === "campaign" || name === "windows-runtime" ? PRIVATE_MANUAL
+    const guard = name === "campaign" || name === "windows-runtime" || name === "firefox-runtime" ? PRIVATE_MANUAL
       : name === "release-gate" ? `always() && ${PRIVATE_PR}` : PRIVATE_PR;
     const conditions = [...blocks.get(name).matchAll(/^    if: (.*)$/gm)].map((match) => match[1]);
     if (conditions.length !== 1 || conditions[0] !== guard) {
@@ -230,6 +231,20 @@ function checkCi(text) {
     'bash tools/run-private-platform-golden.sh native "$mode" x86_64-pc-windows-msvc',
     "bash tools/run-browser-correctness.sh webkit 1.64.1",
   ]) requireText(text, textFragment, label);
+  const firefox = jobs.get("firefox-runtime");
+  for (const fragment of [
+    "image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea",
+    "timeout-minutes: 30",
+    "cargo install wasm-bindgen-cli --version 0.2.126 --locked",
+    "https://archive.mozilla.org/pub/firefox/releases/160.0/linux-x86_64/en-US/firefox-160.0.tar.xz",
+    "https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz",
+    `          printf '%s  %s\\n' e9c7ed0d4abc6eb3648c2c5652bd325e690423ef49414ef201eac59c0932ea8ec52260cf652510b2c98971c7e7eb36e6be8101d87cae17c6dd28ed763bac32a6 "$browser_tools/firefox.tar.xz" | sha512sum --check --status`,
+    `          printf '%s  %s\\n' e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e "$browser_tools/geckodriver.tar.gz" | sha256sum --check --status`,
+    '          browser_home="$browser_tools/firefox-home"',
+    '          mkdir "$browser_home"',
+    `            printf 'exec env -u XAUTHORITY -u XDG_RUNTIME_DIR HOME=%q %q "$@"\\n' "$browser_home" "$browser_tools/firefox/firefox"`,
+    `${safeDirectory}\n          bash tools/run-browser-correctness.sh firefox 160.0 0.37.1`,
+  ]) requireText(firefox, fragment, `${label} firefox-runtime`);
   const windows = jobs.get("windows-runtime");
   requireText(windows, `if: ${PRIVATE_MANUAL}`, `${label} windows-runtime`);
   const macos = jobs.get("macos-arm64-runtime");
@@ -380,6 +395,12 @@ function selfTest(root) {
       ["missing executor accounting diagnostic", "ci.yml", (s) => s.replace("--test gc_accounting_paths -- --nocapture", "--test missing_diagnostic -- --nocapture"), /executor accounting diagnostic/],
       ["duplicated executor accounting diagnostic", "ci.yml", (s) => s.replace("      - name: Check feature-gated executor accounting paths\n        if: matrix.stage == 'workspace'", "      - name: Check feature-gated executor accounting paths\n        if: always()"), /executor accounting diagnostic/],
       ["missing WebKit safe-directory setup", "ci.yml", (s) => s.replace('          git config --global --add safe.directory "$GITHUB_WORKSPACE"\n', ""), /safe\.directory/],
+      ["Firefox on PRs", "ci.yml", (s) => s.replace(`  firefox-runtime:\n    name: Browser runtime (real Firefox, manual)\n    if: ${PRIVATE_MANUAL}`, `  firefox-runtime:\n    name: Browser runtime (real Firefox, manual)\n    if: ${PRIVATE_PR}`), /trusted-event guard/],
+      ["Firefox checksum omitted", "ci.yml", (s) => s.replace("sha512sum --check --status", "true"), /firefox-runtime/],
+      ["geckodriver checksum omitted", "ci.yml", (s) => s.replace("sha256sum --check --status", "true"), /firefox-runtime/],
+      ["Firefox owned home omitted", "ci.yml", (s) => s.replace('browser_home="$browser_tools/firefox-home"', 'browser_home="$HOME"'), /firefox-runtime/],
+      ["Firefox runtime omitted", "ci.yml", (s) => s.replace("bash tools/run-browser-correctness.sh firefox 160.0 0.37.1", "true"), /firefox-runtime/],
+      ["Firefox uses unpinned container", "ci.yml", (s) => s.replace(/(firefox-runtime:[\s\S]*?image: )[^\n]+/, "$1mcr.microsoft.com/playwright:latest"), /firefox-runtime/],
       ["missing browser recipe build", "ci.yml", (s) => s.replace("cargo build --locked --manifest-path demos/web-live/Cargo.toml", "true"), /web-live recipe/],
       ["missing browser recipe execution", "ci.yml", (s) => s.replace("node tools/browser/web-live-example.cjs", "true"), /web-live recipe/],
       [

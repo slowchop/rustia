@@ -22,7 +22,7 @@ for the checked-cast candidate in the evidence below.
 WebKit is not the Safari product shipped by Apple. Real Firefox and Safari
 remain release-candidate acceptance requirements. The private
 `browser-correctness.yml` workflow is historical and is absent from the active
-hosted profile; the retained local runner supports explicit real-browser checks.
+correctness profile; the retained local runner supports explicit real-browser checks.
 Safari requires a prepared, logged-in desktop session and explicit automation
 permission; routine PR CI never launches it. Keep its version and execution
 evidence separate from Playwright WebKit.
@@ -48,6 +48,48 @@ this tree. The retained local script accepts those versions explicitly; browser
 installation and Safari automation permission remain prerequisites, not implicit
 mutations. The active PR gate uses headless WebKit. Local real-browser success
 does not prove remote Firefox/Safari runner readiness; that requirement remains open.
+
+## Manual remote Firefox execution
+
+The active `ci.yml` includes a private, `workflow_dispatch`-only real Firefox job
+on the existing generic Linux Docker correctness pool. It uses the same pinned
+container as the WebKit job for dependencies, but launches the official Mozilla
+Firefox 160.0 release through geckodriver 0.37.1. Playwright's patched Firefox is
+not selected. Downloaded archives are verified before extraction against the
+committed Mozilla SHA-512 and upstream geckodriver SHA-256, then installed only
+inside the disposable job container's temporary directory. A Firefox-only wrapper
+uses its own temporary browser home and drops inherited desktop authentication/
+runtime paths. Cargo, Rustup, Git and runner-mounted home ownership stay unchanged.
+
+The job invokes the existing browser runner, which verifies versions and
+requires eighteen nonzero passing suite groups and both goldens across default
+and bare modes. The workflow policy checks the private/manual guard, ordinary
+Docker pool, pinned image/tools/checksums and actual execution command. Negative
+fixtures reject PR execution, missing checksum checks and omitted execution.
+Existing required PR checks remain in place. No host/browser permission setting,
+runner-group access or benchmark authorization is changed.
+
+After a reviewed branch is pushed, invoke `gh workflow run ci.yml --ref BRANCH`.
+The dispatch runs the existing Windows/shared checks and real Firefox. Inspect
+actual Firefox job logs, test summaries and goldens on that exact head before
+claiming remote acceptance. Adding the job alone is not execution evidence.
+Remote Safari still requires a prepared logged-in Mac and existing automation
+permission; mobile Safari is a separate physical-device check.
+
+### Observed remote Firefox result — 2026-11-13
+
+Immutable head `65701387649ad51fe59067682030c9a4daa10060` executed real Firefox
+160.0 with geckodriver 0.37.1 on the existing Linux x86-64 Docker correctness
+pool in [manual run 43364203240, job 131684665212](https://github.com/slowchop/rustia/actions/runs/43364203240/job/131684665212).
+Actual raw logs contain eighteen nonzero passing summaries: bare 49, default 47,
+96 tests total, zero failures. Both type-grammar tests executed in each mode.
+Both golden payloads match the retained native reference byte-for-byte, SHA-256
+`cf890817d7b66cc2e8ab61030cbe6d0fe3235efe1c8a3dd7a1e4bf94f3b6a9a8`.
+Rust 1.95.0 and wasm-bindgen/test-runner 0.2.126 were used. The job verified the
+committed official browser/driver archive checksums before extraction; the
+Firefox-only temporary home resolved the runner/container ownership mismatch.
+This establishes remote Firefox shared-contract execution for that exact head,
+not remote Safari, physical-iPad Safari, full language parity or a later release candidate.
 
 ## Observed evidence
 

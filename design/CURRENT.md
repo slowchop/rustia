@@ -141,8 +141,11 @@ with private-repository and same-repository PR guards. Public visibility require
 a separate isolation review; there is no hosted fallback or benchmark-runner access.
 The 2026-11-13 type-grammar candidate executed shared contracts on native Linux
 ARM64, a physical iPad, an ARM64 Android emulator and local real Firefox/Safari.
-These scoped results do not close Intel Mac, mobile-browser, final-candidate or
-remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
+A private manual-only job now runs real Firefox with checksum-pinned official
+Mozilla binaries in the existing Docker correctness pool. Its 2026-11-13
+immutable candidate executed all 96 browser contracts with matching goldens;
+the exact head and raw job evidence are recorded separately. These scoped results do not close Intel Mac,
+mobile-browser, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
 
 Install the checkout-local hook with `just install-hooks`. Every push must pass
 the full unchanged-commit `just release-preflight` inventory through the normal
