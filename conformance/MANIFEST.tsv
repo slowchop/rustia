@@ -729,3 +729,5 @@ issues.metamethod-error-sites	stdlib	stdlib.error-level-source-line,stdlib.error
 issues.export-type-assertions	parser-runtime	type.alias,type.runtime-erased	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/export_type_assertions.luau
 issues.index-write-error-messages	runtime	runtime.diagnostic-parity	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/index_write_error_messages.luau
 types.generic-function-types	parser-runtime	type.generic-function,type.function-type-pack,type.runtime-erased	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/generic_function_types.luau
+types.return-type-annotations	parser-runtime	type.return-annotation	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/return_type_annotations.luau
+types.table-type-grammar	parser-runtime	type.table-grammar	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/table_type_grammar.luau

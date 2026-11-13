@@ -974,6 +974,8 @@ pub struct Parser {
     newlines_before: Vec<bool>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
+    #[cfg(test)]
+    type_primary_visits: usize,
 }
 
 impl Parser {
@@ -984,6 +986,8 @@ impl Parser {
             newlines_before,
             interpolations: BTreeMap::new(),
             cursor: 0,
+            #[cfg(test)]
+            type_primary_visits: 0,
         }
     }
 
@@ -1006,6 +1010,8 @@ impl Parser {
             newlines_before,
             interpolations,
             cursor: 0,
+            #[cfg(test)]
+            type_primary_visits: 0,
         }
     }
 
@@ -1451,7 +1457,7 @@ impl Parser {
             )?;
         }
         self.expect_simple(SimpleToken::Equal, "expected '=' in type alias")?;
-        let value = self.parse_type(0)?;
+        let value = self.parse_single_type(0)?;
         let span = Span::new(start, value.span().end);
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::TypeAlias {
@@ -1816,40 +1822,39 @@ impl Parser {
     }
 
     fn parse_function_return_annotation(&mut self, depth: usize) -> Result<()> {
+        self.parse_return_type(depth).map(|_| ())
+    }
+
+    fn parse_return_type(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
-        if self.at_simple(SimpleToken::LParen) {
-            let checkpoint = self.cursor;
-            self.advance();
-            if !self.at_simple(SimpleToken::RParen) {
-                loop {
-                    // A named entry is a function signature, not a return
-                    // pack. Reuse its full grammar rather than consuming its
-                    // name as a standalone type before the colon.
-                    if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
-                        && matches!(
-                            self.tokens.get(self.cursor + 1).map(|token| &token.kind),
-                            Some(TokenKind::Colon)
-                        )
-                    {
-                        self.cursor = checkpoint;
-                        self.parse_type(depth + 1)?;
-                        return Ok(());
-                    }
-                    self.parse_type(depth + 1)?;
-                    if self.eat_simple(SimpleToken::Comma).is_none() {
-                        break;
-                    }
+        if self.at_type_pack_tail() {
+            self.parse_type_pack_tail(depth + 1)
+        } else if self.at_simple(SimpleToken::LParen) {
+            let primary = self.parse_type_primary(depth + 1)?;
+            // Luau 0.709 Parser::parseReturnType folds suffixes only when the
+            // list contains exactly one fixed type, even if it also has a tail
+            // (the upstream CLI-140667 compatibility quirk). A forced function
+            // signature returns immediately; a suffix needs an outer group.
+            let accepts_suffix = match &primary {
+                TypeExpr::TypePack { types, .. } => {
+                    types
+                        .iter()
+                        .filter(|ty| !matches!(ty, TypeExpr::Variadic { .. }))
+                        .count()
+                        == 1
                 }
+                _ => false,
+            };
+            if accepts_suffix {
+                let start = primary.span_start();
+                let ty = self.parse_type_postfix_suffix(primary)?;
+                self.parse_type_combinators(ty, None, start, depth + 1)
+            } else {
+                Ok(primary)
             }
-            self.expect_simple(SimpleToken::RParen, "expected ')' after return type pack")?;
-            if self.at_simple(SimpleToken::Arrow) {
-                self.cursor = checkpoint;
-                self.parse_type(depth + 1)?;
-            }
-            return Ok(());
+        } else {
+            self.parse_single_type(depth + 1)
         }
-        self.parse_type(depth + 1)?;
-        Ok(())
     }
 
     fn parse_optional_function_generics(&mut self) -> Result<()> {
@@ -2041,50 +2046,72 @@ impl Parser {
 
     fn parse_type_union(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
-        let first = self.parse_type_intersection(depth + 1)?;
-        if self.eat_simple(SimpleToken::Pipe).is_none() {
-            return Ok(first);
-        }
-
-        let start = first.span().start;
-        let mut end = first.span().end;
-        let mut types = vec![first, self.parse_type_intersection(depth + 1)?];
-        end = types.last().map_or(end, TypeExpr::span_end);
-        while self.eat_simple(SimpleToken::Pipe).is_some() {
-            types.push(self.parse_type_intersection(depth + 1)?);
-            end = types.last().map_or(end, TypeExpr::span_end);
-        }
-        Ok(TypeExpr::Union {
-            types,
-            span: Span::new(start, end),
-        })
+        let start = self.peek().span.start;
+        let separator = if self.eat_simple(SimpleToken::Pipe).is_some() {
+            Some(SimpleToken::Pipe)
+        } else if self.eat_simple(SimpleToken::Ampersand).is_some() {
+            Some(SimpleToken::Ampersand)
+        } else {
+            None
+        };
+        let first = self.parse_type_postfix(depth + 1)?;
+        self.parse_type_combinators(first, separator, start, depth)
     }
 
-    fn parse_type_intersection(&mut self, depth: usize) -> Result<TypeExpr> {
+    fn parse_type_combinators(
+        &mut self,
+        first: TypeExpr,
+        mut separator: Option<SimpleToken>,
+        start: usize,
+        depth: usize,
+    ) -> Result<TypeExpr> {
         self.check_depth(depth)?;
-        let first = self.parse_type_postfix(depth + 1)?;
-        if self.eat_simple(SimpleToken::Ampersand).is_none() {
-            return Ok(first);
-        }
-
-        let start = first.span().start;
-        let mut end = first.span().end;
-        let mut types = vec![first, self.parse_type_postfix(depth + 1)?];
-        end = types.last().map_or(end, TypeExpr::span_end);
-        while self.eat_simple(SimpleToken::Ampersand).is_some() {
+        let mut types = vec![first];
+        loop {
+            let next = if self.at_simple(SimpleToken::Pipe) {
+                Some(SimpleToken::Pipe)
+            } else if self.at_simple(SimpleToken::Ampersand) {
+                Some(SimpleToken::Ampersand)
+            } else {
+                None
+            };
+            let Some(next) = next else { break };
+            if separator.is_some_and(|previous| {
+                std::mem::discriminant(&previous) != std::mem::discriminant(&next)
+            }) {
+                return Err(
+                    self.error_here("mixed union and intersection types require parentheses")
+                );
+            }
+            separator = Some(next);
+            self.advance();
             types.push(self.parse_type_postfix(depth + 1)?);
-            end = types.last().map_or(end, TypeExpr::span_end);
         }
-        Ok(TypeExpr::Intersection {
-            types,
-            span: Span::new(start, end),
-        })
+        if matches!(separator, Some(SimpleToken::Ampersand))
+            && types
+                .iter()
+                .any(|ty| matches!(ty, TypeExpr::Optional { .. }))
+        {
+            return Err(self.error_here("optional intersection members require parentheses"));
+        }
+        let span = Span::new(
+            start,
+            types.last().expect("type list is nonempty").span_end(),
+        );
+        match separator {
+            Some(SimpleToken::Pipe) => Ok(TypeExpr::Union { types, span }),
+            Some(SimpleToken::Ampersand) => Ok(TypeExpr::Intersection { types, span }),
+            _ => Ok(types.pop().expect("type list is nonempty")),
+        }
     }
 
     fn parse_type_postfix(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
-        let mut ty = self.parse_type_primary(depth + 1)?;
+        let ty = self.parse_type_primary(depth + 1)?;
+        self.parse_type_postfix_suffix(ty)
+    }
 
+    fn parse_type_postfix_suffix(&mut self, mut ty: TypeExpr) -> Result<TypeExpr> {
         loop {
             if let Some(question) = self.eat_simple(SimpleToken::Question) {
                 let span = Span::new(ty.span_start(), question.span.end);
@@ -2106,8 +2133,80 @@ impl Parser {
         Ok(ty)
     }
 
+    fn at_named_type_entry(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+            && matches!(
+                self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                Some(TokenKind::Colon)
+            )
+    }
+
+    fn parse_table_type(&mut self, open: Span, depth: usize) -> Result<TypeExpr> {
+        self.check_depth(depth)?;
+        let mut has_property = false;
+        let mut has_indexer = false;
+        while !self.at_simple(SimpleToken::RBrace) {
+            // read/write are contextual: `{read: T}` is an ordinary property.
+            if (self.at_ident("read") || self.at_ident("write")) && !self.at_named_type_entry() {
+                self.advance();
+            }
+            if self.eat_simple(SimpleToken::LBracket).is_some() {
+                if self.interpolations.contains_key(&self.peek().span.start) {
+                    return Err(self.error_here("interpolated strings are not valid in types"));
+                }
+                let string_property = matches!(self.peek().kind, TokenKind::String(_))
+                    && matches!(
+                        self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                        Some(TokenKind::RBracket)
+                    );
+                if string_property {
+                    let token = self.advance();
+                    if let TokenKind::String(value) = &token.kind {
+                        if value.contains(&0) {
+                            return Err(
+                                self.error_here("table type property cannot contain a null byte")
+                            );
+                        }
+                    }
+                    has_property = true;
+                } else {
+                    if has_indexer {
+                        return Err(self.error_here("cannot have more than one table indexer"));
+                    }
+                    self.parse_single_type(depth + 1)?;
+                    has_indexer = true;
+                }
+                self.expect_simple(SimpleToken::RBracket, "expected ']' after table type key")?;
+                self.expect_simple(SimpleToken::Colon, "expected ':' after table type key")?;
+                self.parse_single_type(depth + 1)?;
+            } else if !has_property && !has_indexer && !self.at_named_type_entry() {
+                // Array shorthand is the entire table type, not another field.
+                self.parse_single_type(depth + 1)?;
+                break;
+            } else {
+                self.expect_name("expected table type property name")?;
+                self.expect_simple(SimpleToken::Colon, "expected ':' after table type property")?;
+                self.parse_single_type(depth + 1)?;
+                has_property = true;
+            }
+            if self.eat_simple(SimpleToken::Comma).is_none()
+                && self.eat_simple(SimpleToken::Semicolon).is_none()
+            {
+                break;
+            }
+        }
+        let close = self.expect_simple(SimpleToken::RBrace, "expected '}' after table type")?;
+        Ok(TypeExpr::Table {
+            span: Span::new(open.start, close.span.end),
+        })
+    }
+
     fn parse_type_primary(&mut self, depth: usize) -> Result<TypeExpr> {
         self.check_depth(depth)?;
+        #[cfg(test)]
+        {
+            self.type_primary_visits += 1;
+        }
         if let Some(ellipsis) = self.eat_simple(SimpleToken::Ellipsis) {
             let inner = self.parse_type_postfix(depth + 1)?;
             return Ok(TypeExpr::Variadic {
@@ -2159,7 +2258,7 @@ impl Parser {
             }
             let close = self.expect_simple(SimpleToken::RParen, "expected ')' in type pack")?;
             if self.eat_simple(SimpleToken::Arrow).is_some() {
-                let result = self.parse_type(depth + 1)?;
+                let result = self.parse_return_type(depth + 1)?;
                 let span = Span::new(start, result.span_end());
                 return Ok(TypeExpr::Function {
                     params: types,
@@ -2178,10 +2277,7 @@ impl Parser {
         }
 
         if let Some(open) = self.eat_simple(SimpleToken::LBrace) {
-            let close = self.skip_balanced(open.span, SimpleToken::LBrace, SimpleToken::RBrace)?;
-            return Ok(TypeExpr::Table {
-                span: Span::new(open.span.start, close.span.end),
-            });
+            return self.parse_table_type(open.span, depth + 1);
         }
 
         if self.at_ident("typeof") {
@@ -2441,38 +2537,6 @@ impl Parser {
             unclosed_block: None,
             span: Span::new(start, self.peek().span.end),
             message: "unterminated typeof type".to_owned(),
-        })
-    }
-
-    fn skip_balanced(
-        &mut self,
-        open_span: Span,
-        open: SimpleToken,
-        close: SimpleToken,
-    ) -> Result<Token> {
-        let mut depth = 1usize;
-        while !self.at_simple(SimpleToken::Eof) {
-            let token = self.advance().clone();
-            if self.interpolations.contains_key(&token.span.start) {
-                return Err(ParseError {
-                    unclosed_block: None,
-                    span: token.span,
-                    message: "interpolated strings are not valid in types".to_owned(),
-                });
-            }
-            if token_matches(&token.kind, open) {
-                depth += 1;
-            } else if token_matches(&token.kind, close) {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(token);
-                }
-            }
-        }
-        Err(ParseError {
-            unclosed_block: None,
-            span: Span::new(open_span.start, self.peek().span.end),
-            message: "unterminated type table".to_owned(),
         })
     }
 }
@@ -2790,8 +2854,8 @@ impl TypeExpr {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Stmt,
-        TableField, TypeExpr, UnaryOp,
+        parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Parser,
+        SimpleToken, Stmt, TableField, TypeExpr, UnaryOp,
     };
 
     #[test]
@@ -2954,6 +3018,111 @@ mod tests {
     }
 
     #[test]
+    fn nested_function_result_types_are_parsed_once() {
+        for depth in [1, 8, 24] {
+            let mut source = "number".to_owned();
+            for _ in 0..depth {
+                source = format!("() -> ({source})");
+            }
+            let mut parser = Parser::new(rustia_lexer::lex_bytes(source.as_bytes()).unwrap());
+            parser.parse_type(0).unwrap();
+            assert!(parser.at_simple(SimpleToken::Eof));
+            assert_eq!(parser.type_primary_visits, 2 * depth + 1);
+        }
+    }
+
+    #[test]
+    fn table_types_validate_fields_indexers_and_array_shorthand() {
+        for ty in [
+            "{}",
+            "{number}",
+            "{{number}}",
+            "{x:number,y:string;}",
+            "{[string]:number,x:boolean}",
+            "{x:number;[number]:string}",
+            "{[\"a\"]:number,[\"b\"]:string}",
+            "{[\"a\" | \"b\"]:number}",
+            "{read x:number,write [string]:boolean}",
+            "{read:number,write:string}",
+            "{id:<T>(T)->T}",
+            "{read number}",
+            "{x: | number | string}",
+            "{x: & A & B}",
+            "{| number | string}",
+            "{[| number | string]:number}",
+            "{read | number | string}",
+            "{x: A & (B | C)}",
+        ] {
+            let source = format!("type T = {ty}");
+            assert!(parse_source(&source).is_ok(), "{source}");
+        }
+        for ty in [
+            "{x:}",
+            "{this is not a type}",
+            "{x:number y:string}",
+            "{number,}",
+            "{number,x:string}",
+            "{T,U}",
+            "{[string]:number,[number]:string}",
+            "{[string]number}",
+            "{x:(number,string)}",
+            "{[T...]:number}",
+            "{[\"a\\0b\"]:number}",
+            "{read}",
+            "{[`field{1}`]:number}",
+            "{[`plain`]:number}",
+            "{read [`field{1}`]:number}",
+            "{x:number;;}",
+            "{x: A | B & C}",
+            "{x: A & B | C}",
+            "{x: A? & B}",
+            "{x: A & B?}",
+        ] {
+            let source = format!("type T = {ty}");
+            assert!(parse_source(&source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn return_annotations_distinguish_single_types_and_packs() {
+        for annotation in [
+            "(number)?",
+            "(number) | nil",
+            "(number,T...)?",
+            "(number,...string) | nil",
+            "((number))?",
+            "(number,U...) & nil",
+            "()",
+            "(number,string)",
+            "(...number)",
+            "T...",
+            "...number | nil",
+            "(x:number)->number",
+            "<T>(T)->T",
+            "((number,string)->number)",
+            "((number,string)->()) | nil",
+        ] {
+            let source = format!("local function f(): {annotation} return nil end");
+            assert!(parse_source(&source).is_ok(), "{source}");
+        }
+        for annotation in [
+            "((number,string))",
+            "T...?",
+            "(number,string)?",
+            "() | nil",
+            "(...number)?",
+            "(number,)",
+            "(T...,number)",
+            "(x:number)",
+            "(number,string)->() | nil",
+            "(number,string)->(number,string)?",
+        ] {
+            let source = format!("local function f(): {annotation} return nil end");
+            assert!(parse_source(&source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
     fn parses_generic_function_types_and_named_parameters() {
         for ty in [
             "<T>(T) -> T",
@@ -3040,7 +3209,7 @@ mod tests {
         for source in [
             "type Box<T = number> = { value: T }",
             "export type Map<K, V = string> = { [K]: V }",
-            "type Pair<T = number, U = string> = { T, U }",
+            "type Pair<T = number, U = string> = { first: T, second: U }",
             "type Callback<T = () -> (number, string)> = T",
             "type Grouped<T = (number)> = T",
             "type Packs<T, P... = (number, string)> = T",

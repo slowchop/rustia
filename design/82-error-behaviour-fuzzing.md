@@ -409,7 +409,7 @@ publication or supported-release acceptance is claimed.
 
 ### Targeted type-grammar differential coverage
 
-The generated differential target includes twelve type shapes in addition to its
+The generated differential target includes seventeen type shapes in addition to its
 40 existing runtime shapes. These cover valid/invalid assertions, alias defaults,
 pack defaults, generic function signatures, ordering and result adjustment. CI smoke takes its shape bound
 from the generator and exercises all eight type variants. Parser and facade
@@ -418,7 +418,7 @@ all four profiles. The existing `export_type_assertions.luau` pinned fixture now
 also exercises erased defaults and valid pack/grouping boundaries.
 
 This closes two concrete coverage holes, not the full type-grammar gate. The
-balanced-table parser remains permissive and broader syntax parity remains open. Raw frontend mutation fuzzing checks robust
+table/return parser now validates the pinned focused forms; broader syntax parity remains open. Raw frontend mutation fuzzing checks robust
 handling, not independent syntactic acceptance; the oracle generator compares
 only the families it generates. Independent-frontend grammar comparison remains
 planned. No new remote fuzz campaign or performance claim is implied.
@@ -430,3 +430,14 @@ Scopes and added runtime checks make the runnable excerpts independent; static
 inference expectations are not ported. Malformed generic/named/pack forms are
 checked for rejection before guest effects on all four profiles. The differential
 smoke includes four additional valid/invalid generic-function shapes.
+
+Return-annotation and table-type coverage ports additional pinned `Parser.test.cpp`
+excerpts with named upstream tests and MIT attribution in `return_type_annotations.luau`
+and `table_type_grammar.luau`. Four additional generated shapes exercise eight variants
+per family, including malformed forms rejected before guest effects. These targeted
+families do not establish the whole semantic/platform acceptance tracked in issue #31.
+
+The compositional family crosses eight type leaves (including malformed forms),
+eight grouping/table/indexer/function wrappers and four alias/return/assertion/default
+contexts. The existing CI differential smoke executes all 256 combinations against
+the locked oracle in addition to the fixed families and seeded random inputs.

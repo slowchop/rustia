@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Shared with CI smoke so new generated shapes are not omitted from its range.
-pub const SOURCE_SHAPE_COUNT: u8 = 52;
+pub const SOURCE_SHAPE_COUNT: u8 = 57;
 
 pub fn source_from_bytes(data: &[u8]) -> String {
     let byte = |index: usize| data.get(index).copied().unwrap_or(0);
@@ -119,9 +119,47 @@ pub fn source_from_bytes(data: &[u8]) -> String {
             let ty = ["<P...>(P...)->P...", "<P...>(...number)->P...", "<T,P...>(T,P...)->P...", "<T>(x:T,...T)->T", "<T>(T)->() | nil", "<P...,P...>(P...)->P...", "<T>(T)->(x:T)->T", "<T>(x:T,string)->T"][usize::from(byte(2) % 8)];
             body.push_str(&format!("type Box<F = {ty}> = F; local function many(...) return ... end; local packed=many :: (<P...>(P...)->P...); return tostring(select('#',packed(1,2)))"));
         }
-        _ => {
+        51 => {
             let ty = ["<T>(x:T...)->T", "<T>(x:...T)->T", "<T>(T...,number)->T", "<T>(...T,number)->T", "<T>((T...))->T", "<T>(())->T", "<T>((number,string))->T", "<T>(T)->(value:T)"][usize::from(byte(2) % 8)];
             body.push_str(&format!("type Invalid = {ty}; return 'invalid function parameter pack'"));
+        }
+        52 => {
+            let ty = ["(number)?", "(number) | nil", "(number,T...)?", "(number,...string) | nil", "((number))?", "(number,U...) & nil", "<T>(T)->T", "(x:number)->number"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("local function f(): {ty} return 7 end; return tostring(f())"));
+        }
+        53 => {
+            let ty = ["((number,string))", "T...?", "(number,string)?", "() | nil", "(...number)?", "(number,)", "(T...,number)", "(x:number)"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("local function f(): {ty} return 7 end; return 'invalid return annotation'"));
+        }
+        54 => {
+            let ty = ["{}", "{number}", "{x:number,y:string;}", "{[string]:number,x:boolean}", "{read x:number,write [string]:boolean}", "{read:number,write:string}", "{id:<T>(T)->T}", "{[\"a\" | \"b\"]:number}"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type T = {ty}; return 'valid table type'"));
+        }
+        55 => {
+            let ty = ["{x:}", "{this is not a type}", "{x:number y:string}", "{number,}", "{number,x:string}", "{[string]:number,[number]:string}", "{x:(number,string)}", "{[T...]:number}"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type T = {ty}; return 'invalid table type'"));
+        }
+        _ => {
+            // Compose type leaves, wrappers and source contexts independently;
+            // malformed combinations must reject before the observed writes.
+            let atom = ["number", "T...", "(number,string)", "<T>(T)->T", "| number | string", "& A & B", "number | string & boolean", "`field{1}`"][usize::from(byte(2) % 8)];
+            let ty = match byte(3) % 8 {
+                0 => atom.to_owned(),
+                1 => format!("({atom})"),
+                2 => format!("{{field:{atom}}}"),
+                3 => format!("{{[{atom}]:number}}"),
+                4 => format!("(number)->{atom}"),
+                5 => format!("{{id:<T>(T)->{atom}}}"),
+                6 => format!("{{read field:{atom}}}"),
+                _ => format!("({atom})?"),
+            };
+            match byte(4) % 4 {
+                0 => body.push_str(&format!("type Probe = {ty};")),
+                1 => body.push_str(&format!("local function f(): {ty} return nil end;")),
+                2 => body.push_str(&format!("local value = nil :: ({ty});")),
+                _ => body.push_str(&format!("type Probe<T = {ty}> = T;")),
+            }
+            body.push_str("return 'composed type grammar'");
         }
     }
     body

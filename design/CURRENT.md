@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-12 (Australia/Hobart).
+Updated: 2026-11-13 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -40,9 +40,9 @@ on all four profiles. The #18 follow-up resolves caller-selected error reports
 against the exact caller program, including reused source names and generated
 wrappers. Non-table writes use oracle-checked index messages. Wrapped coroutines
 preserve their original host report across yield/resume while keeping the guest
-error value unchanged. Manual string rethrows retain their explicit error site. The existing
-balanced-token table-type parser remains more permissive than the full type-grammar
-strictness intended by design/50. Assertions now reject bare tuple/variadic packs
+error value unchanged. Manual string rethrows retain their explicit error site. Return annotations now distinguish single types from packs, including the pinned
+one-fixed-plus-tail suffix quirk. Table types validate fields, indexers, separators,
+contextual qualifiers and standalone array shorthand instead of skipping braces. Assertions now reject bare tuple/variadic packs
 while retaining grouped single types and function/generic pack positions. Alias
 generics accept defaults, enforce regular-before-pack/default ordering, and erase
 defaults at runtime. Generic function types (`<U>(U)->U`) now parse and erase in
@@ -50,8 +50,8 @@ annotations, assertions, aliases, defaults and nested type arguments, with named
 parameters and final pack tails. The pinned upstream test excerpts and runtime
 checks are in `generic_function_types.luau`; negative parser/facade cases and
 differential shapes cover malformed forms. The differential generator includes
-12 targeted type shapes and shares its 52-shape bound with CI smoke. Broader
-grammar coverage, including the permissive table-type parser, remains open;
+17 targeted type shapes and shares its 57-shape bound with CI smoke. Broader
+grammar coverage remains open;
 these fixes do not establish full syntax or analyzer parity.
 
 ## Issue #21 memory recovery
@@ -123,8 +123,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **730 fixtures**, **521 refs**, **0 pending-oracle**
-and **0 pending-impl**: 712 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **732 fixtures**, **523 refs**, **0 pending-oracle**
+and **0 pending-impl**: 714 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and
@@ -173,8 +173,6 @@ this section is a navigation index, not a duplicate checklist or priority order.
 The [maintainer workflow](../CONTRIBUTING.md#issue-driven-development) explains
 selection, coordination, review and closure.
 
-- Parser defects: [return annotation/type-pack grammar #27](https://github.com/slowchop/rustia/issues/27),
-  [table type validation #28](https://github.com/slowchop/rustia/issues/28).
 - [Source-access readiness #29](https://github.com/slowchop/rustia/issues/29).
 - [Documentation and stable API review #30](https://github.com/slowchop/rustia/issues/30).
 - [Semantic coverage and platform acceptance #31](https://github.com/slowchop/rustia/issues/31).
