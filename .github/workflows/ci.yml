@@ -2,7 +2,7 @@ name: CI
 
 # Correctness uses private self-hosted pools with read-only repository access.
 # Public repositories and fork PRs cannot use these persistent runners. Manual
-# dispatch is retained only for the Windows native correctness job.
+# dispatch runs Windows native and real Firefox correctness jobs.
 "on":
   pull_request:
   push:
@@ -332,3 +332,57 @@ jobs:
           cargo build --locked --manifest-path demos/web-live/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/web-live/target
           wasm-bindgen --target web --out-dir demos/web-live/pkg --out-name rustia_example demos/web-live/target/wasm32-unknown-unknown/release/rustia_web_live_example.wasm
           node tools/browser/web-live-example.cjs
+
+  firefox-runtime:
+    name: Browser runtime (real Firefox, manual)
+    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch'
+    runs-on:
+      group: general-linux
+      labels: [self-hosted, Linux, X64, general-linux, docker]
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+    steps:
+      - name: Install container build and Firefox dependencies
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev python3 libdbus-glib-1-2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install pinned Wasm tools and official Firefox
+        run: |
+          set -euo pipefail
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
+          browser_tools=$(mktemp -d "$RUNNER_TEMP/rustia-firefox.XXXXXX")
+          mkdir "$browser_tools/bin"
+          curl --fail --location --silent --show-error https://archive.mozilla.org/pub/firefox/releases/160.0/linux-x86_64/en-US/firefox-160.0.tar.xz --output "$browser_tools/firefox.tar.xz"
+          printf '%s  %s\n' e9c7ed0d4abc6eb3648c2c5652bd325e690423ef49414ef201eac59c0932ea8ec52260cf652510b2c98971c7e7eb36e6be8101d87cae17c6dd28ed763bac32a6 "$browser_tools/firefox.tar.xz" | sha512sum --check --status
+          tar -xJf "$browser_tools/firefox.tar.xz" -C "$browser_tools"
+          curl --fail --location --silent --show-error https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz --output "$browser_tools/geckodriver.tar.gz"
+          printf '%s  %s\n' e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e "$browser_tools/geckodriver.tar.gz" | sha256sum --check --status
+          tar -xzf "$browser_tools/geckodriver.tar.gz" -C "$browser_tools/bin" geckodriver
+          browser_home="$browser_tools/firefox-home"
+          mkdir "$browser_home"
+          # Scope the owned browser home to Firefox; keep Cargo/Git/Rustup homes intact.
+          {
+            printf '%s\n' '#!/usr/bin/env bash'
+            printf 'exec env -u XAUTHORITY -u XDG_RUNTIME_DIR HOME=%q %q "$@"\n' "$browser_home" "$browser_tools/firefox/firefox"
+          } > "$browser_tools/bin/firefox"
+          chmod 755 "$browser_tools/bin/firefox"
+          echo "$browser_tools/bin" >> "$GITHUB_PATH"
+      - name: Execute both feature modes in real Firefox
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash tools/run-browser-correctness.sh firefox 160.0 0.37.1

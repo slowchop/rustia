@@ -44,7 +44,7 @@ symlinks have no separate maps. Hidden configuration is outside the bootstrap tr
 CI workflows under [.github/workflows](./.github/workflows/) are operational correctness
 entry points; the macOS arm64 runtime job uses its account-provisioned Rustup to install the
 pinned toolchain and target without system package writes, then verifies the native host
-before running shared correctness suites. The [Justfile](./Justfile) remains the local
+before running shared correctness suites. A private manual-only real Firefox job uses the existing Linux Docker correctness pool with checksum-pinned official browser/driver archives inside its disposable container. The [Justfile](./Justfile) remains the local
 validation entry point. The ignored private sibling is a separate repository and is outside
 this map.
 The hosted Linux workspace job additionally runs the default-off executor accounting

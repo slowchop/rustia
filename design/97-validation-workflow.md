@@ -78,7 +78,9 @@ existing measurements are historical records. The full inventory additionally
 checks the history projection and refuses missing benchmark source identifiers.
 All jobs use ordinary self-hosted groups with private-repository and trusted
 same-repository PR guards; the final aggregate retains its always-run failure
-check within that trusted scope. Windows native execution stays manual and
-requires an online Windows runner. Public visibility needs a separate isolated
+check within that trusted scope. Windows native and real Firefox execution stay manual. Windows requires an
+online Windows runner; Firefox uses the existing Linux Docker correctness pool
+with checksum-pinned official browser/driver downloads inside its disposable
+container. The optional Firefox job does not replace the required WebKit gate. Public visibility needs a separate isolated
 execution plan. No hosted fallback or benchmark-runner access is added.
 This does not authorize a package release or replace platform release gates.
