@@ -28,6 +28,8 @@ This directory contains internal Node and shell tools for benchmark validation, 
 - [`observe-benchmark-process.py`](observe-benchmark-process.py) is the CI-only unprivileged observer used by the separate `observe` mode. It records child CPU time, faults, context switches, interrupt totals, requested clock-state residency and sanitized code/heap/stack mapping bases. It exports no paths, process IDs or device labels. The observe runner crosses fresh copies and a shared inode in sixteen balanced source legs, then independently replays selected retained files in eight legs. Launch paths are stable and ASLR policy remains unchanged; anonymous file tokens and all diagnostic artifacts survive in private CI exports, including failures. Normal acceptance and history are unchanged. Offline parser/resource/lifecycle tests run through the coordinator self-test.
 - Other direct files include [`check-workflows.js`](check-workflows.js), [`check-benchmark-results.js`](check-benchmark-results.js), [`run-linux-matrix-benchmark.js`](run-linux-matrix-benchmark.js), [`run-linux-memory-benchmark.js`](run-linux-memory-benchmark.js), and [`run-linode-benchmark.js`](run-linode-benchmark.js). The operations design describes the last as retired apart from offline self-test use; the legacy name alone does not establish a provisioner.
 
+- [`package-ios-test.py`](package-ios-test.py) packages one native iOS test executable in a new scratch app using an existing eligible device/profile/signing identity; the reproducible mobile execution and evidence rules are in [platform acceptance](../design/96-browser-platform-acceptance.md#reproduce-native-mobile-contracts). It creates no signing credentials and prints no identifiers.
+
 ## Invariants
 
 - `check-public-workflow-profile.js` also requires the fixed feature-gated executor
@@ -43,6 +45,8 @@ This directory contains internal Node and shell tools for benchmark validation, 
 - `check-package-files.js` reads Cargo's package file list and writes `design/package-files.json` unless invoked with `--check`.
 - Renderers and generators read checked-in inputs and write generated artifacts. Publication helpers can update benchmark-data outputs; the dedicated coordinator transfers, runs, and collects an owned-host lane.
 - `run-linode-benchmark.js` remains a legacy-named offline rules/self-test tool per the operations design; the name does not imply an available provisioner.
+
+- `package-ios-test.py` reads the supplied development profile, writes only a new scratch app and adjacent entitlements, and invokes existing `codesign` to sign/verify. Device execution is a separate explicit `devicectl` action.
 
 ## Verification
 

@@ -139,8 +139,10 @@ headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.
 Ordinary correctness jobs use generic Linux/macOS/Windows self-hosted groups,
 with private-repository and same-repository PR guards. Public visibility requires
 a separate isolation review; there is no hosted fallback or benchmark-runner access.
-Dated Linux ARM64, Windows and real Firefox/Safari passes do not close Intel Mac,
-mobile, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
+The 2026-11-13 type-grammar candidate executed shared contracts on native Linux
+ARM64, a physical iPad, an ARM64 Android emulator and local real Firefox/Safari.
+These scoped results do not close Intel Mac, mobile-browser, final-candidate or
+remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
 
 Install the checkout-local hook with `just install-hooks`. Every push must pass
 the full unchanged-commit `just release-preflight` inventory through the normal

@@ -531,3 +531,130 @@ smoke. Screening 40402650245 remains candidate-only. The completed mandatory
 pre-push inventory has 98 summaries and 1,466 passes with zero failures.
 Intel Mac and mobile runtime execution remain public-release gates; these target
 builds do not claim those runtime checks. Real Safari remains RC-only.
+
+## Type-grammar candidate execution — 2026-11-13
+
+Immutable candidate `6bcf4f4cfb98064acd2ce0a4353fd997d48a8418` in
+[PR #43](https://github.com/slowchop/rustia/pull/43) passed the following actual
+execution checks. An independent artifact audit checked raw test summaries,
+controller exits, Android executable hashes and all 1,746 Linux archive blobs.
+These are shared correctness contracts, not full language or supported-release acceptance.
+
+| Execution | Default | Bare | Groups total | Tools/target |
+|---|---:|---:|---:|---|
+| Native macOS ARM64 | 64 | 64 | 18 | [PR CI job](https://github.com/slowchop/rustia/actions/runs/43357089689/job/131661591797); Rust 1.95.0 |
+| Native Windows x86-64 MSVC | 64 | 64 | 18 | [Manual CI job](https://github.com/slowchop/rustia/actions/runs/43357096085/job/131661618559); Rust 1.95.0 |
+| Local real Safari 26.6.2 | 47 | 49 | 18 | macOS ARM64; system safaridriver |
+| Local real Firefox 160.0 | 47 | 49 | 18 | macOS ARM64; geckodriver 0.37.1 |
+| Physical iPad Pro 11-inch (M4), iPadOS 27.0.1 | 64 | 64 | 18 | `aarch64-apple-ios`; Xcode 26.4.1 (17E202) |
+| Android 15 ARM64 emulator | 64 | 64 | 18 | `aarch64-linux-android`; NDK 28.2.13676358, API 35 |
+| Native Linux ARM64 VM | 64 | 64 | 18 | `aarch64-unknown-linux-gnu`; pinned Rust image below |
+
+Every group executed nonzero tests with zero failures. All fourteen golden payloads
+are byte-identical, SHA-256
+`cf890817d7b66cc2e8ab61030cbe6d0fe3235efe1c8a3dd7a1e4bf94f3b6a9a8`.
+The current native macOS/Windows job logs include both type-grammar regressions
+and their two golden transcripts; these match the retained native reference. Both new
+`type_grammar` tests actually ran, including deep-nesting rejection before guest effects.
+Rust was pinned to 1.95.0. Browser execution used wasm-bindgen/test-runner 0.2.126;
+the temporary release archive was checked against its upstream SHA-256
+`7df536babe345deb68828148dbdc71179118afdab42d83547c7cebfbf1426bd5`.
+
+Android used the existing ARM64 AVD with Hypervisor.Framework acceleration:
+`emulator -accel-check` succeeded, and the running ARM64 process explicitly used
+`-accel on`. This is emulator execution, not physical Android hardware or an
+Intel instruction-set emulator. Linux used a native aarch64 Docker VM and
+`rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1`,
+with the exact candidate extracted by `git archive`, explicit native target and
+both feature modes. Neither virtualization run is a performance measurement.
+
+Local raw logs and manifests are retained outside Git: `rustia-38-safari.log`,
+`rustia-38-firefox.log`, `rustia-38-linux-arm64.log`,
+`rustia-ipad-6bcf4f4c-tests/` and `rustia-android-6bcf4f4c/` under the local temporary
+directory. Device IDs, signing-team IDs, profile contents and private runner
+configuration must stay outside this repository. Remote Firefox/Safari execution,
+Intel Mac execution, mobile-browser execution and later release candidates remain
+separate unclosed requirements in #31/#39/#40/#41.
+
+### Reproduce native mobile contracts
+
+Use a clean checkout at the exact recorded candidate and the pinned toolchain.
+Do not change HEAD or source files during builds/execution. Keep each candidate's
+build JSON, raw logs and summaries in a separate private output directory. Record
+`git rev-parse HEAD`, `rustc -Vv`, target OS/version and actual device versus emulator.
+The nine suites, in both default and `--no-default-features` modes, are:
+
+```bash
+suites=(platform_golden host_functions typed_objects live_value_contract
+        module_resolution yieldable_require callable_continuations
+        numeric_index_contract type_grammar)
+args=()
+for suite in "${suites[@]}"; do args+=(--test "$suite"); done
+cargo test --locked -p rustia --target "$RUSTIA_MOBILE_TARGET" \
+  --target-dir "$RUSTIA_OUTPUT/build" --no-run --message-format=json \
+  "${args[@]}" > "$RUSTIA_OUTPUT/default-build.jsonl" \
+  2> "$RUSTIA_OUTPUT/default-build.log"
+cargo test --locked -p rustia --target "$RUSTIA_MOBILE_TARGET" \
+  --target-dir "$RUSTIA_OUTPUT/build" --no-default-features \
+  --no-run --message-format=json "${args[@]}" \
+  > "$RUSTIA_OUTPUT/bare-build.jsonl" 2> "$RUSTIA_OUTPUT/bare-build.log"
+```
+
+Run with Bash `set -euo pipefail`. For each mode/suite select the `executable`
+from its `compiler-artifact` JSON entry whose `target.name` equals that suite;
+require exactly one matching test executable. Preserve its SHA-256. Do not take
+an executable from a different build/mode or infer runtime success from compilation.
+
+For iOS, `RUSTIA_MOBILE_TARGET=aarch64-apple-ios`. Use a paired physical device
+with Developer Mode and an existing eligible development profile/signing identity.
+Obtain device information with `xcrun devicectl device info details`; decode the
+existing profile with `security cms -D -i` and inspect existing identities with
+`security find-identity -v -p codesigning`. Store their identifiers privately.
+No new profile, certificate, account permission or keychain change is part of this procedure.
+For every executable, package into a fresh scratch app. Set `RUSTIA_IOS_PACKAGER`
+to the absolute path of `tools/package-ios-test.py` from this reviewed tooling
+delivery; the older recorded runtime candidate predates that helper. Keep the
+helper outside that candidate checkout rather than dirtying its source:
+
+```bash
+python3 "$RUSTIA_IOS_PACKAGER" --executable "$RUSTIA_EXECUTABLE" \
+  --profile "$RUSTIA_IOS_PROFILE" --identity "$RUSTIA_IOS_IDENTITY" \
+  --device-udid "$RUSTIA_IOS_UDID" --bundle-id "$RUSTIA_TEST_BUNDLE_ID" \
+  --output "$RUSTIA_NEW_APP"
+xcrun devicectl device install app --device "$RUSTIA_IOS_DEVICE" "$RUSTIA_NEW_APP"
+xcrun devicectl device process launch --console --terminate-existing \
+  --json-output "$RUSTIA_CONTROLLER_JSON" --device "$RUSTIA_IOS_DEVICE" \
+  "$RUSTIA_TEST_BUNDLE_ID" --test-threads=1 --nocapture
+```
+
+The helper validates device/profile membership, profile expiration, certificate
+membership and the allowed bundle ID, signs with the existing identity and verifies
+the bundle. Use a unique test bundle ID allowed by that profile. It never creates
+signing credentials. Raw controller output may contain private IDs: retain it privately.
+Require launch exit zero, successful termination/exit code zero in its JSON, and
+exactly one nonzero passing test summary. CoreDevice can report error 10004 after a
+very short process exits; retain the failed attempt and retry only that explicit
+terminal PID race, at most three launches. A failed launch is never accepted as a pass.
+
+For Android, `RUSTIA_MOBILE_TARGET=aarch64-linux-android`. Set
+`CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` to the existing NDK's
+`aarch64-linux-android35-clang` for this API-35 run. Select one exact `adb -s` device,
+verify `uname -m=aarch64`, ABI `arm64-v8a` and OS version before running. If using an
+emulator, record its ARM64 image and acceleration status separately. For each binary:
+
+```bash
+adb -s "$RUSTIA_ANDROID_DEVICE" push "$RUSTIA_EXECUTABLE" "$RUSTIA_REMOTE_TEST"
+adb -s "$RUSTIA_ANDROID_DEVICE" shell chmod 700 "$RUSTIA_REMOTE_TEST"
+adb -s "$RUSTIA_ANDROID_DEVICE" shell "$RUSTIA_REMOTE_TEST" --test-threads=1 --nocapture
+adb -s "$RUSTIA_ANDROID_DEVICE" shell rm "$RUSTIA_REMOTE_TEST"
+```
+
+Use a unique owned filename under `/data/local/tmp/`, retain the process exit and
+raw output, and require exactly one nonzero passing summary with no failures.
+For each platform/mode the golden suite must emit exactly one
+`RUSTIA_PRIVATE_PLATFORM_GOLDEN ` payload. Extract its exact ASCII bytes through
+the line boundary, excluding any preceding libtest label. CoreDevice console
+transport can frame boundaries as literal `\r\n`; strip only that framing,
+never rewrite guest payload bytes. Compare all payloads byte-for-byte with the
+same-candidate native reference. Recheck clean HEAD/source after all runs and
+remove only the generated test app/files when no longer needed.
