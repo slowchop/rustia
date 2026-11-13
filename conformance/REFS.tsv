@@ -522,3 +522,4 @@ runtime.diagnostic-parity	runtime	upstream-luau-0.709:VM/src/laux.cpp	luau-0.709
 type.generic-function	parser-runtime	upstream-luau-0.709:tests/TypeInfer.generics.test.cpp	luau-0.709	Generic function type binders, named parameters and final type-pack tails parse in annotations, aliases and nested type arguments, then erase without runtime checking.
 type.return-annotation	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Return annotation single/pack disambiguation and pinned one-fixed-plus-tail suffix behavior parse then erase.
 type.table-grammar	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Table type fields, indexers, separators, contextual qualifiers and array shorthand parse then erase.
+type.typeof-expression	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Typeof annotations parse ordinary expressions, including interpolation, then erase without executing their effects.

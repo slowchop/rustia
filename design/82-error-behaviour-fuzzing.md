@@ -409,7 +409,7 @@ publication or supported-release acceptance is claimed.
 
 ### Targeted type-grammar differential coverage
 
-The generated differential target includes seventeen type shapes in addition to its
+The generated differential target includes twenty-one type shapes in addition to its
 40 existing runtime shapes. These cover valid/invalid assertions, alias defaults,
 pack defaults, generic function signatures, ordering and result adjustment. CI smoke takes its shape bound
 from the generator and exercises all eight type variants. Parser and facade
@@ -441,3 +441,21 @@ The compositional family crosses eight type leaves (including malformed forms),
 eight grouping/table/indexer/function wrappers and four alias/return/assertion/default
 contexts. The existing CI differential smoke executes all 256 combinations against
 the locked oracle in addition to the fixed families and seeded random inputs.
+
+Two further typeof families cover ordinary/interpolated/function expressions and
+malformed expression syntax. Copied pinned source and no-execution controls are
+in `typeof_expressions.luau`; facade rejection tests require no guest writes on
+any profile. This closes the confirmed expression-skipping gap, not all of #31.
+
+Erased typeof function bodies enforce loop and vararg context while signatures
+retain the enclosing context. Ordinary invalid function bodies retain their
+existing Compile error phase. A common 512-frame parser budget spans statement,
+expression, type and function-signature boundaries; deep-cycle unit, facade and
+bounded frontend smoke regressions require structured errors instead of stack
+exhaustion. Two additional differential families exercise these context rules.
+
+The `type_grammar` facade regressions are enabled for native and Wasm test runners.
+Node/V8, headless WebKit and the explicit real-browser script run them in both
+feature modes, alongside the existing shared contracts. The browser-runner
+self-test rejects a failure isolated to this suite and verifies eighteen executed
+suite groups; it does not substitute for actual browser execution.

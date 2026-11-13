@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Shared with CI smoke so new generated shapes are not omitted from its range.
-pub const SOURCE_SHAPE_COUNT: u8 = 57;
+pub const SOURCE_SHAPE_COUNT: u8 = 61;
 
 pub fn source_from_bytes(data: &[u8]) -> String {
     let byte = |index: usize| data.get(index).copied().unwrap_or(0);
@@ -138,6 +138,22 @@ pub fn source_from_bytes(data: &[u8]) -> String {
         55 => {
             let ty = ["{x:}", "{this is not a type}", "{x:number y:string}", "{number,}", "{number,x:string}", "{[string]:number,[number]:string}", "{x:(number,string)}", "{[T...]:number}"][usize::from(byte(2) % 8)];
             body.push_str(&format!("type T = {ty}; return 'invalid table type'"));
+        }
+        56 => {
+            let expression = ["1", "(function() return 1 end)()", "error('never execute')", "`value {error('never execute')}`", "{[1]=true}", "function(x:number):number return x end", "1 :: number", "(function(...):...number return ... end)(1,2)"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Probe = typeof({expression}); return 'valid typeof'"));
+        }
+        57 => {
+            let expression = ["", "1+", "this is not an expression", "local x = 1", "return 1", "1,2", "function( end", "(1"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Probe = typeof({expression}); return 'invalid typeof'"));
+        }
+        58 => {
+            let expression = ["function(...) return ... end", "function() while true do break end end", "function() for i=1,1 do continue end end", "function() repeat break until true end", "function() for x in nil do continue end end", "function(x:typeof(...)):typeof(...) end", "function(...) return function(...) return ... end end", "function() local f=function(...) return ... end end"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Probe = typeof({expression}); return 'valid typeof context'"));
+        }
+        59 => {
+            let expression = ["function() break end", "function() continue end", "function() return ... end", "function() local x=... end", "function(...) return function() return ... end end", "function() while true do local f=function() break end end end", "function() type T=typeof(...) end", "function() type T=typeof(function(x:typeof(...)) end) end"][usize::from(byte(2) % 8)];
+            body.push_str(&format!("type Probe = typeof({expression}); return 'invalid typeof context'"));
         }
         _ => {
             // Compose type leaves, wrappers and source contexts independently;

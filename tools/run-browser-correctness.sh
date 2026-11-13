@@ -78,7 +78,7 @@ for mode in bare default; do
   if [[ "$mode" == bare ]]; then args+=(--no-default-features); adapter=bare_wasm_live; else adapter=web_live; fi
   cargo "${args[@]}" --test platform_golden --test "$adapter" --test host_functions \
     --test typed_objects --test live_value_contract --test yieldable_require \
-    --test callable_continuations --test numeric_index_contract
+    --test callable_continuations --test numeric_index_contract --test type_grammar
 done
 if [[ "$browser" == safari ]]; then
   echo 'Safari uses visible automation windows; it has no headless mode.'
@@ -89,7 +89,7 @@ for mode in bare default; do
   bash tools/run-private-platform-golden.sh wasm "$mode"
   args=(test --locked -p rustia --target wasm32-unknown-unknown)
   if [[ "$mode" == bare ]]; then args+=(--no-default-features); adapter=bare_wasm_live; else adapter=web_live; fi
-  for suite in "$adapter" host_functions typed_objects live_value_contract yieldable_require callable_continuations numeric_index_contract; do
+  for suite in "$adapter" host_functions typed_objects live_value_contract yieldable_require callable_continuations numeric_index_contract type_grammar; do
     cargo "${args[@]}" --test "$suite" -- --nocapture 2>&1 | tee "$log"
     if ! grep -Eq 'test result: ok[.] [1-9][0-9]* passed; 0 failed;' "$log"; then
       echo "missing nonzero successful test result for $browser/$mode/$suite" >&2
