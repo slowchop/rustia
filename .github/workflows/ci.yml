@@ -412,7 +412,16 @@ jobs:
           set -euo pipefail
           test "$(uname -s)" = Darwin
           test "$(uname -m)" = arm64
-          if [ "$(stat -f '%Su' /dev/console)" != "$(id -un)" ] || ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+          runner_owns_console=false
+          if [ "$(stat -f '%Su' /dev/console)" = "$(id -un)" ]; then
+            runner_owns_console=true
+          fi
+          runner_gui_available=false
+          if launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+            runner_gui_available=true
+          fi
+          printf 'Safari readiness: runnerOwnsConsole=%s; runnerGuiDomainExists=%s\n' "$runner_owns_console" "$runner_gui_available"
+          if [ "$runner_owns_console" != true ] || [ "$runner_gui_available" != true ]; then
             echo "::error::Safari needs the runner account's existing logged-in desktop session; no browser tests ran."
             exit 1
           fi

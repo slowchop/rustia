@@ -100,8 +100,9 @@ and normal Windows/Firefox dispatches do not open Safari windows.
 
 The job first requires the runner account to own the logged-in console desktop
 and have a live GUI session, then checks the exact installed `safari_version`.
-Missing prerequisites fail before browser tests rather than reporting an empty
-pass. It uses account-provisioned Rustup and checksum-pinned wasm-bindgen 0.2.126
+The readiness step prints only console-ownership and GUI-domain-presence
+booleans, not account names. Missing prerequisites fail before browser tests
+rather than reporting an empty pass. It uses account-provisioned Rustup and checksum-pinned wasm-bindgen 0.2.126
 binaries in the job's temporary directory. No system package install, runner
 access change or Safari automation permission toggle is performed. Existing
 Safari automation permission is required. The normal browser runner executes
