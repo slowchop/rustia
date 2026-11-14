@@ -700,3 +700,55 @@ transport can frame boundaries as literal `\r\n`; strip only that framing,
 never rewrite guest payload bytes. Compare all payloads byte-for-byte with the
 same-candidate native reference. Recheck clean HEAD/source after all runs and
 remove only the generated test app/files when no longer needed.
+
+
+## Physical iPad Safari execution — 2026-11-14
+
+After explicit user authorization for temporary LAN test serving, immutable
+candidate `21167c04bfb64e8974d639f2041697cfb2510d22` executed the complete shared
+browser contracts in **Safari 27.0.1 on a physical iPad Pro 11-inch (M4),
+iPadOS 27.0.1**. Fresh Wasm builds and native references used the same clean
+candidate, pinned Rust 1.95.0 and wasm-bindgen/test-runner 0.2.126.
+The [sanitized receipt](mobile-safari-2026-11-14.json) records each suite count and
+input-Wasm SHA-256, plus the exact harness digest.
+
+| Mode | Executed groups | Passing tests | Failed |
+|---|---:|---:|---:|
+| Bare | 9 | 49 | 0 |
+| Default | 9 | 47 | 0 |
+| Total | 18 | 96 | 0 |
+
+Every group has exactly one nonzero successful summary; none were failed,
+ignored or filtered out. Both type-grammar regressions actually executed in
+each mode, including deep nesting and no guest effects during type erasure.
+The two iPad golden payloads match fresh default/bare native macOS ARM64
+references from this same candidate byte-for-byte, full payload SHA-256
+`cf890817d7b66cc2e8ab61030cbe6d0fe3235efe1c8a3dd7a1e4bf94f3b6a9a8`.
+
+The pinned official wasm-bindgen manual runner served one loopback backend per
+suite. A temporary LAN proxy used an unguessable per-run URL and added only an
+output observer to the official HTML; generated JS/Wasm assets were forwarded
+unchanged. It launched Apple's built-in Safari on the paired physical iPad via
+`devicectl --payload-url`. One owned test tab navigated between suites and sent
+its DOM output, console transcript and browser user agent back to the observer.
+An initial one-test golden probe was separate from the 96-test acceptance run.
+No browser/OS automation permission setting was changed.
+
+The user agent uses a desktop-compatible Macintosh/Intel label; the paired
+CoreDevice details and launch receipt establish that this was the physical iPad.
+It does not constitute native Intel Mac execution. The proxy, all loopback
+backends and test-runner processes were stopped afterward; independent artifact
+review checked the raw results, Cargo artifact modes/hashes, launch/controller
+success and matching native transcripts. Raw peer/device identifiers and the
+full private harness/controller records remain outside source history.
+
+Retained local evidence is under `rustia-ipad-safari-21167c04/` in the private
+temporary directory, with `rustia-ipad-safari-batch.py` as the exact harness.
+To repeat, build both browser modes and the nine shared suites as in
+`tools/run-browser-correctness.sh`, serve the official manual test pages only
+with explicit device/network authorization, retain actual nonzero DOM results
+and goldens, verify the candidate remains clean and stop every server afterward.
+
+This closes the physical-iPad Safari shared-contract execution item in #40.
+Remote desktop Safari, native Intel Mac, full language parity and later release
+candidates remain separate unproven gates in #31/#39/#40.

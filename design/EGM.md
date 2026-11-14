@@ -13,6 +13,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Error and fuzzing contract: [82-error-behaviour-fuzzing.md](./82-error-behaviour-fuzzing.md).
 - Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).
 - Executed browser/native platform evidence and remaining gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
+- [mobile-safari-2026-11-14.json](./mobile-safari-2026-11-14.json) is the sanitized dated physical-iPad Safari execution receipt, with per-suite input hashes/counts and golden comparison; raw device/peer identifiers remain private.
 - Staged validation and the complete pre-push inventory: [97-validation-workflow.md](./97-validation-workflow.md).
 - Hosted executor-accounting path counts are a default-off CI diagnostic, described
   in the validation contract and [VM Core 2](./58-vm-core2.md); they provide no timing acceptance.
