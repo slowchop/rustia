@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-13 (Australia/Hobart).
+Updated: 2026-11-14 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -144,8 +144,10 @@ ARM64, a physical iPad, an ARM64 Android emulator and local real Firefox/Safari.
 A private manual-only job now runs real Firefox with checksum-pinned official
 Mozilla binaries in the existing Docker correctness pool. Its 2026-11-13
 immutable candidate executed all 96 browser contracts with matching goldens;
-the exact head and raw job evidence are recorded separately. These scoped results do not close Intel Mac,
-mobile-browser, final-candidate or remote-browser gates. [Evidence](96-browser-platform-acceptance.md).
+the exact head and raw job evidence are recorded separately. Physical iPad Safari
+27.0.1 also executed all 96 browser contracts on the 2026-11-14 candidate, with
+goldens matching fresh native references. These scoped results do not close
+Intel Mac, final-candidate or remote desktop Safari gates. [Evidence](96-browser-platform-acceptance.md).
 
 Install the checkout-local hook with `just install-hooks`. Every push must pass
 the full unchanged-commit `just release-preflight` inventory through the normal

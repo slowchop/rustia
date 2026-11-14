@@ -1,0 +1,122 @@
+{
+  "date": "2026-11-14",
+  "timezone": "Australia/Hobart",
+  "candidate": "21167c04bfb64e8974d639f2041697cfb2510d22",
+  "execution": "Safari on physical iPad Pro 11-inch (M4)",
+  "os_version": "27.0.1",
+  "browser_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Safari/605.1.15",
+  "rust": "1.95.0",
+  "wasm_bindgen": "0.2.126",
+  "passed": 96,
+  "failed": 0,
+  "groups": 18,
+  "golden_payload_sha256": "cf890817d7b66cc2e8ab61030cbe6d0fe3235efe1c8a3dd7a1e4bf94f3b6a9a8",
+  "matches_same_candidate_native_default_and_bare": true,
+  "lan_server_stopped": true,
+  "harness_sha256": "570b8f6a7ddd34658d6bc2851f509640915a0f84d024a92d955b58cad4904aa0",
+  "modes": [
+    {
+      "mode": "bare",
+      "passed": 49,
+      "suites": [
+        {
+          "name": "platform_golden",
+          "passed": 1,
+          "input_wasm_sha256": "d3d60146b8e96676a31b339c946daebf65f5cb04004aa28378d3245f5a056144"
+        },
+        {
+          "name": "bare_wasm_live",
+          "passed": 4,
+          "input_wasm_sha256": "6414aef4f6f564978656d786f3202a3eb9da02bca285be545aa48574a9888a87"
+        },
+        {
+          "name": "host_functions",
+          "passed": 12,
+          "input_wasm_sha256": "a76582b22effbbda91e43c8663176aa06eeddef6cb4a0b1940a77a0d5a69b770"
+        },
+        {
+          "name": "typed_objects",
+          "passed": 9,
+          "input_wasm_sha256": "5949800d4d8f14bcf14f0b9de3469ebea322b6ce93028a41abc66cff0fc12284"
+        },
+        {
+          "name": "live_value_contract",
+          "passed": 1,
+          "input_wasm_sha256": "9c8f1c94ae34c2f3ab36c9143d9aa79a083902fa237bd0fcefec9d30c25e1185"
+        },
+        {
+          "name": "yieldable_require",
+          "passed": 13,
+          "input_wasm_sha256": "8f68019045200869e4e338f10de4ab0b81fd3a8c094dd3030c5f0e17b2de6ac2"
+        },
+        {
+          "name": "callable_continuations",
+          "passed": 6,
+          "input_wasm_sha256": "d8e8a796a64a8f0ce914912ceb5e6114bec16479fcd5bac9e165d1e65037a928"
+        },
+        {
+          "name": "numeric_index_contract",
+          "passed": 1,
+          "input_wasm_sha256": "251630c7a69cf435964619e41d51dd088e7ecf48664d5da7a09baf179f473454"
+        },
+        {
+          "name": "type_grammar",
+          "passed": 2,
+          "input_wasm_sha256": "807d84c6a4ed48aa41f114a78d8de51116795b915bd2e7ca3569cfa47be954cf"
+        }
+      ]
+    },
+    {
+      "mode": "default",
+      "passed": 47,
+      "suites": [
+        {
+          "name": "platform_golden",
+          "passed": 1,
+          "input_wasm_sha256": "8ded5a091c513e44029c895ed9e0513db7c437df75e89f7dc865ba6ef2e95f57"
+        },
+        {
+          "name": "web_live",
+          "passed": 2,
+          "input_wasm_sha256": "5e6c540dfef7abac24c08788febeabd0c803b2d4088ccc189d58bfcca37ef432"
+        },
+        {
+          "name": "host_functions",
+          "passed": 12,
+          "input_wasm_sha256": "91bff286b7ea23bfcc0299877a0c48a5984138d03d9ba5c7d8183503feb5e42b"
+        },
+        {
+          "name": "typed_objects",
+          "passed": 9,
+          "input_wasm_sha256": "80463b335105105072f71f9c553a26e8d08a41e72b387e79332b7d76dc866c07"
+        },
+        {
+          "name": "live_value_contract",
+          "passed": 1,
+          "input_wasm_sha256": "53a7ee02ff4f96d270b8b352c8ae33cd74b8fbb5ef750d7b29eec84697a8a5b8"
+        },
+        {
+          "name": "yieldable_require",
+          "passed": 13,
+          "input_wasm_sha256": "8f81bbda07de5bf75e9ec37647bc925db5fd91c146a5bf3c42dde91bd510657c"
+        },
+        {
+          "name": "callable_continuations",
+          "passed": 6,
+          "input_wasm_sha256": "64e6b41bfbf923068a8d059fdd12996ee6aa519c3d288447ae2bd739d225f1f5"
+        },
+        {
+          "name": "numeric_index_contract",
+          "passed": 1,
+          "input_wasm_sha256": "c9069447bb8f1d5a8931624b5b4eda8611d22ae31ee150d011d442ae682731f1"
+        },
+        {
+          "name": "type_grammar",
+          "passed": 2,
+          "input_wasm_sha256": "b6510468aa5e2c9c0c966aeceafc35da54bd85a008350c630f23e1ad03ba646f"
+        }
+      ]
+    }
+  ],
+  "scope": "Official wasm-bindgen manual runner; observer added to HTML only, JS/Wasm assets forwarded unchanged. Native Intel Mac, remote Safari and later release candidates remain separate."
+}
