@@ -2,13 +2,22 @@ name: CI
 
 # Correctness uses private self-hosted pools with read-only repository access.
 # Public repositories and fork PRs cannot use these persistent runners. Manual
-# dispatch runs Windows native and real Firefox correctness jobs.
+# dispatch runs Windows/Firefox; Safari requires the explicit safari input.
 "on":
   pull_request:
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      safari:
+        description: Run visible Safari tests on an existing logged-in runner desktop
+        type: boolean
+        default: false
+      safari_version:
+        description: Exact installed Safari version required by the explicit Safari run
+        type: string
+        default: "26.6.2"
 
 permissions:
   contents: read
@@ -386,3 +395,54 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           bash tools/run-browser-correctness.sh firefox 160.0 0.37.1
+
+  safari-runtime:
+    name: Browser runtime (real Safari, explicit manual)
+    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch' && inputs.safari
+    runs-on:
+      group: general-macos
+      labels: [self-hosted, macOS, ARM64, general-macos]
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      SAFARI_VERSION: ${{ inputs.safari_version }}
+    steps:
+      - name: Verify existing logged-in Safari desktop
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          if [ "$(stat -f '%Su' /dev/console)" != "$(id -un)" ] || ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+            echo "::error::Safari needs the runner account's existing logged-in desktop session; no browser tests ran."
+            exit 1
+          fi
+          actual_safari=$(defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString)
+          printf 'Installed Safari: %s; expected: %s\n' "$actual_safari" "$SAFARI_VERSION"
+          test -n "$SAFARI_VERSION"
+          test "$actual_safari" = "$SAFARI_VERSION"
+          /usr/bin/safaridriver --version
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust and temporary Wasm tools
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          if [ ! -x "$cargo_bin/rustup" ]; then
+            echo "::error::Rustup is missing from this account's Cargo tools directory."
+            exit 1
+          fi
+          export PATH="$cargo_bin:$PATH"
+          echo "$cargo_bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown --no-self-update
+          safari_tools=$(mktemp -d "$RUNNER_TEMP/rustia-safari.XXXXXX")
+          curl --fail --location --silent --show-error https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.126/wasm-bindgen-0.2.126-aarch64-apple-darwin.tar.gz --output "$safari_tools/wasm-tools.tar.gz"
+          printf '%s  %s\n' 7df536babe345deb68828148dbdc71179118afdab42d83547c7cebfbf1426bd5 "$safari_tools/wasm-tools.tar.gz" | shasum -a 256 --check --status
+          tar -xzf "$safari_tools/wasm-tools.tar.gz" -C "$safari_tools"
+          echo "$safari_tools/wasm-bindgen-0.2.126-aarch64-apple-darwin" >> "$GITHUB_PATH"
+      - name: Execute both feature modes in real Safari
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          bash tools/run-browser-correctness.sh safari "$SAFARI_VERSION"

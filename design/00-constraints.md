@@ -50,6 +50,12 @@ The full matrix below remains the public-release contract.
 | Windows **x86_64** (msvc) — build ✅ / shared runtime contracts ✅ | |
 | iOS **arm64** + Android **arm64** — build ✅ / runtime TODO | |
 
+On 2026-11-15, the user explicitly deferred native Intel Mac execution from the
+active #31 development tracker because no Intel hardware is available. #39
+retains the unverified native Intel acceptance task for later; Apple Silicon
+execution and cross-compilation do not satisfy it. This deferral does not remove
+the Intel row from the full release matrix above.
+
 Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical, and retained wasm
 portability evidence covers V8, JavaScriptCore-family, and SpiderMonkey shells. The remaining native arches
 and iOS/Android targets are public-release correctness gates.
