@@ -1398,6 +1398,8 @@ fn measure_with_factory(
         samples_prepare_ns.push(prepare_elapsed.as_secs_f64() * 1e9);
         samples_first_call_ns.push(first_call_elapsed.as_secs_f64() * 1e9);
         samples_cold_start_ns.push((prepare_elapsed + first_call_elapsed).as_secs_f64() * 1e9);
+        // Keep the cold-start probe's live allocations out of steady-state work.
+        drop(cold);
 
         let mut prepared = factory()?;
         let _ = prepared.run(n)?;
@@ -3447,6 +3449,48 @@ mod tests {
             ..Config::default()
         };
         validate_measurement_outputs(&diagnostic).expect("no-history diagnostics need no sidecar");
+    }
+
+    #[test]
+    fn cold_probe_is_released_before_steady_state_preparation() {
+        struct ExclusivePrepared(Rc<Cell<bool>>);
+
+        impl PreparedWorkload for ExclusivePrepared {
+            fn run(&mut self, _n: u64) -> Result<String> {
+                Ok("number:1".to_owned())
+            }
+        }
+
+        impl Drop for ExclusivePrepared {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+
+        for fixed_n in [None, Some(1)] {
+            let active = Rc::new(Cell::new(false));
+            let config = Config {
+                fixed_n,
+                target: Duration::ZERO,
+                max_n: 1,
+                reps: 3,
+                ..Config::default()
+            };
+            let result = measure_with_factory(
+                &config,
+                &ENGINE_SLOTS[0],
+                &WORKLOADS[0],
+                test_verification(),
+                || {
+                    if active.replace(true) {
+                        return Err(Error::new("previous prepared workload is still alive"));
+                    }
+                    Ok(Box::new(ExclusivePrepared(Rc::clone(&active))))
+                },
+            );
+            assert!(result.is_ok(), "preparation must be exclusive: {result:?}");
+            assert!(!active.get(), "the final workload must also be released");
+        }
     }
 
     #[test]

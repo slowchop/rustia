@@ -328,3 +328,26 @@ snapshot before each lane's first quiet window. This is not continuous
 monitoring, and does not certify the host's other health conditions. The helper
 is explicitly shipped and inbox-tested with every runner. Existing guest work,
 historical samples, thresholds and the calibration warning stay unchanged.
+
+
+### Cold-start probe lifetime correction — 2026-11-15
+
+Independent static review for #33 found that the separate cold-start probe stayed
+alive while the steady-state engine was constructed, warmed and timed. Its live
+VM/program allocations therefore overlapped steady-state work in every recorded
+repetition. This is a demonstrated harness lifecycle defect, not a demonstrated
+cause of the historical 26.87% process outlier.
+
+The harness now destroys the cold-start object after recording its preparation
+and first-call observations, before creating the steady-state object. Destruction
+is outside both measured regions. A synthetic exclusive-resource workload fails
+on the previous implementation and passes for both fixed-N and calibrated paths;
+it runs no guest benchmark and asserts no elapsed-time threshold. Existing fresh
+state, warmup, equal-work and checksum contracts remain unchanged.
+
+Dropping guest state does not reset libc allocator history, force page return or
+control ASLR/cache placement. Process-level repeatability still needs a reviewed
+immutable private CI experiment; no local timing or new permission change is
+used as evidence. Retain every old sample, failed calibration and threshold.
+Any new measurement must identify the changed harness separately and must not
+silently replace old protocol/results or claim that the old outlier is fixed.
