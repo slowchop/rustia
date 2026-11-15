@@ -7,10 +7,12 @@ const path = require("node:path");
 const EXPECTED_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
 const PRIVATE_PR = "github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
 const PRIVATE_MANUAL = "github.event.repository.private == true && github.event_name == 'workflow_dispatch'";
+const PRIVATE_SAFARI = `${PRIVATE_MANUAL} && inputs.safari`;
 const LINUX_RUNNER = "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]";
 const CI_JOBS = Object.freeze({
   "release-preflight": LINUX_RUNNER,
   "release-gate": LINUX_RUNNER,
+  "safari-runtime": "runs-on:\n      group: general-macos\n      labels: [self-hosted, macOS, ARM64, general-macos]",
   "macos-arm64-runtime": "runs-on:\n      group: general-macos\n      labels: [self-hosted, macOS, ARM64, general-macos]",
   "portable-engine-build": LINUX_RUNNER,
   "wasm-node-runtime": LINUX_RUNNER,
@@ -102,7 +104,7 @@ function checkJobRunners(text, expected, label) {
     if (declarations.length !== 1 || declarations[0] !== runner) {
       reject(`${label} job ${name} must run on ${runner}`);
     }
-    const guard = name === "campaign" || name === "windows-runtime" || name === "firefox-runtime" ? PRIVATE_MANUAL
+    const guard = name === "safari-runtime" ? PRIVATE_SAFARI : name === "campaign" || name === "windows-runtime" || name === "firefox-runtime" ? PRIVATE_MANUAL
       : name === "release-gate" ? `always() && ${PRIVATE_PR}` : PRIVATE_PR;
     const conditions = [...blocks.get(name).matchAll(/^    if: (.*)$/gm)].map((match) => match[1]);
     if (conditions.length !== 1 || conditions[0] !== guard) {
@@ -168,7 +170,7 @@ function checkNoForbidden(text, label) {
 
 function checkCi(text) {
   const label = ".github/workflows/ci.yml";
-  checkTriggers(text, '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n', label);
+  checkTriggers(text, '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n    inputs:\n      safari:\n        description: Run visible Safari tests on an existing logged-in runner desktop\n        type: boolean\n        default: false\n      safari_version:\n        description: Exact installed Safari version required by the explicit Safari run\n        type: string\n        default: "26.6.2"\n', label);
   checkPermissions(text, label);
   checkJobRunners(text, CI_JOBS, label);
   checkActionPins(text, label);
@@ -245,6 +247,37 @@ function checkCi(text) {
     `            printf 'exec env -u XAUTHORITY -u XDG_RUNTIME_DIR HOME=%q %q "$@"\\n' "$browser_home" "$browser_tools/firefox/firefox"`,
     `${safeDirectory}\n          bash tools/run-browser-correctness.sh firefox 160.0 0.37.1`,
   ]) requireText(firefox, fragment, `${label} firefox-runtime`);
+  const safari = jobs.get("safari-runtime");
+  for (const fragment of [
+    "timeout-minutes: 30",
+    "SAFARI_VERSION: ${{ inputs.safari_version }}",
+    "            echo \"::error::Safari needs the runner account's existing logged-in desktop session; no browser tests ran.\"",
+    '            exit 1',
+    '          test -n "$SAFARI_VERSION"',
+    '          test "$actual_safari" = "$SAFARI_VERSION"',
+    "rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown --no-self-update",
+    "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.126/wasm-bindgen-0.2.126-aarch64-apple-darwin.tar.gz",
+    `          printf '%s  %s\\n' 7df536babe345deb68828148dbdc71179118afdab42d83547c7cebfbf1426bd5 "$safari_tools/wasm-tools.tar.gz" | shasum -a 256 --check --status`,
+    '          bash tools/run-browser-correctness.sh safari "$SAFARI_VERSION"',
+  ]) requireText(safari, fragment, `${label} safari-runtime`);
+  requireText(safari, [
+    "          runner_owns_console=false",
+    "          if [ \"$(stat -f '%Su' /dev/console)\" = \"$(id -un)\" ]; then",
+    "            runner_owns_console=true",
+    "          fi",
+    "          runner_gui_available=false",
+    "          if launchctl print \"gui/$(id -u)\" >/dev/null 2>&1; then",
+    "            runner_gui_available=true",
+    "          fi",
+    "          printf 'Safari readiness: runnerOwnsConsole=%s; runnerGuiDomainExists=%s\\n' \"$runner_owns_console\" \"$runner_gui_available\"",
+    "          if [ \"$runner_owns_console\" != true ] || [ \"$runner_gui_available\" != true ]; then",
+    "            echo \"::error::Safari needs the runner account's existing logged-in desktop session; no browser tests ran.\"",
+    "            exit 1",
+    "          fi",
+  ].join("\n"), `${label} Safari GUI prerequisite`);
+  for (const forbidden of ["--enable", "sudo ", "brew ", "defaults write", "chmod -R", "chown ", "uses: actions-rust-lang/setup-rust-toolchain@"]) {
+    forbidText(safari, forbidden, `${label} Safari permissions/bootstrap`);
+  }
   const windows = jobs.get("windows-runtime");
   requireText(windows, `if: ${PRIVATE_MANUAL}`, `${label} windows-runtime`);
   const macos = jobs.get("macos-arm64-runtime");
@@ -395,6 +428,15 @@ function selfTest(root) {
       ["missing executor accounting diagnostic", "ci.yml", (s) => s.replace("--test gc_accounting_paths -- --nocapture", "--test missing_diagnostic -- --nocapture"), /executor accounting diagnostic/],
       ["duplicated executor accounting diagnostic", "ci.yml", (s) => s.replace("      - name: Check feature-gated executor accounting paths\n        if: matrix.stage == 'workspace'", "      - name: Check feature-gated executor accounting paths\n        if: always()"), /executor accounting diagnostic/],
       ["missing WebKit safe-directory setup", "ci.yml", (s) => s.replace('          git config --global --add safe.directory "$GITHUB_WORKSPACE"\n', ""), /safe\.directory/],
+      ["Safari without opt-in", "ci.yml", (s) => s.replace(`if: ${PRIVATE_SAFARI}`, `if: ${PRIVATE_MANUAL}`), /trusted-event guard/],
+      ["Safari enabled by default", "ci.yml", (s) => s.replace("type: boolean\n        default: false", "type: boolean\n        default: true"), /reviewed public workflow triggers/],
+      ["Safari GUI ownership omitted", "ci.yml", (s) => s.replace("stat -f '%Su' /dev/console", "printf runner"), /Safari GUI prerequisite/],
+      ["Safari GUI failure falls through", "ci.yml", (s) => s.replace('Safari needs the runner account\'s existing logged-in desktop session; no browser tests ran."\n            exit 1', 'Safari needs the runner account\'s existing logged-in desktop session; no browser tests ran."\n            true'), /Safari GUI prerequisite/],
+      ["Safari on PRs", "ci.yml", (s) => s.replace(`if: ${PRIVATE_SAFARI}`, `if: ${PRIVATE_PR}`), /trusted-event guard/],
+      ["Safari readiness diagnostics omitted", "ci.yml", (s) => s.replace("Safari readiness: runnerOwnsConsole=%s; runnerGuiDomainExists=%s", "readiness unavailable"), /Safari GUI prerequisite/],
+      ["Safari checksum omitted", "ci.yml", (s) => s.replace("shasum -a 256 --check --status", "true"), /safari-runtime/],
+      ["Safari execution omitted", "ci.yml", (s) => s.replace('bash tools/run-browser-correctness.sh safari "$SAFARI_VERSION"', "true"), /safari-runtime/],
+      ["Safari permissions enabled", "ci.yml", (s) => s + "\n          # safaridriver --enable\n", /Safari permissions/],
       ["Firefox on PRs", "ci.yml", (s) => s.replace(`  firefox-runtime:\n    name: Browser runtime (real Firefox, manual)\n    if: ${PRIVATE_MANUAL}`, `  firefox-runtime:\n    name: Browser runtime (real Firefox, manual)\n    if: ${PRIVATE_PR}`), /trusted-event guard/],
       ["Firefox checksum omitted", "ci.yml", (s) => s.replace("sha512sum --check --status", "true"), /firefox-runtime/],
       ["geckodriver checksum omitted", "ci.yml", (s) => s.replace("sha256sum --check --status", "true"), /firefox-runtime/],

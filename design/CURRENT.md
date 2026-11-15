@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-14 (Australia/Hobart).
+Updated: 2026-11-15 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -146,8 +146,15 @@ Mozilla binaries in the existing Docker correctness pool. Its 2026-11-13
 immutable candidate executed all 96 browser contracts with matching goldens;
 the exact head and raw job evidence are recorded separately. Physical iPad Safari
 27.0.1 also executed all 96 browser contracts on the 2026-11-14 candidate, with
-goldens matching fresh native references. These scoped results do not close
-Intel Mac, final-candidate or remote desktop Safari gates. [Evidence](96-browser-platform-acceptance.md).
+goldens matching fresh native references. These scoped results do not establish
+final-candidate acceptance. On 2026-11-15, the user explicitly deferred native
+Intel Mac execution (#39) and remote desktop Safari execution (#40) from #31.
+Both remain unverified, open follow-ups and future release gates; the delivered
+local Safari and physical-iPad results do not substitute for remote execution.
+A private explicit opt-in Safari dispatch uses the existing Apple Silicon pool
+and requires an already logged-in runner desktop. Two attempts failed that
+prerequisite before any browser tests ran; adding the route is not execution
+acceptance. No runner or browser permissions were changed. [Evidence](96-browser-platform-acceptance.md).
 
 Install the checkout-local hook with `just install-hooks`. Every push must pass
 the full unchanged-commit `just release-preflight` inventory through the normal

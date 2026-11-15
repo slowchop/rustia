@@ -352,8 +352,16 @@ registry installation, public release, or complete platform matrix is implied.
   and Safari runs in both feature modes and 120 native Windows correctness tests, including
   matching default/bare golden transcripts. Exact-runtime Linux arm64 shared-contract
   execution is also recorded there.
-  Intel Mac and mobile platforms still need execution evidence; broader final-candidate
-  and full-matrix acceptance remain required. Cross-compilation does not close those gates.
+  The 2026-11-13 candidate subsequently passed 128 shared contracts each on a
+  physical iPad and an ARM64 Android emulator; physical-iPad Safari passed 96
+  browser contracts on the 2026-11-14 candidate. These scoped runs are recorded
+  in design/96 and do not establish every mobile configuration or final-candidate
+  acceptance. On 2026-11-15, the user explicitly deferred native Intel Mac (#39)
+  and remote desktop Safari (#40) from development tracker #31. Both remain open,
+  unverified future release tasks. The Safari CI attempts failed their desktop
+  prerequisite before tests; they are not passing execution evidence. Broader
+  final-candidate and full-matrix acceptance remain required. Cross-compilation
+  does not close those gates.
 - Release preflight formats and strictly lints the separate fuzz workspace,
   then runs its seed tests plus deterministic 2,048-case frontend and VM
   mutation sweeps. The VM decoder covers every production opcode exactly once

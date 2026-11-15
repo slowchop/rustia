@@ -91,6 +91,64 @@ Firefox-only temporary home resolved the runner/container ownership mismatch.
 This establishes remote Firefox shared-contract execution for that exact head,
 not remote Safari, physical-iPad Safari, full language parity or a later release candidate.
 
+## Explicit remote Safari execution
+
+The private `ci.yml` has a manual Safari job on the existing generic macOS ARM64
+correctness pool. It is disabled by default and runs only for a private
+`workflow_dispatch` with the boolean `safari` input set. Ordinary PR/main checks
+and normal Windows/Firefox dispatches do not open Safari windows.
+
+The job first requires the runner account to own the logged-in console desktop
+and have a live GUI session, then checks the exact installed `safari_version`.
+The readiness step prints only console-ownership and GUI-domain-presence
+booleans, not account names. Missing prerequisites fail before browser tests
+rather than reporting an empty pass. It uses account-provisioned Rustup and checksum-pinned wasm-bindgen 0.2.126
+binaries in the job's temporary directory. No system package install, runner
+access change or Safari automation permission toggle is performed. Existing
+Safari automation permission is required. The normal browser runner executes
+both feature modes and rejects zero-test or missing-golden results.
+
+After independent review and the normal push guard, request the visible browser
+execution explicitly:
+
+```bash
+gh workflow run ci.yml --ref BRANCH -f safari=true -f safari_version=26.6.2
+```
+
+Use the exact version installed on the selected prepared runner. A failed GUI,
+version or automation prerequisite is an unfulfilled acceptance gate, not Safari
+execution evidence. Inspect actual eighteen-group test results and both goldens
+on the immutable head before accepting the remote Safari item in #40.
+
+### Intel Mac deferral — 2026-11-15
+
+The user has no Intel Mac and explicitly deferred that portion of #31. #39 stays
+open as the separate future native-Intel execution task. Existing Linux ARM64,
+Windows and Mac ARM64 evidence remains delivered. Native Intel is unverified;
+the Apple Silicon Safari path does not substitute for it. The full release
+matrix in design/00 retains Intel Mac as a future requirement.
+
+### Remote desktop Safari deferral — 2026-11-15
+
+The user also explicitly deferred remote desktop Safari from #31 and authorized
+merging #47 after independent review and passing applicable CI. #40 remains open
+for this unverified future release task. This is a scope deferral, not a Safari
+pass or a waiver of final-candidate/full-matrix release acceptance. #31 can close
+after #47's reviewed deferral and optional execution route are delivered; its
+other semantic and scoped platform requirements have evidence below.
+
+The [first manual attempt](https://github.com/slowchop/rustia/actions/runs/43640013060/job/132585299844)
+at `75850381ad36f77616a49e358652e1cd41c64da4` failed the desktop prerequisite.
+A [diagnostic follow-up](https://github.com/slowchop/rustia/actions/runs/43642722554/job/132593621934)
+at `283af87624b2c1cb84a5014898460379ceee0640` reported
+`runnerOwnsConsole=false; runnerGuiDomainExists=false` and failed the same guard.
+Both stopped before checkout/tool setup and executed zero Safari tests. These
+failures are retained as failed attempts, not accepted runtime evidence; they
+do not establish fleet-wide GUI readiness. No account names or private host
+configuration are recorded here. The guard remains unchanged, and no OS/browser
+permission or runner setup was changed. Do not dispatch `safari=true` again until
+a deliberately selected runner has the required desktop and automation setup.
+
 ## Observed evidence
 
 On 2026-10-23 (Australia/Hobart), the runtime at
