@@ -8,7 +8,8 @@ and the CLI supplies file/stdin/REPL execution. Selectable environment contracts
 one engine. The workspace is private and unpublished, with private self-hosted correctness CI under
 the explicit source profile. Public benchmark automation and publication remain paused.
 A separate private maintainer bridge supports only manually dispatched, reviewed
-exact-cohort runtime comparisons; its outputs stay private and do not authorize public
+exact-cohort runtime comparisons and the separately reviewed #33 harness-lifetime
+repeatability controls; its outputs stay private and do not authorize public
 performance claims. Local performance measurements remain prohibited. The pinned
 conformance corpus does not establish full Luau parity or release readiness.
 

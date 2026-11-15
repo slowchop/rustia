@@ -1,10 +1,11 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [HARNESS IMPLEMENTED — measurement paused; standalone split pending] (updated 2026-10-29).** Initially scoped by the `bench-scoping` agent (clone+read of
+> **Status: [HARNESS IMPLEMENTED — public automation paused; private cohorts available; standalone split pending] (updated 2026-11-15).** Initially scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
-> tooling) under dedicated ephemeral-Linux constraints. The active public-source profile runs hosted
-> correctness and artifact checks. New measurement and publication await a reviewed trusted private
-> benchmark bridge; committed results are historical. The owned-host procedures below describe the
+> tooling) under dedicated ephemeral-Linux constraints. The active public-source profile runs private self-hosted
+> correctness and artifact checks. Public measurement automation and publication remain paused.
+> A trusted private bridge admits reviewed exact-cohort runtime comparisons and the separately
+> reviewed #33 harness-lifetime repeatability controls; outputs remain private. Committed public results are historical. The owned-host procedures below describe the
 > retained private protocol. Cloud provisioning is retired. See [`CURRENT.md`](CURRENT.md) and
 > [benchmark operations](81-benchmark-operations.md#public-source-profile).
 
@@ -79,8 +80,9 @@ a conservative-envelope verdict that is retained with accepted evidence.
 ## Automation structure
 
 1. Active correctness pull-request/push CI validates code, history, generated artifacts, and claims without measuring.
-2. Measurement and publication are paused pending a reviewed trusted private bridge. No active workflow
-   invokes the retained per-commit, screening/calibration, matrix, A/B acceptance or memory lanes.
+2. Public measurement automation and publication remain paused. The private bridge admits only
+   reviewed manual runtime cohorts and the separately reviewed #33 harness-lifetime controls.
+   Source workflows do not invoke the retained measurement lanes.
 3. The retained private protocol confines timing to the attested owned host `ci-bench`, including the
    separate Lua 5.4 binary, wasm adapters and dispatch check. Nothing creates or pays for a cloud instance.
 4. Resumption must preserve the complete single-revision Linux matrix promotion gate. PR screening and

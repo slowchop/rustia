@@ -49,7 +49,9 @@ serves them.
   Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
   Its correctness workflows and public coordinator provide no timing authority.
 - A separate private maintainer bridge is available only for manually dispatched,
-  reviewed exact-cohort runtime comparisons on `ci-bench`. Keep its outputs private and
+  reviewed exact-cohort runtime comparisons on `ci-bench`. The #33 harness-lifetime
+  repeatability controls use a separately reviewed, immutable private protocol.
+  Keep all outputs private and
   review raw data independently before accepting a comparison. Bridge availability is
   not a performance result; private comparisons do not update public history or authorize public claims.
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
