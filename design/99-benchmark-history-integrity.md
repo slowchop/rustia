@@ -346,8 +346,18 @@ it runs no guest benchmark and asserts no elapsed-time threshold. Existing fresh
 state, warmup, equal-work and checksum contracts remain unchanged.
 
 Dropping guest state does not reset libc allocator history, force page return or
-control ASLR/cache placement. Process-level repeatability still needs a reviewed
-immutable private CI experiment; no local timing or new permission change is
-used as evidence. Retain every old sample, failed calibration and threshold.
-Any new measurement must identify the changed harness separately and must not
+control ASLR/cache placement. A separately reviewed immutable private CI protocol
+now evaluates the harness correction using counterbalanced old/fixed A/A blocks.
+Each block retains all five workloads and every sample. The diagnostic controller
+permits one timed attempt and preserves partial attempt files on failure; the
+historical controller and previously executed cohort records remain unchanged.
+Adding or successfully executing this route is not a stability or causal verdict.
+
+The source workflow profile remains correctness-only; the control route gives it
+no benchmark-runner access. No local timing or new permission change is used as
+evidence. Detailed raw results and their independent audits stay private, with
+#33 owning current investigation status. Retain every old sample, failed
+calibration and threshold. Identify the changed harness separately; do not
 silently replace old protocol/results or claim that the old outlier is fixed.
+The scoped controls do not adopt calibration, publish performance claims or
+renew an earlier privileged diagnostic grant.

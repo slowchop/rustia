@@ -11,8 +11,9 @@ The public-source tree runs correctness and artifact validation on ordinary priv
 runners. Public repositories and fork PRs cannot use these persistent pools,
 and there is no hosted fallback. Public per-commit/history measurement, benchmark-data publication, and
 landscape refresh remain paused. A separate private maintainer bridge is
-available for manually dispatched, reviewed exact-cohort runtime comparisons
-only. Those comparisons stay private, do not update public history, and do not
+available for manually dispatched, reviewed exact-cohort runtime comparisons.
+The #33 harness-lifetime repeatability controls use a separately reviewed,
+immutable private protocol. Both stay private, do not update public history, and do not
 authorize public performance claims. The committed benchmark records remain
 historical data; they do not establish current runner authority or performance
 stability. Bridge availability does not accept a performance result. No public

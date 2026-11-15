@@ -164,8 +164,9 @@ defines that inventory; a repaired macOS bootstrap still requires actual native 
 **Never run performance measurements locally.** The source correctness profile gives
 correctness jobs no timing authority. Public per-commit/history automation,
 landscape refresh and publication remain **paused**. A separate private maintainer
-bridge admits only reviewed, manually dispatched exact-cohort runtime comparisons
-on `ci-bench`. Independently review raw data; keep outputs private. Bridge
+bridge admits reviewed, manually dispatched exact-cohort runtime comparisons
+on `ci-bench`, plus the separately reviewed immutable #33 harness-lifetime
+repeatability controls. Independently review raw data; keep outputs private. Bridge
 availability closes no measurement gate and authorizes no public performance claim.
 [Selected profile](public-source-profile.json), [operations](81-benchmark-operations.md).
 
@@ -179,8 +180,10 @@ closure-process outlier. Replays and the approved counter capture did not identi
 its cause; prior security policy was restored and verified. The harness now destroys its
 cold-start probe before preparing the steady-state workload, removing a demonstrated
 live-object overlap. A destructor-order regression covers fixed-N and calibrated paths.
-This correction has no measured repeatability result yet and does not establish the
-historical outlier's cause. Shared-host capacity pressure is not proven causality. Further privileged diagnostics require separate
+A separately reviewed private A/A protocol evaluates the changed harness with
+counterbalanced old/fixed blocks, one timed attempt per pass and retained partial
+attempt files. Its observations remain private and do not establish the historical
+outlier's cause, accepted calibration or a performance claim. Shared-host capacity pressure is not proven causality. Further privileged diagnostics require separate
 approval. Preserve observations and thresholds. [99 — History integrity](99-benchmark-history-integrity.md).
 
 ## Development backlog
