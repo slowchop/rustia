@@ -176,8 +176,11 @@ remain per workload/target/protocol and tied to retained history.
 The graph publication-order fix and evidence-retention changes are delivered.
 Identical-binary repeatability remains **unresolved**, including the roughly 27%
 closure-process outlier. Replays and the approved counter capture did not identify
-its cause; prior security policy was restored and verified. Shared-host capacity
-pressure is not proven causality. Further privileged diagnostics require separate
+its cause; prior security policy was restored and verified. The harness now destroys its
+cold-start probe before preparing the steady-state workload, removing a demonstrated
+live-object overlap. A destructor-order regression covers fixed-N and calibrated paths.
+This correction has no measured repeatability result yet and does not establish the
+historical outlier's cause. Shared-host capacity pressure is not proven causality. Further privileged diagnostics require separate
 approval. Preserve observations and thresholds. [99 — History integrity](99-benchmark-history-integrity.md).
 
 ## Development backlog

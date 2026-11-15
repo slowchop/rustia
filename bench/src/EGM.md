@@ -14,6 +14,7 @@ This directory contains the native Rust benchmark executable. The Cargo target a
 ## Invariants
 
 - `ci-bench` alone is authorized to produce timing evidence; local builds are correctness checks only ([repository policy](../../AGENTS.md#benchmark-policy)).
+- Each cold-start probe is destroyed before the independent steady-state preparation/warmup/timing; the synthetic exclusive-resource regression covers fixed-N and calibrated paths. Destruction is outside the measured regions and does not promise process-allocator reset.
 - The suite compares per-workload results and validates checksums; the design calls for a fresh prepared engine/workload state before calibration and each recorded repetition ([bench design](../../design/80-bench-suite.md)).
 - Builds and correctness checks do not provide performance evidence; only `ci-bench` does ([repository policy](../../AGENTS.md#benchmark-policy)).
 

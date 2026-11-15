@@ -65,7 +65,11 @@ The stable JSONL record deliberately remains a min/median summary. An optional
 commit, target, workload, selected `n`, `n_selection` (`calibrated` or `fixed`), checksum, and summaries for
 local analysis. Calibration probes and
 recorded repetitions each create fresh prepared engine/workload state; a single untimed warmup immediately
-precedes the one timed invocation. Baseline/candidate comparisons should retain separate sidecars and alternate
+precedes the one timed invocation. Each repetition's separate cold-start probe is destroyed before the
+steady-state engine is constructed, warmed or timed; only one prepared workload remains live at a time.
+Destruction is outside both timing regions. This releases the probe's objects, not necessarily allocator
+pages or process RSS, and does not reset the process allocator between repetitions.
+Baseline/candidate comparisons should retain separate sidecars and alternate
 run order (ABBA/BAAB). `--fixed-n` bypasses calibration for exact equal-work comparisons. Sidecars are evidence
 for analysis, not a new public-history schema. The dependency-free
 `analyze-fixed-samples.js` validates fixed-work identity and summaries, then
