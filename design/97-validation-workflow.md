@@ -85,6 +85,9 @@ container. The optional Firefox job does not replace the required WebKit gate. A
 private Safari job requires explicit `safari=true` dispatch, an exact installed
 browser version and an already logged-in runner desktop. It checks prerequisites
 without changing browser/OS permissions and is skipped by routine PR/main CI.
+On 2026-11-15 the user explicitly deferred remote Safari acceptance from #31
+to the open follow-up #40. The failed desktop-prerequisite attempts remain
+failures; the opt-in route and this deferral do not claim executed Safari tests.
 The optional real-browser jobs do not weaken the required aggregate gate. Public visibility needs a separate isolated
 execution plan. No hosted fallback or benchmark-runner access is added.
 This does not authorize a package release or replace platform release gates.

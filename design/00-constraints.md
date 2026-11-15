@@ -45,16 +45,20 @@ The full matrix below remains the public-release contract.
 |---|---|
 | macOS **arm64** (Apple Silicon — dev machine) ✅ | **V8** — Chrome/Edge/Node/Deno ✅ measured |
 | macOS **x86_64** (Intel Mac) — build ✅ / runtime TODO | **SpiderMonkey** — Firefox-family shell ✅ measured; Firefox browser golden passed on macOS arm64 |
-| Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari golden passed on macOS arm64; iOS still TODO |
+| Linux **x86_64** ✅ (Spike C + dedicated matrices) | **JavaScriptCore family** — Bun ✅ measured; real Safari golden passed on macOS arm64 and physical iPad |
 | Linux **arm64** — build ✅ / shared runtime contracts ✅ | |
 | Windows **x86_64** (msvc) — build ✅ / shared runtime contracts ✅ | |
-| iOS **arm64** + Android **arm64** — build ✅ / runtime TODO | |
+| iOS **arm64** + Android **arm64** — build ✅ / scoped runtime contracts ✅ (physical iPad; Android emulator) | |
 
 On 2026-11-15, the user explicitly deferred native Intel Mac execution from the
 active #31 development tracker because no Intel hardware is available. #39
 retains the unverified native Intel acceptance task for later; Apple Silicon
 execution and cross-compilation do not satisfy it. This deferral does not remove
-the Intel row from the full release matrix above.
+the Intel row from the full release matrix above. The user also explicitly
+deferred remote desktop Safari execution from #31 on that date; #40 retains it
+as an open, unverified future release requirement. Local Safari, physical-iPad
+Safari and remote Firefox evidence do not satisfy remote desktop Safari.
+Final-candidate and full-matrix release acceptance remain required.
 
 Measured so far: the triple x86_64-linux + aarch64-mac + wasm32-in-V8 is bit-identical, and retained wasm
 portability evidence covers V8, JavaScriptCore-family, and SpiderMonkey shells. The remaining native arches

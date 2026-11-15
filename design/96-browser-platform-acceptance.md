@@ -126,8 +126,28 @@ The user has no Intel Mac and explicitly deferred that portion of #31. #39 stays
 open as the separate future native-Intel execution task. Existing Linux ARM64,
 Windows and Mac ARM64 evidence remains delivered. Native Intel is unverified;
 the Apple Silicon Safari path does not substitute for it. The full release
-matrix in design/00 retains Intel Mac as a future requirement. #31 can close
-once its remaining non-deferred remote Safari acceptance is actually met.
+matrix in design/00 retains Intel Mac as a future requirement.
+
+### Remote desktop Safari deferral — 2026-11-15
+
+The user also explicitly deferred remote desktop Safari from #31 and authorized
+merging #47 after independent review and passing applicable CI. #40 remains open
+for this unverified future release task. This is a scope deferral, not a Safari
+pass or a waiver of final-candidate/full-matrix release acceptance. #31 can close
+after #47's reviewed deferral and optional execution route are delivered; its
+other semantic and scoped platform requirements have evidence below.
+
+The [first manual attempt](https://github.com/slowchop/rustia/actions/runs/43640013060/job/132585299844)
+at `75850381ad36f77616a49e358652e1cd41c64da4` failed the desktop prerequisite.
+A [diagnostic follow-up](https://github.com/slowchop/rustia/actions/runs/43642722554/job/132593621934)
+at `283af87624b2c1cb84a5014898460379ceee0640` reported
+`runnerOwnsConsole=false; runnerGuiDomainExists=false` and failed the same guard.
+Both stopped before checkout/tool setup and executed zero Safari tests. These
+failures are retained as failed attempts, not accepted runtime evidence; they
+do not establish fleet-wide GUI readiness. No account names or private host
+configuration are recorded here. The guard remains unchanged, and no OS/browser
+permission or runner setup was changed. Do not dispatch `safari=true` again until
+a deliberately selected runner has the required desktop and automation setup.
 
 ## Observed evidence
 

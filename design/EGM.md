@@ -12,7 +12,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Memory benchmark protocol v2, historical v1 compatibility and pending measured acceptance: [57-memory-benchmarking.md](./57-memory-benchmarking.md).
 - Error and fuzzing contract: [82-error-behaviour-fuzzing.md](./82-error-behaviour-fuzzing.md).
 - Numeric-index behavior and retained performance experiments: [95-numeric-index-contract.md](./95-numeric-index-contract.md).
-- Executed browser/native platform evidence and remaining gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
+- Executed browser/native platform evidence, failed Safari readiness attempts, explicit Intel/remote-Safari deferrals and remaining release gates: [96-browser-platform-acceptance.md](./96-browser-platform-acceptance.md).
 - [mobile-safari-2026-11-14.json](./mobile-safari-2026-11-14.json) is the sanitized dated physical-iPad Safari execution receipt, with per-suite input hashes/counts and golden comparison; raw device/peer identifiers remain private.
 - Staged validation and the complete pre-push inventory: [97-validation-workflow.md](./97-validation-workflow.md).
 - Hosted executor-accounting path counts are a default-off CI diagnostic, described
