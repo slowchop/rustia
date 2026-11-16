@@ -150,13 +150,16 @@ type ClockCallback = dyn FnMut() -> f64 + Send;
 #[cfg(not(feature = "send"))]
 type EntropyCallback = dyn FnMut() -> u64;
 #[cfg(feature = "send")]
-type EntropyCallback = dyn FnMut() -> u64 + Send;
+type EntropyCallback = dyn Fn() -> u64 + Send + Sync;
 #[cfg(not(feature = "send"))]
 type ResolverCallback = dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule>;
 #[cfg(feature = "send")]
 type ResolverCallback = dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule> + Send;
 type SharedStdoutSink = Shared<ServiceCell<StdoutCallback>>;
+#[cfg(not(feature = "send"))]
 type SharedEntropyProvider = Shared<ServiceCell<EntropyCallback>>;
+#[cfg(feature = "send")]
+type SharedEntropyProvider = Shared<EntropyCallback>;
 type SharedModuleResolver = Shared<ServiceCell<ResolverCallback>>;
 
 /// A host-resolved module with its canonical cache identity and compiled body.
@@ -359,9 +362,9 @@ impl EntropyProvider {
     }
 
     #[cfg(feature = "send")]
-    pub fn new(entropy: impl FnMut() -> u64 + Send + 'static, deterministic: bool) -> Self {
+    pub fn new(entropy: impl Fn() -> u64 + Send + Sync + 'static, deterministic: bool) -> Self {
         Self {
-            entropy: Shared::new(ServiceCell::new(entropy)),
+            entropy: Shared::new(entropy),
             deterministic,
         }
     }
@@ -371,8 +374,14 @@ impl EntropyProvider {
         self.deterministic
     }
 
+    #[cfg(not(feature = "send"))]
     fn read(&self) -> Result<u64> {
         Ok((borrow_service(&self.entropy, "entropy")?)())
+    }
+
+    #[cfg(feature = "send")]
+    fn read(&self) -> Result<u64> {
+        Ok((self.entropy)())
     }
 }
 
@@ -588,6 +597,7 @@ pub struct Vm {
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
     running_coroutine_stack_bases: Vec<usize>,
+    running_coroutine_active_frame_bases: Vec<usize>,
     active_coroutine_frames: Vec<Vec<CoroutineFrame>>,
     yield_collectors: Vec<Vec<Vec<Value>>>,
     last_error_traceback: Option<TracebackSnapshot>,
@@ -2632,6 +2642,7 @@ impl Vm {
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
             running_coroutine_stack_bases: Vec::new(),
+            running_coroutine_active_frame_bases: Vec::new(),
             active_coroutine_frames: Vec::new(),
             yield_collectors: Vec::new(),
             last_error_traceback: None,
@@ -2870,6 +2881,7 @@ impl Vm {
         if !self.call_stack.is_empty()
             || !self.running_coroutines.is_empty()
             || !self.running_coroutine_stack_bases.is_empty()
+            || !self.running_coroutine_active_frame_bases.is_empty()
             || !self.active_coroutine_frames.is_empty()
             || !self.yield_collectors.is_empty()
             || !self.guest_transactions.is_empty()
@@ -13699,6 +13711,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.mark_control_memory_dirty();
         let driver_stack_base = self.call_stack.len();
         let flow = self.call_value_with_site_resumable(
@@ -13712,6 +13726,8 @@ impl Vm {
         let flow = self.drive_deferred_bytecode_flow(flow, driver_stack_base, fuel);
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -13735,6 +13751,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
@@ -13742,6 +13760,8 @@ impl Vm {
         debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -13765,6 +13785,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.propagate_coroutine_error(frames, error, fuel);
@@ -13772,6 +13794,8 @@ impl Vm {
         debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -14727,7 +14751,13 @@ impl Vm {
         // ordinary call stack while the effect runs. `setfenv(0, ...)` still
         // applies to the whole running thread, so update those saved callers as
         // well; otherwise resuming one restores the pre-call environment.
-        for frames in &mut self.active_coroutine_frames {
+        let active_base = self
+            .running_coroutine_active_frame_bases
+            .last()
+            .copied()
+            .unwrap_or(0)
+            .min(self.active_coroutine_frames.len());
+        for frames in &mut self.active_coroutine_frames[active_base..] {
             for frame in frames {
                 if let CoroutineFrame::Bytecode(frame) = frame {
                     frame.0[0].thread_environment = environment;
@@ -14790,7 +14820,32 @@ impl Vm {
         })?;
         let frame = &mut self.call_stack[index];
         frame.environment = environment;
-        Ok(frame.function)
+        let program = frame.program;
+        let function = frame.function;
+        // A transferred call keeps a lightweight logical call header on the
+        // ordinary stack while the complete bytecode frame lives in the
+        // current thread's active-frame slice. Keep both copies coherent so
+        // resuming the caller cannot restore the old environment.
+        if let Some(program) = program {
+            let active_base = self
+                .running_coroutine_active_frame_bases
+                .last()
+                .copied()
+                .unwrap_or(0)
+                .min(self.active_coroutine_frames.len());
+            for frames in &mut self.active_coroutine_frames[active_base..] {
+                for saved in frames {
+                    if let CoroutineFrame::Bytecode(saved) = saved {
+                        if saved.program_id == program
+                            && option_values_luau_equal(saved.current_function, function)
+                        {
+                            saved.environment = environment;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(function)
     }
 
     fn native_setmetatable(&mut self, args: &[Value]) -> Result<Value> {
@@ -15054,6 +15109,7 @@ impl Vm {
         self.call_stack.shrink_to_fit();
         self.running_coroutines.shrink_to_fit();
         self.running_coroutine_stack_bases.shrink_to_fit();
+        self.running_coroutine_active_frame_bases.shrink_to_fit();
         for frames in &mut self.active_coroutine_frames {
             frames.shrink_to_fit();
         }
@@ -15095,6 +15151,7 @@ impl Vm {
     fn prune_unreachable_coroutines(&mut self) {
         debug_assert!(self.running_coroutines.is_empty());
         debug_assert!(self.running_coroutine_stack_bases.is_empty());
+        debug_assert!(self.running_coroutine_active_frame_bases.is_empty());
         debug_assert!(self.active_coroutine_frames.is_empty());
         let before = self.coroutines.len();
         let heap = &mut self.heap;
@@ -15108,6 +15165,7 @@ impl Vm {
     fn prune_unreachable_coroutines_if_idle(&mut self) {
         if self.running_coroutines.is_empty()
             && self.running_coroutine_stack_bases.is_empty()
+            && self.running_coroutine_active_frame_bases.is_empty()
             && self.active_coroutine_frames.is_empty()
         {
             self.prune_unreachable_coroutines();
@@ -23328,6 +23386,7 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     }
     usage.add_vec(&vm.running_coroutines);
     usage.add_vec(&vm.running_coroutine_stack_bases);
+    usage.add_vec(&vm.running_coroutine_active_frame_bases);
     usage.add_vec(&vm.active_coroutine_frames);
     for frames in &vm.active_coroutine_frames {
         usage.add_vec(frames);
@@ -31947,6 +32006,7 @@ mod inline_cache_tests {
         vm.call_stack.reserve(4_096);
         vm.running_coroutines.reserve(4_096);
         vm.running_coroutine_stack_bases.reserve(4_096);
+        vm.running_coroutine_active_frame_bases.reserve(4_096);
         vm.active_coroutine_frames.reserve(4_096);
         vm.yield_collectors.reserve(4_096);
         assert!(vm.call_stack.capacity() >= 4_096);
@@ -31956,6 +32016,7 @@ mod inline_cache_tests {
         assert_eq!(vm.call_stack.capacity(), 0);
         assert_eq!(vm.running_coroutines.capacity(), 0);
         assert_eq!(vm.running_coroutine_stack_bases.capacity(), 0);
+        assert_eq!(vm.running_coroutine_active_frame_bases.capacity(), 0);
         assert_eq!(vm.active_coroutine_frames.capacity(), 0);
         assert_eq!(vm.yield_collectors.capacity(), 0);
     }

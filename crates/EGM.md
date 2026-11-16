@@ -20,7 +20,7 @@ The workspace packages and their boundaries are documented in their package maps
 
 ## Invariants
 
-- The public `rustia` facade is the application boundary; compiler and VM controls are lower-level 0.x contracts. `rustia-vm/send`, retained-entry construction, capture inspection and scoped re-entry are consumer-proven lower-level seams, not facade-wide guarantees.
+- The public `rustia` facade is the application boundary; compiler and VM controls are lower-level 0.x contracts. `rustia-vm/send`, retained-entry construction, capture inspection and scoped re-entry are consumer-proven lower-level seams, not facade-wide guarantees. Do not combine the facade and `rustia-vm/send` in one feature-unified dependency graph until issue #50 adds facade compatibility.
 - [`design/CURRENT.md`](../design/CURRENT.md) is authoritative when staged design snapshots differ from the current implementation.
 - Deterministic execution is an explicitly selected contract. `standard()` and `live()` retain the general embedding surface, with policies and defaults selected by profile.
 - Luau 0.709 is the pinned compatibility oracle. Passing corpus rows do not imply full language parity.

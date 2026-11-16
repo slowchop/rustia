@@ -160,7 +160,10 @@ Applications configure providers through `RustiaBuilder` and read facade-owned
 `Settings`; see [75](75-embedded-api.md#application-api-boundary).
 
 `VmSettings` keeps its load-bearing `Clone + Debug` derives (VM callers clone settings; VM tests
-clone). Cloning settings shares providers; documented. `ServiceClock` and any new public enum get
+clone). Cloning settings shares providers; documented. In lower-level `rustia-vm/send`, the
+construction-only entropy provider is `Send + Sync`, so independent VMs may read one cloned
+provider concurrently; mutable runtime service re-entry remains a structured nonblocking error.
+`ServiceClock` and any new public enum get
 `#[non_exhaustive]` per facade convention.
 
 **Explicitly cut from this slice** (KISS review; may return when a real caller exists):

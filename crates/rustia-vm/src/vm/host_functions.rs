@@ -171,6 +171,7 @@ impl Vm {
         if !self.call_stack.is_empty()
             || !self.running_coroutines.is_empty()
             || !self.running_coroutine_stack_bases.is_empty()
+            || !self.running_coroutine_active_frame_bases.is_empty()
             || !self.active_coroutine_frames.is_empty()
             || !self.yield_collectors.is_empty()
             || !self.guest_transactions.is_empty()

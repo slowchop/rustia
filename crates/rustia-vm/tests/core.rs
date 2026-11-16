@@ -1800,6 +1800,44 @@ fn entropy_provider_selects_the_initial_random_sequence() {
     });
 }
 
+#[cfg(feature = "send")]
+#[test]
+fn cloned_entropy_provider_supports_concurrent_vm_construction() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    let next_seed = Arc::new(AtomicU64::new(40));
+    let settings = VmSettings {
+        services: VmServices {
+            entropy: Some(EntropyProvider::new(
+                {
+                    let next_seed = Arc::clone(&next_seed);
+                    move || next_seed.fetch_add(1, Ordering::SeqCst)
+                },
+                true,
+            )),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let start = Arc::new(Barrier::new(3));
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            let settings = settings.clone();
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                Vm::with_settings(Profile::ReproducibleStandard, settings)
+            })
+        })
+        .collect();
+    start.wait();
+    for worker in workers {
+        worker.join().expect("VM construction must not panic");
+    }
+    assert_eq!(next_seed.load(Ordering::SeqCst), 42);
+}
+
 #[test]
 fn deterministic_sim_silently_drops_nondeterministic_entropy() {
     let settings = VmSettings {

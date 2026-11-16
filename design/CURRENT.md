@@ -84,8 +84,10 @@ saved-caller driver releases bytecode frames before synchronous host dispatch
 and restores their diagnostic context, roots and continuations afterward.
 These are low-level `rustia-vm` contracts used by the Luvy integration. The
 application facade remains thread-affine and does not yet expose this complete
-surface ergonomically. Broader deep-reentry and facade acceptance therefore
-remain open in [issue #50](https://github.com/slowchop/rustia/issues/50).
+surface ergonomically. A dependency graph that also enables `rustia-vm/send`
+for the facade is not yet supported; Luvy uses the lower-level VM/compiler/parser
+boundary directly. Broader deep-reentry and facade acceptance therefore remain
+open in [issue #50](https://github.com/slowchop/rustia/issues/50).
 
 ## Implemented contracts
 

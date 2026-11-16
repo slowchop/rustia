@@ -440,6 +440,7 @@ fn deferred_protected_module_suspension_rebases_its_error_handler_traceback() {
         }));
     vm.running_coroutines.push(owner);
     vm.running_coroutine_stack_bases.push(0);
+    vm.running_coroutine_active_frame_bases.push(0);
     let VmFlow::Yield(suspension) = drive_module(&mut vm, request).unwrap() else {
         panic!("module transfer should expose a genuine coroutine yield");
     };
@@ -450,6 +451,7 @@ fn deferred_protected_module_suspension_rebases_its_error_handler_traceback() {
     assert_eq!(vm.module_cohorts[&0].loading.len(), 1);
     vm.release_require_frames(&suspension.frames);
     vm.running_coroutine_stack_bases.pop();
+    vm.running_coroutine_active_frame_bases.pop();
     vm.running_coroutines.pop();
     assert!(vm.module_cohorts[&0].loading.is_empty());
     assert!(vm.call_stack.is_empty());
