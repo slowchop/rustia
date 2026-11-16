@@ -89,6 +89,18 @@ consumer-proven slice, not a claim that the public facade now has mlua-style
 `Scope`, async callbacks or unrestricted deep re-entry. Those ergonomic and
 acceptance decisions remain open under issue #50.
 
+Saved native completion frames are synchronous boundaries, not resumable Rust
+builtin frames. Their callbacks report `coroutine.isyieldable() == false` and an
+attempted yield raises the ordinary pinned Luau boundary error immediately, so
+an inner protected call can catch it. Borrowed/direct native callback execution
+uses the same boundary. Embedders that need suspension must use the explicit
+guest coroutine resume/yield path rather than yielding through a synchronous
+native callback.
+
+This restriction is coroutine-local. A synchronous callback may resume a child
+coroutine, and that child retains its own normal yieldability; Rustia restores
+the parent's non-yieldable boundary when control returns.
+
 ## Application API boundary
 
 The `rustia` facade owns its profiles, capabilities, settings, memory samples,

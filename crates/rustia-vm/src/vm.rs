@@ -8806,7 +8806,13 @@ impl Vm {
                 expected: "function",
             }));
         }
-        let results = self.call_value(program, method, &[value], depth.saturating_add(1), fuel)?;
+        let results = self.call_value_non_yieldable(
+            program,
+            method,
+            &[value],
+            depth.saturating_add(1),
+            fuel,
+        )?;
         let value = first_result_or_nil(results);
         self.string_value_bytes(value)?.ok_or_else(|| {
             Error::new(ErrorKind::RuntimeError {
@@ -13368,6 +13374,9 @@ impl Vm {
         args: &[Value],
         call_site: Option<ErrorLocation>,
     ) -> Result<Vec<Value>> {
+        if self.non_yieldable_depth != 0 {
+            return Err(non_yieldable_boundary_error());
+        }
         self.record_running_coroutine_yield_snapshot(call_site);
         let Some(collector) = self.yield_collectors.last_mut() else {
             if self.settings.enable_conformance_top_level_yield {
@@ -13385,6 +13394,9 @@ impl Vm {
         args: &[Value],
         call_site: Option<ErrorLocation>,
     ) -> VmFlowResult<Vec<Value>> {
+        if self.non_yieldable_depth != 0 {
+            return Err(non_yieldable_boundary_error());
+        }
         self.record_running_coroutine_yield_snapshot(call_site);
         if self.running_coroutines.last().is_none() {
             if self.settings.enable_conformance_top_level_yield {
@@ -13708,6 +13720,7 @@ impl Vm {
         depth: usize,
         fuel: &mut Execution<'_>,
     ) -> VmFlowResult<Vec<Value>> {
+        let parent_non_yieldable_depth = std::mem::take(&mut self.non_yieldable_depth);
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
@@ -13730,6 +13743,8 @@ impl Vm {
         debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        debug_assert_eq!(self.non_yieldable_depth, 0);
+        self.non_yieldable_depth = parent_non_yieldable_depth;
         self.mark_control_memory_dirty();
         flow.map(into_vec_flow)
     }
@@ -13748,6 +13763,7 @@ impl Vm {
                 return Err(error);
             }
         };
+        let parent_non_yieldable_depth = std::mem::take(&mut self.non_yieldable_depth);
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
@@ -13764,6 +13780,8 @@ impl Vm {
         debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        debug_assert_eq!(self.non_yieldable_depth, 0);
+        self.non_yieldable_depth = parent_non_yieldable_depth;
         self.mark_control_memory_dirty();
         flow
     }
@@ -13782,6 +13800,7 @@ impl Vm {
                 return Err(error);
             }
         };
+        let parent_non_yieldable_depth = std::mem::take(&mut self.non_yieldable_depth);
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
@@ -13798,6 +13817,8 @@ impl Vm {
         debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
+        debug_assert_eq!(self.non_yieldable_depth, 0);
+        self.non_yieldable_depth = parent_non_yieldable_depth;
         self.mark_control_memory_dirty();
         flow
     }
@@ -18577,7 +18598,7 @@ impl Vm {
                 TableNext::End => return Ok(Value::nil()),
                 TableNext::InvalidKey => return Err(Error::new(ErrorKind::InvalidKeyToNext)),
             };
-            let result = first_result_or_nil(self.call_value(
+            let result = first_result_or_nil(self.call_value_non_yieldable(
                 program,
                 callback,
                 &[next_key, value],
@@ -18603,7 +18624,7 @@ impl Vm {
         for index in 1..=len {
             let key = Value::number(index as f64);
             let value = self.raw_table_get(table, key)?;
-            let result = first_result_or_nil(self.call_value(
+            let result = first_result_or_nil(self.call_value_non_yieldable(
                 program,
                 callback,
                 &[key, value],

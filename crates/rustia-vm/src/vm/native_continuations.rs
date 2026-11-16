@@ -60,9 +60,6 @@ impl NativeFrameStorage {
     fn into_frame(mut self) -> NativeFrame {
         self.0.pop().expect("one native completion")
     }
-    pub(super) fn non_yieldable(&self) -> bool {
-        matches!(self.frame().state, NativeCompletion::GSub(_))
-    }
     pub(super) fn roots(&self, roots: &mut Vec<Value>) {
         if let NativeCompletion::Foreach(state) = &self.frame().state {
             roots.extend_from_slice(&[Value::table(state.table), state.callback]);

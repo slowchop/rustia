@@ -14,7 +14,7 @@
     "canonical_facts": {
       "luau_target": "Luau 0.709, standalone surface",
       "conformance": {
-        "fixtures": 733,
+        "fixtures": 734,
         "refs": 524,
         "pending": 0
       },

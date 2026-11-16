@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-16 (Australia/Hobart).
+Updated: 2026-11-17 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -89,6 +89,16 @@ for the facade is not yet supported; Luvy uses the lower-level VM/compiler/parse
 boundary directly. Broader deep-reentry and facade acceptance therefore remain
 open in [issue #50](https://github.com/slowchop/rustia/issues/50).
 
+Synchronous native callbacks now use one explicit non-yieldable boundary in
+both saved-caller and borrowed/direct execution. `tostring`, function-based
+`string.gsub`, `table.foreach` and `table.foreachi` callbacks report
+`coroutine.isyieldable() == false`; `coroutine.yield` raises the pinned Luau
+boundary error at the attempted yield, so an inner `pcall`/`xpcall` can catch it.
+The boundary belongs to the callback's coroutine: a child coroutine resumed by
+that callback remains independently yieldable, and the parent boundary is
+restored when the child returns. This does not make arbitrary Rust/native frames
+resumable.
+
 ## Implemented contracts
 
 | Area | Current behavior and detailed contract |
@@ -146,8 +156,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **733 fixtures**, **524 refs**, **0 pending-oracle**
-and **0 pending-impl**: 715 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **734 fixtures**, **524 refs**, **0 pending-oracle**
+and **0 pending-impl**: 716 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and
