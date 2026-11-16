@@ -2,12 +2,26 @@
 
 mod builtin_arguments;
 mod bytecode_calls;
+mod captures;
 mod expanded_calls;
 mod host_functions;
 mod host_objects;
+mod implicit_operations;
+mod implicit_operators;
+mod import_continuations;
+use implicit_operations::{ImplicitResult, ImplicitStep};
+use import_continuations::ImportState;
+#[cfg(test)]
+mod native_completion_tests;
+mod native_continuations;
+use native_continuations::NativeFrameStorage;
+mod program_entry;
 mod require;
+mod scoped_host;
+pub use captures::{CaptureStorage, FunctionInspection, InspectedFunctionKind, RetainedCapture};
 use host_objects::HostObjectTypeBinding;
 use require::{try_clone_module_load, try_clone_module_loads, ModuleLoad, SuspendedRequireFrame};
+pub use scoped_host::VmHostCall;
 
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
@@ -31,18 +45,17 @@ use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, Hot
 #[cfg(test)]
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{binary, canonicalize_number, NumericOp};
+use crate::ownership::{borrow_service, RegistryCell, ServiceCell, Shared, Weak};
 use crate::profile::{GuestSurface, Profile};
 use crate::register_blocks::RegisterBlockPlan;
 use crate::tape::{FunctionTape, TapeComparison, TapeOp};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 const LUAU_TABLE_MAX_SIZE: usize = 1 << 26;
@@ -126,10 +139,28 @@ pub type LoadStringCompiler = fn(
     profile: Profile,
 ) -> std::result::Result<Program, String>;
 
-type SharedStdoutSink = Rc<RefCell<dyn FnMut(&str)>>;
-type SharedEntropyProvider = Rc<RefCell<dyn FnMut() -> u64>>;
-type SharedModuleResolver =
-    Rc<RefCell<dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule>>>;
+#[cfg(not(feature = "send"))]
+type StdoutCallback = dyn FnMut(&str);
+#[cfg(feature = "send")]
+type StdoutCallback = dyn FnMut(&str) + Send;
+#[cfg(not(feature = "send"))]
+type ClockCallback = dyn FnMut() -> f64;
+#[cfg(feature = "send")]
+type ClockCallback = dyn FnMut() -> f64 + Send;
+#[cfg(not(feature = "send"))]
+type EntropyCallback = dyn FnMut() -> u64;
+#[cfg(feature = "send")]
+type EntropyCallback = dyn Fn() -> u64 + Send + Sync;
+#[cfg(not(feature = "send"))]
+type ResolverCallback = dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule>;
+#[cfg(feature = "send")]
+type ResolverCallback = dyn FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule> + Send;
+type SharedStdoutSink = Shared<ServiceCell<StdoutCallback>>;
+#[cfg(not(feature = "send"))]
+type SharedEntropyProvider = Shared<ServiceCell<EntropyCallback>>;
+#[cfg(feature = "send")]
+type SharedEntropyProvider = Shared<EntropyCallback>;
+type SharedModuleResolver = Shared<ServiceCell<ResolverCallback>>;
 
 /// A host-resolved module with its canonical cache identity and compiled body.
 #[derive(Clone, Debug)]
@@ -160,6 +191,7 @@ pub struct ModuleResolver {
 }
 
 impl ModuleResolver {
+    #[cfg(not(feature = "send"))]
     pub fn new(
         mut resolver: impl FnMut(&str, Option<&str>) -> Result<ResolvedModule> + 'static,
         deterministic: bool,
@@ -170,14 +202,39 @@ impl ModuleResolver {
         )
     }
 
+    #[cfg(feature = "send")]
+    pub fn new(
+        mut resolver: impl FnMut(&str, Option<&str>) -> Result<ResolvedModule> + Send + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self::new_with_profile(
+            move |requested, referrer, _profile| resolver(requested, referrer),
+            deterministic,
+        )
+    }
+
     /// Creates a resolver that can compile source according to the requesting
     /// VM's execution profile.
+    #[cfg(not(feature = "send"))]
     pub fn new_with_profile(
         resolver: impl FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule> + 'static,
         deterministic: bool,
     ) -> Self {
         Self {
-            resolver: Rc::new(RefCell::new(resolver)),
+            resolver: Shared::new(ServiceCell::new(resolver)),
+            deterministic,
+        }
+    }
+
+    /// Creates a transferable resolver that can compile source according to
+    /// the requesting VM's execution profile.
+    #[cfg(feature = "send")]
+    pub fn new_with_profile(
+        resolver: impl FnMut(&str, Option<&str>, Profile) -> Result<ResolvedModule> + Send + 'static,
+        deterministic: bool,
+    ) -> Self {
+        Self {
+            resolver: Shared::new(ServiceCell::new(resolver)),
             deterministic,
         }
     }
@@ -193,7 +250,9 @@ impl ModuleResolver {
         referrer: Option<&str>,
         profile: Profile,
     ) -> Result<ResolvedModule> {
-        (self.resolver.borrow_mut())(requested, referrer, profile)
+        (borrow_service(&self.resolver, MODULE_RESOLVER_SERVICE_NAME)?)(
+            requested, referrer, profile,
+        )
     }
 }
 
@@ -213,14 +272,23 @@ pub struct StdoutSink {
 }
 
 impl StdoutSink {
+    #[cfg(not(feature = "send"))]
     pub fn new(sink: impl FnMut(&str) + 'static) -> Self {
         Self {
-            sink: Rc::new(RefCell::new(sink)),
+            sink: Shared::new(ServiceCell::new(sink)),
         }
     }
 
-    fn write(&self, text: &str) {
-        (self.sink.borrow_mut())(text);
+    #[cfg(feature = "send")]
+    pub fn new(sink: impl FnMut(&str) + Send + 'static) -> Self {
+        Self {
+            sink: Shared::new(ServiceCell::new(sink)),
+        }
+    }
+
+    fn write(&self, text: &str) -> Result<()> {
+        (borrow_service(&self.sink, STDOUT_SERVICE_NAME)?)(text);
+        Ok(())
     }
 }
 
@@ -235,14 +303,23 @@ impl fmt::Debug for StdoutSink {
 /// underlying provider.
 #[derive(Clone)]
 pub struct ClockProvider {
-    clock: Rc<RefCell<dyn FnMut() -> f64>>,
+    clock: Shared<ServiceCell<ClockCallback>>,
     deterministic: bool,
 }
 
 impl ClockProvider {
+    #[cfg(not(feature = "send"))]
     pub fn new(clock: impl FnMut() -> f64 + 'static, deterministic: bool) -> Self {
         Self {
-            clock: Rc::new(RefCell::new(clock)),
+            clock: Shared::new(ServiceCell::new(clock)),
+            deterministic,
+        }
+    }
+
+    #[cfg(feature = "send")]
+    pub fn new(clock: impl FnMut() -> f64 + Send + 'static, deterministic: bool) -> Self {
+        Self {
+            clock: Shared::new(ServiceCell::new(clock)),
             deterministic,
         }
     }
@@ -252,8 +329,8 @@ impl ClockProvider {
         self.deterministic
     }
 
-    fn read(&self) -> f64 {
-        (self.clock.borrow_mut())()
+    fn read(&self) -> Result<f64> {
+        Ok((borrow_service(&self.clock, "clock")?)())
     }
 }
 
@@ -276,9 +353,18 @@ pub struct EntropyProvider {
 }
 
 impl EntropyProvider {
+    #[cfg(not(feature = "send"))]
     pub fn new(entropy: impl FnMut() -> u64 + 'static, deterministic: bool) -> Self {
         Self {
-            entropy: Rc::new(RefCell::new(entropy)),
+            entropy: Shared::new(ServiceCell::new(entropy)),
+            deterministic,
+        }
+    }
+
+    #[cfg(feature = "send")]
+    pub fn new(entropy: impl Fn() -> u64 + Send + Sync + 'static, deterministic: bool) -> Self {
+        Self {
+            entropy: Shared::new(entropy),
             deterministic,
         }
     }
@@ -288,8 +374,14 @@ impl EntropyProvider {
         self.deterministic
     }
 
-    fn read(&self) -> u64 {
-        (self.entropy.borrow_mut())()
+    #[cfg(not(feature = "send"))]
+    fn read(&self) -> Result<u64> {
+        Ok((borrow_service(&self.entropy, "entropy")?)())
+    }
+
+    #[cfg(feature = "send")]
+    fn read(&self) -> Result<u64> {
+        Ok((self.entropy)())
     }
 }
 
@@ -346,7 +438,11 @@ impl VmServices {
     }
 
     fn initial_random_seed(&self) -> u64 {
-        self.entropy.as_ref().map_or(0, EntropyProvider::read)
+        self.entropy.as_ref().map_or(0, |provider| {
+            provider
+                .read()
+                .expect("entropy provider is already in use during VM construction")
+        })
     }
 }
 
@@ -501,6 +597,7 @@ pub struct Vm {
     coroutines: Vec<CoroutineState>,
     running_coroutines: Vec<usize>,
     running_coroutine_stack_bases: Vec<usize>,
+    running_coroutine_active_frame_bases: Vec<usize>,
     active_coroutine_frames: Vec<Vec<CoroutineFrame>>,
     yield_collectors: Vec<Vec<Vec<Value>>>,
     last_error_traceback: Option<TracebackSnapshot>,
@@ -528,7 +625,7 @@ pub struct Vm {
     next_weak_collection_instruction: u64,
     deterministic_collection_count: u64,
     decision_epoch: u64,
-    external_roots: Rc<RefCell<ExternalRootRegistry>>,
+    external_roots: Shared<RegistryCell<ExternalRootRegistry>>,
     coverage_hits: BTreeMap<CoverageKey, u64>,
     opcode_census: Vec<u64>,
     control_live_bytes: usize,
@@ -561,7 +658,7 @@ struct ModuleCohort {
 struct ExternalRootLease {
     id: u64,
     decision_epoch: u64,
-    registry: Weak<RefCell<ExternalRootRegistry>>,
+    registry: Weak<RegistryCell<ExternalRootRegistry>>,
 }
 
 impl Drop for ExternalRootLease {
@@ -580,7 +677,7 @@ impl Drop for ExternalRootLease {
 #[derive(Clone)]
 pub struct RetainedValue {
     value: Value,
-    lease: Rc<ExternalRootLease>,
+    lease: Shared<ExternalRootLease>,
 }
 
 impl RetainedValue {
@@ -598,7 +695,7 @@ impl RetainedValue {
             })
             .without_source_location());
         };
-        if !Rc::ptr_eq(&registry, &vm.external_roots) {
+        if !Shared::ptr_eq(&registry, &vm.external_roots) {
             return Err(
                 Error::new(ErrorKind::RetainedValueFromDifferentVm).without_source_location()
             );
@@ -623,7 +720,7 @@ impl RetainedValue {
     #[inline]
     pub fn belongs_to(&self, vm: &Vm) -> bool {
         self.lease.registry.upgrade().is_some_and(|registry| {
-            Rc::ptr_eq(&registry, &vm.external_roots)
+            Shared::ptr_eq(&registry, &vm.external_roots)
                 && self.lease.decision_epoch == vm.decision_epoch
         })
     }
@@ -2223,6 +2320,17 @@ pub trait VmHostDispatcher {
         args: &[Value],
     ) -> Result<Vec<Value>>;
 
+    /// Invokes a host operation with the current execution budget and depth.
+    /// Legacy dispatchers keep their existing behavior through this default.
+    fn invoke_scoped(
+        &mut self,
+        call: &mut VmHostCall<'_>,
+        handler: &(dyn std::any::Any + Send + Sync),
+        args: &[Value],
+    ) -> Result<Vec<Value>> {
+        call.with_parts(|vm, _, _| self.invoke(vm, handler, args))
+    }
+
     fn begin_savepoint(&mut self) -> Result<()> {
         Ok(())
     }
@@ -2287,6 +2395,7 @@ enum CoroutineFrame {
     PCall,
     XPCall(SuspendedXPCallFrame),
     Require(SuspendedRequireFrame),
+    Native(NativeFrameStorage),
 }
 
 #[derive(Clone)]
@@ -2389,6 +2498,24 @@ struct StacklessSelfCallFrame {
 
 #[derive(Clone)]
 enum BytecodeContinuation {
+    IteratorPrepare {
+        instruction: Instruction,
+    },
+    Import {
+        register: u8,
+        state: ImportState,
+    },
+    Discard,
+    WriteTruthy {
+        register: u8,
+        invert: bool,
+    },
+    NameCall {
+        register: u8,
+        object: Value,
+        key: Value,
+        check: bool,
+    },
     ExpandedCalls(ExpandedCallState),
     WriteFirst {
         register: u8,
@@ -2515,6 +2642,7 @@ impl Vm {
             coroutines: Vec::new(),
             running_coroutines: Vec::new(),
             running_coroutine_stack_bases: Vec::new(),
+            running_coroutine_active_frame_bases: Vec::new(),
             active_coroutine_frames: Vec::new(),
             yield_collectors: Vec::new(),
             last_error_traceback: None,
@@ -2542,7 +2670,7 @@ impl Vm {
             next_weak_collection_instruction,
             deterministic_collection_count: 0,
             decision_epoch: 0,
-            external_roots: Rc::new(RefCell::new(ExternalRootRegistry {
+            external_roots: Shared::new(RegistryCell::new(ExternalRootRegistry {
                 decision_epoch: 0,
                 next_id: 0,
                 values: BTreeMap::new(),
@@ -2753,6 +2881,7 @@ impl Vm {
         if !self.call_stack.is_empty()
             || !self.running_coroutines.is_empty()
             || !self.running_coroutine_stack_bases.is_empty()
+            || !self.running_coroutine_active_frame_bases.is_empty()
             || !self.active_coroutine_frames.is_empty()
             || !self.yield_collectors.is_empty()
             || !self.guest_transactions.is_empty()
@@ -2777,7 +2906,7 @@ impl Vm {
         self.dynamic_programs.reset_epoch();
         self.coverage_hits.clear();
         self.opcode_census.clear();
-        self.external_roots = Rc::new(RefCell::new(ExternalRootRegistry {
+        self.external_roots = Shared::new(RegistryCell::new(ExternalRootRegistry {
             decision_epoch: next_epoch,
             next_id: 0,
             values: BTreeMap::new(),
@@ -3057,7 +3186,7 @@ impl Vm {
     }
 
     fn collect_for_memory_limit(&mut self, transient_roots: &[Value]) {
-        self.collect_heap_and_programs(transient_roots, true);
+        self.collect_heap_and_programs(transient_roots);
     }
 
     fn collect_heap_weak_tables(&mut self, roots: &[Value]) {
@@ -3078,11 +3207,8 @@ impl Vm {
         }
     }
 
-    fn collect_heap_and_programs(&mut self, transient_roots: &[Value], finish_cycle: bool) {
+    fn collect_heap_and_programs(&mut self, transient_roots: &[Value]) {
         let roots = self.collectgarbage_roots(transient_roots);
-        if finish_cycle {
-            self.heap.finish_collection_cycle();
-        }
         self.collect_heap_weak_tables(&roots);
         if self.guest_transactions.is_empty() {
             self.prune_abandoned_module_loads();
@@ -3221,6 +3347,46 @@ impl Vm {
         }
         .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
         self.retain_value(Value::table(table))
+    }
+
+    /// Copies arbitrary bytes into a rooted immutable guest string.
+    ///
+    /// NUL and non-UTF-8 bytes are preserved. Atom/index growth and the root
+    /// registration are admitted before new bytes are allocated; an existing
+    /// interned string needs only a new root. Collection can change the next
+    /// index rehash, so admission is recomputed after quota collection.
+    pub fn create_retained_string_bytes(&mut self, bytes: &[u8]) -> Result<RetainedValue> {
+        self.ensure_healthy()?;
+        if let Some(value) = Value::short_string(bytes) {
+            return self.retain_value(value);
+        }
+        if let Some(atom) = self.heap.find_string_atom_bytes(bytes) {
+            return self.retain_value(Value::string_atom(atom));
+        }
+        let root_bytes =
+            external_root_node_live_bytes().saturating_add(if self.guest_transactions.is_empty() {
+                0
+            } else {
+                size_of::<u64>()
+            });
+        let fits = |vm: &mut Self| {
+            let Some(limit) = vm.settings.memory_limit_bytes else {
+                return true;
+            };
+            let growth = vm
+                .heap
+                .planned_owned_string_live_bytes(bytes.len())
+                .saturating_add(root_bytes);
+            vm.current_live_bytes().saturating_add(growth) <= limit
+        };
+        if !fits(self) {
+            self.collect_for_memory_limit(&[]);
+            if !fits(self) {
+                return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+            }
+        }
+        let value = self.heap.intern_string_value_bytes(bytes);
+        self.retain_value(value)
     }
 
     /// Creates an unrooted module environment whose `_G` is itself and whose
@@ -3699,10 +3865,10 @@ impl Vm {
             }
             retained.push(RetainedValue {
                 value,
-                lease: Rc::new(ExternalRootLease {
+                lease: Shared::new(ExternalRootLease {
                     id,
                     decision_epoch,
-                    registry: Rc::downgrade(&self.external_roots),
+                    registry: Shared::downgrade(&self.external_roots),
                 }),
             });
         }
@@ -4056,7 +4222,6 @@ impl Vm {
     /// explicit quiescence returns spare allocations to the process allocator.
     pub fn collect_garbage(&mut self) {
         let roots = self.collectgarbage_roots(&[]);
-        self.heap.finish_collection_cycle();
         self.collect_heap_weak_tables(&roots);
         let transaction_active = !self.guest_transactions.is_empty();
         if !transaction_active {
@@ -4067,10 +4232,9 @@ impl Vm {
         }
         // The first pass can remove VM-side roots (including interned
         // strings, unreachable coroutine state, and obsolete loaded programs).
-        // A second completed arena cycle returns the backing allocations those
-        // roots owned.
+        // A second trace reclaims allocations formerly reachable through those
+        // roots; owned backing storage is released with its slot.
         let roots = self.collectgarbage_roots(&[]);
-        self.heap.finish_collection_cycle();
         self.collect_heap_weak_tables(&roots);
         if !transaction_active {
             self.prune_abandoned_module_loads();
@@ -4262,7 +4426,12 @@ impl Vm {
                             &varargs,
                             &pending_return_prefixes,
                         );
-                        if matches!(continuation, BytecodeContinuation::ExpandedCalls(_)) {
+                        if matches!(
+                            continuation,
+                            BytecodeContinuation::ExpandedCalls(_)
+                                | BytecodeContinuation::IteratorPrepare { .. }
+                                | BytecodeContinuation::Import { .. }
+                        ) {
                             self.truncate_stackless_self_call_roots(root_mark);
                             resumed_continuation = Some((continuation, returned.into_vec()));
                             break;
@@ -4288,7 +4457,8 @@ impl Vm {
             macro_rules! unwind_stackless_error {
                 ($error:expr) => {{
                     let error = attach_existing_instruction_source(program, function, $error);
-                    let error = self.capture_host_diagnostic(error, program_id, program, function);
+                    let error =
+                        self.capture_host_diagnostic(error, program_id, program, function, None);
                     if error_is_uncatchable(&error, fuel) {
                         return Err(error);
                     }
@@ -4359,6 +4529,17 @@ impl Vm {
             'run_function_loop: loop {
                 if let Some(error) = resumed_error.take() {
                     resumed_continuation = None;
+                    // A transferred call failed after its opcode returned. Apply
+                    // the same source boundary as the synchronous opcode path.
+                    let stopped_pc = pc.saturating_sub(1);
+                    let error = attach_instruction_source(program, function, stopped_pc, error);
+                    let error = self.capture_host_diagnostic(
+                        error,
+                        program_id,
+                        program,
+                        function,
+                        Some(stopped_pc),
+                    );
                     unwind_stackless_error!(error);
                 }
                 if let Some((continuation, resume_results)) = resumed_continuation.take() {
@@ -4374,6 +4555,169 @@ impl Vm {
                         &pending_return_prefixes,
                     );
                     let (continuation, resume_results) = match continuation {
+                        BytecodeContinuation::IteratorPrepare { instruction } => {
+                            let outcome = self.generalized_iterator_after_method(
+                                program,
+                                &mut registers,
+                                &mut register_cells,
+                                instruction,
+                                resume_results,
+                                context.depth,
+                                fuel,
+                            );
+                            let step = match outcome {
+                                Ok(step) => step,
+                                Err(error) => {
+                                    let error = attach_instruction_source(
+                                        program,
+                                        function,
+                                        pc.saturating_sub(1),
+                                        error,
+                                    );
+                                    unwind_stackless_error!(error);
+                                    continue 'run_function_loop;
+                                }
+                            };
+                            if let CallIteratorStep::Complete(advanced) = step {
+                                if !advanced {
+                                    match checked_jump(instruction.aux) {
+                                        Ok(target) => pc = target,
+                                        Err(error) => {
+                                            let error = attach_instruction_source(
+                                                program,
+                                                function,
+                                                pc.saturating_sub(1),
+                                                error,
+                                            );
+                                            unwind_stackless_error!(error);
+                                        }
+                                    }
+                                }
+                                continue 'run_function_loop;
+                            }
+                            let next = (|| -> Result<BytecodeContinuation> {
+                                Ok(BytecodeContinuation::IteratorStep {
+                                    window: GeneralizedIteratorRegisters::new(
+                                        instruction.a,
+                                        instruction.c,
+                                    )?
+                                    .call,
+                                    jump_target: checked_jump(instruction.aux)?,
+                                    jump_if_advanced: false,
+                                    error_pc: pc.saturating_sub(1),
+                                })
+                            })();
+                            let next = match next {
+                                Ok(next) => next,
+                                Err(error) => {
+                                    let error = attach_instruction_source(
+                                        program,
+                                        function,
+                                        pc.saturating_sub(1),
+                                        error,
+                                    );
+                                    unwind_stackless_error!(error);
+                                    continue 'run_function_loop;
+                                }
+                            };
+                            match step {
+                                CallIteratorStep::Call(request) => {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        next,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
+                                CallIteratorStep::Yield(suspension) => {
+                                    return self.suspend_bytecode_frame(
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        next,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        suspension,
+                                    );
+                                }
+                                CallIteratorStep::Complete(_) => {
+                                    unreachable!("completed iterator handled above")
+                                }
+                            }
+                        }
+                        BytecodeContinuation::Import {
+                            register,
+                            mut state,
+                        } => {
+                            let object = resume_results.first().copied().unwrap_or_else(Value::nil);
+                            let outcome = self
+                                .continue_import(
+                                    program,
+                                    program_id,
+                                    context.prototype,
+                                    pc.saturating_sub(1),
+                                    &mut state,
+                                    object,
+                                    context.depth,
+                                    fuel,
+                                )
+                                .map_err(|error| {
+                                    attach_instruction_source(
+                                        program,
+                                        function,
+                                        pc.saturating_sub(1),
+                                        error,
+                                    )
+                                });
+                            match outcome {
+                                Ok(ImplicitStep::Call(request)) => {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::Import { register, state },
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
+                                Ok(ImplicitStep::Ready(value)) => {
+                                    let mut results = resume_results;
+                                    results.truncate(1);
+                                    if results.is_empty() {
+                                        results.try_reserve_exact(1).map_err(|_| {
+                                            Error::new(ErrorKind::OutOfMemory)
+                                                .without_source_location()
+                                        })?;
+                                        results.push(value);
+                                    } else {
+                                        results[0] = value;
+                                    }
+                                    (BytecodeContinuation::WriteFirst { register }, results)
+                                }
+                                Err(error) => {
+                                    unwind_stackless_error!(error);
+                                    continue 'run_function_loop;
+                                }
+                            }
+                        }
                         BytecodeContinuation::ExpandedCalls(mut state) => {
                             let outcome = self
                                 .continue_expanded_calls(program, &mut state, resume_results, fuel)
@@ -4548,7 +4892,6 @@ impl Vm {
                                 && self.hot_ir_enabled()
                                 && fuel.state.fuel.is_none()
                                 && !self.scalar_instrumentation_forced()
-                                && !self.heap.has_allocation_debt()
                                 && !self.weak_collection_due_within(1)
                             {
                                 if let Some(program_id) = program_id {
@@ -4797,19 +5140,47 @@ impl Vm {
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetImport => {
-                                let value = self
-                                    .get_import(
+                                let mut state =
+                                    ImportState::new(program, instruction).map_err(|error| {
+                                        attach_instruction_source(program, function, pc - 1, error)
+                                    })?;
+                                let object =
+                                    Value::table(self.current_environment().map_err(|error| {
+                                        attach_instruction_source(program, function, pc - 1, error)
+                                    })?);
+                                let register = instruction.a;
+                                let value = match self
+                                    .continue_import(
                                         program,
                                         program_id,
                                         context.prototype,
                                         pc - 1,
-                                        instruction,
+                                        &mut state,
+                                        object,
                                         context.depth,
                                         fuel,
                                     )
                                     .map_err(|error| {
                                         attach_instruction_source(program, function, pc - 1, error)
-                                    })?;
+                                    })? {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::Import { register, state },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -4819,7 +5190,7 @@ impl Vm {
                                 let environment =
                                     self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
                                 let value = self
-                                    .get_table_index_with_inline_cache(
+                                    .get_table_index_with_inline_cache_step(
                                         program,
                                         program_id,
                                         context.prototype,
@@ -4830,6 +5201,27 @@ impl Vm {
                                         fuel,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = match value {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, value)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
@@ -4840,18 +5232,35 @@ impl Vm {
                                     self.current_environment().map_err(|e| e.at_pc(pc - 1))?;
                                 let value = get_register(&registers, instruction.a)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                self.set_table_index_with_inline_cache(
-                                    program,
-                                    program_id,
-                                    context.prototype,
-                                    pc - 1,
-                                    environment,
-                                    key,
-                                    value,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let step = self
+                                    .set_table_index_with_inline_cache_step(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        environment,
+                                        key,
+                                        value,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                if let ImplicitStep::Call(request) = step {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::Discard,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
                             }
                             Opcode::Move => {
                                 let value = get_register(&registers, instruction.b)
@@ -4925,106 +5334,132 @@ impl Vm {
                                     })
                                 })?;
                             }
-                            Opcode::Add => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Add,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Sub => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Sub,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Mul => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Mul,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Div => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Div,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::FloorDiv => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::FloorDiv,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Mod => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Mod,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Pow => {
-                                self.numeric_binop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Pow,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Concat => {
-                                let value = self
-                                    .concat_value(
+                            Opcode::Add
+                            | Opcode::Sub
+                            | Opcode::Mul
+                            | Opcode::Div
+                            | Opcode::FloorDiv
+                            | Opcode::Mod
+                            | Opcode::Pow => {
+                                let lhs = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let rhs = get_register(&registers, instruction.c)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let op = match instruction.op {
+                                    Opcode::Add => NumericOp::Add,
+                                    Opcode::Sub => NumericOp::Sub,
+                                    Opcode::Mul => NumericOp::Mul,
+                                    Opcode::Div => NumericOp::Div,
+                                    Opcode::FloorDiv => NumericOp::FloorDiv,
+                                    Opcode::Mod => NumericOp::Mod,
+                                    Opcode::Pow => NumericOp::Pow,
+                                    _ => unreachable!("arithmetic opcode"),
+                                };
+                                let step = if let (Some(lhs), Some(rhs)) =
+                                    (lhs.as_number(), rhs.as_number())
+                                {
+                                    Ok(ImplicitStep::Ready(Value::number(binary(op, lhs, rhs))))
+                                } else {
+                                    self.numeric_binop_value_step(
                                         program,
-                                        &registers,
-                                        instruction,
+                                        lhs,
+                                        rhs,
+                                        op,
                                         context.depth,
                                         fuel,
                                     )
+                                };
+                                let result = match step.map_err(|e| e.at_pc(pc - 1))? {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(&mut registers, instruction.a, result)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, value)
+                            }
+                            Opcode::Concat => {
+                                let lhs = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let rhs = get_register(&registers, instruction.c)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let result = match self
+                                    .concat_operands_step(program, lhs, rhs, context.depth, fuel)
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(&mut registers, instruction.a, result)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::Neg => {
-                                self.numeric_unop(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    NumericOp::Neg,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                                let value = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let result = match self
+                                    .numeric_unop_value_step(
+                                        program,
+                                        value,
+                                        NumericOp::Neg,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(&mut registers, instruction.a, result)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::Abs => {
                                 let value = self
@@ -5303,71 +5738,92 @@ impl Vm {
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
                             }
-                            Opcode::Equal => {
-                                self.compare_equal(
-                                    program,
+                            Opcode::Equal | Opcode::NotEqual => {
+                                let lhs = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let rhs = get_register(&registers, instruction.c)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let invert = instruction.op == Opcode::NotEqual;
+                                let result = match self
+                                    .equal_values_step(program, lhs, rhs, context.depth, fuel)
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteTruthy {
+                                                register: instruction.a,
+                                                invert,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(
                                     &mut registers,
-                                    instruction,
-                                    false,
-                                    context.depth,
-                                    fuel,
+                                    instruction.a,
+                                    Value::boolean(result ^ invert),
                                 )
                                 .map_err(|e| e.at_pc(pc - 1))?;
                             }
-                            Opcode::NotEqual => {
-                                self.compare_equal(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    true,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Less => {
-                                self.compare_order(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    OrderComparison::Less,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::LessEqual => {
-                                self.compare_order(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    OrderComparison::LessEqual,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::Greater => {
-                                self.compare_order(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    OrderComparison::Greater,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
-                            }
-                            Opcode::GreaterEqual => {
-                                self.compare_order(
-                                    program,
-                                    &mut registers,
-                                    instruction,
-                                    OrderComparison::GreaterEqual,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| e.at_pc(pc - 1))?;
+                            Opcode::Less
+                            | Opcode::LessEqual
+                            | Opcode::Greater
+                            | Opcode::GreaterEqual => {
+                                let lhs = get_register(&registers, instruction.b)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let rhs = get_register(&registers, instruction.c)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
+                                let comparison = match instruction.op {
+                                    Opcode::Less => OrderComparison::Less,
+                                    Opcode::LessEqual => OrderComparison::LessEqual,
+                                    Opcode::Greater => OrderComparison::Greater,
+                                    Opcode::GreaterEqual => OrderComparison::GreaterEqual,
+                                    _ => unreachable!("order opcode"),
+                                };
+                                let result = match self
+                                    .order_values_step(
+                                        program,
+                                        lhs,
+                                        rhs,
+                                        comparison,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(&mut registers, instruction.a, result)
+                                    .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::ForPrep => {
                                 if !numeric_for_prepare(
@@ -5679,6 +6135,25 @@ impl Vm {
                                         fuel,
                                     )
                                     .map_err(|e| e.at_pc(pc - 1))?;
+                                let step = match step {
+                                    ImplicitStep::Ready(step) => step,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::IteratorPrepare { instruction },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 match step {
                                     CallIteratorStep::Complete(false) => {
                                         pc = checked_jump(instruction.aux)
@@ -5819,10 +6294,31 @@ impl Vm {
                             Opcode::Len => {
                                 let value = get_register(&registers, instruction.b)
                                     .map_err(|e| e.at_pc(pc - 1))?;
-                                let len = self
-                                    .len_value(program, value, context.depth, fuel)
-                                    .map_err(|e| e.at_pc(pc - 1))?;
-                                set_register(&mut registers, instruction.a, len)
+                                let result = match self
+                                    .len_value_step(program, value, context.depth, fuel)
+                                    .map_err(|e| e.at_pc(pc - 1))?
+                                {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
+                                set_register(&mut registers, instruction.a, result)
                                     .map_err(|e| e.at_pc(pc - 1))?;
                             }
                             Opcode::GetIndex => {
@@ -5834,7 +6330,7 @@ impl Vm {
                                     attach_instruction_source(program, function, pc - 1, e)
                                 })?;
                                 let value = self
-                                    .get_index_value_with_inline_cache(
+                                    .get_index_value_with_inline_cache_step(
                                         program,
                                         program_id,
                                         context.prototype,
@@ -5847,6 +6343,27 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let value = match value {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, value).map_err(
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
@@ -5879,7 +6396,7 @@ impl Vm {
                                     )?;
                                 }
                                 let value = self
-                                    .get_index_value_with_inline_cache(
+                                    .get_index_value_with_inline_cache_step(
                                         program,
                                         program_id,
                                         context.prototype,
@@ -5892,6 +6409,27 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let value = match value {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::WriteFirst {
+                                                register: instruction.a,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, value).map_err(
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
@@ -5919,7 +6457,7 @@ impl Vm {
                                 );
                                 self.advance_fused_instruction_steps_with_root(1, object)?;
                                 let callee = self
-                                    .get_index_value_with_namecall_inline_cache(
+                                    .get_index_value_with_namecall_inline_cache_step(
                                         program,
                                         program_id,
                                         context.prototype,
@@ -5932,6 +6470,30 @@ impl Vm {
                                     .map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
+                                let callee = match callee {
+                                    ImplicitStep::Ready(value) => value,
+                                    ImplicitStep::Call(request) => {
+                                        return self.defer_bytecode_frame(
+                                            program,
+                                            program_id,
+                                            &context,
+                                            pc,
+                                            std::mem::take(&mut registers),
+                                            std::mem::take(&mut register_cells),
+                                            std::mem::take(&mut varargs),
+                                            std::mem::take(&mut pending_return_prefixes),
+                                            BytecodeContinuation::NameCall {
+                                                register: instruction.a,
+                                                object,
+                                                key,
+                                                check: instruction.c == 1,
+                                            },
+                                            std::mem::take(&mut stackless_self_calls),
+                                            tail_call_count,
+                                            request,
+                                        );
+                                    }
+                                };
                                 set_register(&mut registers, instruction.a, callee).map_err(
                                     |e| attach_instruction_source(program, function, pc - 1, e),
                                 )?;
@@ -5981,20 +6543,37 @@ impl Vm {
                                     get_register(&registers, instruction.c).map_err(|e| {
                                         attach_instruction_source(program, function, pc - 1, e)
                                     })?;
-                                self.set_index_value_with_inline_cache(
-                                    program,
-                                    program_id,
-                                    context.prototype,
-                                    pc - 1,
-                                    object,
-                                    key,
-                                    value,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })?;
+                                let step = self
+                                    .set_index_value_with_inline_cache_step(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        object,
+                                        key,
+                                        value,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if let ImplicitStep::Call(request) = step {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::Discard,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
                             }
                             Opcode::SetTableKs => {
                                 let object =
@@ -6049,20 +6628,37 @@ impl Vm {
                                     instruction.aux,
                                     key,
                                 );
-                                self.set_index_value_with_inline_cache(
-                                    program,
-                                    program_id,
-                                    context.prototype,
-                                    pc - 1,
-                                    object,
-                                    key,
-                                    value,
-                                    context.depth,
-                                    fuel,
-                                )
-                                .map_err(|e| {
-                                    attach_instruction_source(program, function, pc - 1, e)
-                                })?;
+                                let step = self
+                                    .set_index_value_with_inline_cache_step(
+                                        program,
+                                        program_id,
+                                        context.prototype,
+                                        pc - 1,
+                                        object,
+                                        key,
+                                        value,
+                                        context.depth,
+                                        fuel,
+                                    )
+                                    .map_err(|e| {
+                                        attach_instruction_source(program, function, pc - 1, e)
+                                    })?;
+                                if let ImplicitStep::Call(request) = step {
+                                    return self.defer_bytecode_frame(
+                                        program,
+                                        program_id,
+                                        &context,
+                                        pc,
+                                        std::mem::take(&mut registers),
+                                        std::mem::take(&mut register_cells),
+                                        std::mem::take(&mut varargs),
+                                        std::mem::take(&mut pending_return_prefixes),
+                                        BytecodeContinuation::Discard,
+                                        std::mem::take(&mut stackless_self_calls),
+                                        tail_call_count,
+                                        request,
+                                    );
+                                }
                             }
                             Opcode::RawSet => {
                                 let table = get_table(&registers, instruction.a)
@@ -7540,7 +8136,7 @@ impl Vm {
         })();
         let result = result.map_err(|error| {
             let error = attach_existing_instruction_source(program, function, error);
-            self.capture_host_diagnostic(error, program_id, program, function)
+            self.capture_host_diagnostic(error, program_id, program, function, None)
         });
         if let Err(error) = &result {
             self.last_error_traceback = Some(self.traceback_snapshot(error.location.clone()));
@@ -7618,9 +8214,42 @@ impl Vm {
         mut results: Vec<Value>,
     ) -> Result<Option<Vec<Value>>> {
         match continuation {
+            BytecodeContinuation::IteratorPrepare { .. } => {
+                Err(Error::new(ErrorKind::InvalidProgram {
+                    reason: "iterator preparation requires resumable continuation handling",
+                }))
+            }
+            BytecodeContinuation::Import { .. } => Err(Error::new(ErrorKind::InvalidProgram {
+                reason: "import requires resumable continuation handling",
+            })),
             BytecodeContinuation::ExpandedCalls(_) => Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "expanded calls require resumable continuation handling",
             })),
+            BytecodeContinuation::Discard => Ok(None),
+            BytecodeContinuation::WriteTruthy { register, invert } => {
+                set_register(
+                    registers,
+                    register,
+                    Value::boolean(first_result_or_nil(results).truthy() ^ invert),
+                )?;
+                Ok(None)
+            }
+            BytecodeContinuation::NameCall {
+                register,
+                object,
+                key,
+                check,
+            } => {
+                let callee = first_result_or_nil(results);
+                set_register(registers, register, callee)
+                    .map_err(|e| e.at_pc(pc.saturating_sub(1)))?;
+                if check {
+                    self.advance_fused_instruction_steps_with_root(1, callee)?;
+                    self.check_method_value(callee, object, key)
+                        .map_err(|e| e.at_pc(pc.saturating_sub(1)))?;
+                }
+                Ok(None)
+            }
             BytecodeContinuation::WriteFirst { register } => {
                 let value = first_result_or_nil(results);
                 set_register(registers, register, value)?;
@@ -7785,98 +8414,6 @@ impl Vm {
                 }));
             }
         })
-    }
-
-    fn get_import(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        instruction: Instruction,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if instruction.aux < 0 {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "negative import descriptor index",
-            }));
-        }
-        if instruction.c != 0 {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "import instruction has non-zero reserved operand",
-            }));
-        }
-        let path_len = usize::from(instruction.b);
-        if !(1..=IMPORT_CACHE_LANES).contains(&path_len) {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "import path length must be between one and three",
-            }));
-        }
-        let descriptor_index = instruction.aux as usize;
-        let descriptor = program.constants().get(descriptor_index).ok_or_else(|| {
-            Error::new(ErrorKind::ConstantOutOfBounds {
-                index: descriptor_index,
-                len: program.constants().len(),
-            })
-        })?;
-        let Constant::Import(path) = descriptor else {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "import instruction constant must be an import descriptor",
-            }));
-        };
-        if path.len() != path_len {
-            return Err(Error::new(ErrorKind::InvalidProgram {
-                reason: "import descriptor length does not match instruction",
-            }));
-        }
-        for component in path {
-            let index = usize::try_from(*component).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "import component index overflow",
-                })
-            })?;
-            if !matches!(program.constants().get(index), Some(Constant::String(_))) {
-                return Err(Error::new(ErrorKind::InvalidProgram {
-                    reason: "import components must reference string constants",
-                }));
-            }
-        }
-
-        let environment = self.current_environment()?;
-        let mut object = Value::table(environment);
-        for (lane, component) in path.iter().copied().enumerate() {
-            if lane > 0 {
-                self.advance_fused_instruction_steps_with_root(1, object)?;
-            }
-            let component = usize::try_from(component).map_err(|_| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "import component index overflow",
-                })
-            })?;
-            let atom = self
-                .constant_string_atom(program, program_id, component)?
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "import component string atom is missing",
-                    })
-                })?;
-            if lane > 0 {
-                self.advance_fused_instruction_steps_with_root(1, object)?;
-            }
-            object = self.get_index_value_with_import_inline_cache(
-                program,
-                program_id,
-                prototype,
-                pc,
-                lane,
-                object,
-                Value::string_atom(atom),
-                depth,
-                fuel,
-            )?;
-        }
-        Ok(object)
     }
 
     fn constant_string_atom(
@@ -8376,104 +8913,6 @@ impl Vm {
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))
     }
 
-    #[inline(always)]
-    fn numeric_binop(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        op: NumericOp,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let lhs = get_register(registers, instruction.b)?;
-        let rhs = get_register(registers, instruction.c)?;
-        let result =
-            if let (Some(lhs_number), Some(rhs_number)) = (lhs.as_number(), rhs.as_number()) {
-                Value::number(binary(op, lhs_number, rhs_number))
-            } else {
-                self.numeric_binop_value(program, lhs, rhs, op, depth, fuel)?
-            };
-        set_register(registers, instruction.a, result)
-    }
-
-    fn numeric_unop(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        op: NumericOp,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let value = get_register(registers, instruction.b)?;
-        let result = self.numeric_unop_value(program, value, op, depth, fuel)?;
-        set_register(registers, instruction.a, result)
-    }
-
-    fn numeric_binop_value(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        op: NumericOp,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if lhs.kind() == ValueKind::Vector || rhs.kind() == ValueKind::Vector {
-            return self.vector_binop_value(lhs, rhs, op);
-        }
-        if let (Some(lhs_number), Some(rhs_number)) =
-            (self.coerce_to_number(lhs)?, self.coerce_to_number(rhs)?)
-        {
-            return Ok(Value::number(binary(op, lhs_number, rhs_number)));
-        }
-        let Some(method_name) = arithmetic_metamethod_name(op) else {
-            return Err(Error::new(ErrorKind::TypeError { expected: "number" }));
-        };
-        if let Some(method) = self.binary_metamethod(lhs, rhs, method_name)? {
-            let results =
-                self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
-            Ok(first_result_or_nil(results))
-        } else {
-            Err(self.with_diagnostic_reason(
-                arithmetic_error(op, lhs, rhs),
-                crate::diagnostic::DiagnosticReason::Arithmetic {
-                    operation: arithmetic_error_op_name(op),
-                    left_type: value_type_name(lhs),
-                    right_type: value_type_name(rhs),
-                },
-            ))
-        }
-    }
-
-    fn numeric_unop_value(
-        &mut self,
-        program: &Program,
-        value: Value,
-        op: NumericOp,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if value.kind() == ValueKind::Vector && op == NumericOp::Neg {
-            let vector = self.vector_data(value)?;
-            return self.alloc_vector_value(-vector.x(), -vector.y(), -vector.z());
-        }
-        if let Some(number) = self.coerce_to_number(value)? {
-            return Ok(Value::number(binary(op, number, 0.0)));
-        }
-        let Some(method_name) = arithmetic_metamethod_name(op) else {
-            return Err(Error::new(ErrorKind::TypeError { expected: "number" }));
-        };
-        if let Some(method) = self.metamethod_for_value(value, method_name)? {
-            let results =
-                self.call_value(program, method, &[value], depth.saturating_add(1), fuel)?;
-            Ok(first_result_or_nil(results))
-        } else {
-            Err(unary_arithmetic_error(op, value))
-        }
-    }
-
     fn binary_metamethod(
         &mut self,
         lhs: Value,
@@ -8503,37 +8942,6 @@ impl Vm {
         } else {
             Ok(None)
         }
-    }
-
-    fn compare_equal(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        invert: bool,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let lhs = get_register(registers, instruction.b)?;
-        let rhs = get_register(registers, instruction.c)?;
-        let result = self.equal_values(program, lhs, rhs, depth, fuel)? ^ invert;
-        set_register(registers, instruction.a, Value::boolean(result))
-    }
-
-    fn equal_values(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
-        if let Some(method) = self.compatible_binary_metamethod(lhs, rhs, "__eq")? {
-            let results =
-                self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
-            return Ok(first_result_or_nil(results).truthy());
-        }
-        self.raw_equal_values(lhs, rhs)
     }
 
     #[doc(hidden)]
@@ -8586,81 +8994,6 @@ impl Vm {
         Ok(lhs.luau_equals(rhs))
     }
 
-    fn compare_order(
-        &mut self,
-        program: &Program,
-        registers: &mut [Value],
-        instruction: Instruction,
-        comparison: OrderComparison,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        let lhs = get_register(registers, instruction.b)?;
-        let rhs = get_register(registers, instruction.c)?;
-        let result = self.order_values(program, lhs, rhs, comparison, depth, fuel)?;
-        set_register(registers, instruction.a, Value::boolean(result))
-    }
-
-    fn order_values(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        comparison: OrderComparison,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
-        match comparison {
-            OrderComparison::Less => self.less_than(program, lhs, rhs, depth, fuel),
-            OrderComparison::LessEqual => self.less_equal(program, lhs, rhs, depth, fuel),
-            OrderComparison::Greater => self.less_than(program, rhs, lhs, depth, fuel),
-            OrderComparison::GreaterEqual => self.less_equal(program, rhs, lhs, depth, fuel),
-        }
-    }
-
-    fn less_than(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
-        if let Some(result) = self.raw_order(lhs, rhs, OrderComparison::Less)? {
-            return Ok(result);
-        }
-        let Some(method) = self.compatible_binary_metamethod(lhs, rhs, "__lt")? else {
-            return Err(order_error(lhs, rhs, "<"));
-        };
-        let results =
-            self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
-        Ok(first_result_or_nil(results).truthy())
-    }
-
-    fn less_equal(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<bool> {
-        if let Some(result) = self.raw_order(lhs, rhs, OrderComparison::LessEqual)? {
-            return Ok(result);
-        }
-        if let Some(method) = self.compatible_binary_metamethod(lhs, rhs, "__le")? {
-            let results =
-                self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
-            return Ok(first_result_or_nil(results).truthy());
-        }
-        let Some(method) = self.compatible_binary_metamethod(rhs, lhs, "__lt")? else {
-            return Err(order_error(lhs, rhs, "<="));
-        };
-        let results =
-            self.call_value(program, method, &[rhs, lhs], depth.saturating_add(1), fuel)?;
-        Ok(!first_result_or_nil(results).truthy())
-    }
-
     fn raw_order(
         &mut self,
         lhs: Value,
@@ -8703,48 +9036,6 @@ impl Vm {
         }
     }
 
-    fn concat_value(
-        &mut self,
-        program: &Program,
-        registers: &[Value],
-        instruction: Instruction,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        let lhs = get_register(registers, instruction.b)?;
-        let rhs = get_register(registers, instruction.c)?;
-        self.concat_operands(program, lhs, rhs, depth, fuel)
-    }
-
-    fn concat_operands(
-        &mut self,
-        program: &Program,
-        lhs: Value,
-        rhs: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if let (Ok(mut lhs_text), Ok(rhs_text)) =
-            (self.value_to_string(lhs), self.value_to_string(rhs))
-        {
-            lhs_text.extend_from_slice(&rhs_text);
-            return Ok(self.heap.intern_string_value_bytes(&lhs_text));
-        }
-        if let Some(method) = self.binary_metamethod(lhs, rhs, "__concat")? {
-            let results =
-                self.call_value(program, method, &[lhs, rhs], depth.saturating_add(1), fuel)?;
-            Ok(first_result_or_nil(results))
-        } else {
-            Err(Error::new(ErrorKind::RuntimeError {
-                message: format!(
-                    "attempt to concatenate {} with {}",
-                    value_type_name(lhs),
-                    value_type_name(rhs)
-                ),
-            }))
-        }
-    }
-
     fn raw_len_value(&mut self, value: Value) -> Result<usize> {
         if value.kind() == ValueKind::String {
             return self
@@ -8766,66 +9057,6 @@ impl Vm {
                 reason: "table handle is missing",
             })
         })
-    }
-
-    fn len_value(
-        &mut self,
-        program: &Program,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if value.kind() == ValueKind::String {
-            return Ok(Value::number(self.raw_len_value(value)? as f64));
-        }
-        match value.kind() {
-            ValueKind::Table | ValueKind::Userdata => {
-                if let Some(method) = self.metamethod_for_value(value, "__len")? {
-                    let results =
-                        self.call_value(program, method, &[value], depth.saturating_add(1), fuel)?;
-                    let result = first_result_or_nil(results);
-                    if result.kind() == ValueKind::Number {
-                        Ok(result)
-                    } else {
-                        Err(Error::new(ErrorKind::RuntimeError {
-                            message: "'__len' must return a number".to_owned(),
-                        }))
-                    }
-                } else {
-                    Ok(Value::number(self.raw_len_value(value)? as f64))
-                }
-            }
-            _ => Err(Error::new(ErrorKind::RuntimeError {
-                message: format!(
-                    "attempt to get length of a {} value",
-                    self.luau_type_name(value)
-                ),
-            })),
-        }
-    }
-
-    fn get_index_value(
-        &mut self,
-        program: &Program,
-        object: Value,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        self.check_recursion_depth(depth)?;
-        if let Some(table) = object.as_table() {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        }
-        if object.kind() == ValueKind::String {
-            return self.string_method_index(key);
-        }
-        if object.kind() == ValueKind::Vector {
-            return self.vector_index_value(object, key);
-        }
-        if object.kind() == ValueKind::Userdata {
-            return self.get_object_index_metamethod(program, object, key, depth, fuel);
-        }
-        Err(self.index_error(object, key)?)
     }
 
     /// Execute one load-verified register block without exposing its temporary
@@ -8937,11 +9168,6 @@ impl Vm {
     ) -> Result<TapeOutcome> {
         #[cfg(not(any(test, feature = "executor-diagnostics")))]
         let _ = program_id;
-        // Tape operations cannot allocate, so allocation debt is invariant
-        // while the tape runs and is checked once per entry.
-        if self.heap.has_allocation_debt() {
-            return Ok(TapeOutcome::Complete { next_pc: entry_pc });
-        }
         let mut pc = entry_pc;
         // Per-instruction logical units (identity when no schedule is
         // attached). Charging by units keeps fuel and deterministic-GC
@@ -9487,142 +9713,6 @@ impl Vm {
         None
     }
 
-    fn get_index_value_with_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        object: Value,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if let Some(table) = object.as_table() {
-            return self.get_table_index_with_inline_cache(
-                program, program_id, prototype, pc, table, key, depth, fuel,
-            );
-        }
-        self.get_index_value(program, object, key, depth, fuel)
-    }
-
-    fn get_index_value_with_namecall_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        object: Value,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        let Some(table) = object.as_table() else {
-            return self.get_index_value(program, object, key, depth, fuel);
-        };
-        self.check_recursion_depth(depth)?;
-        let Some(program_id) = program_id else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-        let Some(atom) = key.as_string_atom() else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-
-        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, 0) {
-            if entry.atom() == Some(atom) {
-                if let Some(Some(value)) =
-                    self.heap.read_string_hash_slot(table, atom, entry.slot())
-                {
-                    if value.kind() != ValueKind::Nil {
-                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                        self.record_table_inline_cache_hit(program_id);
-                        return Ok(value);
-                    }
-                }
-            }
-        }
-
-        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
-            if value.kind() != ValueKind::Nil {
-                self.set_import_inline_cache(
-                    program_id,
-                    prototype,
-                    pc,
-                    0,
-                    TableStringInlineCache::new(atom, slot),
-                );
-                return Ok(value);
-            }
-            if self.table_uses_standard_global_type_surface(table)? {
-                return Ok(value);
-            }
-        }
-
-        let Some(index) = self.metamethod_for_value(object, "__index")? else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-        let Some(index_table) = index.as_table() else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-        self.check_recursion_depth(depth.saturating_add(1))?;
-
-        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, 1) {
-            if entry.atom() == Some(atom) {
-                if let Some(Some(value)) =
-                    self.heap
-                        .read_string_hash_slot(index_table, atom, entry.slot())
-                {
-                    if value.kind() != ValueKind::Nil {
-                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                        self.record_table_inline_cache_hit(program_id);
-                        return Ok(value);
-                    }
-                }
-            }
-        }
-
-        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(index_table, atom) {
-            if value.kind() != ValueKind::Nil {
-                self.set_import_inline_cache(
-                    program_id,
-                    prototype,
-                    pc,
-                    1,
-                    TableStringInlineCache::new(atom, slot),
-                );
-                return Ok(value);
-            }
-        }
-
-        self.get_table_index_with_metamethod(
-            program,
-            index_table,
-            key,
-            depth.saturating_add(1),
-            fuel,
-        )
-    }
-
-    fn get_index_value_with_import_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        lane: usize,
-        object: Value,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        if let Some(table) = object.as_table() {
-            return self.get_table_index_with_import_inline_cache(
-                program, program_id, prototype, pc, lane, table, key, depth, fuel,
-            );
-        }
-        self.get_index_value(program, object, key, depth, fuel)
-    }
-
     fn check_method_value(&mut self, callee: Value, object: Value, key: Value) -> Result<()> {
         if callee.kind() != ValueKind::Nil {
             return Ok(());
@@ -9663,382 +9753,6 @@ impl Vm {
                 key,
             },
         ))
-    }
-
-    fn get_table_index_with_metamethod(
-        &mut self,
-        program: &Program,
-        table: u32,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        self.check_recursion_depth(depth)?;
-        if let Some(index) = key.as_number().and_then(array_iterator_index) {
-            if let Some(value) = self.heap.read_numeric_array_slot(table, index) {
-                if !value.is_nil() {
-                    return Ok(value);
-                }
-            }
-        }
-        if let Some(value) = self.raw_table_slot(table, key)? {
-            if value.kind() != ValueKind::Nil
-                || self.table_uses_standard_global_type_surface(table)?
-            {
-                return Ok(value);
-            }
-        }
-        self.get_object_index_metamethod(program, Value::table(table), key, depth, fuel)
-    }
-
-    fn get_table_index_with_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        table: u32,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        self.check_recursion_depth(depth)?;
-        if let Some(index) = key.as_number().and_then(array_iterator_index) {
-            if let Some(value) = self.heap.read_numeric_array_slot(table, index) {
-                if !value.is_nil() {
-                    return Ok(value);
-                }
-            }
-        }
-        let Some(program_id) = program_id else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-        let Some(atom) = key.as_string_atom() else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-
-        if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
-            if entry.atom() == Some(atom) {
-                if let Some(Some(value)) =
-                    self.heap.read_string_hash_slot(table, atom, entry.slot())
-                {
-                    if value.kind() != ValueKind::Nil {
-                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                        self.record_table_inline_cache_hit(program_id);
-                        return Ok(value);
-                    }
-                }
-            }
-        }
-
-        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
-            if value.kind() != ValueKind::Nil {
-                self.set_table_inline_cache(
-                    program_id,
-                    prototype,
-                    pc,
-                    TableStringInlineCache::new(atom, slot),
-                );
-                return Ok(value);
-            }
-        }
-
-        self.get_table_index_with_metamethod(program, table, key, depth, fuel)
-    }
-
-    fn get_table_index_with_import_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        lane: usize,
-        table: u32,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        self.check_recursion_depth(depth)?;
-        let Some(program_id) = program_id else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-        let Some(atom) = key.as_string_atom() else {
-            return self.get_table_index_with_metamethod(program, table, key, depth, fuel);
-        };
-
-        if let Some(entry) = self.import_inline_cache(program_id, prototype, pc, lane) {
-            if entry.atom() == Some(atom) {
-                if let Some(Some(value)) =
-                    self.heap.read_string_hash_slot(table, atom, entry.slot())
-                {
-                    if value.kind() != ValueKind::Nil {
-                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                        self.record_table_inline_cache_hit(program_id);
-                        return Ok(value);
-                    }
-                }
-            }
-        }
-
-        if let Some(Some((value, slot))) = self.heap.table_string_hash_probe(table, atom) {
-            if value.kind() != ValueKind::Nil {
-                self.set_import_inline_cache(
-                    program_id,
-                    prototype,
-                    pc,
-                    lane,
-                    TableStringInlineCache::new(atom, slot),
-                );
-                return Ok(value);
-            }
-        }
-
-        self.get_table_index_with_metamethod(program, table, key, depth, fuel)
-    }
-
-    fn get_object_index_metamethod(
-        &mut self,
-        program: &Program,
-        object: Value,
-        key: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<Value> {
-        self.check_recursion_depth(depth)?;
-        let Some(method) = self.metamethod_for_value(object, "__index")? else {
-            return if object.kind() == ValueKind::Table {
-                Ok(Value::nil())
-            } else if object.kind() == ValueKind::Userdata {
-                self.metamethod_for_value(object, "__namecall")?
-                    .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))
-            } else {
-                Err(Error::new(ErrorKind::TypeError { expected: "table" }))
-            };
-        };
-        match method.kind() {
-            ValueKind::Function => {
-                let results = self.call_value(
-                    program,
-                    method,
-                    &[object, key],
-                    depth.saturating_add(1),
-                    fuel,
-                )?;
-                Ok(first_result_or_nil(results))
-            }
-            ValueKind::Table => {
-                let table = method.as_table().ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "__index table handle is missing",
-                    })
-                })?;
-                self.get_table_index_with_metamethod(
-                    program,
-                    table,
-                    key,
-                    depth.saturating_add(1),
-                    fuel,
-                )
-            }
-            _ => Err(Error::new(ErrorKind::TypeError {
-                expected: "function or table",
-            })),
-        }
-    }
-
-    fn set_index_value(
-        &mut self,
-        program: &Program,
-        object: Value,
-        key: Value,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        self.check_recursion_depth(depth)?;
-        if let Some(table) = object.as_table() {
-            return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
-        }
-        if object.kind() == ValueKind::Userdata {
-            return self.set_object_newindex_metamethod(program, object, key, value, depth, fuel);
-        }
-        Err(self.index_error(object, key)?)
-    }
-
-    fn set_index_value_with_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        object: Value,
-        key: Value,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        if let Some(table) = object.as_table() {
-            return self.set_table_index_with_inline_cache(
-                program, program_id, prototype, pc, table, key, value, depth, fuel,
-            );
-        }
-        self.set_index_value(program, object, key, value, depth, fuel)
-    }
-
-    fn set_table_index_with_metamethod(
-        &mut self,
-        program: &Program,
-        table: u32,
-        key: Value,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        self.check_recursion_depth(depth)?;
-        let existing = self.raw_table_get(table, key)?;
-        if existing.kind() != ValueKind::Nil {
-            return self.set_table_index(table, key, value);
-        }
-        if let Some(method) = self.metamethod_for_value(Value::table(table), "__newindex")? {
-            return self.apply_newindex_metamethod(
-                program,
-                Value::table(table),
-                method,
-                [key, value],
-                depth,
-                fuel,
-            );
-        }
-        self.set_table_index(table, key, value)
-    }
-
-    fn set_table_index_with_inline_cache(
-        &mut self,
-        program: &Program,
-        program_id: Option<u32>,
-        prototype: Option<u32>,
-        pc: usize,
-        table: u32,
-        key: Value,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        self.check_recursion_depth(depth)?;
-        if let Some(index) = key.as_number().and_then(array_iterator_index) {
-            match self.heap.try_write_numeric_array_slot(table, index, value) {
-                Some(TableNumericArrayWrite::Stored) => return Ok(()),
-                Some(TableNumericArrayWrite::Readonly) => {
-                    return Err(readonly_table_error());
-                }
-                Some(TableNumericArrayWrite::Deferred) | None => {}
-            }
-        }
-        let Some(program_id) = program_id else {
-            return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
-        };
-        let Some(atom) = key.as_string_atom() else {
-            return self.set_table_index_with_metamethod(program, table, key, value, depth, fuel);
-        };
-
-        if let Some(entry) = self.table_inline_cache(program_id, prototype, pc) {
-            if entry.atom() == Some(atom) {
-                match self
-                    .heap
-                    .write_string_hash_slot(table, atom, entry.slot(), value)
-                {
-                    Some(TableStringHashWrite::Stored) => {
-                        #[cfg(any(test, feature = "executor-diagnostics"))]
-                        self.record_table_inline_cache_hit(program_id);
-                        return Ok(());
-                    }
-                    Some(TableStringHashWrite::Readonly) => {
-                        return Err(readonly_table_error());
-                    }
-                    Some(TableStringHashWrite::Deferred) | None => {}
-                }
-            }
-        }
-
-        if let Some(Some((existing, slot))) = self.heap.table_string_hash_probe(table, atom) {
-            if existing.kind() != ValueKind::Nil {
-                match self.heap.write_string_hash_slot(table, atom, slot, value) {
-                    Some(TableStringHashWrite::Stored) => {
-                        self.set_table_inline_cache(
-                            program_id,
-                            prototype,
-                            pc,
-                            TableStringInlineCache::new(atom, slot),
-                        );
-                        return Ok(());
-                    }
-                    Some(TableStringHashWrite::Readonly) => {
-                        return Err(readonly_table_error());
-                    }
-                    Some(TableStringHashWrite::Deferred) | None => {}
-                }
-            }
-        }
-
-        self.set_table_index_with_metamethod(program, table, key, value, depth, fuel)
-    }
-
-    fn set_object_newindex_metamethod(
-        &mut self,
-        program: &Program,
-        object: Value,
-        key: Value,
-        value: Value,
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        self.check_recursion_depth(depth)?;
-        let Some(method) = self.metamethod_for_value(object, "__newindex")? else {
-            return Err(Error::new(ErrorKind::TypeError { expected: "table" }));
-        };
-        self.apply_newindex_metamethod(program, object, method, [key, value], depth, fuel)
-    }
-
-    fn apply_newindex_metamethod(
-        &mut self,
-        program: &Program,
-        object: Value,
-        method: Value,
-        entry: [Value; 2],
-        depth: usize,
-        fuel: &mut Execution<'_>,
-    ) -> Result<()> {
-        self.check_recursion_depth(depth)?;
-        match method.kind() {
-            ValueKind::Function => {
-                self.call_value(
-                    program,
-                    method,
-                    &[object, entry[0], entry[1]],
-                    depth.saturating_add(1),
-                    fuel,
-                )?;
-                Ok(())
-            }
-            ValueKind::Table => {
-                let table = method.as_table().ok_or_else(|| {
-                    Error::new(ErrorKind::InvalidProgram {
-                        reason: "__newindex table handle is missing",
-                    })
-                })?;
-                self.set_table_index_with_metamethod(
-                    program,
-                    table,
-                    entry[0],
-                    entry[1],
-                    depth.saturating_add(1),
-                    fuel,
-                )
-            }
-            _ => Err(Error::new(ErrorKind::TypeError {
-                expected: "function or table",
-            })),
-        }
     }
 
     fn metamethod_for_value(&mut self, value: Value, name: &'static str) -> Result<Option<Value>> {
@@ -10724,6 +10438,17 @@ impl Vm {
             .map(Some)
     }
 
+    fn current_call_site(&self, program: &Program) -> Option<ErrorLocation> {
+        self.call_stack.last().and_then(|frame| {
+            let (prototype, pc) = frame.instruction?;
+            let function = match prototype {
+                Some(index) => program.functions.get(index as usize)?,
+                None => &program.main,
+            };
+            instruction_source_location(program, function, pc)
+        })
+    }
+
     fn call_value(
         &mut self,
         program: &Program,
@@ -10733,14 +10458,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
     ) -> Result<Vec<Value>> {
         let stack_base = self.call_stack.len();
-        let call_site = self.call_stack.last().and_then(|frame| {
-            let (prototype, pc) = frame.instruction?;
-            let function = match prototype {
-                Some(index) => program.functions.get(index as usize)?,
-                None => &program.main,
-            };
-            instruction_source_location(program, function, pc)
-        });
+        let call_site = self.current_call_site(program);
         let flow =
             self.call_value_with_site_resumable(program, callee, args, depth, call_site, fuel);
         match self.drive_deferred_bytecode_flow(flow, stack_base, fuel)? {
@@ -10883,6 +10601,9 @@ impl Vm {
             if entry.function_handle == handle {
                 #[cfg(any(test, feature = "executor-diagnostics"))]
                 self.record_native_call_inline_cache_hit(cache_site.program_id);
+                if self.owned_caller_can_transfer() {
+                    return self.defer_non_bytecode_call(program, callee, args, depth, call_site);
+                }
                 return self
                     .call_native_function_resumable(
                         handle,
@@ -10911,6 +10632,9 @@ impl Vm {
                     native,
                 },
             );
+            if self.owned_caller_can_transfer() {
+                return self.defer_non_bytecode_call(program, callee, args, depth, call_site);
+            }
             return self
                 .call_native_function_resumable(
                     handle, native, args, program, depth, call_site, fuel,
@@ -10938,7 +10662,45 @@ impl Vm {
         )
     }
 
+    fn owned_caller_can_transfer(&self) -> bool {
+        // Stateless/hardened entry programs are borrowed, and their contract
+        // forbids installing a LoadedProgram. Preserve their existing route.
+        self.call_stack
+            .last()
+            .is_none_or(|frame| frame.program.is_some())
+    }
+
     fn call_function_kind_with_site_resumable(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        handle: u32,
+        kind: FunctionKind,
+        bytecode_data: Option<(SmallVec<[FunctionCapture; 2]>, u32, u32)>,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        if self.owned_caller_can_transfer()
+            && matches!(kind, FunctionKind::Host | FunctionKind::Native(_))
+        {
+            return self.defer_non_bytecode_call(program, callee, args, depth, call_site);
+        }
+        self.dispatch_function_kind_with_site_resumable(
+            program,
+            callee,
+            handle,
+            kind,
+            bytecode_data,
+            args,
+            depth,
+            call_site,
+            fuel,
+        )
+    }
+
+    fn dispatch_function_kind_with_site_resumable(
         &mut self,
         program: &Program,
         callee: Value,
@@ -11017,41 +10779,7 @@ impl Vm {
                 )
             }
             FunctionKind::Host => {
-                let (fuel_cost, target) = {
-                    let op = self.host_function(handle)?;
-                    (op.fuel_cost, op.target.clone())
-                };
-                charge_fuel(
-                    &mut fuel.state.fuel,
-                    fuel.state.fuel_limit,
-                    u64::from(fuel_cost),
-                )?;
-                let result = catch_unwind(AssertUnwindSafe(|| match target {
-                    HostFunctionTarget::Inline(handler) => handler(self, args),
-                    HostFunctionTarget::Dispatcher(handler) => {
-                        fuel.hosts.invoke(self, handler.as_ref(), args)
-                    }
-                }));
-                let result = match result {
-                    Ok(result) => result,
-                    Err(_) => {
-                        let function = self.host_function(handle)?.name.clone();
-                        Err(Error::new(ErrorKind::HostPanicked { function })
-                            .without_source_location())
-                    }
-                };
-                if result
-                    .as_ref()
-                    .is_err_and(|error| matches!(error.kind, ErrorKind::HostPanicked { .. }))
-                {
-                    self.poisoned = true;
-                }
-                result
-                    .map_err(|error| {
-                        self.annotate_host_boundary(error, program, call_site.as_ref())
-                    })
-                    .map(ReturnValues::from_vec)
-                    .map(VmFlow::Return)
+                self.dispatch_host_function(program, handle, args, depth, call_site, fuel)
             }
             FunctionKind::Native(native) => self
                 .call_native_function_resumable(
@@ -11059,6 +10787,50 @@ impl Vm {
                 )
                 .map(into_return_values_flow),
         }
+    }
+
+    fn dispatch_host_function(
+        &mut self,
+        program: &Program,
+        handle: u32,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        let (fuel_cost, target) = {
+            let op = self.host_function(handle)?;
+            (op.fuel_cost, op.target.clone())
+        };
+        charge_fuel(
+            &mut fuel.state.fuel,
+            fuel.state.fuel_limit,
+            u64::from(fuel_cost),
+        )?;
+        let result = catch_unwind(AssertUnwindSafe(|| match target {
+            HostFunctionTarget::Inline(handler) => handler(self, args),
+            HostFunctionTarget::Dispatcher(handler) => {
+                let mut call = VmHostCall::new(self, fuel.state, depth);
+                fuel.hosts.invoke_scoped(&mut call, handler.as_ref(), args)
+            }
+        }));
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => {
+                let function = self.host_function(handle)?.name.clone();
+                Err(Error::new(ErrorKind::HostPanicked { function }).without_source_location())
+            }
+        };
+        if result
+            .as_ref()
+            .is_err_and(|error| matches!(error.kind, ErrorKind::HostPanicked { .. }))
+        {
+            self.poisoned = true;
+        }
+        result
+            .map_err(|error| self.annotate_host_boundary(error, program, call_site.as_ref()))
+            .map(ReturnValues::from_vec)
+            .map(VmFlow::Return)
     }
 
     fn value_is_native_function(&mut self, value: Value, native: NativeFunction) -> bool {
@@ -11339,6 +11111,7 @@ impl Vm {
         self.retain_loaded_program(LoadedProgram::new(program))
     }
 
+    #[cfg(test)]
     fn retain_dynamic_program(&mut self, mut program: Program) -> Result<u32> {
         self.preflight_dynamic_program_construction(&program)?;
         self.admit_diagnostic_source(&mut program);
@@ -11395,7 +11168,7 @@ impl Vm {
     }
 
     fn retain_loaded_program(&mut self, loaded: LoadedProgram) -> Result<u32> {
-        self.ensure_loaded_program_growth(&loaded)?;
+        self.ensure_loaded_program_growth(&loaded, 0)?;
         let handle = self.dynamic_programs.insert(loaded);
         handle.ok_or_else(|| {
             Error::new(ErrorKind::InvalidProgram {
@@ -11404,12 +11177,19 @@ impl Vm {
         })
     }
 
-    fn ensure_loaded_program_growth(&mut self, loaded: &LoadedProgram) -> Result<()> {
+    fn ensure_loaded_program_growth(
+        &mut self,
+        loaded: &LoadedProgram,
+        additional: usize,
+    ) -> Result<()> {
         let Some(limit) = self.settings.memory_limit_bytes else {
             return Ok(());
         };
         let fits = |vm: &mut Self| {
-            let additional_live_bytes = vm.dynamic_programs.additional_live_bytes(loaded);
+            let additional_live_bytes = vm
+                .dynamic_programs
+                .additional_live_bytes(loaded)
+                .saturating_add(additional);
             vm.current_live_bytes()
                 .saturating_add(additional_live_bytes)
                 <= limit
@@ -11496,7 +11276,6 @@ impl Vm {
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
             || self.scalar_instrumentation_forced()
-            || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
             || self.recursion_depth_exceeded(depth.saturating_add(1))
         {
@@ -11541,7 +11320,6 @@ impl Vm {
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
             || self.scalar_instrumentation_forced()
-            || self.heap.has_allocation_debt()
         {
             return Ok(None);
         }
@@ -11639,13 +11417,12 @@ impl Vm {
     ) -> Result<Option<ReturnValues>> {
         // Fuel and coverage are deliberately kept on the ordinary interpreter
         // so their per-instruction accounting and source attribution remain
-        // byte-for-byte identical. Likewise, do not skip a pending GC debt or
-        // a deterministic weak-collection boundary.
+        // byte-for-byte identical. Likewise, do not skip a deterministic
+        // weak-collection boundary.
         if !self.closure_call_fast_path_enabled()
             || self.settings.initial_fuel.is_some()
             || fuel.state.fuel.is_some()
             || self.scalar_instrumentation_forced()
-            || self.heap.has_allocation_debt()
             || self.weak_collection_due_within(plan.maximum_instruction_count())
             || depth.saturating_add(1) > self.settings.recursion_limit
         {
@@ -11959,6 +11736,31 @@ impl Vm {
         }
         if native == NativeFunction::XPCall {
             return self.native_xpcall_resumable(program, args, depth, call_site, fuel);
+        }
+        if self.owned_caller_can_transfer()
+            && (matches!(
+                native,
+                NativeFunction::ToString
+                    | NativeFunction::TableForeach
+                    | NativeFunction::TableForeachi
+            ) || (native == NativeFunction::StringGsub
+                && args
+                    .get(2)
+                    .is_some_and(|value| value.kind() == ValueKind::Function)))
+        {
+            self.check_recursion_depth(depth)?;
+            let extra_fuel = self.native_extra_fuel_cost(handle, native, args);
+            charge_fuel(&mut fuel.state.fuel, fuel.state.fuel_limit, extra_fuel)?;
+            return match native {
+                NativeFunction::ToString => self.native_tostring_transfer(program, args, depth),
+                NativeFunction::TableForeach => {
+                    self.native_foreach_transfer(program, args, depth, TableForeachMode::Pairs)
+                }
+                NativeFunction::TableForeachi => {
+                    self.native_foreach_transfer(program, args, depth, TableForeachMode::Array)
+                }
+                _ => self.native_gsub_transfer(program, args, depth),
+            };
         }
         self.call_native_function(handle, native, args, program, depth, call_site, fuel)
             .map(VmFlow::Return)
@@ -12931,7 +12733,13 @@ impl Vm {
                             ))
                         });
                     let error = attach_instruction_source(&program, function, pc, selected_error);
-                    Some(self.capture_host_diagnostic(error, Some(program_id), &program, function))
+                    Some(self.capture_host_diagnostic(
+                        error,
+                        Some(program_id),
+                        &program,
+                        function,
+                        None,
+                    ))
                 });
                 if let Some(selected) = selected {
                     return selected;
@@ -13417,8 +13225,8 @@ impl Vm {
         }
         output.push(b'\n');
         self.catch_host_callback(STDOUT_SERVICE_NAME, || {
-            sink.write(&String::from_utf8_lossy(&output));
-        })?;
+            sink.write(&String::from_utf8_lossy(&output))
+        })??;
         Ok(Value::nil())
     }
 
@@ -13451,18 +13259,10 @@ impl Vm {
                 return Ok(vec![Value::nil(), message]);
             }
         };
-        let program_id = self.retain_dynamic_program(program)?;
         let environment = self.current_thread_environment();
         let module_cohort = self.current_module_cohort();
-        let handle = self
-            .heap
-            .alloc_dynamic_main_function_in_cohort(program_id, environment, module_cohort)
-            .ok_or_else(|| {
-                Error::new(ErrorKind::InvalidProgram {
-                    reason: "function handle overflow",
-                })
-            })?;
-        Ok(vec![Value::function(handle)])
+        let (entry, _) = self.create_program_entry(program, environment, module_cohort, 0)?;
+        Ok(vec![entry])
     }
 
     fn native_require(
@@ -13681,6 +13481,7 @@ impl Vm {
         program_id: Option<u32>,
         program: &Program,
         function: &Function,
+        stopped_pc: Option<usize>,
     ) -> Error {
         use crate::diagnostic::{Diagnostic, DiagnosticFrame};
 
@@ -13696,8 +13497,13 @@ impl Vm {
         // Luau memory errors keep their bare guest message. Host reports can
         // still identify the stopped instruction without changing that value.
         let oom_pc = error_is_out_of_memory(&error)
-            .then(|| self.call_stack.last()?.instruction.map(|(_, pc)| pc))
-            .flatten();
+            .then_some(stopped_pc)
+            .flatten()
+            .or_else(|| {
+                error_is_out_of_memory(&error)
+                    .then(|| self.call_stack.last()?.instruction.map(|(_, pc)| pc))
+                    .flatten()
+            });
         let oom_location = oom_pc.and_then(|pc| instruction_source_location(program, function, pc));
         let Some(location) = error.location.as_ref().or(oom_location.as_ref()) else {
             return error;
@@ -13905,6 +13711,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.mark_control_memory_dirty();
         let driver_stack_base = self.call_stack.len();
         let flow = self.call_value_with_site_resumable(
@@ -13918,6 +13726,8 @@ impl Vm {
         let flow = self.drive_deferred_bytecode_flow(flow, driver_stack_base, fuel);
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -13941,6 +13751,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.resume_coroutine_frames_inner(frames, resume_results, fuel);
@@ -13948,6 +13760,8 @@ impl Vm {
         debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -13971,6 +13785,8 @@ impl Vm {
         self.running_coroutines.push(coroutine);
         self.running_coroutine_stack_bases
             .push(self.call_stack.len());
+        self.running_coroutine_active_frame_bases
+            .push(self.active_coroutine_frames.len());
         self.active_coroutine_frames.push(active_frames);
         self.mark_control_memory_dirty();
         let flow = self.propagate_coroutine_error(frames, error, fuel);
@@ -13978,6 +13794,8 @@ impl Vm {
         debug_assert!(active.is_some());
         let stack_base = self.running_coroutine_stack_bases.pop();
         debug_assert_eq!(stack_base, Some(self.call_stack.len()));
+        let active_base = self.running_coroutine_active_frame_bases.pop();
+        debug_assert_eq!(active_base, Some(self.active_coroutine_frames.len()));
         let running = self.running_coroutines.pop();
         debug_assert_eq!(running, Some(coroutine));
         self.mark_control_memory_dirty();
@@ -14002,6 +13820,11 @@ impl Vm {
                 CoroutineFrame::Require(frame) => self
                     .finish_required_module(frame, results)
                     .map(VmFlow::Return),
+                CoroutineFrame::Native(_) => {
+                    return Err(Error::new(ErrorKind::InvalidProgram {
+                        reason: "native completion escaped its driver",
+                    }));
+                }
                 CoroutineFrame::PCall => {
                     let mut protected_results = Vec::with_capacity(results.len() + 1);
                     protected_results.push(Value::boolean(true));
@@ -14054,7 +13877,7 @@ impl Vm {
                 return Err(error);
             }
             match frames.remove(0) {
-                CoroutineFrame::Bytecode(_) => {}
+                CoroutineFrame::Bytecode(_) | CoroutineFrame::Native(_) => {}
                 CoroutineFrame::Require(frame) => self.release_module_load(&frame),
                 CoroutineFrame::PCall => {
                     self.last_error_traceback = None;
@@ -14924,6 +14747,23 @@ impl Vm {
         for frame in &mut self.call_stack[base..] {
             frame.thread_environment = environment;
         }
+        // Transferred native/host calls remove their bytecode callers from the
+        // ordinary call stack while the effect runs. `setfenv(0, ...)` still
+        // applies to the whole running thread, so update those saved callers as
+        // well; otherwise resuming one restores the pre-call environment.
+        let active_base = self
+            .running_coroutine_active_frame_bases
+            .last()
+            .copied()
+            .unwrap_or(0)
+            .min(self.active_coroutine_frames.len());
+        for frames in &mut self.active_coroutine_frames[active_base..] {
+            for frame in frames {
+                if let CoroutineFrame::Bytecode(frame) = frame {
+                    frame.0[0].thread_environment = environment;
+                }
+            }
+        }
         if let Some(coroutine) = self.running_coroutines.last().copied() {
             if let Some(state) = self.coroutines.get_mut(coroutine) {
                 state.thread_environment = environment;
@@ -14980,7 +14820,32 @@ impl Vm {
         })?;
         let frame = &mut self.call_stack[index];
         frame.environment = environment;
-        Ok(frame.function)
+        let program = frame.program;
+        let function = frame.function;
+        // A transferred call keeps a lightweight logical call header on the
+        // ordinary stack while the complete bytecode frame lives in the
+        // current thread's active-frame slice. Keep both copies coherent so
+        // resuming the caller cannot restore the old environment.
+        if let Some(program) = program {
+            let active_base = self
+                .running_coroutine_active_frame_bases
+                .last()
+                .copied()
+                .unwrap_or(0)
+                .min(self.active_coroutine_frames.len());
+            for frames in &mut self.active_coroutine_frames[active_base..] {
+                for saved in frames {
+                    if let CoroutineFrame::Bytecode(saved) = saved {
+                        if saved.program_id == program
+                            && option_values_luau_equal(saved.current_function, function)
+                        {
+                            saved.environment = environment;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(function)
     }
 
     fn native_setmetatable(&mut self, args: &[Value]) -> Result<Value> {
@@ -15139,7 +15004,9 @@ impl Vm {
             traced_cohorts.extend(frames.iter().filter_map(|frame| match frame {
                 CoroutineFrame::Bytecode(frame) => Some(frame.module_cohort),
                 CoroutineFrame::Require(frame) => Some(frame.cohort),
-                CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => None,
+                CoroutineFrame::PCall | CoroutineFrame::XPCall(_) | CoroutineFrame::Native(_) => {
+                    None
+                }
             }));
         }
         for cohort_id in &traced_cohorts {
@@ -15181,7 +15048,9 @@ impl Vm {
                     let cohort_id = match frame {
                         CoroutineFrame::Bytecode(frame) => Some(frame.module_cohort),
                         CoroutineFrame::Require(frame) => Some(frame.cohort),
-                        CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => None,
+                        CoroutineFrame::PCall
+                        | CoroutineFrame::XPCall(_)
+                        | CoroutineFrame::Native(_) => None,
                     };
                     if let Some(cohort_id) = cohort_id {
                         if traced_cohorts.insert(cohort_id) {
@@ -15240,6 +15109,7 @@ impl Vm {
         self.call_stack.shrink_to_fit();
         self.running_coroutines.shrink_to_fit();
         self.running_coroutine_stack_bases.shrink_to_fit();
+        self.running_coroutine_active_frame_bases.shrink_to_fit();
         for frames in &mut self.active_coroutine_frames {
             frames.shrink_to_fit();
         }
@@ -15281,6 +15151,7 @@ impl Vm {
     fn prune_unreachable_coroutines(&mut self) {
         debug_assert!(self.running_coroutines.is_empty());
         debug_assert!(self.running_coroutine_stack_bases.is_empty());
+        debug_assert!(self.running_coroutine_active_frame_bases.is_empty());
         debug_assert!(self.active_coroutine_frames.is_empty());
         let before = self.coroutines.len();
         let heap = &mut self.heap;
@@ -15294,6 +15165,7 @@ impl Vm {
     fn prune_unreachable_coroutines_if_idle(&mut self) {
         if self.running_coroutines.is_empty()
             && self.running_coroutine_stack_bases.is_empty()
+            && self.running_coroutine_active_frame_bases.is_empty()
             && self.active_coroutine_frames.is_empty()
         {
             self.prune_unreachable_coroutines();
@@ -15325,6 +15197,7 @@ impl Vm {
                 }
             }
             CoroutineFrame::PCall | CoroutineFrame::Require(_) => {}
+            CoroutineFrame::Native(frame) => frame.roots(roots),
             CoroutineFrame::XPCall(frame) => {
                 roots.push(frame.handler);
             }
@@ -15492,7 +15365,7 @@ impl Vm {
         };
         match mode.as_str() {
             "collect" => {
-                self.collect_heap_and_programs(args, true);
+                self.collect_heap_and_programs(args);
                 self.gc_step_counter = 0;
                 self.gc_stopped = false;
                 Ok(Value::number(0.0))
@@ -15524,7 +15397,7 @@ impl Vm {
                     collectgarbage_step_threshold(size)
                 };
                 if self.gc_step_counter >= threshold {
-                    self.collect_heap_and_programs(args, false);
+                    self.collect_heap_and_programs(args);
                     self.gc_step_counter = 0;
                     self.gc_stopped = false;
                     Ok(Value::boolean(true))
@@ -15547,7 +15420,7 @@ impl Vm {
         validate_native_arity(args, 0, u8::MAX as usize, "os.clock arguments")?;
         if let Some(clock) = self.settings.services.monotonic_clock.clone() {
             let reading =
-                self.catch_host_callback(MONOTONIC_CLOCK_SERVICE_NAME, || clock.read())?;
+                self.catch_host_callback(MONOTONIC_CLOCK_SERVICE_NAME, || clock.read())??;
             return Ok(Value::number(reading));
         }
         Ok(Value::number(
@@ -15619,7 +15492,7 @@ impl Vm {
     /// plugged provider's value, or the pinned epoch when the socket is empty.
     fn os_wall_now_seconds(&mut self) -> Result<f64> {
         match self.settings.services.wall_clock.clone() {
-            Some(clock) => self.catch_host_callback(WALL_CLOCK_SERVICE_NAME, || clock.read()),
+            Some(clock) => self.catch_host_callback(WALL_CLOCK_SERVICE_NAME, || clock.read())?,
             None => Ok(OS_TIME_NOW_SECONDS as f64),
         }
     }
@@ -18672,16 +18545,7 @@ impl Vm {
         fuel: &mut Execution<'_>,
         mode: TableForeachMode,
     ) -> Result<Value> {
-        validate_native_arity(args, 2, 2, "table.foreach arguments")?;
-        let table = args[0]
-            .as_table()
-            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
-        let callback = args[1];
-        if callback.kind() != ValueKind::Function {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "function",
-            }));
-        }
+        let (table, callback) = table_foreach_arguments(args)?;
 
         match mode {
             TableForeachMode::Pairs => {
@@ -19394,7 +19258,8 @@ impl Vm {
         let text = self.coerce_to_string(registers, instruction.b)?;
         let count = string_repeat_count(get_number(registers, instruction.c)?)?;
         let result_len = string_repeat_len(text.len(), count)?;
-        self.ensure_memory_growth(VmCell::owned_string_live_bytes(result_len), &[])?;
+        let growth = self.heap.planned_owned_string_live_bytes(result_len);
+        self.ensure_memory_growth(growth, &[])?;
         let output = repeat_string(&text, count)?;
         Ok(self.heap.intern_string_value_bytes(&output))
     }
@@ -19845,7 +19710,7 @@ impl Vm {
         instruction: Instruction,
         depth: usize,
         fuel: &mut Execution<'_>,
-    ) -> Result<CallIteratorStep> {
+    ) -> Result<ImplicitStep<CallIteratorStep>> {
         let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
         window.validate(registers.len())?;
 
@@ -19853,21 +19718,22 @@ impl Vm {
         match subject.kind() {
             ValueKind::Table | ValueKind::Userdata => {
                 if let Some(method) = self.metamethod_for_value(subject, "__iter")? {
-                    let results = self.call_value(program, method, &[subject], depth, fuel)?;
-                    if instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS {
-                        self.sync_register_cells(registers, register_cells)?;
-                    }
-                    self.prepare_call_iterator_from_results(registers, window.call, results)?;
-                    return self.call_iterator_step(CallIteratorStepContext {
-                        program,
-                        registers,
-                        register_cells,
-                        window: window.call,
-                        depth,
-                        fuel,
-                        invalid_callee: InvalidIteratorCallee::Call,
-                        sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
-                    });
+                    let results =
+                        match self.implicit_call(program, method, &[subject], depth, fuel)? {
+                            ImplicitStep::Ready(results) => results,
+                            ImplicitStep::Call(request) => return Ok(ImplicitStep::Call(request)),
+                        };
+                    return self
+                        .generalized_iterator_after_method(
+                            program,
+                            registers,
+                            register_cells,
+                            instruction,
+                            results,
+                            depth,
+                            fuel,
+                        )
+                        .map(ImplicitStep::Ready);
                 }
                 if subject.kind() == ValueKind::Table {
                     set_register(
@@ -19879,7 +19745,8 @@ impl Vm {
                     set_register(registers, window.call.control, Value::nil())?;
                     return self
                         .table_iterator_step(registers, register_cells, window.call)
-                        .map(CallIteratorStep::Complete);
+                        .map(CallIteratorStep::Complete)
+                        .map(ImplicitStep::Ready);
                 }
                 Err(iteration_error(subject))
             }
@@ -19902,9 +19769,37 @@ impl Vm {
                     invalid_callee: InvalidIteratorCallee::Call,
                     sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
                 })
+                .map(ImplicitStep::Ready)
             }
             _ => Err(iteration_error(subject)),
         }
+    }
+
+    fn generalized_iterator_after_method(
+        &mut self,
+        program: &Program,
+        registers: &mut [Value],
+        register_cells: &mut [Option<u32>],
+        instruction: Instruction,
+        results: Vec<Value>,
+        depth: usize,
+        fuel: &mut Execution<'_>,
+    ) -> Result<CallIteratorStep> {
+        let window = GeneralizedIteratorRegisters::new(instruction.a, instruction.c)?;
+        if instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS {
+            self.sync_register_cells(registers, register_cells)?;
+        }
+        self.prepare_call_iterator_from_results(registers, window.call, results)?;
+        self.call_iterator_step(CallIteratorStepContext {
+            program,
+            registers,
+            register_cells,
+            window: window.call,
+            depth,
+            fuel,
+            invalid_callee: InvalidIteratorCallee::Call,
+            sync_caller_cells: instruction.b != ITERATOR_CALLER_HAS_NO_CAPTURED_LOCALS,
+        })
     }
 
     fn generalized_iterator_loop(
@@ -20394,13 +20289,9 @@ impl Vm {
     #[inline(always)]
     fn maybe_collect_with_roots(&mut self, transient_roots: &[Value]) -> Result<()> {
         let deterministic_sim = self.profile.is_deterministic_sim();
-        if !deterministic_sim {
-            self.heap.collect_debt();
-        }
         let interval = self.settings.deterministic_gc_interval.get();
         while self.executed_instructions >= self.next_weak_collection_instruction {
             if deterministic_sim || !self.gc_stopped {
-                self.heap.finish_collection_cycle();
                 let roots = self.collectgarbage_roots(transient_roots);
                 self.heap.collect_weak_tables_with_roots(&roots);
                 self.prune_unreachable_coroutines_if_idle();
@@ -23320,7 +23211,12 @@ fn shrink_bytecode_continuation_capacity(continuation: &mut BytecodeContinuation
     match continuation {
         BytecodeContinuation::ExpandedCalls(state) => state.shrink(),
         BytecodeContinuation::ReturnWithPrefix { prefix } => prefix.shrink_to_fit(),
-        BytecodeContinuation::WriteFirst { .. }
+        BytecodeContinuation::Import { .. }
+        | BytecodeContinuation::IteratorPrepare { .. }
+        | BytecodeContinuation::Discard
+        | BytecodeContinuation::WriteTruthy { .. }
+        | BytecodeContinuation::NameCall { .. }
+        | BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
         | BytecodeContinuation::AppendToTable { .. }
@@ -23350,6 +23246,7 @@ fn shrink_coroutine_frame_capacity(frame: &mut CoroutineFrame) {
             frame.stackless_self_calls.shrink_to_fit();
         }
         CoroutineFrame::Require(frame) => frame.load.identity.shrink_to_fit(),
+        CoroutineFrame::Native(frame) => frame.shrink(),
         CoroutineFrame::PCall | CoroutineFrame::XPCall(_) => {}
     }
 }
@@ -23380,6 +23277,9 @@ fn extend_coroutine_program_roots(
                 roots.insert(frame.program_id);
             }
             CoroutineFrame::PCall | CoroutineFrame::Require(_) => {}
+            CoroutineFrame::Native(frame) => {
+                roots.insert(frame.frame().program_id);
+            }
         }
     }
 }
@@ -23400,6 +23300,13 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
         usage.add_vec(&definition.methods);
         for method in &definition.methods {
             let (live, reserved) = method.memory_usage();
+            usage.add(
+                live.saturating_sub(size_of::<HostFunctionOp>()),
+                reserved.saturating_sub(size_of::<HostFunctionOp>()),
+            );
+        }
+        for (_, hook) in definition.hooks.iter() {
+            let (live, reserved) = hook.memory_usage();
             usage.add(
                 live.saturating_sub(size_of::<HostFunctionOp>()),
                 reserved.saturating_sub(size_of::<HostFunctionOp>()),
@@ -23479,6 +23386,7 @@ fn add_vm_cached_control_memory(vm: &Vm, usage: &mut MemoryUsage) {
     }
     usage.add_vec(&vm.running_coroutines);
     usage.add_vec(&vm.running_coroutine_stack_bases);
+    usage.add_vec(&vm.running_coroutine_active_frame_bases);
     usage.add_vec(&vm.active_coroutine_frames);
     for frames in &vm.active_coroutine_frames {
         usage.add_vec(frames);
@@ -23704,6 +23612,33 @@ fn try_clone_bytecode_continuation(
         BytecodeContinuation::ExpandedCalls(state) => {
             BytecodeContinuation::ExpandedCalls(state.try_clone()?)
         }
+        BytecodeContinuation::IteratorPrepare { instruction } => {
+            BytecodeContinuation::IteratorPrepare {
+                instruction: *instruction,
+            }
+        }
+        BytecodeContinuation::Import { register, state } => BytecodeContinuation::Import {
+            register: *register,
+            state: *state,
+        },
+        BytecodeContinuation::Discard => BytecodeContinuation::Discard,
+        BytecodeContinuation::WriteTruthy { register, invert } => {
+            BytecodeContinuation::WriteTruthy {
+                register: *register,
+                invert: *invert,
+            }
+        }
+        BytecodeContinuation::NameCall {
+            register,
+            object,
+            key,
+            check,
+        } => BytecodeContinuation::NameCall {
+            register: *register,
+            object: *object,
+            key: *key,
+            check: *check,
+        },
         BytecodeContinuation::WriteFirst { register } => BytecodeContinuation::WriteFirst {
             register: *register,
         },
@@ -23802,6 +23737,7 @@ fn try_clone_coroutine_frame(frame: &CoroutineFrame) -> Result<CoroutineFrame> {
             SuspendedBytecodeFrameStorage::try_new(try_clone_suspended_bytecode_frame(frame)?)?,
         ),
         CoroutineFrame::PCall => CoroutineFrame::PCall,
+        CoroutineFrame::Native(frame) => CoroutineFrame::Native(frame.try_clone()?),
         CoroutineFrame::Require(frame) => CoroutineFrame::Require(SuspendedRequireFrame {
             cohort: frame.cohort,
             load: try_clone_module_load(&frame.load)?,
@@ -23995,6 +23931,7 @@ fn add_coroutine_frame_memory(frame: &CoroutineFrame, usage: &mut MemoryUsage) {
             usage.add(frame.load.identity.len(), frame.load.identity.capacity())
         }
         CoroutineFrame::PCall => {}
+        CoroutineFrame::Native(frame) => frame.memory(usage),
     }
 }
 
@@ -24032,7 +23969,12 @@ fn add_continuation_memory(continuation: &BytecodeContinuation, usage: &mut Memo
     match continuation {
         BytecodeContinuation::ExpandedCalls(state) => state.memory(usage),
         BytecodeContinuation::ReturnWithPrefix { prefix } => usage.add_vec(prefix),
-        BytecodeContinuation::WriteFirst { .. }
+        BytecodeContinuation::Import { .. }
+        | BytecodeContinuation::IteratorPrepare { .. }
+        | BytecodeContinuation::Discard
+        | BytecodeContinuation::WriteTruthy { .. }
+        | BytecodeContinuation::NameCall { .. }
+        | BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
         | BytecodeContinuation::AppendToTable { .. }
@@ -25386,7 +25328,14 @@ fn extend_bytecode_continuation_roots(roots: &mut Vec<Value>, continuation: &Byt
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
             roots.extend_from_slice(prefix);
         }
-        BytecodeContinuation::WriteFirst { .. }
+        BytecodeContinuation::NameCall { object, key, .. } => {
+            roots.extend_from_slice(&[*object, *key]);
+        }
+        BytecodeContinuation::Import { .. }
+        | BytecodeContinuation::IteratorPrepare { .. }
+        | BytecodeContinuation::Discard
+        | BytecodeContinuation::WriteTruthy { .. }
+        | BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
         | BytecodeContinuation::AppendToTable { .. }
@@ -25403,7 +25352,14 @@ fn extend_bytecode_continuation_heap_roots(
         BytecodeContinuation::ReturnWithPrefix { prefix } => {
             extend_heap_backed_roots(roots, prefix);
         }
-        BytecodeContinuation::WriteFirst { .. }
+        BytecodeContinuation::NameCall { object, key, .. } => {
+            extend_heap_backed_roots(roots, &[*object, *key]);
+        }
+        BytecodeContinuation::Import { .. }
+        | BytecodeContinuation::IteratorPrepare { .. }
+        | BytecodeContinuation::Discard
+        | BytecodeContinuation::WriteTruthy { .. }
+        | BytecodeContinuation::WriteFirst { .. }
         | BytecodeContinuation::WriteFixed { .. }
         | BytecodeContinuation::PCallWriteFixed { .. }
         | BytecodeContinuation::AppendToTable { .. }
@@ -27275,6 +27231,7 @@ enum GSubReplacement {
     Table(Value),
 }
 
+#[derive(Clone)]
 enum GSubPattern {
     Empty,
     Plain(Vec<u8>),
@@ -27289,6 +27246,7 @@ enum GSubPattern {
     Capturing(CapturingPattern),
 }
 
+#[derive(Clone)]
 struct GSubMatch {
     start: usize,
     end: usize,
@@ -27301,6 +27259,7 @@ enum GSubCapture {
     Position(usize),
 }
 
+#[derive(Clone)]
 struct CapturingPattern {
     anchored_start: bool,
     steps: Vec<CaptureStep>,
@@ -27318,6 +27277,7 @@ struct CaptureMatchState {
     captures: Vec<Option<StringCapture>>,
 }
 
+#[derive(Clone)]
 enum CaptureStep {
     StartAnchor,
     EndAnchor,
@@ -28133,11 +28093,13 @@ fn is_luau_pattern_special(byte: u8) -> bool {
     )
 }
 
+#[derive(Clone)]
 struct NonCapturingPattern {
     anchored_start: bool,
     steps: Vec<PatternStep>,
 }
 
+#[derive(Clone, Copy)]
 enum PatternStep {
     Frontier(LuauByteClass),
     Item {
@@ -28147,6 +28109,7 @@ enum PatternStep {
     EndAnchor,
 }
 
+#[derive(Clone, Copy)]
 enum PatternItem {
     Any,
     Byte(u8),
@@ -28391,6 +28354,9 @@ mod inline_cache_tests {
         };
     }
 
+    // Owned storage has no auxiliary arena debt at startup: the first eligible
+    // instruction now enters tape. These exact path counts include it; scalar
+    // differential assertions below still check semantic instruction totals.
     fn tape_program() -> Program {
         Program::new(
             Function::new(
@@ -28418,7 +28384,7 @@ mod inline_cache_tests {
         let taped_result = taped.run(&program).unwrap();
         assert_eq!(taped_result.as_number(), Some(5.0));
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 6);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
 
         let mut dispatched = Vm::new(Profile::ReproducibleStandard);
@@ -28478,8 +28444,8 @@ mod inline_cache_tests {
 
         let mut taped = Vm::new(Profile::ReproducibleStandard);
         let taped_error = taped.run(&program).unwrap_err();
-        assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 2);
+        assert_eq!(taped.dynamic_programs[0].tape_entries, 2);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 3);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
 
         let mut dispatched = Vm::new(Profile::ReproducibleStandard);
@@ -29089,7 +29055,7 @@ mod inline_cache_tests {
         let taped_result = taped.run(&program).unwrap();
         assert_eq!(taped_result.as_number(), Some(12.0));
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 8);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
 
@@ -29133,7 +29099,7 @@ mod inline_cache_tests {
         let taped_error = taped.run(&program).unwrap_err();
         assert_eq!(taped_error.pc, Some(10));
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 10);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 11);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
         assert_eq!(taped.executed_instructions, 11);
@@ -29180,7 +29146,7 @@ mod inline_cache_tests {
         let taped_result = taped.run(&program).unwrap();
         assert_eq!(taped_result.as_number(), Some(15.0));
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 13);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 14);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 2);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
         assert_eq!(taped.executed_instructions, 15);
@@ -29220,7 +29186,7 @@ mod inline_cache_tests {
         // The out-of-bounds clear is rejected at build time, so the tape run
         // ends one instruction earlier and the canonical scalar error fires.
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 8);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 0);
         assert_eq!(taped.executed_instructions, 9);
@@ -29401,7 +29367,7 @@ mod inline_cache_tests {
         let taped_result = taped.run(&program).unwrap();
         assert_eq!(taped_result.as_number(), Some(8.0));
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 6);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 7);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 1);
 
         let mut scalar = Vm::new(Profile::ReproducibleStandard);
@@ -29476,7 +29442,7 @@ mod inline_cache_tests {
         // Move and the interior Move run on tape, and the guarded GetIndex
         // side-exits to the scalar error site.
         assert_eq!(taped.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(taped.dynamic_programs[0].tape_instructions, 4);
+        assert_eq!(taped.dynamic_programs[0].tape_instructions, 5);
         assert_eq!(taped.dynamic_programs[0].tape_receipts, 0);
         assert_eq!(taped.dynamic_programs[0].tape_guard_exits, 1);
 
@@ -29617,7 +29583,7 @@ mod inline_cache_tests {
 
         assert_eq!(vm.run(&program).unwrap().as_number(), Some(42.0));
         assert_eq!(vm.dynamic_programs[0].tape_entries, 1);
-        assert_eq!(vm.dynamic_programs[0].tape_instructions, 8);
+        assert_eq!(vm.dynamic_programs[0].tape_instructions, 9);
         assert_eq!(vm.dynamic_programs[0].tape_receipts, 1);
         assert_tape_differential(&program);
     }
@@ -30787,58 +30753,121 @@ mod inline_cache_tests {
 
     #[test]
     fn memory_limit_precedes_leaf_mutation_after_an_allocating_instruction() {
-        let template = closure_call_counter_program();
-        let program = Program::with_functions(
-            Function::new(
+        fn run_case(
+            mode: ClosureCallTestMode,
+            allocate: bool,
+            limit: Option<usize>,
+        ) -> (Vm, Result<Value>, usize) {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            let template = closure_call_counter_program();
+            // Keep the source registers initialized before quota admission. The
+            // allocated array must exceed the ordinary leaf-frame headroom, not
+            // rely on a single empty table exceeding a transient Host frame.
+            const ARRAY_LEN: u8 = 64;
+            let mut instructions = vec![
+                Instruction::new(Opcode::LoadConst, 0, 0, 0),
+                Instruction::new(Opcode::LoadConst, 1, 0, 1),
+                Instruction::with_aux(Opcode::LoadFunction, 2, 0, 0, 0),
+                Instruction::with_aux(Opcode::GetGlobal, 3, 0, 0, 2),
+            ];
+            for register in 6..6 + ARRAY_LEN {
+                instructions.push(Instruction::new(Opcode::LoadConst, register, 0, 1));
+            }
+            instructions.extend([
+                Instruction::with_aux(Opcode::Call, 4, 3, 2, 1),
+                if allocate {
+                    Instruction::new(Opcode::NewArray, 4, 6, ARRAY_LEN)
+                } else {
+                    Instruction::new(Opcode::Move, 4, 4, 0)
+                },
+                if allocate {
+                    Instruction::new(Opcode::NewArray, 5, 6, ARRAY_LEN)
+                } else {
+                    Instruction::new(Opcode::Move, 5, 5, 0)
+                },
+                if allocate {
+                    Instruction::new(Opcode::NewArray, 6, 6, ARRAY_LEN)
+                } else {
+                    Instruction::new(Opcode::Move, 6, 6, 0)
+                },
+                Instruction::with_aux(Opcode::Call, 7, 2, 0, 0),
+                Instruction::new(Opcode::Halt, 0, 0, 0),
+            ]);
+            let program = Program::with_functions(
+                Function::new(instructions, 6 + ARRAY_LEN as usize),
                 vec![
-                    Instruction::new(Opcode::LoadConst, 0, 0, 0),
-                    Instruction::new(Opcode::LoadConst, 1, 0, 1),
-                    Instruction::with_aux(Opcode::LoadFunction, 2, 0, 0, 0),
-                    Instruction::with_aux(Opcode::GetGlobal, 3, 0, 0, 2),
-                    Instruction::with_aux(Opcode::Call, 4, 3, 2, 1),
-                    Instruction::new(Opcode::NewArray, 4, 0, 0),
-                    Instruction::with_aux(Opcode::Call, 5, 2, 0, 0),
-                    Instruction::new(Opcode::Halt, 0, 0, 0),
+                    Constant::Number(0.0),
+                    Constant::Number(1.0),
+                    Constant::String(b"arm_quota".to_vec()),
                 ],
-                6,
-            ),
-            vec![
-                Constant::Number(0.0),
-                Constant::Number(1.0),
-                Constant::String(b"arm_quota".to_vec()),
-            ],
-            template.functions,
-        );
-
-        let mut instruction_counts = Vec::new();
-        for mode in [ClosureCallTestMode::Off, ClosureCallTestMode::Force] {
+                template.functions,
+            );
             let mut vm = Vm::with_settings(
                 Profile::ReproducibleStandard,
                 VmSettings {
                     memory_limit_bytes: Some(usize::MAX),
-                    ..VmSettings::default()
+                    ..Default::default()
                 },
             );
             vm.closure_call_mode = mode;
+            let observed = Arc::new(AtomicUsize::new(0));
+            let record = observed.clone();
             vm.install_host_function(HostFunctionOp::new(
                 "arm_quota",
                 1,
                 OpCapability::Pure,
-                Arc::new(|vm, args| {
+                Arc::new(move |vm, args| {
                     vm.set_global_value("quota_leaf", args[0])?;
-                    // Calibrate the exact pre-allocation boundary, including
-                    // the caller frame and roots, without assuming layout
-                    // sizes. The limit is present throughout the frame.
-                    vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+                    record.store(vm.current_live_bytes(), Ordering::SeqCst);
+                    vm.settings.memory_limit_bytes = Some(limit.unwrap_or(usize::MAX));
                     Ok(Vec::new())
                 }),
             ))
             .unwrap();
-
-            let error = vm
-                .run(&program)
-                .expect_err("the new table exceeds the quota");
-            assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+            let result = vm.run(&program);
+            (vm, result, observed.load(Ordering::SeqCst))
+        }
+        // Calibrate only the successful non-allocating Off control, using fresh
+        // VMs and fixed externally chosen budgets. No saved-frame sizes enter
+        // the calibration and failures of the allocating case are not searched.
+        let (_, control, observed) = run_case(ClosureCallTestMode::Off, false, None);
+        control.unwrap();
+        let mut high = observed.max(1);
+        while run_case(ClosureCallTestMode::Off, false, Some(high))
+            .1
+            .is_err()
+        {
+            high = high.checked_mul(2).expect("finite control quota");
+        }
+        let mut low = 0;
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if run_case(ClosureCallTestMode::Off, false, Some(middle))
+                .1
+                .is_ok()
+            {
+                high = middle;
+            } else {
+                low = middle + 1;
+            }
+        }
+        let fixed_limit = high;
+        for mode in [ClosureCallTestMode::Off, ClosureCallTestMode::Force] {
+            let (mut control, result, _) = run_case(mode, false, Some(fixed_limit));
+            result.expect("identical no-allocation control must succeed");
+            let leaf = control
+                .get_global_value("quota_leaf")
+                .unwrap()
+                .as_function()
+                .unwrap();
+            let leaf = control.heap.function_capture(leaf, 0).unwrap();
+            assert_eq!(
+                control.heap.capture_get(leaf).and_then(Value::as_number),
+                Some(1.0)
+            );
+            let (mut vm, result, _) = run_case(mode, true, Some(fixed_limit));
+            let error = result.expect_err("new table must exceed fixed resumed-caller budget");
+            assert!(matches!(error.kind, ErrorKind::OutOfMemory), "{error}");
             let leaf = vm
                 .get_global_value("quota_leaf")
                 .unwrap()
@@ -30850,11 +30879,14 @@ mod inline_cache_tests {
                 Some(0.0)
             );
             assert_eq!(vm.executor_census().closure_call_fast_entries, 0);
-            instruction_counts.push(vm.executed_instructions);
+            // Four original setup operations + 64 element initializations,
+            // then arm_quota, three NewArray operations and the stopped Call.
+            assert_eq!(
+                vm.executed_instructions,
+                4 + 64 + 5,
+                "stop at the caller Call boundary before entering the leaf"
+            );
         }
-        // NewArray (pc 5) completed; the scalar quota check at the Call
-        // (pc 6) must abort before executing the counter's first instruction.
-        assert_eq!(instruction_counts, [7, 7]);
     }
 
     /// [`closure_call_loop_program`] with a logical-unit schedule: `main`
@@ -31974,6 +32006,7 @@ mod inline_cache_tests {
         vm.call_stack.reserve(4_096);
         vm.running_coroutines.reserve(4_096);
         vm.running_coroutine_stack_bases.reserve(4_096);
+        vm.running_coroutine_active_frame_bases.reserve(4_096);
         vm.active_coroutine_frames.reserve(4_096);
         vm.yield_collectors.reserve(4_096);
         assert!(vm.call_stack.capacity() >= 4_096);
@@ -31983,6 +32016,7 @@ mod inline_cache_tests {
         assert_eq!(vm.call_stack.capacity(), 0);
         assert_eq!(vm.running_coroutines.capacity(), 0);
         assert_eq!(vm.running_coroutine_stack_bases.capacity(), 0);
+        assert_eq!(vm.running_coroutine_active_frame_bases.capacity(), 0);
         assert_eq!(vm.active_coroutine_frames.capacity(), 0);
         assert_eq!(vm.yield_collectors.capacity(), 0);
     }
@@ -32017,6 +32051,31 @@ mod inline_cache_tests {
         assert!(collected.reserved_bytes < allocated.reserved_bytes);
         assert!(collected.peak_live_bytes >= Some(allocated.live_bytes));
         assert!(collected.peak_reserved_bytes >= Some(allocated.reserved_bytes));
+    }
+
+    #[test]
+    fn owned_string_quota_rejects_before_interning_and_accepts_exact_growth() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.collect_garbage();
+        let before = vm.current_live_bytes();
+        let atoms = vm.heap.string_atom_count();
+        let growth = vm.heap.planned_owned_string_live_bytes(200);
+        vm.settings.memory_limit_bytes = Some(before + growth - 1);
+        let unit = Value::short_string(b"x").unwrap();
+        let error = vm
+            .native_string_rep(&[unit, Value::number(200.0)])
+            .unwrap_err();
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.heap.string_atom_count(), atoms);
+        assert_eq!(vm.current_live_bytes(), before);
+
+        vm.settings.memory_limit_bytes = Some(before + growth);
+        let value = vm.native_string_rep(&[unit, Value::number(200.0)]).unwrap();
+        assert_eq!(
+            vm.string_value_bytes(value).unwrap().unwrap(),
+            vec![b'x'; 200]
+        );
+        assert_eq!(vm.current_live_bytes(), before + growth);
     }
 
     #[test]
@@ -33867,4 +33926,18 @@ mod gc_root_refresh_accounting_census_tests {
             census.gc_root_refreshes,
         );
     }
+}
+
+fn table_foreach_arguments(args: &[Value]) -> Result<(u32, Value)> {
+    validate_native_arity(args, 2, 2, "table.foreach arguments")?;
+    let table = args[0]
+        .as_table()
+        .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "table" }))?;
+    let callback = args[1];
+    if callback.kind() != ValueKind::Function {
+        return Err(Error::new(ErrorKind::TypeError {
+            expected: "function",
+        }));
+    }
+    Ok((table, callback))
 }

@@ -5,6 +5,11 @@ use crate::bytecode::{supports_call_descriptor, CallDescriptor, CallDescriptorCa
 
 #[derive(Clone)]
 enum ExpandedCallee {
+    // Lookup arguments are already expanded for these two resume stages.
+    MethodResult {
+        key: Value,
+    },
+    ImportResult(ImportState),
     Early(Value),
     Import(u32),
     Method {
@@ -109,7 +114,7 @@ pub(super) fn descriptor(
             unpack_append_call_expand_aux(descriptor.aux)?;
         }
         _ if descriptor.aux != 0 => {
-            return Err(invalid("expanded call descriptor contains unused aux data"))
+            return Err(invalid("expanded call descriptor contains unused aux data"));
         }
         _ => {}
     }
@@ -380,6 +385,7 @@ impl ExpandedCallState {
         for call in &self.calls {
             match call.callee {
                 ExpandedCallee::Early(value) => roots.push(value),
+                ExpandedCallee::MethodResult { key } => roots.push(key),
                 ExpandedCallee::Method {
                     receiver_cell: Some(cell),
                     ..
@@ -401,6 +407,7 @@ impl ExpandedCallState {
         for call in &self.calls {
             match call.callee {
                 ExpandedCallee::Early(value) => extend_heap_backed_roots(roots, &[value]),
+                ExpandedCallee::MethodResult { key } => extend_heap_backed_roots(roots, &[key]),
                 ExpandedCallee::Method {
                     receiver_cell: Some(cell),
                     ..
@@ -487,11 +494,53 @@ impl Vm {
                     .calls
                     .pop()
                     .ok_or_else(|| invalid("missing pending expanded call"))?;
-                call.args
-                    .try_reserve(results.len())
-                    .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-                call.args.append(&mut results);
+                let lookup_result = if matches!(
+                    call.callee,
+                    ExpandedCallee::MethodResult { .. } | ExpandedCallee::ImportResult(_)
+                ) {
+                    Some(first_result_or_nil(std::mem::take(&mut results)))
+                } else {
+                    call.args.try_reserve(results.len()).map_err(|_| {
+                        Error::new(ErrorKind::OutOfMemory).without_source_location()
+                    })?;
+                    call.args.append(&mut results);
+                    None
+                };
                 let callee = match call.callee {
+                    ExpandedCallee::MethodResult { key } => {
+                        let callee =
+                            lookup_result.ok_or_else(|| invalid("missing method lookup result"))?;
+                        let receiver = *call
+                            .args
+                            .first()
+                            .ok_or_else(|| invalid("missing method receiver"))?;
+                        self.advance_fused_instruction_steps_with_root(1, callee)?;
+                        self.check_method_value(callee, receiver, key)?;
+                        callee
+                    }
+                    ExpandedCallee::ImportResult(mut import) => {
+                        let object =
+                            lookup_result.ok_or_else(|| invalid("missing import lookup result"))?;
+                        match self.continue_import(
+                            program,
+                            None,
+                            None,
+                            0,
+                            &mut import,
+                            object,
+                            state.depth,
+                            fuel,
+                        )? {
+                            ImplicitStep::Ready(value) => value,
+                            ImplicitStep::Call(request) => {
+                                call.callee = ExpandedCallee::ImportResult(import);
+                                // We just popped this same call: the existing
+                                // vector capacity accommodates its saved stage.
+                                state.calls.push(call);
+                                return Ok(ExpandedCallFlow::Transfer(request));
+                            }
+                        }
+                    }
                     ExpandedCallee::Early(value) => value,
                     ExpandedCallee::Method {
                         name: index,
@@ -531,8 +580,20 @@ impl Vm {
                             "method-name constant must be a string",
                         )?;
                         self.advance_fused_instruction_steps_with_root(1, receiver)?;
-                        let callee =
-                            self.get_index_value(program, receiver, key, state.depth, fuel)?;
+                        let callee = match self.get_index_value_step(
+                            program,
+                            receiver,
+                            key,
+                            state.depth,
+                            fuel,
+                        )? {
+                            ImplicitStep::Ready(value) => value,
+                            ImplicitStep::Call(request) => {
+                                call.callee = ExpandedCallee::MethodResult { key };
+                                state.calls.push(call);
+                                return Ok(ExpandedCallFlow::Transfer(request));
+                            }
+                        };
                         self.advance_fused_instruction_steps_with_root(1, callee)?;
                         self.check_method_value(callee, receiver, key)?;
                         callee
@@ -545,11 +606,8 @@ impl Vm {
                         self.maybe_collect()?;
                         // This fused instruction has no GetImport cache lanes. Reuse
                         // the ordinary lookup semantics without a cache identity.
-                        self.get_import(
+                        let mut import = ImportState::new(
                             program,
-                            None,
-                            None,
-                            0,
                             Instruction {
                                 op: Opcode::GetImport,
                                 a: 0,
@@ -557,9 +615,25 @@ impl Vm {
                                 c: 0,
                                 aux: index as i32,
                             },
+                        )?;
+                        let object = Value::table(self.current_environment()?);
+                        match self.continue_import(
+                            program,
+                            None,
+                            None,
+                            0,
+                            &mut import,
+                            object,
                             state.depth,
                             fuel,
-                        )?
+                        )? {
+                            ImplicitStep::Ready(value) => value,
+                            ImplicitStep::Call(request) => {
+                                call.callee = ExpandedCallee::ImportResult(import);
+                                state.calls.push(call);
+                                return Ok(ExpandedCallFlow::Transfer(request));
+                            }
+                        }
                     }
                 };
                 // A lookup metamethod can produce a fresh function or callable

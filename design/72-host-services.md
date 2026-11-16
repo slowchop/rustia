@@ -160,7 +160,10 @@ Applications configure providers through `RustiaBuilder` and read facade-owned
 `Settings`; see [75](75-embedded-api.md#application-api-boundary).
 
 `VmSettings` keeps its load-bearing `Clone + Debug` derives (VM callers clone settings; VM tests
-clone). Cloning settings shares providers; documented. `ServiceClock` and any new public enum get
+clone). Cloning settings shares providers; documented. In lower-level `rustia-vm/send`, the
+construction-only entropy provider is `Send + Sync`, so independent VMs may read one cloned
+provider concurrently; mutable runtime service re-entry remains a structured nonblocking error.
+`ServiceClock` and any new public enum get
 `#[non_exhaustive]` per facade convention.
 
 **Explicitly cut from this slice** (KISS review; may return when a real caller exists):
@@ -239,7 +242,8 @@ instead of `0.0`).
 
 `require`/module-loader socket; incremental accounting and live `count`/`gcinfo`;
 recording/replay providers; WASI-style permission UI; `GcSchedule`/`determinism_tier()` public API;
-paced-GC knobs; `Send`/`Sync` providers (the VM is thread-affine); async sinks; fixing the
+paced-GC knobs; transferable providers in the public facade (the default VM is
+thread-affine; `rustia-vm/send` is only a lower-level consumer slice); async sinks; fixing the
 pre-existing `os.date`/`os.time(table)` oracle divergences; perf claims (service calls are cold-path).
 
 This is the scope boundary of the host-services slice, not current project

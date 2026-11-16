@@ -210,8 +210,10 @@ Expose a Rust type's methods with `ObjectType<T>` and keep instances as live
 `Object<T>` handles. Deterministic methods read input and stage requests;
 standard/live methods can change application state immediately. See the
 [object guide](https://github.com/slowchop/rustia/blob/main/design/83-rust-objects.md)
-for an example and lifetime rules. Custom fields/metamethods, scoped callbacks,
-and async host calls remain future work.
+for an example and lifetime rules. The lower-level `rustia-vm` crate now has
+owned field/metamethod hooks and a scoped re-entry seam for controlled
+integrations such as Luvy; ergonomic typed-facade fields, borrowed scopes and
+async host calls remain future work.
 
 ### Speed: a measured snapshot
 

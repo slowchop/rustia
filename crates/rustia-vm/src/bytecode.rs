@@ -131,6 +131,11 @@ pub struct Function {
     pub parameter_count: usize,
     pub is_vararg: bool,
     pub upvalues: Vec<UpvalueDescriptor>,
+    /// Lexical names in the same order as `upvalues`, independent of whether a
+    /// capture uses a shared cell or a direct immutable value. The compiler
+    /// supplies one name per descriptor. Hand-authored bytecode may omit them.
+    /// Use [`Self::upvalue_name`] to reject absent or misaligned metadata.
+    pub upvalue_names: Vec<String>,
     pub captured_registers: Vec<u8>,
     pub source_map: Vec<InstructionSource>,
     pub debug_name: Option<String>,
@@ -729,6 +734,11 @@ fn add_function_memory(function: &Function, live: &mut usize, reserved: &mut usi
     }
     add_vec!(function.code, Instruction);
     add_vec!(function.upvalues, UpvalueDescriptor);
+    add_vec!(function.upvalue_names, String);
+    for name in &function.upvalue_names {
+        *live = live.saturating_add(name.len());
+        *reserved = reserved.saturating_add(name.capacity());
+    }
     add_vec!(function.captured_registers, u8);
     add_vec!(function.source_map, InstructionSource);
     add_vec!(function.parameter_types, RuntimeType);
@@ -782,6 +792,7 @@ impl Function {
             parameter_count: 0,
             is_vararg: false,
             upvalues: Vec::new(),
+            upvalue_names: Vec::new(),
             captured_registers: Vec::new(),
             source_map: Vec::new(),
             debug_name: None,
@@ -801,6 +812,7 @@ impl Function {
             parameter_count,
             is_vararg: false,
             upvalues: Vec::new(),
+            upvalue_names: Vec::new(),
             captured_registers: Vec::new(),
             source_map: Vec::new(),
             debug_name: None,
@@ -821,6 +833,7 @@ impl Function {
             parameter_count,
             is_vararg,
             upvalues: Vec::new(),
+            upvalue_names: Vec::new(),
             captured_registers: Vec::new(),
             source_map: Vec::new(),
             debug_name: None,
@@ -842,6 +855,7 @@ impl Function {
             parameter_count,
             is_vararg: false,
             upvalues,
+            upvalue_names: Vec::new(),
             captured_registers,
             source_map: Vec::new(),
             debug_name: None,
@@ -864,6 +878,7 @@ impl Function {
             parameter_count,
             is_vararg,
             upvalues,
+            upvalue_names: Vec::new(),
             captured_registers,
             source_map: Vec::new(),
             debug_name: None,
@@ -875,6 +890,22 @@ impl Function {
     pub fn with_source_map(mut self, source_map: Vec<InstructionSource>) -> Self {
         self.source_map = source_map;
         self
+    }
+
+    /// Attaches capture names without changing executable capture descriptors.
+    /// A length mismatch makes all names unavailable through `upvalue_name`.
+    pub fn with_upvalue_names(mut self, names: Vec<String>) -> Self {
+        self.upvalue_names = names;
+        self
+    }
+
+    /// Returns a capture's lexical name only when metadata covers every
+    /// descriptor. Legacy or malformed partial metadata is not guessed.
+    pub fn upvalue_name(&self, index: usize) -> Option<&str> {
+        if self.upvalue_names.len() != self.upvalues.len() {
+            return None;
+        }
+        self.upvalue_names.get(index).map(String::as_str)
     }
 
     pub fn with_debug_name(mut self, debug_name: Option<String>) -> Self {
@@ -935,6 +966,60 @@ pub enum UpvalueDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_name_lookup_rejects_missing_partial_and_extra_metadata() {
+        let function = Function::with_params_and_upvalues(
+            Vec::new(),
+            1,
+            0,
+            vec![
+                UpvalueDescriptor::ParentLocal(0),
+                UpvalueDescriptor::ParentLocalValue(1),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(function.upvalue_name(0), None);
+        let partial = function.clone().with_upvalue_names(vec!["left".into()]);
+        assert_eq!(partial.upvalue_name(0), None);
+        assert_eq!(partial.upvalue_name(1), None);
+        let extra = function.clone().with_upvalue_names(vec![
+            "left".into(),
+            "right".into(),
+            "extra".into(),
+        ]);
+        assert_eq!(extra.upvalue_name(0), None);
+        let named = function.with_upvalue_names(vec!["left".into(), "right".into()]);
+        assert_eq!(named.upvalue_name(0), Some("left"));
+        assert_eq!(named.upvalue_name(1), Some("right"));
+        assert_eq!(named.upvalue_name(2), None);
+    }
+
+    #[test]
+    fn program_memory_accounts_for_capture_name_storage() {
+        let mut program = Program::with_functions(
+            Function::new(Vec::new(), 1),
+            Vec::new(),
+            vec![Function::with_params_and_upvalues(
+                Vec::new(),
+                1,
+                0,
+                vec![UpvalueDescriptor::ParentLocal(0)],
+                Vec::new(),
+            )],
+        );
+        let before = program.memory_usage(false);
+        let mut name = String::with_capacity(80);
+        name.push_str("counter");
+        let mut names = Vec::with_capacity(3);
+        names.push(name);
+        let expected_live = names.len() * size_of::<String>() + names[0].len();
+        let expected_reserved = names.capacity() * size_of::<String>() + names[0].capacity();
+        program.functions[0].upvalue_names = names;
+        let after = program.memory_usage(false);
+        assert_eq!(after.0 - before.0, expected_live);
+        assert_eq!(after.1 - before.1, expected_reserved);
+    }
 
     #[test]
     fn program_clones_share_compiled_constants_and_string_storage() {

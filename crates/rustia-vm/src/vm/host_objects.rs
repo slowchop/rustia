@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::host_object::{object_error, wrong_object_type};
-use crate::{HostObjectData, HostObjectTypeDefinition};
-use std::any::{type_name, Any, TypeId};
+use crate::{HostObjectData, HostObjectOwner, HostObjectPayload, HostObjectTypeDefinition};
+use std::any::{type_name, TypeId};
 
 #[cfg(test)]
 mod tests;
@@ -43,6 +43,14 @@ impl Vm {
                 &format!("{}.{}", definition.name, method.name),
                 method.fuel_cost,
                 method.capability,
+            )?;
+        }
+        for (name, hook) in definition.hooks.iter() {
+            validate_registered_op(
+                self.profile,
+                &format!("{}.{}", definition.name, name),
+                hook.fuel_cost,
+                hook.capability,
             )?;
         }
         self.host_object_types
@@ -103,7 +111,7 @@ impl Vm {
         &mut self,
         rust_type_id: TypeId,
         rust_type_name: &'static str,
-        payload: Box<dyn Any>,
+        payload: Box<HostObjectPayload>,
     ) -> Result<Value> {
         self.validate_host_object_creation(rust_type_id)?;
         if payload.as_ref().type_id() != rust_type_id {
@@ -111,7 +119,7 @@ impl Vm {
         }
         self.ensure_memory_growth(VmCell::host_object_live_bytes(), &[])?;
         let metatable = self.host_object_metatable(rust_type_id)?;
-        let data = Rc::new(HostObjectData::new(rust_type_name, payload));
+        let data = Shared::new(HostObjectData::new(rust_type_name, payload));
         let handle = self
             .heap
             .alloc_host_object(metatable, data)
@@ -120,14 +128,40 @@ impl Vm {
     }
 
     /// Admits an instance and its public root atomically.
+    #[cfg(not(feature = "send"))]
     pub fn create_retained_host_object<T: 'static>(&mut self, payload: T) -> Result<RetainedValue> {
-        self.validate_host_object_creation(TypeId::of::<T>())?;
+        self.create_retained_host_object_boxed(
+            TypeId::of::<T>(),
+            type_name::<T>(),
+            Box::new(payload),
+        )
+    }
+
+    /// Admits a transferable instance and its public root atomically.
+    #[cfg(feature = "send")]
+    pub fn create_retained_host_object<T: Send + Sync + 'static>(
+        &mut self,
+        payload: T,
+    ) -> Result<RetainedValue> {
+        self.create_retained_host_object_boxed(
+            TypeId::of::<T>(),
+            type_name::<T>(),
+            Box::new(payload),
+        )
+    }
+
+    fn create_retained_host_object_boxed(
+        &mut self,
+        rust_type_id: TypeId,
+        rust_type_name: &'static str,
+        payload: Box<HostObjectPayload>,
+    ) -> Result<RetainedValue> {
+        self.validate_host_object_creation(rust_type_id)?;
         self.ensure_memory_growth(
             VmCell::host_object_live_bytes().saturating_add(external_root_node_live_bytes()),
             &[],
         )?;
-        let value =
-            self.create_host_object(TypeId::of::<T>(), type_name::<T>(), Box::new(payload))?;
+        let value = self.create_host_object(rust_type_id, rust_type_name, payload)?;
         match self.retain_value(value) {
             Ok(retained) => Ok(retained),
             Err(error) => {
@@ -141,11 +175,11 @@ impl Vm {
     /// Performs the Rust receiver check before callback argument conversions.
     /// No collector borrow escapes; the returned owner is VM-local.
     pub fn checked_host_object(
-        &mut self,
+        &self,
         value: Value,
         expected_type: TypeId,
         expected_name: &'static str,
-    ) -> Result<Rc<HostObjectData>> {
+    ) -> Result<HostObjectOwner> {
         let data = value
             .as_userdata()
             .and_then(|handle| self.heap.host_object(handle))
@@ -171,30 +205,49 @@ impl Vm {
             .as_userdata()
             .filter(|handle| self.heap.host_object(*handle).is_some())
             .ok_or_else(|| wrong_object_type("userdata"))?;
-        let metatable = self
-            .heap
-            .userdata_metatable(handle)
-            .flatten()
-            .expect("host object always has a metatable");
-        let index = Value::string_atom(
-            self.heap
-                .find_string_atom_bytes(b"__index")
-                .expect("host object index key remains reachable"),
-        );
-        let methods = self
-            .heap
-            .table_get(metatable, index)
-            .and_then(Value::as_table)
-            .expect("host object metatable has an index table");
-        let method = self
+        let key = self
             .heap
             .find_string_atom_bytes(name.as_bytes())
-            .and_then(|atom| self.heap.table_get(methods, Value::string_atom(atom)))
-            .unwrap_or_else(Value::nil);
-        if method.kind() != ValueKind::Function {
-            return Err(object_error(format!("Rust object has no method '{name}'")));
+            .map(Value::string_atom)
+            .ok_or_else(|| object_error(format!("Rust object has no method '{name}'")))?;
+        self.host_object_registered_method(Value::userdata(handle), key)
+            .ok_or_else(|| object_error(format!("Rust object has no method '{name}'")))
+    }
+
+    pub(super) fn host_object_registered_method(
+        &mut self,
+        value: Value,
+        key: Value,
+    ) -> Option<Value> {
+        let handle = value.as_userdata()?;
+        self.heap.host_object(handle)?;
+        let metatable = self.heap.userdata_metatable(handle)??;
+        // A dynamic index hook replaces __index. Its original method table is
+        // retained separately in the same protected, frozen metatable.
+        let methods = ["__rustia_methods", "__index"]
+            .into_iter()
+            .find_map(|name| {
+                let atom = self.heap.find_string_atom_bytes(name.as_bytes())?;
+                self.heap
+                    .table_get(metatable, Value::string_atom(atom))?
+                    .as_table()
+            })?;
+        self.heap
+            .table_get(methods, key)
+            .filter(|value| value.kind() == ValueKind::Function)
+    }
+
+    pub(super) fn reject_host_object_method_write(
+        &mut self,
+        value: Value,
+        key: Value,
+    ) -> Result<()> {
+        if self.host_object_registered_method(value, key).is_some() {
+            return Err(object_error(
+                "cannot replace a registered Rust object method".to_owned(),
+            ));
         }
-        Ok(method)
+        Ok(())
     }
 
     fn ensure_host_objects_allowed(&self) -> Result<()> {
@@ -232,6 +285,16 @@ impl Vm {
         self.heap
             .table_set(metatable.as_table().expect("new table"), index_key, methods)
             .expect("new metatable accepts its index");
+        if definition.hooks.index.is_some() {
+            let methods_key = self.string("__rustia_methods");
+            self.heap
+                .table_set(
+                    metatable.as_table().expect("new table"),
+                    methods_key,
+                    methods,
+                )
+                .expect("new metatable accepts its method table");
+        }
         let protected_key = self.string("__metatable");
         self.heap
             .table_set(
@@ -256,6 +319,21 @@ impl Vm {
             self.heap
                 .table_set(methods.as_table().expect("new table"), key, function)
                 .expect("new method table accepts its function");
+        }
+        for (name, hook) in definition.hooks.iter() {
+            let function = if admit {
+                self.register_host_function(hook.clone())?
+            } else {
+                Value::function(
+                    self.heap
+                        .alloc_host_function(hook.clone(), self.globals)
+                        .expect("persisted hook handle must remain representable"),
+                )
+            };
+            let key = self.string(name);
+            self.heap
+                .table_set(metatable.as_table().expect("new table"), key, function)
+                .expect("new metatable accepts its hook");
         }
         self.heap
             .table_freeze(methods.as_table().expect("new table"));

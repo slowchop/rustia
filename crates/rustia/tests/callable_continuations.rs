@@ -217,3 +217,75 @@ fn iterator_calls_resume_and_synchronize_captured_callers() -> rustia::Result<()
     }
     Ok(())
 }
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn transferred_setfenv_survives_wrapped_coroutine_yield_and_pcall() -> rustia::Result<()> {
+    for profile in [
+        rustia::Profile::LuauCompat,
+        rustia::Profile::ReproducibleStandard,
+        rustia::Profile::DeterministicSim,
+        rustia::Profile::Puc51Compat,
+    ] {
+        let mut vm = RustiaBuilder::standard()
+            .profile(profile)
+            .fuel(100_000)
+            .build()?;
+        assert!(
+            vm.load(
+                r#"
+                local original = getfenv()
+                local original_thread = getfenv(0)
+                local function worker(environment)
+                    setfenv(0, environment)
+                    coroutine.yield()
+                    assert(getfenv(0) == environment)
+                    return getfenv()
+                end
+                local resume = coroutine.wrap(worker)
+                local environment = {}
+                assert(resume(environment) == nil)
+                assert(getfenv(0) == original_thread)
+                local ok, result = pcall(resume)
+                return ok and result == original and getfenv(0) == original_thread
+            "#,
+            )
+            .eval::<bool>()?,
+            "{profile:?}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn transferred_setfenv_updates_the_resumed_main_frame() -> rustia::Result<()> {
+    for profile in [
+        rustia::Profile::LuauCompat,
+        rustia::Profile::ReproducibleStandard,
+        rustia::Profile::DeterministicSim,
+        rustia::Profile::Puc51Compat,
+    ] {
+        let mut vm = RustiaBuilder::standard()
+            .profile(profile)
+            .fuel(100_000)
+            .build()?;
+        let answer: i64 = vm
+            .load(
+                r#"
+                local environment = setmetatable({ answer = 42 }, { __index = getfenv() })
+                setfenv(1, environment)
+                return answer
+            "#,
+            )
+            .eval()?;
+        assert_eq!(answer, 42, "{profile:?}");
+    }
+    Ok(())
+}

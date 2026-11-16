@@ -1,10 +1,11 @@
 use super::*;
-use std::cell::Cell;
+use crate::test_ownership::{Cell, Rc};
 
 struct Counter(i64);
 
 fn definition(value: f64) -> HostObjectTypeDefinition {
     HostObjectTypeDefinition {
+        hooks: crate::HostObjectHooks::default(),
         rust_type_id: TypeId::of::<Counter>(),
         rust_type_name: type_name::<Counter>(),
         name: "Counter".to_owned(),
@@ -104,6 +105,7 @@ impl Drop for DropProbe {
 
 fn probe_definition() -> HostObjectTypeDefinition {
     HostObjectTypeDefinition {
+        hooks: crate::HostObjectHooks::default(),
         rust_type_id: TypeId::of::<DropProbe>(),
         rust_type_name: type_name::<DropProbe>(),
         name: "DropProbe".into(),
@@ -395,4 +397,92 @@ fn reset_rebuilds_admitted_configuration_without_temporary_quota_roots() {
     vm.settings.memory_limit_bytes = Some(baseline + 4096);
     let object = vm.create_retained_host_object(Counter(4)).unwrap();
     assert_eq!(call(&mut vm, &object), 4.0);
+}
+
+#[test]
+fn callable_userdata_hooks_keep_variable_arity_and_current_dispatcher() {
+    struct Dispatcher {
+        calls: usize,
+    }
+    impl VmHostDispatcher for Dispatcher {
+        fn invoke(
+            &mut self,
+            vm: &mut Vm,
+            _: &(dyn std::any::Any + Send + Sync),
+            args: &[Value],
+        ) -> Result<Vec<Value>> {
+            let object =
+                vm.checked_host_object(args[0], TypeId::of::<Counter>(), type_name::<Counter>())?;
+            if args.len() > 2 {
+                return Err(object_error("at most one owned argument".to_owned()));
+            }
+            self.calls += 1;
+            let counter = object.try_borrow::<Counter>()?;
+            Ok(vec![Value::number(
+                counter.0 as f64 + args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0),
+            )])
+        }
+    }
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let mut definition = definition(0.0);
+    definition.hooks.call = Some(HostFunctionOp::dispatched(
+        "invoke",
+        3,
+        OpCapability::ReadsExternalMutableState,
+        Arc::new(()),
+    ));
+    vm.register_host_object_type(definition).unwrap();
+    let object = vm.create_retained_host_object(Counter(7)).unwrap();
+    let mut dispatcher = Dispatcher { calls: 0 };
+    let mut execution = vm.begin_execution();
+    for (args, expected) in [(Vec::new(), 7.0), (vec![Value::number(4.0)], 11.0)] {
+        let result = vm
+            .call_retained_function_in(
+                object.value(&vm).unwrap(),
+                &args,
+                &mut execution,
+                &mut dispatcher,
+            )
+            .unwrap();
+        assert_eq!(result[0].as_number(), Some(expected));
+    }
+    assert!(vm
+        .call_retained_function_in(
+            object.value(&vm).unwrap(),
+            &[Value::nil(), Value::nil()],
+            &mut execution,
+            &mut dispatcher
+        )
+        .is_err());
+    assert_eq!(dispatcher.calls, 2);
+}
+
+#[test]
+fn hook_storage_is_accounted_and_failed_registration_preserves_old_definition() {
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    vm.register_host_object_type(definition(1.0)).unwrap();
+    let object = vm.create_retained_host_object(Counter(10)).unwrap();
+    let before = vm.current_live_bytes();
+    let mut replacement = definition(2.0);
+    let hook = HostFunctionOp::new(
+        "index".repeat(1024),
+        1,
+        OpCapability::Pure,
+        Arc::new(|_, _| Ok(vec![Value::nil()])),
+    );
+    replacement.hooks.index = Some(hook);
+    vm.settings.memory_limit_bytes = Some(before);
+    assert!(vm.register_host_object_type(replacement.clone()).is_err());
+    vm.settings.memory_limit_bytes = None;
+    assert_eq!(call(&mut vm, &object), 11.0);
+    let after_failure = vm.create_retained_host_object(Counter(10)).unwrap();
+    assert_eq!(call(&mut vm, &after_failure), 11.0);
+    vm.register_host_object_type(replacement).unwrap();
+    assert!(
+        vm.current_live_bytes() > before + 5 * 1024,
+        "hook names and op metadata contribute to the census"
+    );
+    assert_eq!(call(&mut vm, &object), 11.0);
+    let newest = vm.create_retained_host_object(Counter(10)).unwrap();
+    assert_eq!(call(&mut vm, &newest), 12.0);
 }

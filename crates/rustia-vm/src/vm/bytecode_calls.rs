@@ -2,6 +2,11 @@
 //! A saved caller carries the same complete state as a suspended coroutine.
 use super::*;
 
+enum DriverExit {
+    Complete(VmFlow<ReturnValues>),
+    Host(DeferredBytecodeCall),
+}
+
 impl Vm {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run_function(
@@ -42,7 +47,23 @@ impl Vm {
         }
         self.active_coroutine_frames.push(Vec::new());
         self.mark_control_memory_dirty();
-        let result = self.drive_bytecode_calls(initial, pending_slot, fuel);
+        let mut flow = initial;
+        let result = loop {
+            let non_yieldable_base = self.non_yieldable_depth;
+            let step = self.drive_bytecode_calls(flow, pending_slot, fuel);
+            self.non_yieldable_depth = non_yieldable_base;
+            match step {
+                Ok(DriverExit::Complete(completed)) => break Ok(completed),
+                Err(error) => break Err(error),
+                Ok(DriverExit::Host(request)) => {
+                    self.non_yieldable_depth = self
+                        .non_yieldable_depth
+                        .saturating_add(self.native_boundary_depth(pending_slot));
+                    flow = self.dispatch_transferred_host(request, fuel);
+                    self.non_yieldable_depth = non_yieldable_base;
+                }
+            }
+        };
         self.call_stack.truncate(stack_base);
         let pending = self.active_coroutine_frames.pop();
         if let Some(pending) = &pending {
@@ -64,7 +85,7 @@ impl Vm {
         mut flow: VmFlowResult<ReturnValues>,
         pending_slot: usize,
         fuel: &mut Execution<'_>,
-    ) -> VmFlowResult<ReturnValues> {
+    ) -> Result<DriverExit> {
         loop {
             match flow {
                 Ok(VmFlow::Call(request)) => {
@@ -85,6 +106,26 @@ impl Vm {
                     }
                     self.active_coroutine_frames[pending_slot].extend(callers.into_iter().rev());
                     self.mark_control_memory_dirty();
+                    if matches!(
+                        callee
+                            .as_function()
+                            .and_then(|handle| self.heap.function_kind(handle)),
+                        Some(FunctionKind::Host)
+                    ) {
+                        return Ok(DriverExit::Host(DeferredBytecodeCall {
+                            callee,
+                            args,
+                            depth,
+                            call_site,
+                            fallback_program,
+                            callers: Vec::new(),
+                        }));
+                    }
+                    let non_yieldable_base = self.non_yieldable_depth;
+                    // Pending native frames may have just been added this step.
+                    self.non_yieldable_depth = self
+                        .non_yieldable_depth
+                        .saturating_add(self.native_boundary_depth(pending_slot));
                     flow = self.enter_deferred_bytecode_call(
                         fallback_program,
                         callee,
@@ -93,12 +134,17 @@ impl Vm {
                         call_site,
                         fuel,
                     );
+                    self.non_yieldable_depth = non_yieldable_base;
                 }
                 Ok(VmFlow::Return(results)) => {
                     let Some(frame) = self.active_coroutine_frames[pending_slot].pop() else {
-                        return Ok(VmFlow::Return(results));
+                        return Ok(DriverExit::Complete(VmFlow::Return(results)));
                     };
                     self.mark_control_memory_dirty();
+                    let non_yieldable_base = self.non_yieldable_depth;
+                    self.non_yieldable_depth = self
+                        .non_yieldable_depth
+                        .saturating_add(self.native_boundary_depth(pending_slot));
                     flow = match frame {
                         CoroutineFrame::Bytecode(frame) => {
                             // Only a bytecode continuation owns a saved call header.
@@ -110,6 +156,7 @@ impl Vm {
                                 fuel,
                             )
                         }
+                        CoroutineFrame::Native(frame) => self.complete_native_frame(frame, results),
                         CoroutineFrame::Require(frame) => self
                             .finish_required_module(frame, results.into_vec())
                             .map(|results| VmFlow::Return(results.into())),
@@ -125,8 +172,32 @@ impl Vm {
                             Ok(VmFlow::Return(protected.into()))
                         }
                     };
+                    self.non_yieldable_depth = non_yieldable_base;
                 }
                 Ok(VmFlow::Yield(mut suspension)) => {
+                    if let Some(boundary) = self.active_coroutine_frames[pending_slot]
+                        .iter()
+                        .rposition(|frame| matches!(frame, CoroutineFrame::Native(_)))
+                    {
+                        self.release_require_frames(&suspension.frames);
+                        let CoroutineFrame::Native(frame) =
+                            &self.active_coroutine_frames[pending_slot][boundary]
+                        else {
+                            unreachable!("native boundary index")
+                        };
+                        let callback_stack_base = frame.frame().callback_stack_base;
+                        while self.active_coroutine_frames[pending_slot].len() > boundary {
+                            if let Some(CoroutineFrame::Require(frame)) =
+                                self.active_coroutine_frames[pending_slot].pop()
+                            {
+                                self.release_module_load(&frame);
+                            }
+                        }
+                        self.call_stack.truncate(callback_stack_base);
+                        self.mark_control_memory_dirty();
+                        flow = Err(non_yieldable_boundary_error());
+                        continue;
+                    }
                     let pending = &mut self.active_coroutine_frames[pending_slot];
                     if suspension.frames.try_reserve(pending.len()).is_err() {
                         self.release_require_frames(&suspension.frames);
@@ -140,16 +211,20 @@ impl Vm {
                         }
                         suspension.frames.push(frame);
                     }
-                    return Ok(VmFlow::Yield(suspension));
+                    return Ok(DriverExit::Complete(VmFlow::Yield(suspension)));
                 }
                 Err(error) => {
                     if error_is_uncatchable(&error, fuel) {
-                        return Err(error);
+                        return Err(self.attach_saved_caller_error(pending_slot, error));
                     }
                     let Some(frame) = self.active_coroutine_frames[pending_slot].pop() else {
                         return Err(error);
                     };
                     self.mark_control_memory_dirty();
+                    let non_yieldable_base = self.non_yieldable_depth;
+                    self.non_yieldable_depth = self
+                        .non_yieldable_depth
+                        .saturating_add(self.native_boundary_depth(pending_slot));
                     flow = match frame {
                         CoroutineFrame::Bytecode(frame) => {
                             self.call_stack.pop();
@@ -160,6 +235,7 @@ impl Vm {
                                 fuel,
                             )
                         }
+                        CoroutineFrame::Native(_) => Err(error),
                         CoroutineFrame::Require(frame) => {
                             self.release_module_load(&frame);
                             Err(error)
@@ -174,9 +250,136 @@ impl Vm {
                             .resume_xpcall_error_handler(frame, error, fuel)
                             .map(|results| VmFlow::Return(results.into())),
                     };
+                    self.non_yieldable_depth = non_yieldable_base;
                 }
             }
         }
+    }
+
+    fn native_boundary_depth(&self, pending_slot: usize) -> usize {
+        self.active_coroutine_frames[pending_slot]
+            .iter()
+            .filter(|frame| matches!(frame,CoroutineFrame::Native(frame) if frame.non_yieldable()))
+            .count()
+    }
+
+    /// Uncatchable errors bypass ordinary continuation resumption, but they
+    /// still belong to the bytecode instruction that transferred into the
+    /// native or host call. Recover that instruction before discarding the
+    /// saved caller; otherwise fuel/OOM diagnostics lose their PC and source.
+    fn attach_saved_caller_error(&self, pending_slot: usize, error: Error) -> Error {
+        if error
+            .diagnostic
+            .as_ref()
+            .is_some_and(|diagnostic| diagnostic.trace_captured)
+            || (error.pc.is_some() && !error_is_out_of_memory(&error))
+            || (error.location_suppressed && !error_is_out_of_memory(&error))
+        {
+            return error;
+        }
+        let Some(frame) = self.active_coroutine_frames[pending_slot]
+            .iter()
+            .rev()
+            .find_map(|frame| match frame {
+                CoroutineFrame::Bytecode(frame) => Some(frame),
+                _ => None,
+            })
+        else {
+            return error;
+        };
+        let Some(loaded) = self.dynamic_programs.get(frame.program_id) else {
+            return error;
+        };
+        let function = match frame.prototype {
+            Some(index) => loaded.program.functions.get(index as usize),
+            None => Some(&loaded.program.main),
+        };
+        let Some(function) = function else {
+            return error;
+        };
+        let error_pc = match &frame.continuation {
+            BytecodeContinuation::IteratorStep { error_pc, .. } => *error_pc,
+            _ => frame.pc.saturating_sub(1),
+        };
+        let error = if error.location_suppressed {
+            error
+        } else {
+            attach_instruction_source(&loaded.program, function, error_pc, error)
+        };
+        self.capture_host_diagnostic(
+            error,
+            Some(frame.program_id),
+            &loaded.program,
+            function,
+            Some(error_pc),
+        )
+    }
+
+    // Deliberately outside drive_bytecode_calls: saved-frame/resume locals must
+    // leave the Rust stack before a synchronous host operation can re-enter.
+    fn dispatch_transferred_host(
+        &mut self,
+        request: DeferredBytecodeCall,
+        fuel: &mut Execution<'_>,
+    ) -> VmFlowResult<ReturnValues> {
+        self.check_recursion_depth(request.depth)?;
+        self.mutate_last_call_stack_frame(|frame| {
+            extend_heap_backed_roots(&mut frame.stackless_roots, &[request.callee]);
+            extend_heap_backed_roots(&mut frame.stackless_roots, &request.args);
+        });
+        self.admit_transferred_target(request.fallback_program, request.callee, &request.args)?;
+        let program = self.dynamic_program(request.fallback_program)?;
+        let handle = request
+            .callee
+            .as_function()
+            .ok_or_else(|| invalid_deferred_call("host target is not a function"))?;
+        self.dispatch_host_function(
+            &program,
+            handle,
+            &request.args,
+            request.depth,
+            request.call_site,
+            fuel,
+        )
+    }
+
+    fn admit_transferred_target(
+        &mut self,
+        program_id: u32,
+        callee: Value,
+        args: &[Value],
+    ) -> Result<()> {
+        // Saved caller storage must be admitted before Host or Native effects.
+        // A temporary preflight header keeps the fallback program and raw target
+        // alive even when a low-level request has no ordinary bytecode caller.
+        let mut roots = try_copy_vec(args)?;
+        roots
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        roots.push(callee);
+        self.call_stack
+            .try_reserve(1)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        let environment = self.current_environment()?;
+        self.call_stack.push(CallStackFrame {
+            instruction: None,
+            program: Some(program_id),
+            function: None,
+            debug_name: None,
+            environment,
+            thread_environment: self.current_thread_environment(),
+            module_cohort: self.current_module_cohort(),
+            call_site: None,
+            roots,
+            stackless_roots: Vec::new(),
+            stackless_debug_frames: Vec::new(),
+        });
+        self.mark_control_memory_dirty();
+        let admitted =
+            self.ensure_memory_growth(args.len().saturating_mul(size_of::<Value>()), &[]);
+        self.call_stack.pop();
+        self.mark_control_memory_dirty();
+        admitted
     }
 
     pub(super) fn retain_dynamic_program_ref_with_roots(
@@ -219,6 +422,51 @@ impl Vm {
             self.prune_unreachable_coroutines_if_idle();
         }
         retained
+    }
+
+    /// Release the bytecode caller before entering a host or native target.
+    /// The driver dispatches an already-transferred target directly, so this
+    /// internal transfer cannot repeatedly defer the same invocation.
+    pub(super) fn defer_non_bytecode_call(
+        &mut self,
+        program: &Program,
+        callee: Value,
+        args: &[Value],
+        depth: usize,
+        call_site: Option<ErrorLocation>,
+    ) -> VmFlowResult<ReturnValues> {
+        let args = try_copy_vec(args)?;
+        // Reuse the exact current program only when its owned artifact is the
+        // supplied source. Raw lower-engine callers can supply another Program.
+        let program_id = self
+            .call_stack
+            .last()
+            .and_then(|frame| frame.program)
+            .filter(|id| {
+                self.dynamic_programs
+                    .get(*id)
+                    .is_some_and(|loaded| std::ptr::eq(program, loaded.program.as_ref()))
+            });
+        let fallback_program = match program_id {
+            Some(id) => id,
+            None => {
+                let mut roots = Vec::new();
+                roots
+                    .try_reserve_exact(args.len() + 1)
+                    .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+                roots.push(callee);
+                roots.extend_from_slice(&args);
+                self.retain_dynamic_program_ref_with_roots(program, roots, Vec::new())?
+            }
+        };
+        Ok(VmFlow::Call(DeferredBytecodeCall {
+            callee,
+            args,
+            depth,
+            call_site,
+            fallback_program,
+            callers: Vec::new(),
+        }))
     }
 
     fn enter_deferred_bytecode_call(
@@ -270,9 +518,21 @@ impl Vm {
                 (program.unwrap_or(fallback_program), Some(prototype))
             }
             FunctionKind::DynamicMain { program } => (program, None),
+            FunctionKind::Host => {
+                return Ok(VmFlow::Call(DeferredBytecodeCall {
+                    callee,
+                    args,
+                    depth,
+                    call_site,
+                    fallback_program,
+                    callers: Vec::new(),
+                }));
+            }
             _ => {
+                self.check_recursion_depth(depth)?;
+                self.admit_transferred_target(fallback_program, callee, &args)?;
                 let program = self.dynamic_program(fallback_program)?;
-                return self.call_function_kind_with_site_resumable(
+                return self.dispatch_function_kind_with_site_resumable(
                     &program, callee, handle, kind, data, &args, depth, call_site, fuel,
                 );
             }

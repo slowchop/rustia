@@ -343,6 +343,7 @@ impl<H: HostSchema> Rustia<H> {
                 rust_type_name: type_name::<T>(),
                 name: definition.name,
                 methods: definition.methods,
+                hooks: Default::default(),
             })
             .map_err(Error::from_engine)
     }

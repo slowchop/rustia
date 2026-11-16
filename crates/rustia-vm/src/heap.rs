@@ -1,15 +1,12 @@
 use crate::extension::HostFunctionOp;
-use crate::host_object::HostObjectData;
-use gc_arena::lock::RefLock;
-use gc_arena::{Arena, Collect, DynamicRootSet, Gc, Rootable, Static};
+use crate::host_object::{HostObjectData, HostObjectOwner};
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
-use std::rc::Rc;
 
 use crate::bytecode::{stable_bytes_hash, SharedProgramString};
 use crate::number::table_key_number_bits;
-use crate::value::{ShortString, Value, ValueKind};
+use crate::value::{ShortString, Value, ValueKind, SHORT_STRING_CAPACITY};
 
 const MAX_LUAU_ARRAY_INDEX: usize = 2_147_483_647;
 const TABLE_HASH_INDEX_MIN_LEN: usize = 16;
@@ -25,16 +22,12 @@ const SLOT_MAX_GENERATION: u8 = u8::MAX;
 /// retired after generation 255 instead of wrapping, so no stale handle can
 /// ever alias a later occupant. Sixteen million simultaneous slots is already
 /// well above the memory limits a production VM can reasonably admit.
-#[derive(Collect)]
-#[collect(no_drop)]
 struct ReusableSlots<T> {
     slots: Vec<ReusableSlot<T>>,
     free: Vec<u32>,
     occupied: usize,
 }
 
-#[derive(Collect)]
-#[collect(no_drop)]
 struct ReusableSlot<T> {
     generation: u8,
     value: Option<T>,
@@ -326,44 +319,39 @@ const fn slot_handle_parts(handle: u32) -> (usize, u8) {
     )
 }
 
-#[derive(Collect)]
-#[collect(no_drop)]
-struct RootData<'gc> {
-    _roots: DynamicRootSet<'gc>,
-    strings: ReusableSlots<InternedString<'gc>>,
+struct RootData {
+    strings: ReusableSlots<InternedString>,
     string_index: Vec<u32>,
     userdatas: ReusableSlots<UserdataData>,
     buffers: ReusableSlots<BufferData>,
     vectors: ReusableSlots<VectorData>,
 }
 
-#[derive(Collect)]
-#[collect(no_drop)]
-enum InternedString<'gc> {
+enum InternedString {
     /// Compact atom storage used for short strings that must acquire table-key identity.
     Inline(ShortString),
     /// Immutable compile-time bytes shared by every VM that loads the same program.
-    Shared(Static<SharedProgramString>),
+    Shared(SharedProgramString),
     /// Per-VM runtime strings too large for the inline form.
-    Owned(Gc<'gc, Static<Vec<u8>>>),
+    Owned(Box<[u8]>),
 }
 
-impl InternedString<'_> {
+impl InternedString {
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         match self {
             Self::Inline(value) => value.as_bytes(),
-            Self::Shared(value) => value.0.as_bytes(),
-            Self::Owned(value) => value.0.as_slice(),
+            Self::Shared(value) => value.as_bytes(),
+            Self::Owned(value) => value.as_ref(),
         }
     }
 
     #[inline]
     fn stable_hash(&self) -> u64 {
         match self {
-            Self::Shared(value) => value.0.stable_hash(),
+            Self::Shared(value) => value.stable_hash(),
             Self::Inline(value) => stable_bytes_hash(value.as_bytes()),
-            Self::Owned(value) => stable_bytes_hash(value.0.as_slice()),
+            Self::Owned(value) => stable_bytes_hash(value.as_ref()),
         }
     }
 }
@@ -528,23 +516,23 @@ impl FunctionCapture {
     }
 }
 
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
+#[derive(Clone, Copy)]
+
 struct UpvalueData {
     value: Value,
 }
 
-#[derive(Clone, Collect)]
-#[collect(no_drop)]
+#[derive(Clone)]
+
 struct UserdataData {
     metatable: Option<u32>,
     payload: UserdataPayload,
-    #[collect(require_static)]
-    host_object: Option<Rc<HostObjectData>>,
+
+    host_object: Option<HostObjectOwner>,
 }
 
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
+#[derive(Clone, Copy)]
+
 pub(crate) enum UserdataPayload {
     None,
     ConformanceInt64(i64),
@@ -559,10 +547,17 @@ pub(crate) enum UserdataPayload {
     },
 }
 
-#[derive(Clone, Collect)]
-#[collect(no_drop)]
+#[derive(Clone)]
+
 struct BufferData {
     bytes: Vec<u8>,
+}
+
+/// Mutable state of an existing function. Its kind, host definition and module
+/// cohort never change; the retained function handle keeps those owned once.
+struct FunctionSnapshot {
+    captures: SmallVec<[FunctionCapture; 2]>,
+    environment: u32,
 }
 
 struct HeapTransaction {
@@ -575,14 +570,14 @@ struct HeapTransaction {
     buffer_free: Vec<u32>,
     vector_free: Vec<u32>,
     tables: Vec<(u32, TableData)>,
-    functions: Vec<(u32, FunctionData)>,
+    functions: Vec<(u32, FunctionSnapshot)>,
     upvalues: Vec<(u32, UpvalueData)>,
     userdatas: Vec<(u32, UserdataData)>,
     buffers: Vec<(u32, BufferData)>,
 }
 
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
+#[derive(Clone, Copy)]
+
 pub(crate) struct VectorData {
     x: f32,
     y: f32,
@@ -622,8 +617,8 @@ impl VectorData {
     }
 }
 
-#[derive(Clone, Copy, Collect)]
-#[collect(no_drop)]
+#[derive(Clone, Copy)]
+
 pub enum FunctionKind {
     Bytecode {
         program: Option<u32>,
@@ -636,8 +631,8 @@ pub enum FunctionKind {
     Native(NativeFunction),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Collect)]
-#[collect(no_drop)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+
 pub enum NativeFunction {
     Assert,
     Error,
@@ -923,32 +918,17 @@ pub(crate) enum TableIterationOrder {
     Puc51,
 }
 
-type ArenaRoot = Rootable![Gc<'_, RefLock<RootData<'_>>>];
-type VmArena = Arena<ArenaRoot>;
-
-/// The GC cell for one VM lane.
-///
-/// `gc-arena` values and retained roots are not independently thread-safe, so the VM stays
-/// thread-affine while it owns an arena. Parallel hosts should create one VM per worker or move
-/// compiled programs/configuration between workers instead of moving a live VM.
+/// Owned guest storage for one VM. Guest references remain generation-checked
+/// compact handles; the explicit tracer below owns reachability and weak edges.
+/// Host payload ownership is local by default; `send` selects transferable
+/// owners and requires thread-safe payloads.
 pub struct VmCell {
-    arena: VmArena,
-    allocation_debt_pending: bool,
-    // Tables contain only compact `Value` and metadata handles, never arena GC
-    // pointers. Keeping them beside the arena removes the mutation boundary from
-    // every hot table read/write while the explicit weak-table traversal still
-    // walks the same graph.
+    root: RootData,
     tables: ReusableSlots<TableData>,
-    // Function metadata contains only stable compact handles, not GC pointers.
-    // Keeping it beside the arena avoids entering `Arena::mutate` for every
-    // bytecode/native dispatch while weak-table traversal can still inspect it.
     functions: ReusableSlots<FunctionData>,
-    // Upvalues are compact `Value` handles as well. Their hot read/write path
-    // does not need a GC mutation boundary; weak traversal receives this slice.
     upvalues: ReusableSlots<UpvalueData>,
     side_usage: HeapMemoryUsage,
-    // Selected once at VM construction from the profile; every table in this
-    // cell uses the same hash-part variant.
+    // Selected once at VM construction from the profile.
     table_layout: TableLayout,
     transactions: Vec<HeapTransaction>,
     #[cfg(any(test, feature = "table-write-diagnostics"))]
@@ -964,14 +944,14 @@ impl VmCell {
         size_of::<ReusableSlot<BufferData>>().saturating_add(size)
     }
 
-    pub(crate) const fn owned_string_live_bytes(size: usize) -> usize {
-        // The arena allocation is counted in addition to the reusable atom
-        // slot and owned byte vector. Keep a conservative fixed allowance for
-        // the arena header and Vec descriptor.
-        size_of::<ReusableSlot<InternedString<'static>>>()
-            .saturating_add(size)
-            .saturating_add(size_of::<Vec<u8>>())
-            .saturating_add(64)
+    /// Conservative growth for a not-yet-interned runtime string. Include atom
+    /// index growth, including a rehash, before the caller allocates its bytes.
+    pub(crate) fn planned_owned_string_live_bytes(&mut self, size: usize) -> usize {
+        if size <= SHORT_STRING_CAPACITY {
+            return 0;
+        }
+        self.planned_inline_string_intern()
+            .map_or(usize::MAX, |(_, growth)| growth.saturating_add(size))
     }
 
     /// Live bytes of a PUC-layout table with the given array-part size and
@@ -991,23 +971,14 @@ impl VmCell {
     }
 
     pub(crate) fn with_table_layout(table_layout: TableLayout) -> Self {
-        let arena = VmArena::new(|mc| {
-            Gc::new(
-                mc,
-                RefLock::new(RootData {
-                    _roots: DynamicRootSet::new(mc),
-                    strings: ReusableSlots::new(),
-                    string_index: Vec::new(),
-                    userdatas: ReusableSlots::new(),
-                    buffers: ReusableSlots::new(),
-                    vectors: ReusableSlots::new(),
-                }),
-            )
-        });
-        let allocation_debt_pending = arena.metrics().allocation_debt() > 0.0;
         Self {
-            arena,
-            allocation_debt_pending,
+            root: RootData {
+                strings: ReusableSlots::new(),
+                string_index: Vec::new(),
+                userdatas: ReusableSlots::new(),
+                buffers: ReusableSlots::new(),
+                vectors: ReusableSlots::new(),
+            },
             tables: ReusableSlots::new(),
             functions: ReusableSlots::new(),
             upvalues: ReusableSlots::new(),
@@ -1060,20 +1031,20 @@ impl VmCell {
     fn mutate_table_data_with_root<R>(
         &mut self,
         handle: u32,
-        mutate: impl FnOnce(&RootData<'_>, &mut TableData) -> R,
+        mutate: impl FnOnce(&RootData, &mut TableData) -> R,
     ) -> Option<R> {
         self.journal_table(handle);
         let tables = &mut self.tables;
         let side_usage = &mut self.side_usage;
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let table = tables.get_mut(handle)?;
             let before = table_data_memory_usage(table);
-            let result = mutate(&root, table);
+            let result = mutate(root, table);
             table.mutation_version = table.mutation_version.wrapping_add(1);
             side_usage.adjust(before, table_data_memory_usage(table));
             Some(result)
-        })
+        }
     }
 
     pub(crate) fn transaction_snapshot_live_bytes(&mut self) -> usize {
@@ -1089,16 +1060,16 @@ impl VmCell {
         }
         for function in self.functions.values() {
             bytes = bytes
-                .saturating_add(size_of::<(u32, FunctionData)>())
-                .saturating_add(function_data_memory_usage(function).live_bytes);
+                .saturating_add(size_of::<(u32, FunctionSnapshot)>())
+                .saturating_add(function_captures_memory_usage(&function.captures).live_bytes);
         }
         bytes = bytes.saturating_add(
             self.upvalues
                 .occupied_len()
                 .saturating_mul(size_of::<(u32, UpvalueData)>()),
         );
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             bytes = bytes
                 .saturating_add(root.strings.free.len().saturating_mul(size_of::<u32>()))
                 .saturating_add(root.userdatas.free.len().saturating_mul(size_of::<u32>()))
@@ -1114,7 +1085,7 @@ impl VmCell {
                     .saturating_add(size_of::<(u32, BufferData)>())
                     .saturating_add(buffer.bytes.len());
             }
-        });
+        };
         bytes
     }
 
@@ -1129,26 +1100,26 @@ impl VmCell {
             buffers: 0,
             vectors: 0,
         };
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             checkpoint.strings = root.strings.slots.len();
             checkpoint.userdatas = root.userdatas.slots.len();
             checkpoint.buffers = root.buffers.slots.len();
             checkpoint.vectors = root.vectors.slots.len();
-        });
-        let root_snapshot = self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            Ok::<_, ()>((
+        };
+        let root_snapshot = {
+            let root = &self.root;
+            (
                 try_clone_copy_vec(&root.strings.free)?,
                 try_clone_copy_vec(&root.userdatas.free)?,
                 try_clone_copy_vec(&root.buffers.free)?,
                 try_clone_copy_vec(&root.vectors.free)?,
                 try_snapshot_userdata_slots(&root.userdatas)?,
                 try_snapshot_buffer_slots(&root.buffers)?,
-            ))
-        });
+            )
+        };
         let (string_free, userdata_free, buffer_free, vector_free, userdatas, buffers) =
-            root_snapshot?;
+            root_snapshot;
         let tables = try_snapshot_table_slots(&self.tables)?;
         let functions = try_snapshot_function_slots(&self.functions)?;
         let upvalues = try_snapshot_copy_slots(&self.upvalues)?;
@@ -1188,9 +1159,10 @@ impl VmCell {
                 *slot = value;
             }
         }
-        for (handle, value) in transaction.functions {
-            if let Some(slot) = self.functions.get_mut(handle) {
-                *slot = value;
+        for (handle, snapshot) in transaction.functions {
+            if let Some(function) = self.functions.get_mut(handle) {
+                function.captures = snapshot.captures;
+                function.environment = snapshot.environment;
             }
         }
         for (handle, value) in transaction.upvalues {
@@ -1204,8 +1176,8 @@ impl VmCell {
             .rollback_transaction(transaction.checkpoint.functions, transaction.function_free);
         self.upvalues
             .rollback_transaction(transaction.checkpoint.upvalues, transaction.upvalue_free);
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             for (handle, value) in transaction.userdatas {
                 if let Some(slot) = root.userdatas.get_mut(handle) {
                     *slot = value;
@@ -1224,11 +1196,8 @@ impl VmCell {
                 .rollback_transaction(transaction.checkpoint.buffers, transaction.buffer_free);
             root.vectors
                 .rollback_transaction(transaction.checkpoint.vectors, transaction.vector_free);
-            rebuild_string_index(&mut root, STRING_INDEX_MIN_CAPACITY);
-        });
-        self.arena.finish_cycle();
-        self.arena.finish_cycle();
-        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+            rebuild_string_index(root, STRING_INDEX_MIN_CAPACITY);
+        };
         self.recompute_side_usage();
     }
 
@@ -1252,11 +1221,6 @@ impl VmCell {
         let _ = handle;
     }
 
-    pub fn finish_collection_cycle(&mut self) {
-        self.arena.finish_cycle();
-        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
-    }
-
     /// Discards every guest allocation while retaining reusable slot-vector
     /// capacity for the next decision epoch.
     ///
@@ -1267,17 +1231,14 @@ impl VmCell {
         self.tables.reset_epoch();
         self.functions.reset_epoch();
         self.upvalues.reset_epoch();
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             root.strings.reset_epoch();
             root.string_index.clear();
             root.userdatas.reset_epoch();
             root.buffers.reset_epoch();
             root.vectors.reset_epoch();
-        });
-        self.arena.finish_cycle();
-        self.arena.finish_cycle();
-        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+        };
         self.recompute_side_usage();
     }
 
@@ -1299,22 +1260,22 @@ impl VmCell {
             buffers: 0,
             vectors: 0,
         };
-        let arena_is_append_only = self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        let storage_is_append_only = 'storage: {
+            let root = &self.root;
             if !root.strings.free.is_empty()
                 || !root.userdatas.free.is_empty()
                 || !root.buffers.free.is_empty()
                 || !root.vectors.free.is_empty()
             {
-                return false;
+                break 'storage false;
             }
             checkpoint.strings = root.strings.slots.len();
             checkpoint.userdatas = root.userdatas.slots.len();
             checkpoint.buffers = root.buffers.slots.len();
             checkpoint.vectors = root.vectors.slots.len();
             true
-        });
-        arena_is_append_only.then_some(checkpoint)
+        };
+        storage_is_append_only.then_some(checkpoint)
     }
 
     /// Drops allocations made after a hardened environment was sealed while
@@ -1324,17 +1285,14 @@ impl VmCell {
         self.tables.truncate_to_checkpoint(checkpoint.tables);
         self.functions.truncate_to_checkpoint(checkpoint.functions);
         self.upvalues.truncate_to_checkpoint(checkpoint.upvalues);
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             root.strings.truncate_to_checkpoint(checkpoint.strings);
             root.userdatas.truncate_to_checkpoint(checkpoint.userdatas);
             root.buffers.truncate_to_checkpoint(checkpoint.buffers);
             root.vectors.truncate_to_checkpoint(checkpoint.vectors);
-            rebuild_string_index(&mut root, STRING_INDEX_MIN_CAPACITY);
-        });
-        self.arena.finish_cycle();
-        self.arena.finish_cycle();
-        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
+            rebuild_string_index(root, STRING_INDEX_MIN_CAPACITY);
+        };
         self.recompute_side_usage();
     }
 
@@ -1345,15 +1303,13 @@ impl VmCell {
         usage.add_slots(&self.upvalues);
         usage.add(self.side_usage.live_bytes, self.side_usage.reserved_bytes);
 
-        let arena_bytes = self.arena.metrics().total_gc_allocation();
-        usage.add(arena_bytes, arena_bytes);
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             usage.add_slots(&root.strings);
             usage.add_slots(&root.userdatas);
             usage.add_slots(&root.buffers);
             usage.add_slots(&root.vectors);
-        });
+        };
         usage.add_vec(&self.transactions);
         for transaction in &self.transactions {
             add_heap_transaction_memory(transaction, &mut usage);
@@ -1384,10 +1340,8 @@ impl VmCell {
             usage.add(function.live_bytes, function.reserved_bytes);
         }
 
-        let arena_bytes = self.arena.metrics().total_gc_allocation();
-        usage.add(arena_bytes, arena_bytes);
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             usage.add_slots_census(&root.strings);
             usage.add_slots_census(&root.userdatas);
             usage.add_slots_census(&root.buffers);
@@ -1395,7 +1349,7 @@ impl VmCell {
             usage.add_vec(&root.string_index);
             for string in root.strings.values() {
                 if let InternedString::Owned(value) = string {
-                    usage.add_vec(&value.0);
+                    usage.add(value.len(), value.len());
                 }
             }
             for buffer in root.buffers.values() {
@@ -1406,7 +1360,7 @@ impl VmCell {
                     usage.add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
                 }
             }
-        });
+        };
         usage.add_vec(&self.transactions);
         for transaction in &self.transactions {
             add_heap_transaction_memory(transaction, &mut usage);
@@ -1426,12 +1380,12 @@ impl VmCell {
             let function = function_data_memory_usage(function);
             usage.add(function.live_bytes, function.reserved_bytes);
         }
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             usage.add_vec(&root.string_index);
             for string in root.strings.values() {
                 if let InternedString::Owned(value) = string {
-                    usage.add_vec(&value.0);
+                    usage.add(value.len(), value.len());
                 }
             }
             for buffer in root.buffers.values() {
@@ -1442,7 +1396,7 @@ impl VmCell {
                     usage.add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
                 }
             }
-        });
+        };
         self.side_usage = usage;
     }
 
@@ -1470,19 +1424,19 @@ impl VmCell {
         let tables = &mut self.tables;
         let functions = &mut self.functions;
         let upvalues = &mut self.upvalues;
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let mode_key = b"__mode";
-            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let mode_atom = string_index_lookup(root, mode_key, stable_bytes_hash(mode_key));
             let modes = mode_atom.map_or_else(BTreeMap::new, |mode_atom| {
                 tables
                     .handles()
                     .filter_map(|handle| {
-                        table_weak_mode(&root, tables, handle, mode_atom).map(|mode| (handle, mode))
+                        table_weak_mode(root, tables, handle, mode_atom).map(|mode| (handle, mode))
                     })
                     .collect()
             });
-            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            let live = mark_heap_reachable(root, tables, functions, upvalues, &modes, roots);
             debug_assert!(live.upvalues.live_len() <= upvalues.occupied_len());
             for (&handle, &mode) in &modes {
                 if let Some(table) = tables.get_mut(handle) {
@@ -1503,7 +1457,7 @@ impl VmCell {
                     }
                 }
                 Some(mark_heap_reachable(
-                    &root,
+                    root,
                     tables,
                     functions,
                     upvalues,
@@ -1516,9 +1470,9 @@ impl VmCell {
                 Some(live)
             };
             if let Some(reclaim_live) = reclaim_live.as_ref() {
-                reclaim_unreachable(&mut root, tables, functions, upvalues, reclaim_live);
+                reclaim_unreachable(root, tables, functions, upvalues, reclaim_live);
             }
-        });
+        };
         self.recompute_side_usage();
     }
 
@@ -1578,49 +1532,49 @@ impl VmCell {
         let tables = &self.tables;
         let functions = &self.functions;
         let upvalues = &self.upvalues;
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let mode_key = b"__mode";
-            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let mode_atom = string_index_lookup(root, mode_key, stable_bytes_hash(mode_key));
             let modes = mode_atom.map_or_else(BTreeMap::new, |mode_atom| {
                 tables
                     .handles()
                     .filter_map(|handle| {
-                        table_weak_mode(&root, tables, handle, mode_atom).map(|mode| (handle, mode))
+                        table_weak_mode(root, tables, handle, mode_atom).map(|mode| (handle, mode))
                     })
                     .collect()
             });
-            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            let live = mark_heap_reachable(root, tables, functions, upvalues, &modes, roots);
             root.userdatas
                 .handles()
                 .filter(|handle| live.userdatas.contains(*handle))
                 .collect()
-        })
+        }
     }
 
     pub(crate) fn reachable_module_cohorts(&mut self, roots: &[Value]) -> BTreeSet<u32> {
         let tables = &self.tables;
         let functions = &self.functions;
         let upvalues = &self.upvalues;
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let mode_key = b"__mode";
-            let mode_atom = string_index_lookup(&root, mode_key, stable_bytes_hash(mode_key));
+            let mode_atom = string_index_lookup(root, mode_key, stable_bytes_hash(mode_key));
             let modes = mode_atom.map_or_else(BTreeMap::new, |mode_atom| {
                 tables
                     .handles()
                     .filter_map(|handle| {
-                        table_weak_mode(&root, tables, handle, mode_atom).map(|mode| (handle, mode))
+                        table_weak_mode(root, tables, handle, mode_atom).map(|mode| (handle, mode))
                     })
                     .collect()
             });
-            let live = mark_heap_reachable(&root, tables, functions, upvalues, &modes, roots);
+            let live = mark_heap_reachable(root, tables, functions, upvalues, &modes, roots);
             functions
                 .handles()
                 .filter(|handle| live.functions.contains(*handle))
                 .filter_map(|handle| functions.get(handle).map(|function| function.module_cohort))
                 .collect()
-        })
+        }
     }
 
     pub fn release_spare_capacity(&mut self) {
@@ -1653,8 +1607,8 @@ impl VmCell {
         self.functions.release_spare_capacity();
         self.upvalues.release_spare_capacity();
 
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             for buffer in root.buffers.values_mut() {
                 buffer.bytes.shrink_to_fit();
             }
@@ -1663,22 +1617,8 @@ impl VmCell {
             root.userdatas.release_spare_capacity();
             root.buffers.release_spare_capacity();
             root.vectors.release_spare_capacity();
-        });
+        };
         self.recompute_side_usage();
-    }
-
-    #[inline(always)]
-    pub fn collect_debt(&mut self) {
-        if !self.allocation_debt_pending {
-            return;
-        }
-        self.arena.collect_debt();
-        self.allocation_debt_pending = self.arena.metrics().allocation_debt() > 0.0;
-    }
-
-    #[inline(always)]
-    pub(crate) fn has_allocation_debt(&self) -> bool {
-        self.allocation_debt_pending
     }
 
     pub fn intern_string(&mut self, value: &str) -> u32 {
@@ -1687,12 +1627,11 @@ impl VmCell {
 
     pub fn intern_string_bytes(&mut self, value: &[u8]) -> u32 {
         let hash = stable_bytes_hash(value);
-        let mut allocated_gc_string = false;
-        let (atom, index_before, index_after, owned_added) = self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        let (atom, index_before, index_after, owned_added) = 'storage: {
+            let root = &mut self.root;
             let index_before = vec_memory_usage(&root.string_index);
-            if let Some(atom) = string_index_lookup(&root, value, hash) {
-                return (atom, index_before, index_before, HeapMemoryUsage::default());
+            if let Some(atom) = string_index_lookup(root, value, hash) {
+                break 'storage (atom, index_before, index_before, HeapMemoryUsage::default());
             }
             let required = root.strings.occupied_len().saturating_add(1);
             if root.string_index.is_empty() || required.saturating_mul(2) > root.string_index.len()
@@ -1701,15 +1640,14 @@ impl VmCell {
                     .saturating_mul(2)
                     .next_power_of_two()
                     .max(STRING_INDEX_MIN_CAPACITY);
-                rebuild_string_index(&mut root, capacity);
+                rebuild_string_index(root, capacity);
             }
             let mut owned_added = HeapMemoryUsage::default();
             let stored = ShortString::new(value).map_or_else(
                 || {
-                    allocated_gc_string = true;
-                    let bytes = value.to_vec();
-                    owned_added = vec_memory_usage(&bytes);
-                    InternedString::Owned(Gc::new(mc, Static(bytes)))
+                    let bytes = Box::<[u8]>::from(value);
+                    owned_added.add(bytes.len(), bytes.len());
+                    InternedString::Owned(bytes)
                 },
                 InternedString::Inline,
             );
@@ -1717,18 +1655,17 @@ impl VmCell {
                 .strings
                 .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
-            insert_string_index(&mut root, atom);
+            insert_string_index(root, atom);
             (
                 atom,
                 index_before,
                 vec_memory_usage(&root.string_index),
                 owned_added,
             )
-        });
+        };
         self.side_usage.adjust(index_before, index_after);
         self.side_usage
             .add(owned_added.live_bytes, owned_added.reserved_bytes);
-        self.allocation_debt_pending |= allocated_gc_string;
         atom
     }
 
@@ -1738,38 +1675,38 @@ impl VmCell {
             return self.intern_inline_string(short, stable_hash);
         }
         let append_only = !self.transactions.is_empty();
-        let (atom, index_before, index_after, owned_removed) = self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        let (atom, index_before, index_after, owned_removed) = 'storage: {
+            let root = &mut self.root;
             let index_before = vec_memory_usage(&root.string_index);
-            if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
+            if let Some(atom) = string_index_lookup(root, value.as_bytes(), stable_hash) {
                 let mut owned_removed = HeapMemoryUsage::default();
                 if !append_only && matches!(root.strings.get(atom), Some(InternedString::Owned(_)))
                 {
                     if let Some(InternedString::Owned(stored)) = root.strings.get(atom) {
-                        owned_removed = vec_memory_usage(&stored.0);
+                        owned_removed.add(stored.len(), stored.len());
                     }
                     *root
                         .strings
                         .get_mut(atom)
                         .expect("looked-up string atom remains live") =
-                        InternedString::Shared(Static(value));
+                        InternedString::Shared(value);
                 }
-                return (atom, index_before, index_before, owned_removed);
+                break 'storage (atom, index_before, index_before, owned_removed);
             }
-            ensure_string_index_capacity(&mut root);
-            let stored = InternedString::Shared(Static(value));
+            ensure_string_index_capacity(root);
+            let stored = InternedString::Shared(value);
             let atom = root
                 .strings
                 .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
-            insert_string_index(&mut root, atom);
+            insert_string_index(root, atom);
             (
                 atom,
                 index_before,
                 vec_memory_usage(&root.string_index),
                 HeapMemoryUsage::default(),
             )
-        });
+        };
         self.side_usage.adjust(index_before, index_after);
         self.side_usage
             .adjust(owned_removed, HeapMemoryUsage::default());
@@ -1777,28 +1714,28 @@ impl VmCell {
     }
 
     fn intern_inline_string(&mut self, value: ShortString, stable_hash: u64) -> u32 {
-        let (atom, index_before, index_after) = self.arena.mutate(|_mc, root| {
-            let mut root = root.unlock(_mc).borrow_mut();
+        let (atom, index_before, index_after) = 'storage: {
+            let root = &mut self.root;
             let index_before = vec_memory_usage(&root.string_index);
-            if let Some(atom) = string_index_lookup(&root, value.as_bytes(), stable_hash) {
-                return (atom, index_before, index_before);
+            if let Some(atom) = string_index_lookup(root, value.as_bytes(), stable_hash) {
+                break 'storage (atom, index_before, index_before);
             }
-            ensure_string_index_capacity(&mut root);
+            ensure_string_index_capacity(root);
             let stored = InternedString::Inline(value);
             let atom = root
                 .strings
                 .insert(stored)
                 .expect("string atom table exceeds compact u32 index address space");
-            insert_string_index(&mut root, atom);
+            insert_string_index(root, atom);
             (atom, index_before, vec_memory_usage(&root.string_index))
-        });
+        };
         self.side_usage.adjust(index_before, index_after);
         atom
     }
 
     fn planned_inline_string_intern(&mut self) -> Option<(u32, usize)> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let (atom, slot_growth) = root.strings.planned_insert()?;
             let required = root.strings.occupied_len().saturating_add(1);
             let index_len = if root.string_index.is_empty()
@@ -1815,14 +1752,14 @@ impl VmCell {
                 .saturating_sub(root.string_index.len())
                 .saturating_mul(size_of::<u32>());
             Some((atom, slot_growth.saturating_add(index_growth)))
-        })
+        }
     }
 
     fn planned_vector_allocation(&mut self) -> Option<(u32, usize)> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             root.vectors.planned_insert()
-        })
+        }
     }
 
     #[inline]
@@ -1834,37 +1771,34 @@ impl VmCell {
     #[inline]
     pub(crate) fn find_string_atom_bytes(&mut self, value: &[u8]) -> Option<u32> {
         let stable_hash = stable_bytes_hash(value);
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            string_index_lookup(&root, value, stable_hash)
-        })
+        {
+            let root = &self.root;
+            string_index_lookup(root, value, stable_hash)
+        }
     }
 
     #[inline]
     pub(crate) fn string_atom_equals_bytes(&mut self, atom: u32, value: &[u8]) -> Option<bool> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
+        {
+            self.root
                 .strings
                 .get(atom)
                 .map(|candidate| candidate.as_bytes() == value)
-        })
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn string_atom_count(&mut self) -> usize {
-        self.arena
-            .mutate(|mc, root| root.unlock(mc).borrow().strings.occupied_len())
+        self.root.strings.occupied_len()
     }
 
     pub fn string_bytes(&mut self, atom: u32) -> Option<Vec<u8>> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
+        {
+            self.root
                 .strings
                 .get(atom)
                 .map(|value| value.as_bytes().to_vec())
-        })
+        }
     }
 
     pub(crate) fn with_string_bytes<R>(
@@ -1872,12 +1806,12 @@ impl VmCell {
         atom: u32,
         use_bytes: impl FnOnce(&[u8]) -> R,
     ) -> Option<R> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             root.strings
                 .get(atom)
                 .map(|value| use_bytes(value.as_bytes()))
-        })
+        }
     }
 
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
@@ -1978,10 +1912,10 @@ impl VmCell {
         let old_table_usage = table_data_memory_usage(existing);
         let mut candidate = existing.clone();
         let node_len = candidate.puc_hash().map_or(0, |puc| puc.nodes.len());
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            puc_resize(&*root, &mut candidate, nasize, node_len);
-        });
+        {
+            let root = &self.root;
+            puc_resize(root, &mut candidate, nasize, node_len);
+        };
         candidate.mutation_version = candidate.mutation_version.wrapping_add(1);
         let candidate_usage = table_data_memory_usage(&candidate);
         let growth = candidate_usage
@@ -2075,6 +2009,10 @@ impl VmCell {
             environment,
             module_cohort,
         })
+    }
+
+    pub(crate) fn dynamic_main_function_live_bytes() -> usize {
+        size_of::<ReusableSlot<FunctionData>>()
     }
 
     pub fn alloc_native_function(
@@ -2175,7 +2113,7 @@ impl VmCell {
             .collect()
     }
 
-    /// Returns the data needed to dispatch a function call in one arena access.
+    /// Returns the data needed to dispatch a function call from one generation-checked slot.
     ///
     /// Bytecode calls need their captured upvalues and environment immediately
     /// after inspecting the function kind. Native and host calls deliberately do
@@ -2224,6 +2162,23 @@ impl VmCell {
         self.upvalue_set(capture.cell()?, value)
     }
 
+    /// Trusted idle host mutation. Direct captures remain direct; replacing a
+    /// shared capture writes its existing cell without joining unrelated cells.
+    pub(crate) fn set_function_capture(
+        &mut self,
+        handle: u32,
+        index: usize,
+        value: Value,
+    ) -> Option<()> {
+        let capture = self.function_capture(handle, index)?;
+        if let Some(cell) = capture.cell() {
+            return self.upvalue_set(cell, value);
+        }
+        self.journal_function(handle);
+        *self.functions.get_mut(handle)?.captures.get_mut(index)? = FunctionCapture::direct(value);
+        Some(())
+    }
+
     #[inline]
     pub fn function_environment(&self, handle: u32) -> Option<u32> {
         self.functions
@@ -2260,15 +2215,15 @@ impl VmCell {
         if let Some(table) = metatable {
             self.tables.get(table)?;
         }
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let value = UserdataData {
                 metatable,
                 payload: UserdataPayload::None,
                 host_object: None,
             };
             root.userdatas.insert(value)
-        })
+        }
     }
 
     pub(crate) fn alloc_userdata_with_payload(
@@ -2279,15 +2234,15 @@ impl VmCell {
         if let Some(table) = metatable {
             self.tables.get(table)?;
         }
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let value = UserdataData {
                 metatable,
                 payload,
                 host_object: None,
             };
             root.userdatas.insert(value)
-        })
+        }
     }
 
     pub(crate) const fn host_object_live_bytes() -> usize {
@@ -2297,93 +2252,84 @@ impl VmCell {
     pub(crate) fn alloc_host_object(
         &mut self,
         metatable: u32,
-        host_object: Rc<HostObjectData>,
+        host_object: HostObjectOwner,
     ) -> Option<u32> {
         self.tables.get(metatable)?;
-        let handle = self.arena.mutate(|mc, root| {
-            root.unlock(mc).borrow_mut().userdatas.insert(UserdataData {
+        let handle = {
+            self.root.userdatas.insert(UserdataData {
                 metatable: Some(metatable),
                 payload: UserdataPayload::None,
                 host_object: Some(host_object),
             })
-        })?;
+        }?;
         self.side_usage
             .add(HostObjectData::live_bytes(), HostObjectData::live_bytes());
         Some(handle)
     }
 
-    pub(crate) fn host_object(&mut self, userdata: u32) -> Option<Rc<HostObjectData>> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
-                .userdatas
-                .get(userdata)?
-                .host_object
-                .clone()
-        })
+    pub(crate) fn host_object(&self, userdata: u32) -> Option<HostObjectOwner> {
+        {
+            self.root.userdatas.get(userdata)?.host_object.clone()
+        }
     }
 
     pub(crate) fn discard_host_object(&mut self, userdata: u32) {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow_mut()
+        {
+            self.root
                 .userdatas
                 .retain_handles(|candidate| candidate != userdata);
-        });
+        };
         self.recompute_side_usage();
     }
 
     pub fn alloc_buffer(&mut self, bytes: Vec<u8>) -> Option<u32> {
         let usage = vec_memory_usage(&bytes);
-        let handle = self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        let handle = {
+            let root = &mut self.root;
             let value = BufferData { bytes };
             root.buffers.insert(value)
-        })?;
+        }?;
         self.side_usage.add(usage.live_bytes, usage.reserved_bytes);
         Some(handle)
     }
 
     pub(crate) fn alloc_vector(&mut self, vector: VectorData) -> Option<u32> {
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             root.vectors.insert(vector)
-        })
+        }
     }
 
     pub(crate) fn vector(&mut self, vector: u32) -> Option<VectorData> {
-        self.arena
-            .mutate(|mc, root| root.unlock(mc).borrow().vectors.get(vector).copied())
+        self.root.vectors.get(vector).copied()
     }
 
     pub fn has_buffer(&mut self, buffer: u32) -> bool {
-        self.arena
-            .mutate(|mc, root| root.unlock(mc).borrow().buffers.get(buffer).is_some())
+        self.root.buffers.get(buffer).is_some()
     }
 
     pub fn buffer_len(&mut self, buffer: u32) -> Option<usize> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
+        {
+            self.root
                 .buffers
                 .get(buffer)
                 .map(|buffer| buffer.bytes.len())
-        })
+        }
     }
 
     pub fn buffer_read(&mut self, buffer: u32, offset: usize, count: usize) -> Option<Vec<u8>> {
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let buffer = root.buffers.get(buffer)?;
             let end = offset.checked_add(count)?;
             (end <= buffer.bytes.len()).then(|| buffer.bytes[offset..end].to_vec())
-        })
+        }
     }
 
     pub fn buffer_write(&mut self, buffer: u32, offset: usize, bytes: &[u8]) -> Option<()> {
         self.journal_buffer(buffer);
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let buffer = root.buffers.get_mut(buffer)?;
             let end = offset.checked_add(bytes.len())?;
             if end > buffer.bytes.len() {
@@ -2391,7 +2337,7 @@ impl VmCell {
             }
             buffer.bytes[offset..end].copy_from_slice(bytes);
             Some(())
-        })
+        }
     }
 
     pub fn buffer_fill(
@@ -2402,8 +2348,8 @@ impl VmCell {
         byte: u8,
     ) -> Option<()> {
         self.journal_buffer(buffer);
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let buffer = root.buffers.get_mut(buffer)?;
             let end = offset.checked_add(count)?;
             if end > buffer.bytes.len() {
@@ -2411,32 +2357,29 @@ impl VmCell {
             }
             buffer.bytes[offset..end].fill(byte);
             Some(())
-        })
+        }
     }
 
     pub fn userdata_metatable(&mut self, userdata: u32) -> Option<Option<u32>> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
+        {
+            self.root
                 .userdatas
                 .get(userdata)
                 .map(|userdata| userdata.metatable)
-        })
+        }
     }
 
     pub fn has_userdata(&mut self, userdata: u32) -> bool {
-        self.arena
-            .mutate(|mc, root| root.unlock(mc).borrow().userdatas.get(userdata).is_some())
+        self.root.userdatas.get(userdata).is_some()
     }
 
     pub(crate) fn userdata_payload(&mut self, userdata: u32) -> Option<UserdataPayload> {
-        self.arena.mutate(|mc, root| {
-            root.unlock(mc)
-                .borrow()
+        {
+            self.root
                 .userdatas
                 .get(userdata)
                 .map(|userdata| userdata.payload)
-        })
+        }
     }
 
     pub(crate) fn set_userdata_payload(
@@ -2445,12 +2388,12 @@ impl VmCell {
         payload: UserdataPayload,
     ) -> Option<()> {
         self.journal_userdata(userdata);
-        self.arena.mutate(|mc, root| {
-            let mut root = root.unlock(mc).borrow_mut();
+        {
+            let root = &mut self.root;
             let userdata = root.userdatas.get_mut(userdata)?;
             userdata.payload = payload;
             Some(())
-        })
+        }
     }
 
     #[inline]
@@ -2493,11 +2436,11 @@ impl VmCell {
         if table_data.puc_hash().is_some() {
             // PUC hashing needs string bytes for main positions.
             let tables = &self.tables;
-            return self.arena.mutate(|mc, root| {
-                let root = root.unlock(mc).borrow();
+            return {
+                let root = &self.root;
                 let table = tables.get(table)?;
-                puc_lookup(&root, table, table_key)
-            });
+                puc_lookup(root, table, table_key)
+            };
         }
         if let Some(index) = table_key_array_index(table_key) {
             if let Some(value) = table_data.array.get(index - 1) {
@@ -3013,10 +2956,10 @@ impl VmCell {
         let creates_hash_entry = if is_puc {
             // PUC nil-stores to absent keys create tombstones, so value
             // nilness does not clear `creates_hash_entry` here.
-            self.arena.mutate(|mc, root| {
-                let root = root.unlock(mc).borrow();
-                puc_creates_hash_entry(&root, &candidate, table_key)
-            })
+            {
+                let root = &self.root;
+                puc_creates_hash_entry(root, &candidate, table_key)
+            }
         } else {
             let HashPart::Log { entries, index } = &candidate.hash else {
                 unreachable!("Log layout confirmed above")
@@ -3045,21 +2988,21 @@ impl VmCell {
             _ => key_value,
         };
         if is_puc {
-            self.arena.mutate(|mc, root| {
-                let root = root.unlock(mc).borrow();
+            {
+                let root = &self.root;
                 // The candidate must use the final byte hash even before the
                 // new atom is admitted. Interning first would leak on quota failure.
                 if let Some((short, _, atom)) = pending_inline_atom {
                     let hashes = PendingPucStringHash {
-                        root: &root,
+                        root,
                         atom,
                         hash: luau_string_hash(short.as_bytes()),
                     };
                     puc_store(&hashes, &mut candidate, table_key, key_value, value, false);
                 } else {
-                    puc_store(&*root, &mut candidate, table_key, key_value, value, false);
+                    puc_store(root, &mut candidate, table_key, key_value, value, false);
                 }
-            });
+            };
         } else {
             set_table_data(&mut candidate, table_key, key_value, value);
         }
@@ -3120,10 +3063,10 @@ impl VmCell {
             // the array goes to the node part (never Invalid for in-range
             // i32 indices).
             let key_value = Value::number(one_based_index as f64);
-            self.arena.mutate(|mc, root| {
-                let root = root.unlock(mc).borrow();
-                puc_store(&*root, &mut candidate, key, key_value, value, false);
-            });
+            {
+                let root = &self.root;
+                puc_store(root, &mut candidate, key, key_value, value, false);
+            };
         } else {
             if one_based_index > candidate.array.len() {
                 candidate.array.resize(one_based_index, Value::nil());
@@ -3384,12 +3327,12 @@ impl VmCell {
             _ => Some(self.table_key_from_value(after)),
         };
         let tables = &self.tables;
-        self.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &self.root;
             let table = tables.get(table)?;
             match after.kind() {
                 ValueKind::Nil => Some(
-                    first_non_nil_table_entry(&root, table, order)
+                    first_non_nil_table_entry(root, table, order)
                         .map_or(TableNext::End, |(key, value)| TableNext::Entry(key, value)),
                 ),
                 ValueKind::Number => {
@@ -3399,14 +3342,14 @@ impl VmCell {
                     if let Some(index) = table_key_array_index(key) {
                         if index <= table.array.len() {
                             return Some(
-                                next_after_array_index(&root, table, index, order)
+                                next_after_array_index(root, table, index, order)
                                     .map_or(TableNext::End, |(key, value)| {
                                         TableNext::Entry(key, value)
                                     }),
                             );
                         }
                     }
-                    Some(next_after_hash_key(&root, table, key, order).map_or(
+                    Some(next_after_hash_key(root, table, key, order).map_or(
                         TableNext::InvalidKey,
                         |entry| {
                             entry
@@ -3418,7 +3361,7 @@ impl VmCell {
                     let Some(key) = table_key.flatten() else {
                         return Some(TableNext::InvalidKey);
                     };
-                    Some(next_after_hash_key(&root, table, key, order).map_or(
+                    Some(next_after_hash_key(root, table, key, order).map_or(
                         TableNext::InvalidKey,
                         |entry| {
                             entry
@@ -3427,7 +3370,7 @@ impl VmCell {
                     ))
                 }
             }
-        })
+        }
     }
 
     pub fn table_is_readonly(&mut self, table: u32) -> Option<bool> {
@@ -3445,13 +3388,23 @@ impl VmCell {
         Some(was_readonly)
     }
 
+    pub(crate) fn table_set_readonly(&mut self, table: u32, readonly: bool) -> Option<()> {
+        self.journal_table(table);
+        let table = self.tables.get_mut(table)?;
+        if table.readonly != readonly {
+            table.readonly = readonly;
+            table.mutation_version = table.mutation_version.wrapping_add(1);
+        }
+        Some(())
+    }
+
     pub fn has_table(&mut self, table: u32) -> bool {
         self.tables.get(table).is_some()
     }
 }
 
 #[inline]
-fn string_index_lookup(root: &RootData<'_>, value: &[u8], stable_hash: u64) -> Option<u32> {
+fn string_index_lookup(root: &RootData, value: &[u8], stable_hash: u64) -> Option<u32> {
     if root.string_index.is_empty() {
         return None;
     }
@@ -3477,7 +3430,7 @@ fn string_index_lookup(root: &RootData<'_>, value: &[u8], stable_hash: u64) -> O
     None
 }
 
-fn ensure_string_index_capacity(root: &mut RootData<'_>) {
+fn ensure_string_index_capacity(root: &mut RootData) {
     let required = root.strings.occupied_len().saturating_add(1);
     if root.string_index.is_empty() || required.saturating_mul(2) > root.string_index.len() {
         let capacity = required
@@ -3488,7 +3441,7 @@ fn ensure_string_index_capacity(root: &mut RootData<'_>) {
     }
 }
 
-fn rebuild_string_index(root: &mut RootData<'_>, requested_capacity: usize) {
+fn rebuild_string_index(root: &mut RootData, requested_capacity: usize) {
     let required_capacity = root
         .strings
         .occupied_len()
@@ -3513,7 +3466,7 @@ fn rebuild_string_index(root: &mut RootData<'_>, requested_capacity: usize) {
     }
 }
 
-fn insert_string_index(root: &mut RootData<'_>, atom: u32) {
+fn insert_string_index(root: &mut RootData, atom: u32) {
     let value = root
         .strings
         .get(atom)
@@ -3768,17 +3721,17 @@ fn vec_memory_usage<T>(values: &Vec<T>) -> HeapMemoryUsage {
     }
 }
 
-fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
-    let mut usage = HeapMemoryUsage {
-        live_bytes: function
-            .captures
-            .len()
-            .saturating_mul(size_of::<FunctionCapture>()),
-        reserved_bytes: function
-            .captures
+fn function_captures_memory_usage(captures: &SmallVec<[FunctionCapture; 2]>) -> HeapMemoryUsage {
+    HeapMemoryUsage {
+        live_bytes: captures.len().saturating_mul(size_of::<FunctionCapture>()),
+        reserved_bytes: captures
             .capacity()
             .saturating_mul(size_of::<FunctionCapture>()),
-    };
+    }
+}
+
+fn function_data_memory_usage(function: &FunctionData) -> HeapMemoryUsage {
+    let mut usage = function_captures_memory_usage(&function.captures);
     if let Some(host) = &function.host_function {
         let (live, reserved) = host.memory_usage();
         usage.add(live, reserved);
@@ -3815,18 +3768,15 @@ fn try_clone_table_data(table: &TableData) -> Result<TableData, ()> {
     })
 }
 
-fn try_clone_function_data(function: &FunctionData) -> Result<FunctionData, ()> {
+fn try_snapshot_function(function: &FunctionData) -> Result<FunctionSnapshot, ()> {
     let mut captures = SmallVec::new();
     captures
         .try_reserve(function.captures.len())
         .map_err(|_| ())?;
     captures.extend_from_slice(&function.captures);
-    Ok(FunctionData {
-        kind: function.kind,
-        host_function: function.host_function.clone(),
+    Ok(FunctionSnapshot {
         captures,
         environment: function.environment,
-        module_cohort: function.module_cohort,
     })
 }
 
@@ -3879,7 +3829,7 @@ fn try_snapshot_table_slots(slots: &ReusableSlots<TableData>) -> Result<Vec<(u32
 
 fn try_snapshot_function_slots(
     slots: &ReusableSlots<FunctionData>,
-) -> Result<Vec<(u32, FunctionData)>, ()> {
+) -> Result<Vec<(u32, FunctionSnapshot)>, ()> {
     let mut snapshot = Vec::new();
     snapshot
         .try_reserve_exact(slots.occupied_len())
@@ -3887,7 +3837,7 @@ fn try_snapshot_function_slots(
     for handle in slots.handles() {
         snapshot.push((
             handle,
-            try_clone_function_data(slots.get(handle).expect("live function handle"))?,
+            try_snapshot_function(slots.get(handle).expect("live function handle"))?,
         ));
     }
     Ok(snapshot)
@@ -3928,7 +3878,7 @@ fn add_heap_transaction_memory(transaction: &HeapTransaction, usage: &mut HeapMe
     }
     usage.add_vec(&transaction.functions);
     for (_, function) in &transaction.functions {
-        let nested = function_data_memory_usage(function);
+        let nested = function_captures_memory_usage(&function.captures);
         usage.add(nested.live_bytes, nested.reserved_bytes);
     }
     usage.add_vec(&transaction.upvalues);
@@ -4269,7 +4219,7 @@ trait PucStringHashes {
     fn puc_string_hash(&self, atom: u32) -> u32;
 }
 
-impl PucStringHashes for RootData<'_> {
+impl PucStringHashes for RootData {
     fn puc_string_hash(&self, atom: u32) -> u32 {
         self.strings
             .get(atom)
@@ -4278,13 +4228,13 @@ impl PucStringHashes for RootData<'_> {
 }
 
 /// Read-only overlay for one not-yet-admitted short-string atom.
-struct PendingPucStringHash<'a, 'gc> {
-    root: &'a RootData<'gc>,
+struct PendingPucStringHash<'a> {
+    root: &'a RootData,
     atom: u32,
     hash: u32,
 }
 
-impl PucStringHashes for PendingPucStringHash<'_, '_> {
+impl PucStringHashes for PendingPucStringHash<'_> {
     fn puc_string_hash(&self, atom: u32) -> u32 {
         if atom == self.atom {
             self.hash
@@ -4342,7 +4292,7 @@ fn puc_find_node(root: &impl PucStringHashes, puc: &PucHashPart, key: TableKey) 
 /// `findindex`'s chain walk (ltable.c:137): like [`puc_find_node`], but a
 /// dead node with the same key also matches ("key may be dead already, but
 /// it is ok to use it in `next`").
-fn puc_find_node_for_next(root: &RootData<'_>, puc: &PucHashPart, key: TableKey) -> Option<usize> {
+fn puc_find_node_for_next(root: &RootData, puc: &PucHashPart, key: TableKey) -> Option<usize> {
     if puc.nodes.is_empty() {
         return None;
     }
@@ -4366,7 +4316,7 @@ fn puc_find_node_for_next(root: &RootData<'_>, puc: &PucHashPart, key: TableKey)
 /// `luaH_get` (ltable.c:469). `Some` means the key was found — including
 /// tombstone nodes and in-range nil array slots, which PUC reports as found
 /// nils; `None` means absent.
-fn puc_lookup(root: &RootData<'_>, table: &TableData, key: TableKey) -> Option<Value> {
+fn puc_lookup(root: &RootData, table: &TableData, key: TableKey) -> Option<Value> {
     if let Some(index) = table_key_array_index(key) {
         if let Some(value) = table.array.get(index - 1) {
             return Some(*value);
@@ -4795,7 +4745,7 @@ fn puc_first_node_entry(puc: &PucHashPart, from: usize) -> Option<(Value, Value)
 /// Whether storing `key` (nil or not) would create a new node entry: the key
 /// is not array-routed and not already present in its chain. PUC nil-stores
 /// to absent keys create tombstones, so value nilness is irrelevant here.
-fn puc_creates_hash_entry(root: &RootData<'_>, table: &TableData, key: TableKey) -> bool {
+fn puc_creates_hash_entry(root: &RootData, table: &TableData, key: TableKey) -> bool {
     if let Some(index) = table_key_array_index(key) {
         if index <= table.array.len() {
             return false;
@@ -4861,7 +4811,7 @@ impl LiveSlotGenerations {
 
 /// The mark result shared by weak-table sweeping and ordinary heap reclamation.
 ///
-/// Every side store uses generation-safe compact handles outside `gc-arena`.
+/// Every store uses generation-safe compact handles owned by the VM.
 /// Per-store generation arrays retain exact liveness without the allocation
 /// and pointer overhead of general-purpose tree sets, and the same result
 /// drives weak-table sweeping and ordinary reclamation.
@@ -4877,7 +4827,7 @@ struct HeapLiveSet {
 
 impl HeapLiveSet {
     fn new(
-        root: &RootData<'_>,
+        root: &RootData,
         tables: &ReusableSlots<TableData>,
         functions: &ReusableSlots<FunctionData>,
         upvalues: &ReusableSlots<UpvalueData>,
@@ -4925,7 +4875,7 @@ impl HeapLiveSet {
 }
 
 fn table_weak_mode(
-    root: &RootData<'_>,
+    root: &RootData,
     tables: &ReusableSlots<TableData>,
     table: u32,
     mode_atom: u32,
@@ -4949,7 +4899,7 @@ fn table_weak_mode(
     (weak.keys || weak.values).then_some(weak)
 }
 
-fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Option<bool> {
+fn string_value_contains(root: &RootData, value: Value, needle: u8) -> Option<bool> {
     if let Some(short) = value.as_short_string() {
         return Some(short.as_bytes().contains(&needle));
     }
@@ -4960,7 +4910,7 @@ fn string_value_contains(root: &RootData<'_>, value: Value, needle: u8) -> Optio
 }
 
 fn mark_heap_reachable(
-    root: &RootData<'_>,
+    root: &RootData,
     tables: &ReusableSlots<TableData>,
     functions: &ReusableSlots<FunctionData>,
     upvalues: &ReusableSlots<UpvalueData>,
@@ -5185,7 +5135,7 @@ fn sweep_weak_table(table: &mut TableData, mode: WeakMode, live: &HeapLiveSet) {
 }
 
 fn reclaim_unreachable(
-    root: &mut RootData<'_>,
+    root: &mut RootData,
     tables: &mut ReusableSlots<TableData>,
     functions: &mut ReusableSlots<FunctionData>,
     upvalues: &mut ReusableSlots<UpvalueData>,
@@ -5317,7 +5267,7 @@ fn table_boundary_binary_search(table: &TableData, mut lower: usize, mut upper: 
 }
 
 fn first_non_nil_table_entry(
-    root: &RootData<'_>,
+    root: &RootData,
     table: &TableData,
     order: TableIterationOrder,
 ) -> Option<(Value, Value)> {
@@ -5332,7 +5282,7 @@ fn first_non_nil_table_entry(
 }
 
 fn next_after_array_index(
-    root: &RootData<'_>,
+    root: &RootData,
     table: &TableData,
     one_based_index: usize,
     order: TableIterationOrder,
@@ -5349,7 +5299,7 @@ fn next_after_array_index(
 }
 
 fn first_hash_entry(
-    root: &RootData<'_>,
+    root: &RootData,
     table: &TableData,
     order: TableIterationOrder,
 ) -> Option<(Value, Value)> {
@@ -5373,7 +5323,7 @@ fn first_hash_entry(
 }
 
 fn next_after_hash_key(
-    root: &RootData<'_>,
+    root: &RootData,
     table: &TableData,
     key: TableKey,
     order: TableIterationOrder,
@@ -5401,7 +5351,7 @@ fn next_after_hash_key(
 }
 
 fn ordered_hash_entries<'a>(
-    root: &RootData<'_>,
+    root: &RootData,
     entries: &'a [TableEntry],
     order: TableIterationOrder,
 ) -> Vec<&'a TableEntry> {
@@ -5416,7 +5366,7 @@ fn ordered_hash_entries<'a>(
     }
 }
 
-fn luau_hash_nodes<'a>(root: &RootData<'_>, entries: &'a [TableEntry]) -> Vec<&'a TableEntry> {
+fn luau_hash_nodes<'a>(root: &RootData, entries: &'a [TableEntry]) -> Vec<&'a TableEntry> {
     let Some(hash_size) = table_hash_size(entries) else {
         return Vec::new();
     };
@@ -5435,7 +5385,7 @@ struct LuauHashNode<'a> {
 }
 
 fn luau_hash_insert<'a>(
-    root: &RootData<'_>,
+    root: &RootData,
     nodes: &mut [LuauHashNode<'a>],
     last_free: &mut usize,
     entry: &'a TableEntry,
@@ -5494,12 +5444,12 @@ fn table_hash_size(entries: &[TableEntry]) -> Option<usize> {
     }
 }
 
-fn luau_hash_position(root: &RootData<'_>, key: TableKey, hash_size: usize) -> usize {
+fn luau_hash_position(root: &RootData, key: TableKey, hash_size: usize) -> usize {
     debug_assert!(hash_size.is_power_of_two());
     (luau_hash_key(root, key) as usize) & (hash_size - 1)
 }
 
-fn luau_hash_key(root: &RootData<'_>, key: TableKey) -> u32 {
+fn luau_hash_key(root: &RootData, key: TableKey) -> u32 {
     match key {
         TableKey::Boolean(value) => u32::from(value),
         TableKey::Number(bits) => luau_number_hash(bits),
@@ -5572,6 +5522,125 @@ mod tests {
     use crate::bytecode::{Constant, Function, Instruction, Opcode, Program};
     use std::mem::size_of;
 
+    #[test]
+    fn function_snapshot_keeps_immutable_host_definition_owned_once() {
+        use crate::extension::{HostFunctionHandler, OpCapability};
+        use std::sync::Arc;
+
+        let mut heap = VmCell::new();
+        let environment = heap.alloc_array_table(&[]);
+        let handler: HostFunctionHandler = Arc::new(|_, _| Ok(Vec::new()));
+        let operation = HostFunctionOp::new(
+            "persistent_host_definition",
+            1,
+            OpCapability::Pure,
+            handler.clone(),
+        );
+        heap.alloc_host_function(operation, environment).unwrap();
+        let owners = Arc::strong_count(&handler);
+        let before = heap.memory_usage_census().live_bytes;
+        let admitted = heap.transaction_snapshot_live_bytes();
+
+        heap.begin_transaction().unwrap();
+        assert_eq!(Arc::strong_count(&handler), owners);
+        assert_eq!(heap.memory_usage_census().live_bytes, before + admitted);
+        assert_eq!(heap.memory_usage(), heap.memory_usage_census());
+        heap.commit_transaction();
+        assert_eq!(Arc::strong_count(&handler), owners);
+        assert_eq!(heap.memory_usage_census().live_bytes, before);
+    }
+
+    #[test]
+    fn function_snapshot_restores_nested_capture_and_environment_edits() {
+        let mut heap = VmCell::new();
+        let original_environment = heap.alloc_array_table(&[]);
+        let original_value = Value::table(heap.alloc_array_table(&[]));
+        let cell = heap.alloc_upvalue(Value::number(11.0)).unwrap();
+        // Exercise both shared cells and direct captures, including a spilled
+        // capture vector. Immutable prototype/cohort identity must survive.
+        let function = heap
+            .alloc_function_in_cohort(
+                Some(7),
+                3,
+                vec![
+                    FunctionCapture::direct(original_value),
+                    FunctionCapture::from_cell(cell),
+                    FunctionCapture::direct(Value::number(2.0)),
+                    FunctionCapture::direct(Value::number(3.0)),
+                ],
+                original_environment,
+                11,
+            )
+            .unwrap();
+        let before = heap.memory_usage_census().live_bytes;
+        let admitted = heap.transaction_snapshot_live_bytes();
+        heap.begin_transaction().unwrap();
+        assert_eq!(heap.memory_usage_census().live_bytes, before + admitted);
+
+        let middle_environment = heap.alloc_array_table(&[]);
+        let middle_value = Value::table(heap.alloc_array_table(&[]));
+        heap.set_function_environment(function, middle_environment)
+            .unwrap();
+        heap.set_function_capture(function, 0, middle_value)
+            .unwrap();
+        heap.set_function_capture(function, 1, Value::number(22.0))
+            .unwrap();
+        heap.begin_transaction().unwrap();
+        let latest_environment = heap.alloc_array_table(&[]);
+        let latest_value = Value::table(heap.alloc_array_table(&[]));
+        heap.set_function_environment(function, latest_environment)
+            .unwrap();
+        heap.set_function_capture(function, 0, latest_value)
+            .unwrap();
+        heap.set_function_capture(function, 1, Value::number(33.0))
+            .unwrap();
+        let provisional = heap
+            .alloc_dynamic_main_function(8, latest_environment)
+            .unwrap();
+
+        heap.collect_weak_tables_with_roots(&[Value::function(function)]);
+        assert_eq!(heap.memory_usage(), heap.memory_usage_census());
+        heap.rollback_transaction();
+        assert_eq!(
+            heap.function_environment(function),
+            Some(middle_environment)
+        );
+        assert_eq!(
+            heap.capture_get(heap.function_capture(function, 0).unwrap())
+                .and_then(Value::as_table),
+            middle_value.as_table()
+        );
+        assert_eq!(
+            heap.upvalue_get(cell).and_then(Value::as_number),
+            Some(22.0)
+        );
+        assert!(heap.function_kind(provisional).is_none());
+        heap.rollback_transaction();
+        assert_eq!(
+            heap.function_environment(function),
+            Some(original_environment)
+        );
+        assert_eq!(
+            heap.capture_get(heap.function_capture(function, 0).unwrap())
+                .and_then(Value::as_table),
+            original_value.as_table()
+        );
+        assert_eq!(
+            heap.upvalue_get(cell).and_then(Value::as_number),
+            Some(11.0)
+        );
+        assert!(matches!(
+            heap.function_kind(function),
+            Some(FunctionKind::Bytecode {
+                program: Some(7),
+                prototype: 3
+            })
+        ));
+        assert_eq!(heap.functions.get(function).unwrap().module_cohort, 11);
+        assert!(heap.has_table(original_value.as_table().unwrap()));
+        assert_eq!(heap.memory_usage(), heap.memory_usage_census());
+    }
+
     fn empty_table() -> TableData {
         TableData {
             array: Vec::new(),
@@ -5600,8 +5669,56 @@ mod tests {
         if cfg!(target_pointer_width = "64") {
             assert_eq!(size_of::<TableEntry>(), 48);
             assert_eq!(size_of::<SharedProgramString>(), 16);
-            assert_eq!(size_of::<InternedString<'static>>(), 24);
+            assert_eq!(size_of::<InternedString>(), 24);
         }
+    }
+
+    #[test]
+    fn owned_string_growth_matches_independent_census_across_rehash_and_reuse() {
+        let mut heap = VmCell::new();
+        for index in 0..80 {
+            let bytes = format!("owned runtime binary string {index}\0").into_bytes();
+            let before = heap.memory_usage_census().live_bytes;
+            let planned = heap.planned_owned_string_live_bytes(bytes.len());
+            let atom = heap.intern_string_bytes(&bytes);
+            let after = heap.memory_usage_census().live_bytes;
+            assert_eq!(after - before, planned);
+            assert_eq!(heap.string_bytes(atom).as_deref(), Some(bytes.as_slice()));
+            heap.memory_usage();
+        }
+        heap.collect_weak_tables_with_roots(&[]);
+        let bytes = b"replacement uses a reclaimed string slot";
+        let before = heap.memory_usage_census().live_bytes;
+        let planned = heap.planned_owned_string_live_bytes(bytes.len());
+        heap.intern_string_bytes(bytes);
+        assert_eq!(heap.memory_usage_census().live_bytes - before, planned);
+        heap.memory_usage();
+    }
+
+    #[test]
+    #[cfg(not(target_family = "wasm"))]
+    fn owned_string_storage_can_transfer_without_changing_handles() {
+        fn assert_send<T: Send>() {}
+        // This proves the owned atom store only. VmCell still contains local
+        // host objects, and the VM facade still has local roots and services.
+        assert_send::<ReusableSlots<InternedString>>();
+        let mut strings = ReusableSlots::new();
+        let stale = strings
+            .insert(InternedString::Owned(Box::from(b"old bytes".as_slice())))
+            .unwrap();
+        strings.retain_handles(|_| false);
+        let current = strings
+            .insert(InternedString::Owned(Box::from(b"live bytes".as_slice())))
+            .unwrap();
+        let strings = std::thread::spawn(move || {
+            assert!(strings.get(stale).is_none());
+            assert_eq!(strings.get(current).unwrap().as_bytes(), b"live bytes");
+            strings
+        })
+        .join()
+        .unwrap();
+        assert!(strings.get(stale).is_none());
+        assert_eq!(strings.get(current).unwrap().as_bytes(), b"live bytes");
     }
 
     #[test]
@@ -5624,15 +5741,15 @@ mod tests {
             assert_eq!(heap.string_bytes(*atom).as_deref(), Some(value.as_slice()));
         }
 
-        heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &heap.root;
             assert_eq!(root.strings.len(), values.len());
             assert!(root.string_index.len() >= root.strings.len() * 2);
             assert_eq!(
                 root.string_index.iter().filter(|slot| **slot != 0).count(),
                 root.strings.len()
             );
-        });
+        };
     }
 
     #[test]
@@ -5656,8 +5773,8 @@ mod tests {
         let second_long =
             second.intern_shared_string(program.shared_string(1).expect("long descriptor"));
 
-        first.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &first.root;
             assert!(matches!(
                 root.strings.get(short),
                 Some(InternedString::Inline(_))
@@ -5665,15 +5782,15 @@ mod tests {
             let Some(InternedString::Shared(stored)) = root.strings.get(first_long) else {
                 panic!("compiled long string should use shared storage");
             };
-            assert_eq!(stored.0.as_bytes().as_ptr(), long_pointer);
-        });
-        second.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+            assert_eq!(stored.as_bytes().as_ptr(), long_pointer);
+        };
+        {
+            let root = &second.root;
             let Some(InternedString::Shared(stored)) = root.strings.get(second_long) else {
                 panic!("second VM should retain shared storage");
             };
-            assert_eq!(stored.0.as_bytes().as_ptr(), long_pointer);
-        });
+            assert_eq!(stored.as_bytes().as_ptr(), long_pointer);
+        };
     }
 
     #[test]
@@ -5692,13 +5809,13 @@ mod tests {
         let Constant::String(compiled_bytes) = &program.constants()[0] else {
             panic!("compiled constant should remain a string");
         };
-        runtime_first.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &runtime_first.root;
             let Some(InternedString::Shared(stored)) = root.strings.get(runtime_atom) else {
                 panic!("compiled arrival should upgrade runtime-owned storage");
             };
-            assert_eq!(stored.0.as_bytes().as_ptr(), compiled_bytes.as_ptr());
-        });
+            assert_eq!(stored.as_bytes().as_ptr(), compiled_bytes.as_ptr());
+        };
         assert_eq!(
             runtime_first.string_bytes(runtime_atom),
             Some(bytes.clone())
@@ -5769,10 +5886,7 @@ mod tests {
         heap.table_freeze(readonly).expect("table should freeze");
         let missing = Value::short_string(b"unseen-key").expect("short string");
 
-        let string_count = |heap: &mut VmCell| {
-            heap.arena
-                .mutate(|mc, root| root.unlock(mc).borrow().strings.len())
-        };
+        let string_count = |heap: &mut VmCell| heap.root.strings.len();
         assert_eq!(string_count(&mut heap), 0);
 
         assert!(heap.table_get(writable, missing).is_none());
@@ -5800,10 +5914,7 @@ mod tests {
     fn numeric_table_paths_preserve_key_rules_without_creating_string_atoms() {
         let mut heap = VmCell::new();
         let table = heap.alloc_array_table(&[]);
-        let string_count = |heap: &mut VmCell| {
-            heap.arena
-                .mutate(|mc, root| root.unlock(mc).borrow().strings.len())
-        };
+        let string_count = |heap: &mut VmCell| heap.root.strings.len();
         let cases = [
             (1.0, 11.0),
             (1.5, 15.0),
@@ -7303,11 +7414,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(values.iter().all(|value| value.as_short_string().is_some()));
-        heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &heap.root;
             assert!(root.strings.is_empty());
             assert!(root.string_index.is_empty());
-        });
+        };
     }
 
     #[test]
@@ -7481,10 +7592,10 @@ mod tests {
         let tables = &heap.tables;
         let functions = &heap.functions;
         let upvalues = &heap.upvalues;
-        let live = heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        let live = {
+            let root = &heap.root;
             mark_heap_reachable(
-                &root,
+                root,
                 tables,
                 functions,
                 upvalues,
@@ -7494,7 +7605,7 @@ mod tests {
                     Value::userdata(live_userdata),
                 ],
             )
-        });
+        };
 
         assert!(live.contains_ref(HeapRef::Function(live_function)));
         assert!(live.contains_ref(HeapRef::Table(live_environment)));
@@ -7530,10 +7641,10 @@ mod tests {
         assert!(heap.tables.get(dead).is_none());
         assert!(heap.functions.get(dead_function).is_none());
         assert!(heap.upvalues.get(dead_upvalue).is_none());
-        heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &heap.root;
             assert!(root.buffers.get(dead_buffer).is_none());
-        });
+        };
     }
 
     #[test]
@@ -7903,8 +8014,8 @@ mod tests {
     /// reaches its slot (the PUC chain-integrity invariant).
     fn assert_puc_chain_integrity(heap: &VmCell, table: u32) {
         let tables = &heap.tables;
-        heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
+        {
+            let root = &heap.root;
             let table = tables.get(table).expect("table exists");
             let HashPart::Puc(puc) = &table.hash else {
                 panic!("expected a PUC-layout table");
@@ -7913,7 +8024,7 @@ mod tests {
                 let PucNodeKey::Live(key) = puc.nodes[slot].key else {
                     continue;
                 };
-                let mut at = puc_main_position(&*root, puc.nodes.len(), key);
+                let mut at = puc_main_position(root, puc.nodes.len(), key);
                 loop {
                     assert!(
                         at < puc.nodes.len(),
@@ -7930,15 +8041,15 @@ mod tests {
                     at = next as usize;
                 }
             }
-        });
+        };
     }
 
     /// Test-only main-position helper for a single key.
     fn puc_test_main_position(heap: &VmCell, nodes_len: usize, key: TableKey) -> usize {
-        heap.arena.mutate(|mc, root| {
-            let root = root.unlock(mc).borrow();
-            puc_main_position(&*root, nodes_len, key)
-        })
+        {
+            let root = &heap.root;
+            puc_main_position(root, nodes_len, key)
+        }
     }
 
     fn same_test_value(a: Value, b: Value) -> bool {

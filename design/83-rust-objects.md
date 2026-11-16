@@ -60,6 +60,16 @@ fresh-object registrations and live result handles before allocating guest
 return values. These checks do not undo application work already done by the
 callback. Owned snapshots cannot represent Rust objects; use live results.
 
+### Low-level owned hooks
+
+The issue-#50 `rustia-vm` definition additionally has optional `__index`,
+`__newindex`, `__eq`, `__tostring` and `__call` host operations. They use the
+same checked receiver, capability admission, fuel, scoped dispatcher and panic
+boundary as methods. Existing instances retain their original protected
+definition after replacement. This is the primitive Luvy uses for ECS-backed
+views; `ObjectType` does not yet expose an ergonomic typed wrapper for these
+hooks, so this does not change the public facade example above.
+
 Run the complete [game-turn example](../crates/rustia/examples/game_objects.rs)
 with `cargo run -p rustia --example game_objects`. It applies a successful
 move, cancels a later decision, and checks that the cancelled requests never
@@ -126,8 +136,10 @@ the enclosing table write or function/object call has consumed them.
 Rustia admits method metadata, instance storage, and public roots under its
 logical-live memory quota. Arbitrary allocations inside `T` remain application
 memory, like callback captures. `T` must be `'static`, but need not be `Clone`,
-`Send`, or `Sync`; the VM and handles keep their thread-affine contract. Method
-closures retain the normal `Send + Sync + 'static` bounds. Payload and capture
+`Send`, or `Sync` in the default local mode. The opt-in lower-level `send` mode
+requires payloads to be `Send + Sync` and uses checked shared read/write guards;
+it still permits only one exclusive VM executor. Method closures retain the
+normal `Send + Sync + 'static` bounds. Payload and capture
 destructors must not panic. The application must avoid hidden Rust ownership
 cycles that would keep its own data alive.
 
@@ -137,8 +149,9 @@ Rust coercion cannot change a type after its callback adapters have erased it.
 Compile-only regressions cover these brands without expanding the public API
 reference's examples.
 
-Custom fields/metamethods, borrowed scopes, async methods, and automatic Rust
-payload snapshots remain outside this milestone.
+Typed-facade custom fields/metamethods, borrowed scopes, async methods, and
+automatic Rust payload snapshots remain outside this milestone; only the
+lower-level owned-hook primitive described above is implemented.
 
 ## Evidence and remaining work
 

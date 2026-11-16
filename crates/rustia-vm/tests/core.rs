@@ -1,12 +1,13 @@
+#[path = "support/ownership.rs"]
+mod ownership;
+use ownership::{Rc, RefCell};
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
     ClockProvider, Constant, EntropyProvider, ErrorKind, ExtensionOp, Function, HostFunctionOp,
     Instruction, OpCapability, Opcode, Profile, Program, StdoutSink, Value, ValueKind, Vm,
     VmServices, VmSettings, DECISION_RESET_ABI_VERSION, MAX_RECURSION_LIMIT,
 };
-use std::cell::RefCell;
 use std::num::NonZeroU64;
-use std::rc::Rc;
 use std::sync::Arc;
 
 fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {
@@ -1797,6 +1798,44 @@ fn entropy_provider_selects_the_initial_random_sequence() {
             vm.run(&math_random_program()).unwrap().as_number().unwrap(),
         ]
     });
+}
+
+#[cfg(feature = "send")]
+#[test]
+fn cloned_entropy_provider_supports_concurrent_vm_construction() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    let next_seed = Arc::new(AtomicU64::new(40));
+    let settings = VmSettings {
+        services: VmServices {
+            entropy: Some(EntropyProvider::new(
+                {
+                    let next_seed = Arc::clone(&next_seed);
+                    move || next_seed.fetch_add(1, Ordering::SeqCst)
+                },
+                true,
+            )),
+            ..VmServices::default()
+        },
+        ..VmSettings::default()
+    };
+    let start = Arc::new(Barrier::new(3));
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            let settings = settings.clone();
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                Vm::with_settings(Profile::ReproducibleStandard, settings)
+            })
+        })
+        .collect();
+    start.wait();
+    for worker in workers {
+        worker.join().expect("VM construction must not panic");
+    }
+    assert_eq!(next_seed.load(Ordering::SeqCst), 42);
 }
 
 #[test]

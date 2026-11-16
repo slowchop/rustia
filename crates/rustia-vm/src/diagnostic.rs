@@ -70,7 +70,7 @@ impl SourceSnapshot {
         }
         let charge = self.bytes.len().checked_add(std::mem::size_of::<Self>())?;
         budget
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                 used.checked_add(charge)
                     .filter(|next| *next <= limits.retained_source_bytes)
             })
