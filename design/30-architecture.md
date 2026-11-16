@@ -137,10 +137,16 @@ hand-rolled mark&sweep [fallback]; Rc+cycle-collector [rejected]; region/no-GC f
 **free** (3.18 ns/mut in Marked phase = no-barrier; `make_gray_again` is `#[cold]`), and the **retain pattern**
 works (a `DynamicRoot` survived **1000 forced collections**, `fetch` ~0.69 ns; deep-copy-out is a one-time
 export cost). The old cross-thread live-VM move path was measured UB-clean, but production now avoids that
-marker entirely: a live `VmCell` is thread-affine while it owns its gc-arena component and side stores. Throughput == slotmap == plain Vec
+marker entirely. The default live `VmCell` remains thread-affine. The opt-in
+lower-level `rustia-vm/send` mode instead uses owned, explicitly traced storage
+and checked transferable owners for services, roots and payloads. It permits an
+idle VM to move between scheduler workers while retaining one exclusive executor;
+it does not permit concurrent access to one interpreter. Throughput == slotmap == plain Vec
 (3.18 vs 3.14 ns/op). **slotmap rejected as the main heap** (its only edge is snapshot, which is O(heap) not
-O(1), and it has no cycle reclamation). Two API rules: (i) hosts parallelize with worker-local VMs and shared
-immutable compiled artifacts/configuration, not by moving live VMs; (ii) DeterministicSim collection uses the
+O(1), and it has no cycle reclamation). Two API rules: (i) ordinary hosts use
+worker-local VMs and shared immutable compiled artifacts/configuration; schedulers
+that need mobile ownership explicitly select `send` and transfer only at idle
+boundaries; (ii) DeterministicSim collection uses the
 instruction counter, never byte-debt, while Standard/LuauCompat may use allocation debt.
 
 **Production implementation update (2026-07-27):** ordinary reachability and generation-safe reuse cover tables,
@@ -327,7 +333,8 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 - **P1 — engine core (substantial, release gates remain).** Lexer + recursive-descent parser (full type-grammar
   parse, no typecheck) + compiler
   (constant-fold w/ pinned libm+canon, generic-superinstruction fusion, regalloc, O0 mode); `rustia-vm` with
-  the **16-byte tagged Value**, thread-affine hybrid VM heap with gc-arena scheduling/owned long-string storage
+  the **16-byte tagged Value**, owned tracing heap with default thread-affine and
+  opt-in transferable ownership, plus owned long-string storage
   plus generation-safe object/program reclamation and maintained logical-live accounting, big-match
   dispatch, fuel + recursion cap, and a stackless trampoline. Host-columnar rollback region. Prepare the
   cross-arch golden (incl. f64) for the FULL target matrix (§C0): native macOS-arm64/**x86_64-Intel**/Windows/
@@ -383,7 +390,7 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 |---|---|---|
 | Value-layout/correctness evidence is still incomplete across the full native/browser matrix; real **Safari/iOS JSC** remains open even though V8, Bun/JSC-family, and SpiderMonkey shell wasm are measured | **high** | close the residual §C0 public-release build/golden matrix while keeping timings dedicated-Linux-only; keep `Value` sealed/swappable until then |
 | Earlier general-script perf evidence came from narrow spike workloads | med | use the committed multi-workload harness and generated per-workload claim gate |
-| Live VM is thread-affine instead of `Send` | med | Avoids unsafe in production; hosts should construct VMs on worker threads and share only immutable compiled artifacts/configuration |
+| Transferable VM ownership accidentally becomes concurrent execution | med | `send` changes owner/bounds only; APIs still require exclusive mutable access, callback guards are scoped, and scheduler handoff is allowed only while idle. Default embedding remains thread-affine. |
 | Mixed-heap correctness regresses across native/wasm | med | one shared 96-epoch/3,072-wave source now covers the complete object mix, bounded roots, weak/cyclic reclamation, hot reload, OOM recovery, exact reset plateaus, and stable warmed Node/V8 linear-memory pages |
 | GC full-collect cost scales O(live-objects) (~10 ns/obj; ~200 µs at 20k objects) | med | tune the instruction-count collection interval against the landed mixed-heap correctness gate and realistic heap sizes |
 | Remaining semantic/diagnostic tail can move errors across compile/runtime boundaries | med | add focused pinned-Luau fixtures plus differential/fuzz tests and public stack-trace/source diagnostics |

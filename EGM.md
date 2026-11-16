@@ -64,6 +64,8 @@ diagnostic. Its fixed workload path counts are CI-only and carry no timing claim
   iteration, fuel, and collection rules belong to the selected contract and versioned ABI.
 - The application facade owns its settings/errors and retained handles. VM internals
   remain separate lower-level APIs; handles must respect VM ownership and decision epochs.
+  The facade remains thread-affine; the lower-level VM's opt-in `send` mode permits
+  idle exclusive ownership transfer, not concurrent execution.
 - Host-owned authoritative state and external effects are not silently rolled back with
   guest state. Typed invocation journals and guest installation savepoints have distinct
   boundaries.

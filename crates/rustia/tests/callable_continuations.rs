@@ -217,3 +217,43 @@ fn iterator_calls_resume_and_synchronize_captured_callers() -> rustia::Result<()
     }
     Ok(())
 }
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn transferred_setfenv_survives_wrapped_coroutine_yield_and_pcall() -> rustia::Result<()> {
+    for profile in [
+        rustia::Profile::LuauCompat,
+        rustia::Profile::ReproducibleStandard,
+        rustia::Profile::DeterministicSim,
+        rustia::Profile::Puc51Compat,
+    ] {
+        let mut vm = RustiaBuilder::standard()
+            .profile(profile)
+            .fuel(100_000)
+            .build()?;
+        assert!(
+            vm.load(
+                r#"
+                local original = getfenv()
+                local function worker(environment)
+                    setfenv(0, environment)
+                    coroutine.yield()
+                    assert(getfenv(0) == environment)
+                    return getfenv()
+                end
+                local resume = coroutine.wrap(worker)
+                local environment = {}
+                assert(resume(environment) == nil)
+                local ok, result = pcall(resume)
+                return ok and result == original
+            "#,
+            )
+            .eval::<bool>()?,
+            "{profile:?}"
+        );
+    }
+    Ok(())
+}

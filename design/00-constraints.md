@@ -81,10 +81,13 @@ principle expose a value-layout or platform assumption despite the portable libm
   default-true in a version we adopt.
 
 ### C2 — thread model
-- The production VM stays safe Rust and thread-affine while it owns its hybrid heap (`gc-arena` component plus
-  VM side stores). Parallel hosts should
-  create one VM per worker, or move shared immutable compiled artifacts/configuration between workers, instead
-  of moving a live VM across threads.
+- The production VM stays safe Rust. Default ownership is thread-affine; the
+  opt-in lower-level `send` mode uses owned tracing storage and transferable
+  checked owners while retaining one exclusive executor. The VM owns its heap
+  and side stores. Ordinary parallel hosts create one VM per worker and share
+  immutable compiled artifacts/configuration. A scheduler that selects `send`
+  may instead move an idle live VM between workers, but never share or execute
+  it concurrently.
 - Execution model is **N independent VMs across a thread pool**, NOT one shared VM. Per-borrow tax of the
   Arc path was ~5–10% in koto — budget for, and try to beat, that.
 

@@ -14,7 +14,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 ## Invariants
 
-- One portable engine serves targets; no target-specific semantic engine is implied.
+- One portable engine serves targets; no target-specific semantic engine is implied. The opt-in `send` feature changes ownership and bounds, not guest language policy; default local providers and payloads remain supported.
 - Deterministic numeric operations canonicalize NaN values and normalize numeric table keys.
 - Fuel and recursion exhaustion are structured runtime errors; memory quota is logical VM-owned memory, not process RSS.
 - `DeterministicSim` and `HardenedLeaf` are distinct policy dimensions; hardened leaves impose a restricted guest surface.
@@ -22,8 +22,8 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 ## Side Effects
 
-VM execution mutates the GC-managed guest heap and execution counters, may collect, and may call configured host functions, module resolvers, clocks, entropy providers, or stdout sinks.
+VM execution mutates the owned, explicitly traced guest heap and execution counters, may collect, and may call configured host functions, module resolvers, clocks, entropy providers, or stdout sinks.
 
 ## Verification
 
-From the repository root, run `cargo test --locked -p rustia-vm`.
+From the repository root, run `cargo test --locked -p rustia-vm` and `cargo test --locked -p rustia-vm --features send`.

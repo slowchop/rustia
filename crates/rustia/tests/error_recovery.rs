@@ -481,7 +481,13 @@ fn oom_host_reports_distinguish_generated_wrappers_from_user_expressions() {
                 error.as_vm_error().unwrap().to_string(),
                 "not enough memory"
             );
-            assert_eq!(error.diagnostic().unwrap().generated_source, generated);
+            assert_eq!(
+                error
+                    .diagnostic()
+                    .unwrap_or_else(|| panic!("{profile:?}: generated={generated}: {error:?}"))
+                    .generated_source,
+                generated
+            );
             let report = error.report().to_string();
             if generated {
                 assert!(report.contains("generated wrapper code"), "{report}");

@@ -156,11 +156,8 @@ impl Vm {
             load,
         };
         let outcome = (|| {
-            let program_id = self.retain_dynamic_program(resolved.program)?;
-            let handle = self
-                .heap
-                .alloc_dynamic_main_function_in_cohort(program_id, environment, cohort_id)
-                .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+            let (entry, program_id) =
+                self.create_program_entry(resolved.program, environment, cohort_id, 0)?;
             let mut callers = Vec::new();
             callers
                 .try_reserve_exact(1)
@@ -170,7 +167,7 @@ impl Vm {
                 load: try_clone_module_load(&frame.load)?,
             }));
             Ok(VmFlow::Call(DeferredBytecodeCall {
-                callee: Value::function(handle),
+                callee: entry,
                 args: Vec::new(),
                 depth: depth.saturating_add(1),
                 call_site,

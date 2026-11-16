@@ -225,6 +225,7 @@ struct Compiler {
     global_environment_escaped: bool,
     disable_builtin_fastpaths: bool,
     upvalues: Vec<UpvalueDescriptor>,
+    upvalue_names: Vec<String>,
     captured_registers: BTreeSet<u8>,
     capture_hints: Vec<Vec<u8>>,
     capture_stack: Vec<CaptureScope>,
@@ -265,6 +266,7 @@ impl Compiler {
             global_environment_escaped: false,
             disable_builtin_fastpaths: false,
             upvalues: Vec::new(),
+            upvalue_names: Vec::new(),
             captured_registers,
             capture_hints,
             capture_stack: Vec::new(),
@@ -1615,6 +1617,7 @@ impl Compiler {
             locals: std::mem::take(&mut self.locals),
             fastcall_candidate_names: std::mem::take(&mut self.fastcall_candidate_names),
             upvalues: std::mem::take(&mut self.upvalues),
+            upvalue_names: std::mem::take(&mut self.upvalue_names),
             captured_registers: std::mem::take(&mut self.captured_registers),
         };
         let parent_assigned_globals = self.assigned_globals.clone();
@@ -1661,6 +1664,8 @@ impl Compiler {
         let function_source_map = std::mem::take(&mut self.source_map);
         let function_max_registers = usize::from(self.max_registers.max(1));
         let upvalues = std::mem::take(&mut self.upvalues);
+        let upvalue_names = std::mem::take(&mut self.upvalue_names);
+        debug_assert_eq!(upvalues.len(), upvalue_names.len());
         let captured_registers = self.captured_registers.iter().copied().collect::<Vec<_>>();
         let function_assigned_globals = self.assigned_globals.clone();
         let function_assigned_stdlib_fields = self.assigned_stdlib_fields.clone();
@@ -1680,6 +1685,7 @@ impl Compiler {
             captured_registers,
         )
         .with_source_map(function_source_map)
+        .with_upvalue_names(upvalue_names)
         .with_debug_name(debug_name)
         .with_debug_line_defined(debug_line_defined)
         .with_parameter_types(parameter_types);
@@ -1693,6 +1699,7 @@ impl Compiler {
         self.locals = parent_scope.locals;
         self.fastcall_candidate_names = parent_scope.fastcall_candidate_names;
         self.upvalues = parent_scope.upvalues;
+        self.upvalue_names = parent_scope.upvalue_names;
         self.captured_registers = parent_scope.captured_registers;
         self.assigned_globals = parent_assigned_globals;
         self.assigned_globals.extend(function_assigned_globals);
@@ -3505,6 +3512,7 @@ impl Compiler {
         let parent_locals = std::mem::take(&mut self.locals);
         let parent_fastcall_candidate_names = std::mem::take(&mut self.fastcall_candidate_names);
         let parent_upvalues = std::mem::take(&mut self.upvalues);
+        let parent_upvalue_names = std::mem::take(&mut self.upvalue_names);
         let parent_captured_registers = std::mem::take(&mut self.captured_registers);
         let parent_capture_stack = std::mem::take(&mut self.capture_stack);
         let parent_assigned_globals = self.assigned_globals.clone();
@@ -3557,6 +3565,7 @@ impl Compiler {
         self.locals = parent_locals;
         self.fastcall_candidate_names = parent_fastcall_candidate_names;
         self.upvalues = parent_upvalues;
+        self.upvalue_names = parent_upvalue_names;
         self.captured_registers = parent_captured_registers;
         self.capture_stack = parent_capture_stack;
         self.assigned_globals = parent_assigned_globals;
@@ -5763,9 +5772,19 @@ impl Compiler {
         if let Some(Binding::Upvalue(index)) = self.locals.get(name).copied() {
             return Ok(index);
         }
+        // Exiting a lexical block restores its visible local-name map, but
+        // captures already emitted by that block still belong to this function.
+        // Resolve by descriptor before allocating another slot for that binding.
+        if let Some(index) = self.upvalues.iter().position(|saved| *saved == descriptor) {
+            let index =
+                u8::try_from(index).map_err(|_| CompileError::new("too many function upvalues"))?;
+            self.locals.insert(name.to_owned(), Binding::Upvalue(index));
+            return Ok(index);
+        }
         let index = u8::try_from(self.upvalues.len())
             .map_err(|_| CompileError::new("too many function upvalues"))?;
         self.upvalues.push(descriptor);
+        self.upvalue_names.push(name.to_owned());
         self.locals.insert(name.to_owned(), Binding::Upvalue(index));
         Ok(index)
     }
@@ -5781,8 +5800,19 @@ impl Compiler {
         {
             return Some(index);
         }
+        let scope = &mut self.capture_stack[scope_index];
+        if let Some(index) = scope.upvalues.iter().position(|saved| *saved == descriptor) {
+            let index = u8::try_from(index).ok()?;
+            scope
+                .locals
+                .insert(name.to_owned(), Binding::Upvalue(index));
+            return Some(index);
+        }
         let index = u8::try_from(self.capture_stack[scope_index].upvalues.len()).ok()?;
         self.capture_stack[scope_index].upvalues.push(descriptor);
+        self.capture_stack[scope_index]
+            .upvalue_names
+            .push(name.to_owned());
         self.capture_stack[scope_index]
             .locals
             .insert(name.to_owned(), Binding::Upvalue(index));
@@ -6735,6 +6765,7 @@ struct CaptureScope {
     locals: BTreeMap<String, Binding>,
     fastcall_candidate_names: BTreeSet<String>,
     upvalues: Vec<UpvalueDescriptor>,
+    upvalue_names: Vec<String>,
     captured_registers: BTreeSet<u8>,
 }
 

@@ -1,12 +1,13 @@
+#[path = "support/ownership.rs"]
+mod ownership;
+use ownership::{Rc, RefCell};
 use rustia_vm::number::{binary, NumericOp, CANON_NAN_BITS};
 use rustia_vm::{
     ClockProvider, Constant, EntropyProvider, ErrorKind, ExtensionOp, Function, HostFunctionOp,
     Instruction, OpCapability, Opcode, Profile, Program, StdoutSink, Value, ValueKind, Vm,
     VmServices, VmSettings, DECISION_RESET_ABI_VERSION, MAX_RECURSION_LIMIT,
 };
-use std::cell::RefCell;
 use std::num::NonZeroU64;
-use std::rc::Rc;
 use std::sync::Arc;
 
 fn first_arg(args: &[Value]) -> rustia_vm::Result<Value> {

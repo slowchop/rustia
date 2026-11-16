@@ -259,7 +259,7 @@ fn active_require_continuation_keeps_its_cache_cohort_and_values_alive() {
             },
         })]);
     vm.mark_control_memory_dirty();
-    vm.collect_heap_and_programs(&[], true);
+    vm.collect_heap_and_programs(&[]);
     assert!(vm.module_cohorts.contains_key(&cohort));
     assert!(vm.heap.has_table(table.as_table().unwrap()));
     vm.active_coroutine_frames.pop();
@@ -275,7 +275,7 @@ fn collection_releases_abandoned_loads_while_other_frames_are_active() {
     pending(&mut vm, "abandoned", Some(owner));
     vm.active_coroutine_frames.push(vec![CoroutineFrame::PCall]);
     vm.mark_control_memory_dirty();
-    vm.collect_heap_and_programs(&[], true);
+    vm.collect_heap_and_programs(&[]);
     assert!(!vm.heap.has_userdata(owner));
     assert!(vm.module_cohorts[&0].loading.is_empty());
     vm.active_coroutine_frames.pop();

@@ -63,6 +63,32 @@ acyclic snapshot layer. This advanced layer is additive, not a replacement for t
 The ordered expansion is recorded in
 [Build Order](#build-order).
 
+### Lower-level transferable consumer slice (2026-11-16)
+
+Issue #50 adds a deliberately lower-level integration surface used by Luvy.
+`rustia-vm` keeps local `Rc`/`RefCell` ownership by default and offers an opt-in
+`send` feature that selects transferable owners, service guards, retained roots
+and `Send + Sync` Rust payloads. This lets an idle, exclusively owned VM move
+between scheduler workers; it neither permits simultaneous calls nor makes the
+application facade's handles transferable.
+
+The compiler records one optional lexical name per upvalue descriptor. Rooted
+VM primitives can inspect script function metadata, capture storage and exact
+environments, replace captures while idle, traverse a table one raw pair at a
+time, and control trusted readonly/metatable state. `retain_program_entry`
+constructs a callable main function in an exact rooted environment without
+executing guest code. These operations preserve VM/epoch checks, alias/cell
+identity, guest savepoints, collection and logical-live admission.
+
+`VmHostCall` is the borrowed re-entry boundary for trusted dispatchers. A nested
+call uses the same `VmExecution`, fuel, recursion depth and dispatcher; it does
+not store a borrowed host pointer in the VM. The saved-caller driver leaves the
+large bytecode frame before synchronous host dispatch, roots all transferred
+state, and restores source diagnostics and continuations afterward. This is the
+consumer-proven slice, not a claim that the public facade now has mlua-style
+`Scope`, async callbacks or unrestricted deep re-entry. Those ergonomic and
+acceptance decisions remain open under issue #50.
+
 ## Application API boundary
 
 The `rustia` facade owns its profiles, capabilities, settings, memory samples,

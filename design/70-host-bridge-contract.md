@@ -59,6 +59,15 @@ callback itself is nevertheless a semantic trust boundary: safe Rust cannot stop
 reading a captured global or mutating captured/interior state. Grabby must keep deterministic registrations
 capture-free (or capture only audited immutable data).
 
+The lower-level issue-#50 consumer seam is separate from that facade contract.
+A trusted `VmHostDispatcher` may receive a short-lived `VmHostCall` and re-enter
+guest code with the exact active `VmExecution`, fuel allowance, caller depth and
+dispatcher. The VM never stores the borrowed dispatcher. Owned bytecode callers
+are saved and fully rooted before the synchronous host boundary, so re-entry does
+not keep a large Rust bytecode frame live or create a second budget. This seam is
+used by Luvy's scheduler-owned integration; the ordinary typed facade callbacks
+above still receive no VM handle, and concurrent access to one VM remains invalid.
+
 Authoritative leaves use `RustiaBuilder::deterministic_leaf()` and a host-owned `CompiledEntry`. This guest
 surface layers on `DeterministicSim`: its globals, standard libraries, and host namespaces are sealed and
 frozen; environment/debug/raw mutation, VM RNG, clocks/output, buffers/vectors/coroutines, dynamic compilation,

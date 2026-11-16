@@ -239,7 +239,8 @@ instead of `0.0`).
 
 `require`/module-loader socket; incremental accounting and live `count`/`gcinfo`;
 recording/replay providers; WASI-style permission UI; `GcSchedule`/`determinism_tier()` public API;
-paced-GC knobs; `Send`/`Sync` providers (the VM is thread-affine); async sinks; fixing the
+paced-GC knobs; transferable providers in the public facade (the default VM is
+thread-affine; `rustia-vm/send` is only a lower-level consumer slice); async sinks; fixing the
 pre-existing `os.date`/`os.time(table)` oracle divergences; perf claims (service calls are cold-path).
 
 This is the scope boundary of the host-services slice, not current project
