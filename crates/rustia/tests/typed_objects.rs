@@ -16,8 +16,176 @@ struct Player {
     score: i64,
 }
 
+struct WordList {
+    words: Vec<String>,
+    fail_after: Option<i64>,
+}
+
+struct CountTo(i64);
+
+struct WordIterator {
+    words: Vec<String>,
+    index: usize,
+    fail_after: Option<i64>,
+}
+
+struct CountIterator {
+    next: i64,
+    end: i64,
+}
+
+fn word_list_type() -> ObjectType<WordList> {
+    ObjectType::new("WordList")
+        .length(2, |list: &WordList| list.words.len() as i64)
+        .iterator(
+            3,
+            |list: &WordList| {
+                if list.fail_after == Some(0) {
+                    return Err(Error::embed("iterator setup stopped"));
+                }
+                Ok(WordIterator {
+                    words: list.words.clone(),
+                    index: 0,
+                    fail_after: list.fail_after,
+                })
+            },
+            |state: &mut WordIterator, _: Option<i64>| -> Result<Option<(i64, String)>> {
+                state.index += 1;
+                let next = state.index as i64;
+                if state.fail_after == Some(next) {
+                    return Err(Error::embed("iterator stopped"));
+                }
+                Ok(state
+                    .words
+                    .get((next - 1) as usize)
+                    .cloned()
+                    .map(|word| (next, word)))
+            },
+        )
+        .method_mut("push", 2, |list: &mut WordList, word: String| {
+            list.words.push(word)
+        })
+}
+
 fn player_type() -> ObjectType<Player> {
     ObjectType::new("Player").method("score", 1, |p: &Player| p.score)
+}
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn typed_length_and_iteration_preserve_luau_control_and_error_semantics() -> Result<()> {
+    let mut lua = RustiaBuilder::standard().fuel(20_000).build()?;
+    lua.register_object_type(word_list_type())?;
+    lua.register_object_type(ObjectType::new("CountTo").iterator(
+        1,
+        |range: &CountTo| {
+            Ok(CountIterator {
+                next: 1,
+                end: range.0,
+            })
+        },
+        |state: &mut CountIterator, _: Option<i64>| {
+            let next = state.next;
+            state.next += 1;
+            (next <= state.end).then_some(next)
+        },
+    ))?;
+    let list = lua.create_object(WordList {
+        words: vec!["a".into(), "b".into(), "c".into()],
+        fail_after: None,
+    })?;
+    lua.globals()?
+        .set_live(&mut lua, "words", &list.as_value())?;
+    assert_eq!(
+        lua.eval::<String>(
+            "local out = {}; for i, word in words do out[i] = word end; return #words .. ':' .. table.concat(out, ',')"
+        )?,
+        "3:a,b,c"
+    );
+    let range = lua.create_object(CountTo(3))?;
+    lua.globals()?
+        .set_live(&mut lua, "count_to", &range.as_value())?;
+    assert_eq!(
+        lua.eval::<String>(
+            "local out = ''; for value in count_to do out ..= tostring(value) end; return out"
+        )?,
+        "123"
+    );
+    assert_eq!(
+        lua.eval::<String>(
+            "local out = ''; for _, a in words do for _, b in words do out ..= a .. b end end; return out"
+        )?,
+        "aaabacbabbbccacbcc"
+    );
+    assert_eq!(
+        lua.eval::<String>(
+            r#"
+            local function run()
+                local out = ''
+                for _, word in words do
+                    out ..= word
+                    coroutine.yield(out)
+                end
+                return out
+            end
+            local a, b = coroutine.create(run), coroutine.create(run)
+            local out = ''
+            for _ = 1, 4 do
+                local _, av = coroutine.resume(a)
+                local _, bv = coroutine.resume(b)
+                out ..= av .. ':' .. bv .. ';'
+            end
+            return out
+        "#
+        )?,
+        "a:a;ab:ab;abc:abc;abc:abc;"
+    );
+    assert_eq!(
+        lua.eval::<String>(
+            "local out = ''; for _, word in words do out ..= word; if word == 'a' then words:push('z') end end; return out .. ':' .. #words"
+        )?,
+        "abc:4"
+    );
+    lua.exec("words:push('d')")?;
+    assert_eq!(
+        lua.eval::<String>("local out = ''; for _, word in words do out ..= word end; return out")?,
+        "abczd"
+    );
+
+    let broken = lua.create_object(WordList {
+        words: vec!["x".into(), "y".into()],
+        fail_after: Some(2),
+    })?;
+    lua.globals()?
+        .set_live(&mut lua, "broken", &broken.as_value())?;
+    assert!(lua.eval::<bool>(
+        "local seen = ''; local ok, message = pcall(function() for _, word in broken do seen ..= word end end); return not ok and seen == 'x' and string.find(message, 'iterator stopped', 1, true) ~= nil"
+    )?);
+    let broken_factory = lua.create_object(WordList {
+        words: vec!["unused".into()],
+        fail_after: Some(0),
+    })?;
+    lua.globals()?
+        .set_live(&mut lua, "broken_factory", &broken_factory.as_value())?;
+    assert!(lua.eval::<bool>(
+        "local ok, message = pcall(function() for _ in broken_factory do end end); return not ok and string.find(message, 'iterator setup stopped', 1, true) ~= nil"
+    )?);
+
+    lua.reset_decision()?;
+    let reset = lua.create_object(WordList {
+        words: vec!["reset".into()],
+        fail_after: None,
+    })?;
+    lua.globals()?
+        .set_live(&mut lua, "words", &reset.as_value())?;
+    assert_eq!(
+        lua.eval::<String>("for _, word in words do return word end")?,
+        "reset"
+    );
+    Ok(())
 }
 
 #[test]

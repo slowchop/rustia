@@ -5,6 +5,8 @@ use crate::host_object::{object_error, wrong_object_type};
 use crate::{HostObjectData, HostObjectOwner, HostObjectPayload, HostObjectTypeDefinition};
 use std::any::{type_name, TypeId};
 
+const HOST_OBJECT_ITERATOR_KEY: &str = "__rustia_iterator";
+
 #[cfg(test)]
 mod tests;
 
@@ -27,6 +29,12 @@ impl Vm {
             return Err(object_error(
                 "Rust object type names must not be empty".to_owned(),
             ));
+        }
+        if definition.hooks.iterator.is_some() != definition.hooks.iterator_step.is_some() {
+            return Err(object_error(format!(
+                "Rust object type '{}' must define both iterator factory and step hooks",
+                definition.name
+            )));
         }
         for (index, method) in definition.methods.iter().enumerate() {
             if definition.methods[..index]
@@ -51,6 +59,14 @@ impl Vm {
                 &format!("{}.{}", definition.name, name),
                 hook.fuel_cost,
                 hook.capability,
+            )?;
+        }
+        if let Some(iterator) = &definition.hooks.iterator_step {
+            validate_registered_op(
+                self.profile,
+                &format!("{}.__iter", definition.name),
+                iterator.fuel_cost,
+                iterator.capability,
             )?;
         }
         self.host_object_types
@@ -335,12 +351,76 @@ impl Vm {
                 .table_set(metatable.as_table().expect("new table"), key, function)
                 .expect("new metatable accepts its hook");
         }
+        if let Some(iterator) = &definition.hooks.iterator_step {
+            let step = if admit {
+                self.register_host_function(iterator.clone())?
+            } else {
+                Value::function(
+                    self.heap
+                        .alloc_host_function(iterator.clone(), self.globals)
+                        .expect("persisted iterator handle must remain representable"),
+                )
+            };
+            let key = self.string(HOST_OBJECT_ITERATOR_KEY);
+            self.heap
+                .table_set(metatable.as_table().expect("new table"), key, step)
+                .expect("new metatable accepts its iterator step");
+        }
         self.heap
             .table_freeze(methods.as_table().expect("new table"));
         self.heap
             .table_freeze(metatable.as_table().expect("new table"));
         drop(root);
         Ok(metatable.as_table().expect("new table"))
+    }
+
+    /// Returns the protected iterator step attached to a host object definition.
+    #[doc(hidden)]
+    pub fn host_object_iterator_step(&mut self, value: Value) -> Result<Value> {
+        let handle = value
+            .as_userdata()
+            .filter(|handle| self.heap.host_object(*handle).is_some())
+            .ok_or_else(|| wrong_object_type("userdata"))?;
+        let metatable = self
+            .heap
+            .userdata_metatable(handle)
+            .flatten()
+            .ok_or_else(|| object_error("Rust object iterator is missing".to_owned()))?;
+        let atom = self
+            .heap
+            .find_string_atom_bytes(HOST_OBJECT_ITERATOR_KEY.as_bytes())
+            .ok_or_else(|| object_error("Rust object iterator is missing".to_owned()))?;
+        self.heap
+            .table_get(metatable, Value::string_atom(atom))
+            .filter(|value| value.kind() == ValueKind::Function)
+            .ok_or_else(|| object_error("Rust object iterator is missing".to_owned()))
+    }
+
+    /// Creates an opaque, unrooted iterator state using the receiver's protected
+    /// metatable. The caller must return or otherwise root it before allocation.
+    #[doc(hidden)]
+    pub fn create_host_iterator_state(
+        &mut self,
+        receiver: Value,
+        rust_type_id: TypeId,
+        rust_type_name: &'static str,
+        payload: Box<HostObjectPayload>,
+    ) -> Result<Value> {
+        if payload.as_ref().type_id() != rust_type_id {
+            return Err(wrong_object_type(rust_type_name));
+        }
+        let metatable = receiver
+            .as_userdata()
+            .filter(|handle| self.heap.host_object(*handle).is_some())
+            .and_then(|handle| self.heap.userdata_metatable(handle).flatten())
+            .ok_or_else(|| wrong_object_type("userdata"))?;
+        self.ensure_memory_growth(VmCell::host_object_live_bytes(), &[receiver])?;
+        let data = Shared::new(HostObjectData::new(rust_type_name, payload));
+        let handle = self
+            .heap
+            .alloc_host_object(metatable, data)
+            .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        Ok(Value::userdata(handle))
     }
 
     pub(super) fn restore_host_object_types(&mut self) {

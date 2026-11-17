@@ -83,6 +83,26 @@ fn forbidden_method_and_duplicate_names_reject_the_complete_replacement() {
     duplicate.methods.push(duplicate.methods[0].clone());
     assert!(vm.register_host_object_type(duplicate).is_err());
     assert_eq!(vm.current_live_bytes(), before);
+    let mut forbidden_iterator = definition(3.0);
+    forbidden_iterator.hooks.iterator = Some(HostFunctionOp::new(
+        "__iter",
+        1,
+        OpCapability::ReadsExternalMutableState,
+        Arc::new(|_, _| Ok(vec![Value::nil()])),
+    ));
+    forbidden_iterator.hooks.iterator_step = Some(HostFunctionOp::new(
+        "__iter_step",
+        1,
+        OpCapability::Pure,
+        Arc::new(|_, _| Ok(vec![Value::nil()])),
+    ));
+    assert!(matches!(
+        vm.register_host_object_type(forbidden_iterator)
+            .unwrap_err()
+            .kind,
+        ErrorKind::CapabilityRemoved { .. }
+    ));
+    assert_eq!(vm.current_live_bytes(), before);
     let object = vm.create_retained_host_object(Counter(10)).unwrap();
     assert_eq!(call(&mut vm, &object), 11.0);
     vm.begin_guest_transaction().unwrap();

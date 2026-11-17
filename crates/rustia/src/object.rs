@@ -1,11 +1,11 @@
 use crate::function::adapter::Token;
-use crate::object_method::{IntoMutObjectMethod, IntoObjectMethod};
+use crate::object_method::{IntoMutObjectMethod, IntoObjectIterator, IntoObjectMethod};
 use crate::value::{load_owned_arguments, snapshot_value};
 use crate::{
     Error, FromRustiaMulti, HostSchema, IntoRustiaMulti, Invocation, OpCapability, Result, Rustia,
     Value,
 };
-use rustia_vm::{HostFunctionOp, HostObjectTypeDefinition, Value as RawValue};
+use rustia_vm::{HostFunctionOp, HostObjectHooks, HostObjectTypeDefinition, Value as RawValue};
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;
 
@@ -38,6 +38,7 @@ type Invariant<T> = PhantomData<fn(T) -> T>;
 pub struct ObjectType<T: 'static, H: HostSchema = ()> {
     name: String,
     pub(crate) methods: Vec<HostFunctionOp>,
+    pub(crate) hooks: HostObjectHooks,
     // Method adapters erase these types after capturing their exact TypeIds.
     marker: Invariant<(T, H)>,
 }
@@ -48,6 +49,7 @@ impl<T: 'static, H: HostSchema> ObjectType<T, H> {
         Self {
             name: name.into(),
             methods: Vec::new(),
+            hooks: HostObjectHooks::default(),
             marker: PhantomData,
         }
     }
@@ -114,6 +116,72 @@ impl<T: 'static, H: HostSchema> ObjectType<T, H> {
             fuel_cost,
             capability.to_core(),
         ));
+        self
+    }
+
+    /// Defines `#object` with a typed, read-only payload callback.
+    pub fn length<F, R>(self, fuel_cost: u32, length: F) -> Self
+    where
+        F: IntoObjectMethod<T, (), R>,
+    {
+        self.length_with_capability(fuel_cost, OpCapability::Pure, length)
+    }
+
+    /// Defines `#object` with an explicit captured-state capability.
+    pub fn length_with_capability<F, R>(
+        mut self,
+        fuel_cost: u32,
+        capability: OpCapability,
+        length: F,
+    ) -> Self
+    where
+        F: IntoObjectMethod<T, (), R>,
+    {
+        self.hooks.length = Some(length.into_object_method(
+            Token,
+            "__len".to_owned(),
+            fuel_cost,
+            capability.to_core(),
+        ));
+        self
+    }
+
+    /// Defines generalized iteration with independent owned state per loop.
+    ///
+    /// The factory borrows the object once. The step mutates only that loop's
+    /// state and receives the previous typed control. `None` completes iteration; the first returned value is Luau's
+    /// next control value and first loop variable.
+    pub fn iterator<Factory, Step, S, C, R>(
+        self,
+        fuel_cost: u32,
+        factory: Factory,
+        step: Step,
+    ) -> Self
+    where
+        (Factory, Step): IntoObjectIterator<T, S, C, R>,
+    {
+        self.iterator_with_capability(fuel_cost, OpCapability::Pure, factory, step)
+    }
+
+    /// Defines generalized iteration with an explicit captured-state capability.
+    pub fn iterator_with_capability<Factory, Step, S, C, R>(
+        mut self,
+        fuel_cost: u32,
+        capability: OpCapability,
+        factory: Factory,
+        step: Step,
+    ) -> Self
+    where
+        (Factory, Step): IntoObjectIterator<T, S, C, R>,
+    {
+        let (factory, step) = crate::object_method::adapter::Iterate::into_object_iterator(
+            (factory, step),
+            Token,
+            fuel_cost,
+            capability.to_core(),
+        );
+        self.hooks.iterator = Some(factory);
+        self.hooks.iterator_step = Some(step);
         self
     }
 
@@ -343,7 +411,7 @@ impl<H: HostSchema> Rustia<H> {
                 rust_type_name: type_name::<T>(),
                 name: definition.name,
                 methods: definition.methods,
-                hooks: Default::default(),
+                hooks: definition.hooks,
             })
             .map_err(Error::from_engine)
     }

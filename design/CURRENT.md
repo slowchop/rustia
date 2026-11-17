@@ -88,9 +88,11 @@ application facade now offers an opt-in `transferable` Cargo feature under
 the interpreter and live handles movable between workers with stricter service
 and object bounds. Execution remains exclusively borrowed, and the default
 facade remains thread-affine. Luvy still uses the lower-level VM/compiler/parser
-boundary because capture migration, owned hooks and scoped re-entry are not yet
-exposed ergonomically. Borrowed scopes, typed hooks, and the sync/resumable API
-split remain tracked in issues #56, #54, and #55 respectively.
+boundary because capture migration, broader owned hooks and scoped re-entry are
+not yet exposed ergonomically. Borrowed scopes, broader typed hooks, and the
+sync/resumable API split remain tracked in issues #56, #54, and #55 respectively.
+Issue #63 provides the bounded facade slice needed by Luvy: typed
+`ObjectType::length` and reset-safe generalized `ObjectType::iterator` hooks.
 
 Synchronous native callbacks now use one explicit non-yieldable boundary in
 both saved-caller and borrowed/direct execution. `tostring`, function-based
@@ -108,7 +110,7 @@ resumable.
 | --- | --- |
 | Engine | Luau 0.709, vector-3, flags-off, f64-only; one native/Wasm engine and public-workspace `unsafe_code = "forbid"`. The default facade/handles are thread-affine; opt-in `rustia/transferable` and lower-level `rustia-vm/send` permit idle ownership transfer with one exclusive executor. [Target](05-luau-target.md), [architecture](30-architecture.md). |
 | Embedding | Facade-owned settings/errors; typed owned conversions and Serde; rooted VM/epoch-safe live values, including quota-atomic host-created tables and immutable vectors ([issue #58](https://github.com/slowchop/rustia/issues/58)); composable chunks, custom environments, compiled modules, atomic installation and host-owned replacement. Lower-level embedders can retain program entries and inspect/migrate rooted captures without executing guest code. [Embedding API](75-embedded-api.md). |
-| Host integration | Synchronous functions, capability declarations, borrowed invocation context, shared fuel, bounded ordered records and typed Rust objects/methods. The low-level scoped dispatcher can re-enter with the active budget/depth; host objects support optional owned field/metamethod hooks. [Host bridge](70-host-bridge-contract.md), [functions](78-host-functions.md), [objects](83-rust-objects.md). |
+| Host integration | Synchronous functions, capability declarations, borrowed invocation context, shared fuel, bounded ordered records and typed Rust objects/methods. The low-level scoped dispatcher can re-enter with the active budget/depth; host objects support optional owned field/metamethod hooks, including typed facade length and generalized iteration. [Host bridge](70-host-bridge-contract.md), [functions](78-host-functions.md), [objects](83-rust-objects.md). |
 | Services and modules | Explicit output/clock/entropy providers and native/WASI/browser adapters. `require` needs a host resolver; core has no ambient filesystem. Module ABI v3 supports yieldable loads and coroutine-owned loading state. Each installation has a fresh dependency-cache cohort; older rooted functions retain theirs. [Services](72-host-services.md), [embedding API](75-embedded-api.md). |
 | Lifetime and limits | Ordinary objects/programs are reclaimed and generation-safely reused; rooted public values stay alive. Maintained logical-live quota accounting, telemetry, atomic OOM recovery and decision reset are implemented. Mixed-heap native/Node-V8 correctness checks cover bounded reuse. Rust payload/capture allocations and process RSS are outside that quota. [Architecture](30-architecture.md), [memory protocol](57-memory-benchmarking.md). |
 | Diagnostics and CLI | Structured compile/runtime errors, bounded source reports; file/stdin/eval/REPL and version output. [Diagnostics](79-script-diagnostics.md), [error/fuzzing contract](82-error-behaviour-fuzzing.md). |
@@ -249,6 +251,7 @@ The active backlog is:
 - [Sync versus resumable API #55](https://github.com/slowchop/rustia/issues/55).
 - [Borrowed scopes #56](https://github.com/slowchop/rustia/issues/56).
 - [One-shot validated push #61](https://github.com/slowchop/rustia/issues/61).
+- [Typed object length and iteration #63](https://github.com/slowchop/rustia/issues/63).
 
 Tracking work does not authorize source visibility, publication, measurements or
 private infrastructure actions; the active constraints above still apply.

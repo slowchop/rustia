@@ -1,7 +1,7 @@
 //! Synchronous method adapters. Receivers are checked before other arguments.
 
-use crate::function::{adapter::Token, host_arg_from_raw, host_return_to_raw};
-use crate::{FromHostArgument, IntoHostReturn, Object};
+use crate::function::{adapter::Token, host_arg_from_raw, host_embed_error, host_return_to_raw};
+use crate::{FromHostArgument, FromRustia, IntoHostReturn, Object, Result};
 use rustia_vm::{HostFunctionOp, OpCapability, Value, Vm};
 use std::any::{type_name, TypeId};
 use std::sync::Arc;
@@ -28,6 +28,31 @@ pub(crate) mod adapter {
             capability: OpCapability,
         ) -> HostFunctionOp;
     }
+
+    pub(crate) trait Iterate<T: 'static, S, C, R>: Send + Sync + 'static {
+        fn into_object_iterator(
+            self,
+            token: Token,
+            fuel_cost: u32,
+            capability: OpCapability,
+        ) -> (HostFunctionOp, HostFunctionOp);
+    }
+
+    pub(crate) trait IterationReturn<C> {
+        type Item: IntoHostReturn;
+        fn into_iteration_return(self) -> Result<Option<Self::Item>>;
+        fn is_fallible() -> bool;
+    }
+
+    #[cfg(not(feature = "transferable"))]
+    pub(crate) trait IterationState: 'static {}
+    #[cfg(not(feature = "transferable"))]
+    impl<T: 'static> IterationState for T {}
+
+    #[cfg(feature = "transferable")]
+    pub(crate) trait IterationState: Send + Sync + 'static {}
+    #[cfg(feature = "transferable")]
+    impl<T: Send + Sync + 'static> IterationState for T {}
 }
 
 /// A read-only Rust-object method accepted by [`crate::ObjectType`].
@@ -45,6 +70,100 @@ impl<T: 'static, A, R, F: adapter::Read<T, A, R>> IntoObjectMethod<T, A, R> for 
 #[allow(private_bounds)]
 pub trait IntoMutObjectMethod<T: 'static, A, R>: adapter::Write<T, A, R> {}
 impl<T: 'static, A, R, F: adapter::Write<T, A, R>> IntoMutObjectMethod<T, A, R> for F {}
+
+/// A typed generalized-iterator step accepted by [`crate::ObjectType`].
+///
+/// The factory receives the payload once and returns owned state for one loop.
+/// The step receives that private state and the previous control value. Returning
+/// `None` completes the loop. A returned tuple's
+/// first value is both Luau's next control value and the loop's first visible
+/// value, exactly like a regular Luau iterator function. Rustia requires that
+/// first value to have exactly the same type as the incoming control.
+///
+/// ```compile_fail
+/// use rustia::ObjectType;
+/// struct Values;
+/// let _ = ObjectType::<Values>::new("Values").iterator(1, |_| Ok::<_, rustia::Error>(()),
+///     |_: &mut (), _: Option<i64>| Some(("wrong control", 1_i64)));
+/// ```
+///
+/// An iterator step must return at least its next control value:
+///
+/// ```compile_fail
+/// use rustia::ObjectType;
+/// struct Values;
+/// let _ = ObjectType::<Values>::new("Values").iterator(1, |_| Ok::<_, rustia::Error>(()),
+///     |_: &mut (), _: Option<i64>| Some(()));
+/// ```
+#[allow(private_bounds)]
+pub trait IntoObjectIterator<T: 'static, S, C, R>: adapter::Iterate<T, S, C, R> {}
+impl<T: 'static, S, C, R, F: adapter::Iterate<T, S, C, R>> IntoObjectIterator<T, S, C, R> for F {}
+
+impl<C: IntoHostReturn> adapter::IterationReturn<C> for Option<C> {
+    type Item = C;
+
+    fn into_iteration_return(self) -> Result<Option<C>> {
+        Ok(self)
+    }
+
+    fn is_fallible() -> bool {
+        false
+    }
+}
+
+impl<C: IntoHostReturn> adapter::IterationReturn<C> for Result<Option<C>> {
+    type Item = C;
+
+    fn into_iteration_return(self) -> Result<Option<C>> {
+        self
+    }
+
+    fn is_fallible() -> bool {
+        true
+    }
+}
+
+macro_rules! iteration_tuple_return {
+    ($($name:ident),+ $(,)?) => {
+        impl<C, $($name),+> adapter::IterationReturn<C> for Option<(C, $($name,)+)>
+        where
+            (C, $($name,)+): IntoHostReturn,
+        {
+            type Item = (C, $($name,)+);
+
+            fn into_iteration_return(self) -> Result<Option<Self::Item>> {
+                Ok(self)
+            }
+
+            fn is_fallible() -> bool {
+                false
+            }
+        }
+
+        impl<C, $($name),+> adapter::IterationReturn<C> for Result<Option<(C, $($name,)+)>>
+        where
+            (C, $($name,)+): IntoHostReturn,
+        {
+            type Item = (C, $($name,)+);
+
+            fn into_iteration_return(self) -> Result<Option<Self::Item>> {
+                self
+            }
+
+            fn is_fallible() -> bool {
+                true
+            }
+        }
+    };
+}
+
+iteration_tuple_return!(A);
+iteration_tuple_return!(A, B);
+iteration_tuple_return!(A, B, D);
+iteration_tuple_return!(A, B, D, E);
+iteration_tuple_return!(A, B, D, E, G);
+iteration_tuple_return!(A, B, D, E, G, H);
+iteration_tuple_return!(A, B, D, E, G, H, I);
 
 pub(crate) fn checked_receiver<T: 'static>(
     vm: &mut Vm,
@@ -133,3 +252,77 @@ write_method!(5; A, B, C, D, E);
 write_method!(6; A, B, C, D, E, G);
 write_method!(7; A, B, C, D, E, G, H);
 write_method!(8; A, B, C, D, E, G, H, I);
+
+impl<T, Factory, Step, S, C, R> adapter::Iterate<T, S, C, R> for (Factory, Step)
+where
+    T: 'static,
+    Factory: Fn(&T) -> Result<S> + Send + Sync + 'static,
+    Step: Fn(&mut S, Option<C>) -> R + Send + Sync + 'static,
+    S: adapter::IterationState,
+    C: FromRustia,
+    R: adapter::IterationReturn<C>,
+{
+    fn into_object_iterator(
+        self,
+        _: Token,
+        fuel_cost: u32,
+        capability: OpCapability,
+    ) -> (HostFunctionOp, HostFunctionOp) {
+        let (factory, step) = self;
+        let factory_op = HostFunctionOp::new(
+            "__iter",
+            fuel_cost,
+            capability,
+            Arc::new(move |vm, args| {
+                let receiver_raw = args.first().copied().unwrap_or_else(Value::nil);
+                let object = checked_receiver::<T>(vm, args)?;
+                let state = {
+                    let receiver = object.try_borrow::<T>()?;
+                    factory(&receiver)
+                }
+                .map_err(|error| host_embed_error("__iter", "return value", error))?;
+                let iterator = vm.host_object_iterator_step(receiver_raw)?;
+                let state = vm.create_host_iterator_state(
+                    receiver_raw,
+                    TypeId::of::<S>(),
+                    type_name::<S>(),
+                    Box::new(state),
+                )?;
+                Ok(vec![iterator, state, Value::nil()])
+            }),
+        )
+        .with_signature(
+            1,
+            vec![type_name::<Object<T>>()],
+            vec!["iterator", type_name::<S>(), "nil"],
+            true,
+        );
+        let step_op = HostFunctionOp::new(
+            "__iter_step",
+            fuel_cost,
+            capability,
+            Arc::new(move |vm, args| {
+                let control = host_arg_from_raw::<Option<C>>(vm, args, 1, "__iter")?;
+                let state = checked_receiver::<S>(vm, args)?;
+                let result = {
+                    let mut state = state.try_borrow_mut::<S>()?;
+                    step(&mut state, control)
+                };
+                match result
+                    .into_iteration_return()
+                    .map_err(|error| host_embed_error("__iter", "return value", error))?
+                {
+                    Some(values) => host_return_to_raw(vm, "__iter", values),
+                    None => Ok(vec![Value::nil()]),
+                }
+            }),
+        )
+        .with_signature(
+            2,
+            vec![type_name::<S>(), type_name::<Option<C>>()],
+            <R::Item as crate::function::adapter::Return>::rustia_type_names(Token),
+            R::is_fallible(),
+        );
+        (factory_op, step_op)
+    }
+}

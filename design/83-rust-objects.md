@@ -60,15 +60,56 @@ fresh-object registrations and live result handles before allocating guest
 return values. These checks do not undo application work already done by the
 callback. Owned snapshots cannot represent Rust objects; use live results.
 
+### Length and generalized iteration
+
+Issue [#63](https://github.com/slowchop/rustia/issues/63) adds reset-safe,
+typed collection hooks without exposing raw VM handles:
+
+```rust
+ObjectType::new("Words")
+    .length(1, |words: &Words| words.items.len() as i64)
+    .iterator(
+        1,
+        |words: &Words| Ok::<_, rustia::Error>((words.items.clone(), 0_usize)),
+        |(items, index), _: Option<i64>| {
+            *index += 1;
+            items.get(*index - 1).cloned().map(|word| (*index as i64, word))
+        },
+    )
+```
+
+`length` implements Luau `__len`. `iterator` takes a fallible factory and a
+step. The factory briefly borrows the object once per loop and returns owned
+state; the step mutates only that loop's private state and receives Luau's
+previous control value for typed validation. `None` completes the loop.
+For a scalar or tuple result, the first value is both the next control and the
+first loop variable, matching an ordinary Luau iterator function. Its Rust type
+must exactly match the incoming `Option<C>` control; empty and mismatched step
+results do not compile. Fallible steps use the
+normal callback diagnostic and protected-call behavior.
+
+Both hooks are synchronous. The iterator factory's read borrow is released
+before its state is admitted to the guest heap; steps never borrow the original
+object. The factory and each step charge the declared host fuel. Hook
+definitions survive reset, while object instances and controls retain the usual
+VM/epoch rules. The same implementation is used by the default, transferable,
+native and Wasm builds. Nested/interleaved loops get independent snapshots, and
+an early break lets the unreachable state be collected. This is deliberately
+not a broad Rust collection API.
+`length_with_capability` and `iterator_with_capability` declare captured-state
+behavior when the payload callback is not replay-stable; profile admission then
+uses the same rules as capability-specific methods.
+
 ### Low-level owned hooks
 
 The issue-#50 `rustia-vm` definition additionally has optional `__index`,
-`__newindex`, `__eq`, `__tostring` and `__call` host operations. They use the
+`__newindex`, `__eq`, `__tostring`, `__call`, `__len`, and generalized iterator
+host operations. They use the
 same checked receiver, capability admission, fuel, scoped dispatcher and panic
 boundary as methods. Existing instances retain their original protected
 definition after replacement. This is the primitive Luvy uses for ECS-backed
-views; `ObjectType` does not yet expose an ergonomic typed wrapper for these
-hooks, so this does not change the public facade example above.
+views. `ObjectType` exposes the bounded length/iterator subset; typed field,
+equality, display and call builders remain tracked by issue #54.
 
 Run the complete [game-turn example](../crates/rustia/examples/game_objects.rs)
 with `cargo run -p rustia --example game_objects`. It applies a successful
