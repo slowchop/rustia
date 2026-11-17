@@ -1,0 +1,82 @@
+name: Error behaviour and fuzzing
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: error-fuzz-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  differential-smoke:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
+        with:
+          toolchain: 1.95.0
+          cache: false
+      - run: cargo build --locked --manifest-path fuzz/Cargo.toml --features oracle --bin error-oracle-worker
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+      - name: Verify release diagnostic parity against pinned Luau
+        run: node tools/audit-release-errors.mjs
+      - run: cargo test --locked --manifest-path fuzz/Cargo.toml generated_differential_smoke -- --ignored
+        env:
+          RUSTIA_DIFF_WORKER: ${{ github.workspace }}/fuzz/target/debug/error-oracle-worker
+
+  campaign:
+    # Long campaigns run only after an explicit workflow dispatch.
+    if: github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        target: [lexer, parser, compiler, vm, stateful, differential]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
+        with:
+          toolchain: 1.95.0, nightly-2026-04-06
+          cache: false
+      - run: cargo +1.95.0 install cargo-fuzz --version 0.13.2 --locked
+      - run: cargo +1.95.0 build --locked --manifest-path fuzz/Cargo.toml --features oracle --bin error-oracle-worker
+      - name: Record identity
+        run: |
+          mkdir -p fuzz/artifacts
+          git rev-parse HEAD > fuzz/artifacts/revision.txt
+          rustc +nightly-2026-04-06 -Vv > fuzz/artifacts/toolchain.txt
+          cargo fuzz --version > fuzz/artifacts/cargo-fuzz.txt
+      - name: Bounded coverage-guided campaign
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
+          RUSTIA_DIFF_WORKER: ${{ github.workspace }}/fuzz/target/debug/error-oracle-worker
+        run: |
+          set -o pipefail
+          cargo +nightly-2026-04-06 fuzz run "$FUZZ_TARGET" -- -seed=1701999215 -max_total_time=1800 -timeout=15 -rss_limit_mb=2048 2>&1 | tee fuzz/artifacts/smoke.log
+          if [[ "$FUZZ_TARGET" == stateful || "$FUZZ_TARGET" == differential ]]; then
+            cargo +nightly-2026-04-06 fuzz run "$FUZZ_TARGET" -- -seed=1701999216 -max_total_time=7200 -timeout=15 -rss_limit_mb=2048 2>&1 | tee fuzz/artifacts/extended.log
+          fi
+      - name: Retain corpus, findings and termination logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: error-fuzz-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            fuzz/artifacts
+            fuzz/corpus
+          retention-days: 30

@@ -6,6 +6,16 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Interface
 
+- `check-public-source-candidate.js` derives and validates dormant public CI and
+  a manual private hosted rehearsal with unchanged required commands. Negative
+  fixtures reject boundary/coverage drift; disposable activation tests exercise
+  the actual selected-profile entrypoints. `--write` explicitly refreshes proposal
+  files before validation; normal checks never activate or regenerate them.
+  The workflow validator keeps private and hosted guard/runner configurations
+  separate while sharing coverage, pins and permission checks. The optional
+  `correctness_ci` selector defaults to private-self-hosted and grants no visibility
+  or timing authority. Operations rendering preserves historical benchmark data
+  while naming only the selected non-authoritative correctness environment.
 - [`benchmark-disk-space.js`](benchmark-disk-space.js) shares the 20 GiB and 20% available-filesystem reserve between coordinator admission and all three post-build runner checks. Numeric post-build snapshots, including refusals, are saved before quiet windows; no device names or paths are exported. The coordinator explicitly ships the helper with each runner and tests that inbox dependency list. This is admission and a post-build check, not continuous disk monitoring.
 - [`run-dedicated-benchmark.js`](run-dedicated-benchmark.js) coordinates owned-host history, per-commit, PR screening, A/B acceptance, live-Serde, calibration, matrix, and memory work. It obtains its SSH destination from an environment variable; the published host label is deliberately not the connection target.
 - `just check-benchmark-results` runs offline self-tests for benchmark analyzers, runners, and renderers plus committed-artifact validators ([Justfile](../Justfile)). `just release-preflight` invokes the full staged release preflight inventory; `just check-quick` runs its early checks.

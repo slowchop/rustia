@@ -8,6 +8,10 @@ const EXPECTED_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
 const PRIVATE_PR = "github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
 const PRIVATE_MANUAL = "github.event.repository.private == true && github.event_name == 'workflow_dispatch'";
 const PRIVATE_SAFARI = `${PRIVATE_MANUAL} && inputs.safari`;
+const PUBLIC_PR = "github.event.repository.private == false";
+const PUBLIC_MANUAL = `${PUBLIC_PR} && github.event_name == 'workflow_dispatch'`;
+const REHEARSAL = "github.event.repository.private == true && github.repository_id == '1437649541' && github.event_name == 'workflow_dispatch' && github.actor_id == '31338' && github.ref == 'refs/heads/main' && github.sha == inputs.expected_sha && inputs.confirm_hosted_rehearsal";
+const REHEARSAL_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      expected_sha:\n        description: Exact reviewed main commit to rehearse\n        type: string\n        required: true\n      confirm_hosted_rehearsal:\n        description: Run the bounded standard-hosted readiness rehearsal\n        type: boolean\n        default: false\n      extended:\n        description: Also run non-required manual platform checks or long fuzz campaigns\n        type: boolean\n        default: false\n';
 const LINUX_RUNNER = "runs-on:\n      group: general-linux\n      labels: [self-hosted, Linux, X64, general-linux]";
 const CI_JOBS = Object.freeze({
   "release-preflight": LINUX_RUNNER,
@@ -92,7 +96,7 @@ function jobBlocks(text, label) {
   ]));
 }
 
-function checkJobRunners(text, expected, label) {
+function checkJobRunners(text, expected, label, mode = "private") {
   const blocks = jobBlocks(text, label);
   const names = [...blocks.keys()].sort();
   const expectedNames = Object.keys(expected).sort();
@@ -104,8 +108,11 @@ function checkJobRunners(text, expected, label) {
     if (declarations.length !== 1 || declarations[0] !== runner) {
       reject(`${label} job ${name} must run on ${runner}`);
     }
-    const guard = name === "safari-runtime" ? PRIVATE_SAFARI : name === "campaign" || name === "windows-runtime" || name === "firefox-runtime" ? PRIVATE_MANUAL
-      : name === "release-gate" ? `always() && ${PRIVATE_PR}` : PRIVATE_PR;
+    const manual = ["campaign", "windows-runtime", "firefox-runtime"].includes(name);
+    const base = mode === "rehearsal" ? REHEARSAL : mode === "public" ? PUBLIC_PR : PRIVATE_PR;
+    const manualGuard = mode === "rehearsal" ? `${REHEARSAL} && inputs.extended` : mode === "public" ? PUBLIC_MANUAL : PRIVATE_MANUAL;
+    const guard = name === "safari-runtime" ? PRIVATE_SAFARI : manual ? manualGuard
+      : name === "release-gate" ? `always() && ${base}` : base;
     const conditions = [...blocks.get(name).matchAll(/^    if: (.*)$/gm)].map((match) => match[1]);
     if (conditions.length !== 1 || conditions[0] !== guard) {
       reject(`${label} job ${name} must retain its private trusted-event guard`);
@@ -132,13 +139,14 @@ function checkTriggers(text, expected, label) {
 }
 
 function checkActionPins(text, label) {
-  for (const line of text.split(/\r?\n/).map((value) => value.trim()).filter((value) => value.startsWith("uses: "))) {
+  const normalized = (line) => line.trim().replace(/^-\s+/, "");
+  for (const line of text.split(/\r?\n/).map(normalized).filter((value) => value.startsWith("uses: "))) {
     const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
     if (!PINNED_ACTIONS.has(action)) reject(`${label} uses an unapproved or unpinned action ${action}`);
   }
   const lines = text.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    if (!/^\s*uses:\s*actions\/checkout@/.test(lines[index])) continue;
+    if (!/^\s*(?:-\s+)?uses:\s*actions\/checkout@/.test(lines[index])) continue;
     let start = index;
     while (start > 0 && !/^\s*-\s/.test(lines[start])) start -= 1;
     let end = index + 1;
@@ -147,7 +155,7 @@ function checkActionPins(text, label) {
     requireText(step, "persist-credentials: false", label);
     if (/persist-credentials:\s*true/.test(step)) reject(`${label} checkout must not persist credentials`);
   }
-  const setupLines = lines.map((line, index) => ({ line: line.trim(), index }))
+  const setupLines = lines.map((line, index) => ({ line: normalized(line), index }))
     .filter(({ line }) => line.startsWith("uses: actions-rust-lang/setup-rust-toolchain@"));
   for (const { index } of setupLines) {
     let end = index + 1;
@@ -159,26 +167,47 @@ function checkActionPins(text, label) {
 
 function checkNoForbidden(text, label) {
   for (const needle of FORBIDDEN_WORKFLOW_TEXT) forbidText(text, needle, label);
+  if (/^\s*continue-on-error:/m.test(text)) reject(`${label} must not suppress failed checks`);
   if (/^\s*git config --global --add safe\.directory\s+.*\*.*$/m.test(text)) {
     reject(`${label} must not use wildcard git safe.directory scope`);
   }
-  if (/^\s*uses:\s*[^\s]+@(?![0-9a-f]{40}\b)/m.test(text)) {
+  if (/^\s*(?:-\s+)?uses:\s*[^\s]+@(?![0-9a-f]{40}\b)/m.test(text)) {
     reject(`${label} must pin every action to a full commit SHA`);
   }
-  if (/^\s*uses:\s*\.\//m.test(text)) reject(`${label} must not call a reusable workflow or local action`);
+  if (/^\s*(?:-\s+)?uses:\s*\.\//m.test(text)) reject(`${label} must not call a reusable workflow or local action`);
 }
 
-function checkCi(text) {
+function hostedJobs(expected) {
+  return Object.fromEntries(Object.entries(expected).filter(([name]) => name !== "safari-runtime").map(([name]) =>
+    [name, `runs-on: ${name === "macos-arm64-runtime" ? "macos-15" : name === "windows-runtime" ? "windows-2025" : "ubuntu-24.04"}`]));
+}
+
+function checkCi(text, mode = "private") {
+  if (!["private", "public", "rehearsal"].includes(mode)) reject("unknown correctness CI mode");
   const label = ".github/workflows/ci.yml";
-  checkTriggers(text, '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n    inputs:\n      safari:\n        description: Run visible Safari tests on an existing logged-in runner desktop\n        type: boolean\n        default: false\n      safari_version:\n        description: Exact installed Safari version required by the explicit Safari run\n        type: string\n        default: "26.6.2"\n', label);
+  const triggers = mode === "rehearsal" ? REHEARSAL_TRIGGERS : mode === "public"
+    ? '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n'
+    : '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n    inputs:\n      safari:\n        description: Run visible Safari tests on an existing logged-in runner desktop\n        type: boolean\n        default: false\n      safari_version:\n        description: Exact installed Safari version required by the explicit Safari run\n        type: string\n        default: "26.6.2"\n';
+  checkTriggers(text, triggers, label);
   checkPermissions(text, label);
-  checkJobRunners(text, CI_JOBS, label);
+  checkJobRunners(text, mode === "private" ? CI_JOBS : hostedJobs(CI_JOBS), label, mode);
   checkActionPins(text, label);
   checkNoForbidden(text, label);
   requireText(text, "stage: [quick, workspace, release]", label);
   requireText(text, 'node tools/run-release-preflight.js --stage "${{ matrix.stage }}"', label);
   requireText(text, "fail-fast: false", label);
   const jobs = jobBlocks(text, label);
+  requireText(jobs.get("release-preflight"), [
+    "      - name: Run canonical release preflight",
+    "        run: node tools/run-release-preflight.js --stage \"${{ matrix.stage }}\"",
+  ].join("\n"), `${label} canonical preflight execution`);
+  if (mode !== "private") {
+    for (const [name, block] of jobs) {
+      const budget = name === "release-preflight" ? 180 : name === "release-gate" ? 5 : 60;
+      const values = [...block.matchAll(/^    timeout-minutes:([^\n]*)$/gm)].map((match) => match[1].trim());
+      if (JSON.stringify(values) !== JSON.stringify([String(budget)])) reject(`${label} ${name} needs its exact hosted budget`);
+    }
+  }
   requireText(text, "max-parallel: 2", label);
   requireText(jobs.get("release-preflight"), "fetch-depth: 0", `${label} release-preflight`);
   requireText(jobs.get("release-preflight"), [
@@ -188,6 +217,10 @@ function checkCi(text) {
     "          cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings",
     "          cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture",
   ].join("\n"), `${label} executor accounting diagnostic`);
+  const stepGuards = [...text.matchAll(/^        if:([^\n]*)$/gm)].map((match) => match[1].trim());
+  if (JSON.stringify(stepGuards) !== JSON.stringify(["matrix.stage == 'workspace'", "matrix.stage == 'workspace'"])) {
+    reject(`${label} must retain exactly the two reviewed workspace step guards`);
+  }
   requireText(jobs.get("release-gate"), "needs: [release-preflight, webkit-runtime]", `${label} release-gate`);
   requireText(jobs.get("release-gate"), "if: always()", `${label} release-gate`);
   requireText(jobs.get("release-gate"), "PREFLIGHT_RESULT: ${{ needs.release-preflight.result }}", `${label} release-gate`);
@@ -214,7 +247,7 @@ function checkCi(text) {
     "          node tools/browser/web-live-example.cjs",
   ].join("\n"), `${label} web-live recipe`);
   for (const textFragment of [
-    "name: Engine build (${{ matrix.target }})",
+    "name: " + (mode === "rehearsal" ? "Public rehearsal / " : "") + "Engine build (${{ matrix.target }})",
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
@@ -236,7 +269,7 @@ function checkCi(text) {
   const firefox = jobs.get("firefox-runtime");
   for (const fragment of [
     "image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea",
-    "timeout-minutes: 30",
+    `timeout-minutes: ${mode === "private" ? 30 : 60}`,
     "cargo install wasm-bindgen-cli --version 0.2.126 --locked",
     "https://archive.mozilla.org/pub/firefox/releases/160.0/linux-x86_64/en-US/firefox-160.0.tar.xz",
     "https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz",
@@ -247,6 +280,7 @@ function checkCi(text) {
     `            printf 'exec env -u XAUTHORITY -u XDG_RUNTIME_DIR HOME=%q %q "$@"\\n' "$browser_home" "$browser_tools/firefox/firefox"`,
     `${safeDirectory}\n          bash tools/run-browser-correctness.sh firefox 160.0 0.37.1`,
   ]) requireText(firefox, fragment, `${label} firefox-runtime`);
+  if (mode === "private") {
   const safari = jobs.get("safari-runtime");
   for (const fragment of [
     "timeout-minutes: 30",
@@ -278,8 +312,9 @@ function checkCi(text) {
   for (const forbidden of ["--enable", "sudo ", "brew ", "defaults write", "chmod -R", "chown ", "uses: actions-rust-lang/setup-rust-toolchain@"]) {
     forbidText(safari, forbidden, `${label} Safari permissions/bootstrap`);
   }
+  }
   const windows = jobs.get("windows-runtime");
-  requireText(windows, `if: ${PRIVATE_MANUAL}`, `${label} windows-runtime`);
+  requireText(windows, `if: ${mode === "private" ? PRIVATE_MANUAL : mode === "public" ? PUBLIC_MANUAL : `${REHEARSAL} && inputs.extended`}`, `${label} windows-runtime`);
   const macos = jobs.get("macos-arm64-runtime");
   requireText(macos, [
     '          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
@@ -297,19 +332,23 @@ function checkCi(text) {
   if (!release.includes("stage: [quick, workspace, release]")) reject(`${label} must run all canonical preflight stages`);
 }
 
-function checkErrorFuzz(text) {
+function checkErrorFuzz(text, mode = "private") {
+  if (!["private", "public", "rehearsal"].includes(mode)) reject("unknown correctness CI mode");
   const label = ".github/workflows/error-fuzz.yml";
-  checkTriggers(text, '"on":\n  pull_request:\n    types: [opened, synchronize, reopened]\n  workflow_dispatch:\n', label);
+  checkTriggers(text, mode === "rehearsal" ? REHEARSAL_TRIGGERS : '"on":\n  pull_request:\n    types: [opened, synchronize, reopened]\n  workflow_dispatch:\n', label);
   checkPermissions(text, label);
-  checkJobRunners(text, FUZZ_JOBS, label);
+  checkJobRunners(text, mode === "private" ? FUZZ_JOBS : hostedJobs(FUZZ_JOBS), label, mode);
   checkActionPins(text, label);
   checkNoForbidden(text, label);
   requireText(text, "name: Verify release diagnostic parity against pinned Luau", label);
   requireText(text, "cargo test --locked --manifest-path fuzz/Cargo.toml generated_differential_smoke -- --ignored", label);
-  requireText(text, "timeout-minutes: 20", `${label} differential-smoke`);
+  requireText(text, `timeout-minutes: ${mode === "private" ? 20 : 60}`, `${label} differential-smoke`);
   const jobs = jobBlocks(text, label);
+  const stepGuards = [...text.matchAll(/^        if:([^\n]*)$/gm)].map((match) => match[1].trim());
+  if (JSON.stringify(stepGuards) !== JSON.stringify(["always()"])) reject(`${label} must retain only its evidence-upload step guard`);
   const campaign = jobs.get("campaign");
-  requireText(campaign, `if: ${PRIVATE_MANUAL}`, `${label} campaign`);
+  const manual = mode === "private" ? PRIVATE_MANUAL : mode === "public" ? PUBLIC_MANUAL : `${REHEARSAL} && inputs.extended`;
+  requireText(campaign, `if: ${manual}`, `${label} campaign`);
   requireText(campaign, "timeout-minutes: 170", `${label} campaign`);
   requireText(campaign, "-max_total_time=1800", `${label} campaign`);
   requireText(campaign, "-timeout=15", `${label} campaign`);
@@ -320,7 +359,7 @@ function checkErrorFuzz(text) {
     reject(`${label} fuzz campaigns must have exactly two bounded durations, each at most 7200 seconds`);
   }
   if (campaign.includes("github.event.pull_request")) reject(`${label} long campaigns must not run from pull requests`);
-  requireText(campaign, `if: ${PRIVATE_MANUAL}`, `${label} campaign`);
+  requireText(campaign, `if: ${manual}`, `${label} campaign`);
   requireText(campaign, "if: always()", `${label} retained fuzz evidence`);
   requireText(campaign, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", `${label} retained fuzz evidence`);
 }
@@ -332,8 +371,15 @@ function validatePublicProfile({ profile, files, workflows }) {
       profile.visibility_authorized !== false) {
     reject("design/public-source-profile.json must be the valid private-rehearsal public-source profile");
   }
+  const hosted = profile.correctness_ci === "public-hosted";
+  if (profile.correctness_ci !== undefined && !["private-self-hosted", "public-hosted"].includes(profile.correctness_ci)) {
+    reject("unknown selected correctness CI mode");
+  }
   const sortedFiles = files.slice().sort();
-  if (JSON.stringify(sortedFiles) !== JSON.stringify(EXPECTED_FILES)) {
+  const rehearsalFiles = ["public-ci-rehearsal.yml", "public-error-fuzz-rehearsal.yml"];
+  const withRehearsal = [...EXPECTED_FILES, ...rehearsalFiles].sort();
+  if (JSON.stringify(sortedFiles) !== JSON.stringify(EXPECTED_FILES) &&
+      (hosted || JSON.stringify(sortedFiles) !== JSON.stringify(withRehearsal))) {
     reject(`active workflows must be exactly ${EXPECTED_FILES.join(" and ")}; found ${sortedFiles.join(", ")}`);
   }
   for (const file of EXPECTED_FILES) {
@@ -341,8 +387,12 @@ function validatePublicProfile({ profile, files, workflows }) {
     if (typeof text !== "string") reject(`missing active workflow ${file}`);
     checkNoForbidden(text, `.github/workflows/${file}`);
   }
-  checkCi(workflows["ci.yml"]);
-  checkErrorFuzz(workflows["error-fuzz.yml"]);
+  checkCi(workflows["ci.yml"], hosted ? "public" : "private");
+  checkErrorFuzz(workflows["error-fuzz.yml"], hosted ? "public" : "private");
+  if (files.includes(rehearsalFiles[0])) {
+    checkCi(workflows[rehearsalFiles[0]], "rehearsal");
+    checkErrorFuzz(workflows[rehearsalFiles[1]], "rehearsal");
+  }
   return { files: sortedFiles.length, profile: profile.state };
 }
 
@@ -461,4 +511,5 @@ function selfTest(root) {
   }
 }
 
-module.exports = { validatePublicProfile, checkCi, checkErrorFuzz, readCheckout, selfTest };
+module.exports = { validatePublicProfile, checkCi, checkErrorFuzz, readCheckout, selfTest,
+  REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };

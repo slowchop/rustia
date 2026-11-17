@@ -46,6 +46,9 @@ serves them.
 ## Benchmark policy
 
 - This checkout uses the private self-hosted correctness profile in `design/public-source-profile.json`.
+  The separately guarded manual #29 readiness rehearsal uses standard hosted
+  VMs for correctness only; ordinary private routing has no hosted fallback.
+  This does not authorize visibility, larger runners, billing-setting changes or benchmarks.
   Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
   Its correctness workflows and public coordinator provide no timing authority.
 - A separate private maintainer bridge is available only for manually dispatched,

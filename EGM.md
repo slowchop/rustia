@@ -20,6 +20,13 @@ the canonical state, design contracts, or pinned Luau 0.709 oracle.
 
 ## Interface
 
+The [dormant public CI proposal](.github/public-ci/EGM.md) preserves the full
+required correctness inventory on fixed standard hosted VMs. Its separate manual
+private readiness rehearsal requires maintainer/main/exact-SHA confirmation;
+ordinary private PR/push routing and the selected profile remain unchanged.
+An explicit future correctness selector is validated independently from historical
+benchmark provenance and never grants timing or publication authority.
+
 The [workspace manifest](./Cargo.toml) contains seven runtime/tooling crates and the
 benchmark harness. Follow these maps from the root toward the file being edited:
 
