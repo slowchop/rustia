@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 733 fixtures and 524 refs: 715 executable `luau-0.709` fixtures, 0
+- The current manifest contains 734 fixtures and 524 refs: 716 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, 18 `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and 0 whole upstream
   Luau 0.709 conformance scripts as `pending-impl` inventory.
 - The `puc-lua-5.1.5` rows are the `Puc51Compat` differential corpus: expectations were captured offline
@@ -149,7 +149,10 @@ The declared behavior-topic catalog is `REFS.tsv`.
 - Stdlib coroutine coverage now executes the whole upstream `coroutine.luau` script: resumable
   `coroutine.create`/`resume`/`wrap`/`yield`, resume-argument delivery back into yielded call sites,
   yielded result delivery to callers, running/normal/suspended/dead status, `coroutine.running`,
-  `coroutine.isyieldable` across yieldable and non-yieldable native callback boundaries, weak-table
+  `coroutine.isyieldable` across yieldable and non-yieldable native callback boundaries, immediate
+  catchable yield rejection inside `tostring`, function-based `string.gsub`, `table.foreach`, and
+  `table.foreachi` callbacks through both `pcall` and `xpcall`, independently yieldable child coroutines
+  resumed inside those callbacks, weak-table
   collection of unreachable coroutine wrappers, `coroutine.close`, and the upstream xpcall continuation
   cases covered by `coroutine.luau`.
 - Stdlib table coverage now includes `table.concat` over sequential array table literals with numeric/string

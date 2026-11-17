@@ -723,6 +723,7 @@ luau-0-709.runtime.callable_recursive_frames	runtime	metatable.call	Reproducible
 luau-0-709.runtime.callable_yield_resume	runtime	metatable.call	ReproducibleStandard	luau-0.709	bool:true	conformance/fixtures/upstream-luau-0.709/callable_yield_resume.luau
 luau-0-709.runtime.callable_function_required	runtime	metatable.call	ReproducibleStandard	luau-0.709	bool:true	conformance/fixtures/upstream-luau-0.709/callable_function_required.luau
 luau-0-709.runtime.metamethod_yield_errors	runtime	runtime.metamethod-yield-error	ReproducibleStandard	luau-0.709	string:pass	conformance/fixtures/upstream-luau-0.709/metamethod_yield_errors.luau
+luau-0-709.runtime.native_callback_yield_boundaries	runtime	runtime.metamethod-yield-error,stdlib.coroutine-isyieldable	ReproducibleStandard	luau-0.709	string:pass	conformance/fixtures/upstream-luau-0.709/native_callback_yield_boundaries.luau
 luau-0-709.runtime.method_callee_evaluation_order	runtime	runtime.method-callee-evaluation-order	ReproducibleStandard	luau-0.709	string:pass	conformance/fixtures/upstream-luau-0.709/method_callee_evaluation_order.luau
 luau-0-709.runtime.diagnostic_parity	runtime	runtime.diagnostic-parity	ReproducibleStandard	luau-0.709	string:pass	conformance/fixtures/upstream-luau-0.709/diagnostic_parity.luau
 issues.metamethod-error-sites	stdlib	stdlib.error-level-source-line,stdlib.error-level-zero	ReproducibleStandard	luau-0.709	string:OK	conformance/fixtures/upstream-luau-0.709/metamethod_error_sites.luau

@@ -583,7 +583,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 24,
+      "file_count": 25,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -602,6 +602,7 @@
         "tests/executor_ownership.rs",
         "tests/gc_accounting_paths.rs",
         "tests/liveness_analysis.rs",
+        "tests/native_callback_yield_boundaries.rs",
         "tests/o2_corpus_compile.rs",
         "tests/o2_families.rs",
         "tests/o2_schedule.rs",
@@ -616,7 +617,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 758,
+      "file_count": 759,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -865,6 +866,7 @@
         "corpus/conformance/fixtures/upstream-luau-0.709/metatable_setmetatable_protected.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/metatable_tostring_format.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/method_callee_evaluation_order.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/native_callback_yield_boundaries.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/native_type_annotations_erased.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/newline_call_suffix_rejected.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/newproxy_argument_semantics.luau",

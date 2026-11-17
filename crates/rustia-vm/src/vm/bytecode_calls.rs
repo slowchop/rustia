@@ -259,7 +259,7 @@ impl Vm {
     fn native_boundary_depth(&self, pending_slot: usize) -> usize {
         self.active_coroutine_frames[pending_slot]
             .iter()
-            .filter(|frame| matches!(frame,CoroutineFrame::Native(frame) if frame.non_yieldable()))
+            .filter(|frame| matches!(frame, CoroutineFrame::Native(_)))
             .count()
     }
 
