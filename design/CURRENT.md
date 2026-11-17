@@ -30,6 +30,16 @@ and supported releases have separate gates; full parity and API stability are no
 [98 — Source readiness](98-public-source-readiness.md) records the audit, history
 projection and visibility gates. Historic PR/CI links remain private evidence.
 
+Issue #29 now has a dormant standard-hosted public CI proposal, shared coverage
+validation and a separately guarded manual private readiness rehearsal. Ordinary
+private PR/push routing is unchanged. Rehearsals require the maintainer, main ref,
+exact SHA and dispatch confirmation; extended manual platform/campaign work is
+off by default. A disposable activation fixture verifies the explicit future
+correctness selector without granting visibility, benchmark or publication
+authority. Actual hosted execution and final privacy clearance remain gates;
+see the [activation proposal](public-source-activation.md). Contribution/security
+policy text is proposed only, and no public invitation is adopted yet.
+
 ## Issue #18 and #19 corrections
 
 Metamethod calls preserve their triggering instruction location for positive `error`

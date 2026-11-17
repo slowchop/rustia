@@ -667,11 +667,13 @@ function authoritativeHost() {
 }
 
 function historicalHostForPublicProfile(profile, status) {
+  const correctnessCi = profile?.correctness_ci ?? "private-self-hosted";
   if (profile?.schema !== "rustia.public-source-profile.v1" || profile?.state !== "private-rehearsal"
     || !/^[0-9a-f]{40}$/.test(profile.historical_head ?? "")
     || profile.historical_host_label !== "ci-bench"
     || !PUBLIC_BRIDGE_STATES.includes(profile.benchmark_bridge)
-    || profile.package_publication !== false || profile.visibility_authorized !== false) {
+    || profile.package_publication !== false || profile.visibility_authorized !== false
+    || !["private-self-hosted", "public-hosted"].includes(correctnessCi)) {
     fail("public-source profile must preserve the explicit historical benchmark provenance and paused-publication boundary");
   }
   const expectedMeasurementMode = profile.benchmark_bridge === "private-maintainer-cohorts-v1"
@@ -687,7 +689,7 @@ function historicalHostForPublicProfile(profile, status) {
   }
   const authorities = Object.entries(status.runner_classes ?? {}).filter(([, runner]) => runner?.timing_authority === true);
   if (authorities.length !== 0 || Object.values(status.runner_classes ?? {}).some((runner) =>
-    runner?.environment !== "self-hosted-shared" || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification"))) {
+    runner?.environment !== (correctnessCi === "public-hosted" ? "github-hosted" : "self-hosted-shared") || Object.hasOwn(runner, "host") || Object.hasOwn(runner, "qualification"))) {
     fail("public-source benchmark status may not declare a current machine or timing authority");
   }
   return profile.historical_host_label;
@@ -858,6 +860,9 @@ function selfTest() {
   if (historicalHostForPublicProfile(publicProfile, pausedPublicStatus) !== "ci-bench") {
     fail("public profile must validate historical rows against their recorded provenance label");
   }
+  if (historicalHostForPublicProfile({ ...publicProfile, correctness_ci: "public-hosted" }, {
+    ...pausedPublicStatus, runner_classes: { "hosted-linux": { environment: "github-hosted", timing_authority: false } },
+  }) !== "ci-bench") fail("hosted correctness selection must not replace historical timing provenance");
   const manualProfile = { ...publicProfile, benchmark_bridge: "private-maintainer-cohorts-v1" };
   const manualStatus = {
     ...pausedPublicStatus,

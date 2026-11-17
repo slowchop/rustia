@@ -6,6 +6,9 @@ Design specifications, canonical project state, structured evidence, and a gener
 
 ## Interface
 
+- [Public-source activation](public-source-activation.md) prepares the exact
+  privacy, hosted-evidence, CI, reporting and visibility gates. The hosted pair
+  is dormant; manual guarded readiness rehearsals do not publish source or packages.
 - Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and links to the GitHub issue backlog.
 - Historical pre-compaction text: [CURRENT-2026-10-30-snapshot.md](./CURRENT-2026-10-30-snapshot.md). Its original authority statements are historical; it must never override CURRENT.
 - Architecture: [30-architecture.md](./30-architecture.md).

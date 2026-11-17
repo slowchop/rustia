@@ -320,9 +320,10 @@ function renderStatus(policy, results) {
   };
 }
 
-function renderPublicStatus(policy, results, bridgeState = "pending-private-trusted-pipeline") {
+function renderPublicStatus(policy, results, bridgeState = "pending-private-trusted-pipeline", correctnessCi = "private-self-hosted") {
   validatePublicPolicy(policy);
   validatePublicBridgeState(bridgeState);
+  if (!["private-self-hosted", "public-hosted"].includes(correctnessCi)) fail("unknown correctness CI mode");
   const measured = measuredCohort(results);
   const projectedMeasuredCommit = resolveHistoricalCommit(measured.commit, root);
   git(["merge-base", "--is-ancestor", projectedMeasuredCommit, "HEAD"]);
@@ -343,7 +344,8 @@ function renderPublicStatus(policy, results, bridgeState = "pending-private-trus
     schema_version: 1,
     profile: "public-source",
     benchmark_bridge: bridgeState,
-    runner_classes: policy.runner_classes,
+    runner_classes: correctnessCi === "public-hosted" ? Object.fromEntries(Object.entries(policy.runner_classes).map(([name, runner]) =>
+      [name.replace("self-hosted-", "hosted-"), { ...runner, environment: "github-hosted" }])) : policy.runner_classes,
     measurement,
     publication,
     progress: {
@@ -458,6 +460,12 @@ function selfTestPublicPolicy(policy) {
   const results = readJson(resultsPath);
   const pendingStatus = renderPublicStatus(policy, results, "pending-private-trusted-pipeline");
   const manualStatus = renderPublicStatus(policy, results, "private-maintainer-cohorts-v1");
+  const hostedStatus = renderPublicStatus(policy, results, "pending-private-trusted-pipeline", "public-hosted");
+  if (Object.values(hostedStatus.runner_classes).some((runner) => runner.environment !== "github-hosted" ||
+      runner.timing_authority !== false || Object.hasOwn(runner, "host")) ||
+      hostedStatus.publication.state !== "paused" || hostedStatus.measurement.authoritative_runner_classes.length !== 0) {
+    fail("hosted correctness selection must preserve the benchmark authority boundary");
+  }
   if (pendingStatus.benchmark_bridge !== "pending-private-trusted-pipeline"
     || pendingStatus.measurement.mode !== "paused-pending-private-bridge"
     || !/pending a reviewed trusted private benchmark bridge/i.test(pendingStatus.measurement.reason)
@@ -517,7 +525,8 @@ function main() {
   if (publicProfile) selfTestPublicPolicy(policy);
   else selfTest(policy);
   const results = readJson(resultsPath);
-  const status = publicProfile ? renderPublicStatus(policy, results, bridgeState) : renderStatus(policy, results);
+  const correctnessCi = publicProfile ? (readJson(publicProfilePath).correctness_ci ?? "private-self-hosted") : null;
+  const status = publicProfile ? renderPublicStatus(policy, results, bridgeState, correctnessCi) : renderStatus(policy, results);
   const output = `${JSON.stringify(status, null, 2)}\n`;
   if (checkOnly) {
     let current;

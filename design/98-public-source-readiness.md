@@ -247,3 +247,51 @@ history or authorize public claims. Comparisons require independent raw-data
 review before acceptance. The profile state records this narrow bridge
 availability, not a successful run, a current performance result, or a change
 to source visibility or package publication.
+
+## Readiness refresh (2026-11-17)
+
+Issue #29 resumes preparation against exact source base
+`b5cc0de6339df4f58acebf6f01b6a52174e50dc6`. Both source and historic repositories
+remain private; all packages remain unpublished. This preparation changes no
+repository visibility, runner access, protections, billing settings or hosted
+history. The original private evidence and history remain intact.
+
+The fresh read-only inventory captured stable remote refs, 14,369 source Git
+objects, 147 Actions runs across 148 attempts, 35 pull requests and 86 check-head
+inventories. Source and hosted Gitleaks scans found zero secrets. The custom
+source matches are byte-identical to the independently reviewed prior set:
+version strings, synthetic address fixtures and one generic historical path
+example. This does not justify another history rewrite. Private raw metadata,
+scanner dispositions, tool identity and hashes are retained separately.
+
+Hosted clearance remains a real gate. Structured job metadata identifies 79
+current-snapshot runs containing private runner identities. Their private path
+and old-redaction log findings are included in that set. Standard hosted-runner
+paths, container home paths and public download destinations are separate false
+positives. The retained check-output/annotation review establishes no additional
+privacy blocker. One running attempt lacked terminal logs at collection; it and
+all post-preparation deltas need final retention before an exact removal approval.
+No logs, artifacts, runs, comments or refs were deleted.
+
+The source has a [dormant hosted CI proposal](../.github/public-ci/README.md) and
+an [activation checklist](public-source-activation.md). The ordinary private CI
+pair remains unchanged. Separate manual readiness workflows require the private
+repository, maintainer, main ref, exact SHA and dispatch confirmation; extended
+platform/campaign work is off by default. They use standard hosted runners only,
+have isolated concurrency namespaces, grant read-only repository access and
+preserve all required correctness commands. They grant no timing or visibility
+authority. The selected correctness mode is separate from historical benchmark
+provenance and paused publication.
+
+Shared validation checks exact job/runner/guard/trigger inventories, tool pins,
+permissions, step conditions, required execution blocks and budgets. Negative
+fixtures cover inline action declarations, skipped preflight and suppressed
+errors. Disposable activation tests execute real validator/self-test entrypoints
+with the hosted selector. Static checks are preparation; actual cold-hosted
+execution, final hosted-content clearance and maintainer approval remain required.
+
+Contribution and security policy text is proposed for final approval, without
+adopting an outside invitation or promising support. GitHub private vulnerability
+reporting must be enabled and read back at the approved public transition; an
+unavailable private-repository endpoint is not proof the channel exists.
+Consumer deployment and supported-release gates remain separate and explicit.

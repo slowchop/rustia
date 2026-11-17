@@ -1299,13 +1299,20 @@ function checkBenchmarkPublication(text) {
 if (fs.existsSync(publicSourceProfilePath)) {
   const publicProfile = require("./check-public-workflow-profile.js");
   if (process.argv?.includes("--self-test")) {
-    const result = publicProfile.selfTest(root);
-    console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);
+    const marker = JSON.parse(fs.readFileSync(publicSourceProfilePath, "utf8"));
+    if (marker.correctness_ci !== "public-hosted") {
+      const result = publicProfile.selfTest(root);
+      console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);
+    }
+    const candidate = require("./check-public-source-candidate.js").selfTest(root);
+    console.log(`dormant hosted candidate self-tests ok (${candidate.cases} negative fixtures)`);
     process.exit(0);
   }
   try {
     const result = publicProfile.readCheckout(root);
     console.log(`workflow policy ok for ${result.files} public workflow file(s) (${result.profile})`);
+    const candidate = require("./check-public-source-candidate.js").readCheckout(root);
+    console.log(`dormant hosted candidate ok (${candidate.workflows} inactive workflow proposals)`);
   } catch (error) {
     fail(`public-source profile: ${error.message}`);
   }
