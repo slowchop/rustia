@@ -9,7 +9,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 ## Interface
 
 - [`src/EGM.md`](./src/EGM.md) documents the crate source boundary and execution internals.
-- `Vm` executes `Program` bytecode with explicit settings, services, fuel, and guest transactions.
+- `Vm` executes `Program` bytecode with explicit settings, services, fuel, and guest transactions. Rooted table, string and immutable vector constructors admit heap storage and external roots under the logical-live quota.
 - Public engine modules include bytecode, errors, extensions, instruction facts, liveness, numeric operations, profiles, and VM.
 
 ## Invariants

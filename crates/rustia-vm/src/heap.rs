@@ -1755,7 +1755,7 @@ impl VmCell {
         }
     }
 
-    fn planned_vector_allocation(&mut self) -> Option<(u32, usize)> {
+    pub(crate) fn planned_vector_allocation(&mut self) -> Option<(u32, usize)> {
         {
             let root = &self.root;
             root.vectors.planned_insert()

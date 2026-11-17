@@ -3389,6 +3389,55 @@ impl Vm {
         self.retain_value(value)
     }
 
+    /// Creates and retains one immutable three-component Luau vector.
+    ///
+    /// Vector storage and the external root are admitted together under the
+    /// logical-live quota. A failed admission therefore allocates neither the
+    /// vector nor a partial external root.
+    pub fn create_retained_vector(&mut self, x: f32, y: f32, z: f32) -> Result<RetainedValue> {
+        self.ensure_healthy()?;
+        let transaction_id_bytes = if self.guest_transactions.is_empty() {
+            0
+        } else {
+            size_of::<u64>()
+        };
+        let root_bytes = external_root_node_live_bytes().saturating_add(transaction_id_bytes);
+        let fits = |vm: &mut Self| -> Result<bool> {
+            let (_, vector_bytes) = vm.heap.planned_vector_allocation().ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "vector handle overflow",
+                })
+            })?;
+            Ok(vm.settings.memory_limit_bytes.is_none_or(|limit| {
+                vm.current_live_bytes()
+                    .saturating_add(vector_bytes)
+                    .saturating_add(root_bytes)
+                    <= limit
+            }))
+        };
+        if !fits(self)? {
+            self.collect_for_memory_limit(&[]);
+            if !fits(self)? {
+                return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+            }
+        }
+        let (planned, _) = self.heap.planned_vector_allocation().ok_or_else(|| {
+            Error::new(ErrorKind::InvalidProgram {
+                reason: "vector handle overflow",
+            })
+        })?;
+        let vector = self
+            .heap
+            .alloc_vector(VectorData::new(x, y, z))
+            .ok_or_else(|| {
+                Error::new(ErrorKind::InvalidProgram {
+                    reason: "vector handle overflow",
+                })
+            })?;
+        debug_assert_eq!(vector, planned);
+        self.retain_value(Value::vector(vector))
+    }
+
     /// Creates an unrooted module environment whose `_G` is itself and whose
     /// missing reads inherit from the VM globals table.
     ///
@@ -33765,6 +33814,37 @@ mod inline_cache_tests {
 
         drop(retained);
         vm.rollback_guest_transaction();
+    }
+
+    #[test]
+    fn retained_vector_construction_is_quota_atomic() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        vm.collect_garbage();
+        let before = vm.current_live_bytes();
+        let (_, vector_bytes) = vm
+            .heap
+            .planned_vector_allocation()
+            .expect("fresh VM has vector handle capacity");
+        let additional = vector_bytes.saturating_add(external_root_node_live_bytes());
+
+        vm.settings.memory_limit_bytes = Some(before.saturating_add(additional).saturating_sub(1));
+        let error = vm
+            .create_retained_vector(1.25, -2.5, 3.75)
+            .expect_err("one byte below vector plus root admission must reject");
+        assert!(matches!(error.kind, ErrorKind::OutOfMemory));
+        assert!(vm.external_roots.borrow().values.is_empty());
+        assert_eq!(vm.current_live_bytes(), before);
+
+        vm.settings.memory_limit_bytes = Some(before.saturating_add(additional));
+        let retained = vm
+            .create_retained_vector(1.25, -2.5, 3.75)
+            .expect("the exact vector plus root delta must fit");
+        assert_eq!(vm.current_live_bytes(), before.saturating_add(additional));
+        assert_eq!(
+            vm.vector_value_components(retained.value(&vm).unwrap())
+                .unwrap(),
+            Some([1.25, -2.5, 3.75])
+        );
     }
 
     #[test]

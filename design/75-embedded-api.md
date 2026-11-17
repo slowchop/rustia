@@ -42,7 +42,8 @@ graph-preserving advanced spine plus its first ergonomic constructors are now im
 VM/epoch-safe rooted `Value`/`Table`/`Function` handles preserve binary strings, buffers, vectors, rich keys,
 shared/cyclic table identity, mutation, raw equality, and ordinary or typed invocation exchange without
 exposing collector lifetimes. `globals()` exposes the real mutable globals table, `create_table()` admits an
-empty rooted table under the logical-live quota, and `Table::set_live()` bridges owned keys to identity-bearing
+empty rooted table under the logical-live quota, `create_vector()` admits an immutable three-component vector
+and root atomically under the same quota, and `Table::set_live()` bridges owned keys to identity-bearing
 live values. `create_function`, persistent `register_function`, and `HostModule::function` share a
 `HostFunction` definition, capability/fuel metadata, and typed owned/live argument and tuple-result conversions.
 Heap functions own their callbacks; guest aliases keep replaced functions callable, collection reclaims
@@ -236,7 +237,7 @@ one engine:
 2. **Advanced live-object API (spine implemented; ergonomics/integration continuing).** Identity-safe live
    `Value` and `Table` handles now share the rooted VM/epoch model with `Function`; `eval_live`, live table
    lookup/mutation/iteration, live function arguments/results, typed-invocation exchange, binary
-   string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table construction,
+   string/buffer/vector access, rich keys, raw identity equality, live globals, quota-aware table and vector construction,
    and owned-key/live-value insertion are implemented. A public coroutine `Thread` handle remains conditional
    on a real host-side scheduling caller. Reclaimable synchronous host-function construction and the
    composable chunk builder are implemented. Typed Rust-object methods and consumer use are verified
@@ -744,7 +745,8 @@ store authoritative state on the GC heap instead of in captured host slots.
     arguments/results, typed-invocation exchange, binary strings, buffers, vectors, rich keys, userdata
     identity, raw equality, and shared/cyclic table graphs do not expose GC lifetimes. A public `Thread` handle
     remains intentionally absent until a concrete host-side scheduling caller defines its contract.
-14. ✅ **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()`,
+14. ✅ **Add the familiar ergonomic entry points:** `globals()`, quota-aware `create_table()` and
+    `create_vector()`,
     owned-key/live-value insertion, and the composable
     `load(source).source_name(...).environment(...)` chunk builder is implemented. The builder borrows
     text or bytes, preserves named diagnostics, supports `eval`/`eval_live`/`eval_serde`/`exec`/`install`, executes against globals

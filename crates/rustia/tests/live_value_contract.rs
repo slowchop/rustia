@@ -1,6 +1,6 @@
 use rustia::{
     Error, Exports, Function, IntoRustia, InvocationLimits, OwnedValue, Result, Rustia, Table,
-    VmErrorKind,
+    ValueType, VmErrorKind,
 };
 use std::cell::Cell;
 
@@ -31,6 +31,41 @@ fn owned_table_keys_survive_value_conversion_under_quota_pressure() -> Result<()
             .iter()
             .all(|row| row.len() == 512 && row.iter().all(|n| *n == 7)));
     }
+    Ok(())
+}
+
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    wasm_bindgen_test::wasm_bindgen_test
+)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
+fn host_created_live_vectors_keep_components_and_epoch_rules() -> Result<()> {
+    let mut rustia = Rustia::default();
+    let direction = rustia.create_vector(1.5, -2.0, 3.0)?;
+    assert_eq!(direction.kind(&rustia)?, ValueType::Vector);
+    assert_eq!(
+        direction.vector_components(&mut rustia)?,
+        Some([1.5, -2.0, 3.0])
+    );
+
+    rustia
+        .globals()?
+        .set_live(&mut rustia, "direction", &direction)?;
+    let components: Vec<f64> = rustia
+        .eval("local moved = direction + vector(0.5, 2, -1); return {moved.x, moved.y, moved.z}")?;
+    assert_eq!(components, vec![2.0, 0.0, 2.0]);
+
+    rustia.reset_decision()?;
+    let error = direction
+        .vector_components(&mut rustia)
+        .expect_err("reset must invalidate the vector handle");
+    assert!(matches!(
+        error.as_vm_error().map(|error| error.kind()),
+        Some(VmErrorKind::StaleRetainedValue {
+            retained_epoch: 0,
+            current_epoch: 1
+        })
+    ));
     Ok(())
 }
 

@@ -26,6 +26,7 @@
 //! | Load dependencies with `require` | [`RustiaBuilder::module_resolver`], [`ServiceModuleResolver`] |
 //! | Replace a script while keeping the old version on failure | [`Chunk::install`], [`Exports`] |
 //! | Work with live script objects | [`Value`], [`Table`], [`Chunk::eval_live`] |
+//! | Create live tables or vectors from Rust | [`Rustia::create_table`], [`Rustia::create_vector`] |
 //! | Give Rust objects script methods | [`ObjectType`], [`Rustia::create_object`] |
 //! | Read structured data with Serde | [`Chunk::eval_serde`] |
 //! | Show a script error | [`Error::report`] |
@@ -104,6 +105,7 @@
 //! | Copy ordinary data out of a script | [`Chunk::eval`], [`OwnedValue`] | Independent Rust-owned data; strings must be UTF-8 and tables must be acyclic. Shared tables are copied independently. |
 //! | Read a Rust struct or collection with Serde | [`Chunk::eval_serde`], [`Value::deserialize`] | The result owns its data and must match the requested Rust type; it cannot borrow from the VM. |
 //! | Keep binary strings or shared/cyclic script objects | [`Chunk::eval_live`], [`Value`], [`Table`] | Live handles preserve identity and keep objects alive in their original interpreter. |
+//! | Create an immutable Luau vector without parsing source | [`Rustia::create_vector`] | Returns a VM/epoch-bound live value with canonical three-component `f32` semantics. |
 //!
 //! A live handle belongs to one interpreter and one *decision epoch*: the guest
 //! state generation that ends when [`Rustia::reset_decision`] succeeds. Reset
@@ -591,6 +593,30 @@ where
             .create_retained_table()
             .map_err(Error::from_engine)?;
         Ok(Table::new(Value::new(value, self.vm.decision_epoch())))
+    }
+
+    /// Creates an immutable live Luau vector in this interpreter.
+    ///
+    /// The vector and its root participate in the logical-live memory quota as
+    /// one admission. Components use Luau's canonical `f32` vector semantics.
+    /// The returned handle belongs to this VM and decision epoch like every
+    /// other live [`Value`].
+    ///
+    /// ```
+    /// # use rustia::Rustia;
+    /// # let mut vm = Rustia::builder().build()?;
+    /// let direction = vm.create_vector(1.5, -2.0, 3.0)?;
+    /// vm.globals()?.set_live(&mut vm, "direction", &direction)?;
+    /// let x: f64 = vm.eval("return direction.x")?;
+    /// assert_eq!(x, 1.5);
+    /// # Ok::<(), rustia::Error>(())
+    /// ```
+    pub fn create_vector(&mut self, x: f32, y: f32, z: f32) -> Result<Value> {
+        let value = self
+            .vm
+            .create_retained_vector(x, y, z)
+            .map_err(Error::from_engine)?;
+        Ok(Value::new(value, self.vm.decision_epoch()))
     }
 
     fn ensure_dynamic_source_loading_allowed(&self) -> Result<()> {
