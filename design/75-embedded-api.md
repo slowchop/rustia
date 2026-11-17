@@ -69,8 +69,9 @@ Issue #50 adds a deliberately lower-level integration surface used by Luvy.
 `rustia-vm` keeps local `Rc`/`RefCell` ownership by default and offers an opt-in
 `send` feature that selects transferable owners, service guards, retained roots
 and `Send + Sync` Rust payloads. This lets an idle, exclusively owned VM move
-between scheduler workers; it neither permits simultaneous calls nor makes the
-application facade's handles transferable.
+between scheduler workers; it does not permit simultaneous calls. The
+lower-level feature alone does not select matching application-facade bounds;
+issue #53 adds that opt-in facade.
 
 The compiler records one optional lexical name per upvalue descriptor. Rooted
 VM primitives can inspect script function metadata, capture storage and exact
@@ -87,7 +88,7 @@ large bytecode frame before synchronous host dispatch, roots all transferred
 state, and restores source diagnostics and continuations afterward. This is the
 consumer-proven slice, not a claim that the public facade now has mlua-style
 `Scope`, async callbacks or unrestricted deep re-entry. Those ergonomic and
-acceptance decisions remain open under issue #50.
+acceptance decisions are tracked by the bounded follow-up issues linked below.
 
 Saved native completion frames are synchronous boundaries, not resumable Rust
 builtin frames. Their callbacks report `coroutine.isyieldable() == false` and an
@@ -100,6 +101,31 @@ native callback.
 This restriction is coroutine-local. A synchronous callback may resume a child
 coroutine, and that child retains its own normal yieldability; Rustia restores
 the parent's non-yieldable boundary when control returns.
+
+### Transferable application facade (2026-11-17)
+
+Issue [#53](https://github.com/slowchop/rustia/issues/53) adds an opt-in Cargo
+feature named `transferable` to the public `rustia` crate.
+It selects the lower-level `rustia-vm/send` ownership mode and reconciles the
+facade's service, object and live-handle bounds with that mode. `Rustia<()>`,
+`Value`, `Table`, `Function` and `Exports` can move together between workers.
+Typed interpreters are transferable when their retained record type is `Send`;
+Rust object payloads require `Send + Sync`, while service and resolver captures
+require `Send`; entropy providers require `Fn + Send + Sync` because cloned
+settings may construct separate VMs concurrently.
+
+This is idle ownership transfer, not shared or concurrent execution. Every
+execution and mutation operation continues to require exclusive `&mut Rustia`,
+and service/object guards reject conflicting re-entry instead of waiting. The
+default feature set keeps the original local `Rc`/`RefCell` facade and weaker
+payload/provider bounds. Cargo feature unification means any embedder that
+enables `rustia-vm/send` elsewhere in its graph must also forward
+`rustia/transferable`; the unmatched mixed graph is intentionally unsupported
+and rejected by the external feature-matrix check. Borrowed scopes
+([#56](https://github.com/slowchop/rustia/issues/56)), typed hooks
+([#54](https://github.com/slowchop/rustia/issues/54)), and the sync versus
+resumable API split ([#55](https://github.com/slowchop/rustia/issues/55)) remain
+separate work.
 
 ## Application API boundary
 

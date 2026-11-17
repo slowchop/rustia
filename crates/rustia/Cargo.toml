@@ -15,6 +15,7 @@ publish.workspace = true
 [features]
 default = ["web-live"]
 web-live = ["dep:getrandom", "dep:js-sys", "dep:wasm-bindgen", "getrandom/wasm_js"]
+transferable = ["rustia-vm/send"]
 
 [dependencies]
 getrandom = { version = "0.3.4", optional = true }

@@ -16,6 +16,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 - `OwnedValue` is the acyclic, Rust-owned copy boundary. Live `Value`, `Table`, `Function`, and `Exports` handles preserve identity and belong to one VM and decision epoch.
 - `reset_decision()` requires an idle VM, advances the epoch, preserves configuration and persistent registrations, and invalidates retained guest handles.
+- The default facade is thread-affine. The opt-in `transferable` feature requires transferable service captures (`Send`, with `Fn + Send + Sync` for entropy) and `Send + Sync` object payloads and makes the interpreter/live handles movable between workers; it does not permit concurrent entry. A unified Cargo graph that enables `rustia-vm/send` must forward `rustia/transferable`.
 - Typed invocations borrow their `HostContext` for one call, share a fuel budget, and publish bounded ordered records only after successful completion.
 - `install` rolls back guest state on failure. Ordinary evaluation mutations and external host effects are not undone.
 - The facade boundary must not expose internal bytecode, raw heap identities, or collector lifetimes.

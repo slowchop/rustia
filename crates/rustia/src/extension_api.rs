@@ -334,7 +334,15 @@ impl RustiaBuilder {
     /// Each call sends one string, with arguments joined by tabs and a trailing
     /// newline. The closure cannot return an error. Output sinks are allowed in
     /// every ordinary profile, including [`Profile::DeterministicSim`].
+    #[cfg(not(feature = "transferable"))]
     pub fn stdout(mut self, sink: impl FnMut(&str) + 'static) -> Self {
+        self.settings.services.stdout = Some(StdoutSink::new(sink));
+        self
+    }
+
+    /// Chooses a transferable sink for script `print` output.
+    #[cfg(feature = "transferable")]
+    pub fn stdout(mut self, sink: impl FnMut(&str) + Send + 'static) -> Self {
         self.settings.services.stdout = Some(StdoutSink::new(sink));
         self
     }
@@ -617,21 +625,56 @@ pub struct ServiceModuleResolver {
 impl ServiceModuleResolver {
     /// Host-supplied replay-stable resolver. The determinism assertion is
     /// trusted, not verified.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
         Self::from_fn_with_determinism(resolver, true)
     }
 
+    /// Host-supplied replay-stable transferable resolver.
+    #[cfg(feature = "transferable")]
+    pub fn from_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, true)
+    }
+
     /// Host-supplied live resolver explicitly labeled nondeterministic.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_nondeterministic_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
         Self::from_fn_with_determinism(resolver, false)
     }
 
+    /// Host-supplied live transferable resolver.
+    #[cfg(feature = "transferable")]
+    pub fn from_nondeterministic_fn(
+        resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
+    ) -> Self {
+        Self::from_fn_with_determinism(resolver, false)
+    }
+
+    #[cfg(not(feature = "transferable"))]
     fn from_fn_with_determinism(
         mut resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
+        deterministic: bool,
+    ) -> Self {
+        let provider = ModuleResolver::new_with_profile(
+            move |requested, referrer, profile| {
+                let module =
+                    resolver(requested, referrer).map_err(crate::value::embed_to_vm_error)?;
+                compile_module_source(module, profile)
+            },
+            deterministic,
+        );
+        Self { provider }
+    }
+
+    #[cfg(feature = "transferable")]
+    fn from_fn_with_determinism(
+        mut resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
         deterministic: bool,
     ) -> Self {
         let provider = ModuleResolver::new_with_profile(
@@ -768,14 +811,32 @@ impl ServiceClock {
 
     /// Supplies a clock whose readings the host promises to reproduce during replay.
     /// Rustia trusts this declaration and does not verify it.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, true),
         }
     }
 
+    /// Supplies a transferable clock whose readings the host promises to reproduce.
+    #[cfg(feature = "transferable")]
+    pub fn from_fn(clock: impl FnMut() -> f64 + Send + 'static) -> Self {
+        Self {
+            provider: ClockProvider::new(clock, true),
+        }
+    }
+
     /// Host-supplied live clock. The provider is explicitly labeled nondeterministic.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_nondeterministic_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
+        Self {
+            provider: ClockProvider::new(clock, false),
+        }
+    }
+
+    /// Host-supplied transferable live clock.
+    #[cfg(feature = "transferable")]
+    pub fn from_nondeterministic_fn(clock: impl FnMut() -> f64 + Send + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, false),
         }
@@ -805,13 +866,15 @@ impl ServiceEntropy {
         all(target_arch = "wasm32", target_os = "unknown", feature = "web-live")
     ))]
     pub fn system() -> Self {
-        let mut fallback_counter = 0_u64;
+        let fallback_counter = std::sync::atomic::AtomicU64::new(0);
         Self {
             provider: EntropyProvider::new(
                 move || {
                     system_entropy().unwrap_or_else(|| {
-                        fallback_counter = fallback_counter.wrapping_add(1);
-                        fallback_entropy(fallback_counter)
+                        let counter = fallback_counter
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            .wrapping_add(1);
+                        fallback_entropy(counter)
                     })
                 },
                 false,
@@ -827,14 +890,32 @@ impl ServiceEntropy {
     }
 
     /// Host-supplied replay-stable seed provider.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, true),
         }
     }
 
+    /// Host-supplied transferable replay-stable seed provider.
+    #[cfg(feature = "transferable")]
+    pub fn from_fn(entropy: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
+        Self {
+            provider: EntropyProvider::new(entropy, true),
+        }
+    }
+
     /// Host-supplied live seed provider, explicitly labeled nondeterministic.
+    #[cfg(not(feature = "transferable"))]
     pub fn from_nondeterministic_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
+        Self {
+            provider: EntropyProvider::new(entropy, false),
+        }
+    }
+
+    /// Host-supplied transferable live seed provider.
+    #[cfg(feature = "transferable")]
+    pub fn from_nondeterministic_fn(entropy: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, false),
         }

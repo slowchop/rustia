@@ -6,7 +6,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 
 ## Interface
 
-- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc provides a task index, callback-state chooser, failure/reuse comparison, owned/live/Serde value chooser, and browser setup links; `Rustia` documents the thread-affine interpreter boundary.
+- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc provides a task index, callback-state chooser, failure/reuse comparison, owned/live/Serde value chooser, browser setup links, and the default thread-affine versus opt-in `transferable` ownership boundary.
 - `Chunk`: named source, optional rooted lexical environment, then `eval`, `eval_live`, `eval_serde`, `exec`, or transactional `install`.
 - `OwnedValue`/`IntoRustia`/`FromRustia`: owned data conversions; `Value` and `Table`: rooted live guest values.
 - `Function`/`Exports` and `HostFunction`: retained script calls and reusable host callbacks.
@@ -23,6 +23,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 - Reset requires an idle VM, preserves settings and persistent registrations, and invalidates prior live handles.
 - `install` is guest-state transactional; `eval`/`exec` leave completed guest mutations in place on failure.
 - Invocation callbacks only receive their declared capability views. Captured Rust state remains an embedder trust boundary.
+- With `transferable`, service closures require `Send`, entropy providers require `Fn + Send + Sync`, object payloads require `Send + Sync`, and the facade/live handles may move only as an idle exclusively owned graph; calls continue to require `&mut Rustia`.
 - Deterministic invocation records have one dense sequence and bounded logical record bytes; host publication is all-or-nothing on escaping failure.
 
 ## Side Effects

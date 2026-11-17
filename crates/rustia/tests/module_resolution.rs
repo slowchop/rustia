@@ -2,8 +2,10 @@ use rustia::{
     DiagnosticLimits, ModuleSource, OwnedTable, RustiaBuilder, ServiceModuleResolver, VmErrorKind,
     RUSTIA_MODULE_RESOLUTION_ABI_VERSION,
 };
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc, Mutex,
+};
 
 #[test]
 fn dependency_syntax_error_retains_its_source_and_loading_callers() {
@@ -55,10 +57,10 @@ fn dependency_syntax_error_obeys_zero_snapshot_budget() {
 #[test]
 fn require_resolves_by_host_identity_and_executes_once() {
     assert_eq!(RUSTIA_MODULE_RESOLUTION_ABI_VERSION, 3);
-    let resolutions = Rc::new(Cell::new(0_u32));
-    let resolutions_for_host = Rc::clone(&resolutions);
+    let resolutions = Arc::new(AtomicU32::new(0));
+    let resolutions_for_host = Arc::clone(&resolutions);
     let resolver = ServiceModuleResolver::from_fn(move |requested, referrer| {
-        resolutions_for_host.set(resolutions_for_host.get() + 1);
+        resolutions_for_host.fetch_add(1, Ordering::Relaxed);
         assert_eq!(referrer, Some("entry.luau"));
         assert!(matches!(requested, "first" | "second"));
         Ok(ModuleSource::with_source_name(
@@ -89,7 +91,7 @@ fn require_resolves_by_host_identity_and_executes_once() {
 
     assert_eq!(result.get_string_as::<bool>("same").unwrap(), Some(true));
     assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(1.0));
-    assert_eq!(resolutions.get(), 2);
+    assert_eq!(resolutions.load(Ordering::Relaxed), 2);
 }
 
 #[test]
@@ -114,11 +116,12 @@ fn require_compiles_modules_with_the_requesting_profile() {
 
 #[test]
 fn require_passes_nested_referrers_and_caches_empty_results() {
-    let calls = Rc::new(RefCell::new(Vec::<(String, Option<String>)>::new()));
-    let calls_for_host = Rc::clone(&calls);
+    let calls = Arc::new(Mutex::new(Vec::<(String, Option<String>)>::new()));
+    let calls_for_host = Arc::clone(&calls);
     let resolver = ServiceModuleResolver::from_fn(move |requested, referrer| {
         calls_for_host
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .push((requested.to_owned(), referrer.map(str::to_owned)));
         match requested {
             "outer" => Ok(ModuleSource::with_source_name(
@@ -151,7 +154,7 @@ fn require_passes_nested_referrers_and_caches_empty_results() {
     assert_eq!(result.get_string_as::<f64>("value").unwrap(), Some(42.0));
     assert_eq!(result.get_string_as::<f64>("runs").unwrap(), Some(1.0));
     assert_eq!(
-        calls.borrow().as_slice(),
+        calls.lock().unwrap().as_slice(),
         [
             ("outer".to_owned(), Some("entry.luau".to_owned())),
             ("empty".to_owned(), Some("modules/outer.luau".to_owned())),
@@ -201,14 +204,14 @@ fn require_reports_cycles_and_does_not_cache_failures() {
 
 #[test]
 fn require_reset_clears_the_execute_once_cache() {
-    let output = Rc::new(RefCell::new(String::new()));
-    let output_for_host = Rc::clone(&output);
+    let output = Arc::new(Mutex::new(String::new()));
+    let output_for_host = Arc::clone(&output);
     let resolver = ServiceModuleResolver::from_fn(|requested, _| {
         assert_eq!(requested, "probe");
         Ok(ModuleSource::new("probe", "print('loaded'); return 7"))
     });
     let mut vm = RustiaBuilder::deterministic()
-        .stdout(move |text| output_for_host.borrow_mut().push_str(text))
+        .stdout(move |text| output_for_host.lock().unwrap().push_str(text))
         .module_resolver(resolver)
         .build()
         .expect("deterministic resolver");
@@ -221,7 +224,7 @@ fn require_reset_clears_the_execute_once_cache() {
     vm.reset_decision().expect("decision reset");
     let second: f64 = vm.eval(r#"return require("probe")"#).expect("second epoch");
     assert_eq!(second, 7.0);
-    assert_eq!(output.borrow().as_str(), "loaded\nloaded\n");
+    assert_eq!(output.lock().unwrap().as_str(), "loaded\nloaded\n");
 }
 
 #[test]
@@ -373,11 +376,10 @@ fn deterministic_and_hardened_profiles_reject_invalid_resolvers() {
 
 #[test]
 fn resolver_panics_poison_until_decision_reset() {
-    let calls = Rc::new(Cell::new(0_u32));
-    let calls_for_host = Rc::clone(&calls);
+    let calls = Arc::new(AtomicU32::new(0));
+    let calls_for_host = Arc::clone(&calls);
     let resolver = ServiceModuleResolver::from_fn(move |_, _| {
-        calls_for_host.set(calls_for_host.get() + 1);
-        if calls_for_host.get() == 1 {
+        if calls_for_host.fetch_add(1, Ordering::Relaxed) == 0 {
             panic!("resolver panic");
         }
         Ok(ModuleSource::new("recovered", "return 42"))

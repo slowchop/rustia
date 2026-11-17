@@ -378,7 +378,7 @@ pub(crate) enum HostReturnValue {
     NewObject {
         rust_type_id: std::any::TypeId,
         rust_type_name: &'static str,
-        value: Box<dyn std::any::Any>,
+        value: Box<rustia_vm::HostObjectPayload>,
     },
 }
 

@@ -67,7 +67,7 @@ bare guest `not enough memory` message. Cross-profile regressions are in
 `crates/rustia/tests/error_recovery.rs`. Full acceptance uses the repository
 preflight and PR CI gates.
 
-## Issue #50 transferable consumer slice
+## Transferable consumer and facade slices
 
 The lower-level VM has an opt-in `send` ownership mode for scheduler-owned
 interpreters. It replaces local `Rc`/`RefCell` ownership with checked shared
@@ -83,11 +83,14 @@ call seam that re-enters with the unchanged fuel, depth and dispatcher. The
 saved-caller driver releases bytecode frames before synchronous host dispatch
 and restores their diagnostic context, roots and continuations afterward.
 These are low-level `rustia-vm` contracts used by the Luvy integration. The
-application facade remains thread-affine and does not yet expose this complete
-surface ergonomically. A dependency graph that also enables `rustia-vm/send`
-for the facade is not yet supported; Luvy uses the lower-level VM/compiler/parser
-boundary directly. Broader deep-reentry and facade acceptance therefore remain
-open in [issue #50](https://github.com/slowchop/rustia/issues/50).
+application facade now offers an opt-in `transferable` Cargo feature under
+[issue #53](https://github.com/slowchop/rustia/issues/53) that makes
+the interpreter and live handles movable between workers with stricter service
+and object bounds. Execution remains exclusively borrowed, and the default
+facade remains thread-affine. Luvy still uses the lower-level VM/compiler/parser
+boundary because capture migration, owned hooks and scoped re-entry are not yet
+exposed ergonomically. Borrowed scopes, typed hooks, and the sync/resumable API
+split remain tracked in issues #56, #54, and #55 respectively.
 
 Synchronous native callbacks now use one explicit non-yieldable boundary in
 both saved-caller and borrowed/direct execution. `tostring`, function-based
@@ -103,7 +106,7 @@ resumable.
 
 | Area | Current behavior and detailed contract |
 | --- | --- |
-| Engine | Luau 0.709, vector-3, flags-off, f64-only; one native/Wasm engine and public-workspace `unsafe_code = "forbid"`. The default live VM/handles are thread-affine; lower-level `rustia-vm` has an opt-in transferable ownership mode with one exclusive executor. [Target](05-luau-target.md), [architecture](30-architecture.md). |
+| Engine | Luau 0.709, vector-3, flags-off, f64-only; one native/Wasm engine and public-workspace `unsafe_code = "forbid"`. The default facade/handles are thread-affine; opt-in `rustia/transferable` and lower-level `rustia-vm/send` permit idle ownership transfer with one exclusive executor. [Target](05-luau-target.md), [architecture](30-architecture.md). |
 | Embedding | Facade-owned settings/errors; typed owned conversions and Serde; rooted VM/epoch-safe live values; composable chunks, custom environments, compiled modules, atomic installation and host-owned replacement. Lower-level embedders can retain program entries and inspect/migrate rooted captures without executing guest code. [Embedding API](75-embedded-api.md). |
 | Host integration | Synchronous functions, capability declarations, borrowed invocation context, shared fuel, bounded ordered records and typed Rust objects/methods. The low-level scoped dispatcher can re-enter with the active budget/depth; host objects support optional owned field/metamethod hooks. [Host bridge](70-host-bridge-contract.md), [functions](78-host-functions.md), [objects](83-rust-objects.md). |
 | Services and modules | Explicit output/clock/entropy providers and native/WASI/browser adapters. `require` needs a host resolver; core has no ambient filesystem. Module ABI v3 supports yieldable loads and coroutine-owned loading state. Each installation has a fresh dependency-cache cohort; older rooted functions retain theirs. [Services](72-host-services.md), [embedding API](75-embedded-api.md). |
@@ -226,6 +229,10 @@ this section is a navigation index, not a duplicate checklist or priority order.
 The [maintainer workflow](../CONTRIBUTING.md#issue-driven-development) explains
 selection, coordination, review and closure.
 
+Delivered foundation (closed):
+[lower-level transferable/reentrant embedding #50](https://github.com/slowchop/rustia/issues/50).
+The active backlog is:
+
 - [Source-access readiness #29](https://github.com/slowchop/rustia/issues/29).
 - [Documentation and stable API review #30](https://github.com/slowchop/rustia/issues/30).
 - [Semantic coverage and platform acceptance #31](https://github.com/slowchop/rustia/issues/31).
@@ -233,7 +240,10 @@ selection, coordination, review and closure.
 - [Benchmark repeatability and trusted evidence #33](https://github.com/slowchop/rustia/issues/33).
 - [Supported-release acceptance #34](https://github.com/slowchop/rustia/issues/34).
 - [Pinned target maintenance #35](https://github.com/slowchop/rustia/issues/35).
-- [Transferable/reentrant embedding and capture inspection #50](https://github.com/slowchop/rustia/issues/50).
+- [Opt-in transferable facade #53](https://github.com/slowchop/rustia/issues/53).
+- [Typed owned hooks #54](https://github.com/slowchop/rustia/issues/54).
+- [Sync versus resumable API #55](https://github.com/slowchop/rustia/issues/55).
+- [Borrowed scopes #56](https://github.com/slowchop/rustia/issues/56).
 
 Tracking work does not authorize source visibility, publication, measurements or
 private infrastructure actions; the active constraints above still apply.

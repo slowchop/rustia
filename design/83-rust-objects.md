@@ -136,7 +136,8 @@ the enclosing table write or function/object call has consumed them.
 Rustia admits method metadata, instance storage, and public roots under its
 logical-live memory quota. Arbitrary allocations inside `T` remain application
 memory, like callback captures. `T` must be `'static`, but need not be `Clone`,
-`Send`, or `Sync` in the default local mode. The opt-in lower-level `send` mode
+`Send`, or `Sync` in the default local mode. The facade's opt-in `transferable`
+feature selects the lower-level `send` mode and
 requires payloads to be `Send + Sync` and uses checked shared read/write guards;
 it still permits only one exclusive VM executor. Method closures retain the
 normal `Send + Sync + 'static` bounds. Payload and capture

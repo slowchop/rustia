@@ -1807,12 +1807,17 @@ fn cloned_entropy_provider_supports_concurrent_vm_construction() {
     use std::sync::{Arc, Barrier};
 
     let next_seed = Arc::new(AtomicU64::new(40));
+    let concurrent_entry = Arc::new(Barrier::new(2));
     let settings = VmSettings {
         services: VmServices {
             entropy: Some(EntropyProvider::new(
                 {
                     let next_seed = Arc::clone(&next_seed);
-                    move || next_seed.fetch_add(1, Ordering::SeqCst)
+                    let concurrent_entry = Arc::clone(&concurrent_entry);
+                    move || {
+                        concurrent_entry.wait();
+                        next_seed.fetch_add(1, Ordering::SeqCst)
+                    }
                 },
                 true,
             )),
