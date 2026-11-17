@@ -196,7 +196,7 @@ pub use object_context::{
     IntoEffectObjectMethod, IntoExternalMutObjectMethod, IntoExternalObjectMethod,
     IntoInputObjectMethod, IntoSlotReadObjectMethod, IntoSlotWriteObjectMethod,
 };
-pub use object_method::{IntoMutObjectMethod, IntoObjectMethod};
+pub use object_method::{IntoMutObjectMethod, IntoObjectIterator, IntoObjectMethod};
 pub use profile::{GuestSurface, OpCapability, Profile};
 pub use runtime_error::{VmError, VmErrorKind, VmErrorMessage};
 /// Version of the decision-reset lifecycle contract.

@@ -735,7 +735,11 @@ where
     Ok(results)
 }
 
-fn host_embed_error(function_name: &str, slot: impl AsRef<str>, error: Error) -> rustia_vm::Error {
+pub(crate) fn host_embed_error(
+    function_name: &str,
+    slot: impl AsRef<str>,
+    error: Error,
+) -> rustia_vm::Error {
     match error {
         Error {
             kind: crate::ErrorKind::Vm(error),

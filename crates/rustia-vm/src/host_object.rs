@@ -79,6 +79,13 @@ pub struct HostObjectHooks {
     pub equals: Option<HostFunctionOp>,
     pub display: Option<HostFunctionOp>,
     pub call: Option<HostFunctionOp>,
+    /// Implements `#object` through the ordinary synchronous host-call path.
+    pub length: Option<HostFunctionOp>,
+    /// Creates one independent iterator state and returns Luau's
+    /// iterator/state/control triple.
+    pub iterator: Option<HostFunctionOp>,
+    /// Advances the private state returned by `iterator`.
+    pub iterator_step: Option<HostFunctionOp>,
 }
 
 impl HostObjectHooks {
@@ -90,6 +97,8 @@ impl HostObjectHooks {
             ("__eq", self.equals.as_ref()),
             ("__tostring", self.display.as_ref()),
             ("__call", self.call.as_ref()),
+            ("__len", self.length.as_ref()),
+            ("__iter", self.iterator.as_ref()),
         ]
         .into_iter()
         .filter_map(|(name, op)| op.map(|op| (name, op)))

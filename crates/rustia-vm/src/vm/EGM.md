@@ -19,7 +19,7 @@ This private module directory separates specialized VM call paths and host integ
   forward unchanged. This does not implement scheduler ownership or facade reentry.
 - [captures.rs](./captures.rs): rooted script capture/source/environment inspection, idle capture edits, raw one-pair table traversal and trusted readonly/metatable control; mutations preserve quota admission and savepoints. [captures_tests.rs](./captures_tests.rs) checks legacy metadata, active-call rejection, quotas, rollback and reclaimed/slot-reused roots.
 - [program_entry.rs](./program_entry.rs): checked retained main-function construction in a rooted lexical environment, sharing dynamic-main allocation with loadstring and builtin require. Construction does not execute or reset fuel/depth. [program_entry_tests.rs](./program_entry_tests.rs) checks environment lifetime, ordinary bytecode validation, source identity, quota admission and rollback.
-- [host_objects.rs](./host_objects.rs): Rust payload type registration, construction, receiver validation, method-first lookup and five optional field/equality/display/call hooks. Hook operations use ordinary capability admission, fuel and invocation dispatch; original protected definitions stay attached to existing instances.
+- [host_objects.rs](./host_objects.rs): Rust payload type registration, construction, receiver validation, method-first lookup and optional field/equality/display/call/length/iterator hooks. The VM stores the iterator step in the protected metatable; the typed factory returns that step with a fresh opaque state and nil initial control. Hook operations use ordinary capability admission, fuel and invocation dispatch; original protected definitions stay attached to existing instances.
 - [require.rs](./require.rs): host-resolved module loading, coroutine-owned continuation, and cache publication.
 
 ## Invariants
@@ -31,6 +31,7 @@ This private module directory separates specialized VM call paths and host integ
 - A required module's zero/one result enters cache only after successful completion. Load ownership belongs to its coroutine/cohort and is released on failure, cancellation, reset, or abandoned coroutine collection.
 - Retained program entries inherit the current cohort without resolving/caching modules. The environment and returned entry are VM/epoch-checked roots; hardened leaves reject construction. Host module policy remains outside the primitive.
 - Host object receiver type is checked before callback argument conversion. Host payload state is outside guest savepoint rollback.
+- Host object iterator setup and steps are synchronous host calls. The setup returns the protected step, a fresh per-loop state and nil initial control; step completion is a nil first result, matching generalized Luau iteration.
 - Specialized builtin paths must preserve source evaluation order and fall back to ordinary calls when specialization shape does not apply.
 
 ## Side Effects
