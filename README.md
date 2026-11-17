@@ -15,6 +15,16 @@ every platform. See the [platform evidence](https://github.com/slowchop/rustia/b
 for executed tests and remaining gaps. Contribution and support policies are
 undecided; source access does not promise either service.
 
+The default application facade is thread-affine. Enable the `transferable`
+Cargo feature when an idle interpreter and its live handles must move between
+worker threads. Execution still requires exclusive mutable access; the feature
+does not allow concurrent entry into one interpreter. Transferable service
+closures require `Send`; entropy providers require `Fn + Send + Sync`, and
+Rust object payloads require `Send + Sync`. Cargo unifies dependency features:
+if another dependency enables `rustia-vm/send`, the application must also
+enable `rustia/transferable`. The unmatched mixed graph is unsupported and
+intentionally rejected.
+
 ## Try it
 
 Add this to your application's `Cargo.toml` (Rust 1.95 or newer):

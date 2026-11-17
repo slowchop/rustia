@@ -2,9 +2,7 @@ use rustia::{
     ModuleSource, OwnedValue, Profile, RustiaBuilder, RustiaExtension, ServiceModuleResolver,
     VmErrorKind, RUSTIA_INSTALL_TRANSACTION_ABI_VERSION,
 };
-use std::cell::Cell;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[test]
@@ -272,12 +270,11 @@ fn weak_table_collection_is_observable_on_commit_and_reversed_on_rollback() {
 
 #[test]
 fn each_install_has_a_fresh_lazy_require_cohort() {
-    let resolution = Rc::new(Cell::new(0_u32));
-    let resolution_for_host = Rc::clone(&resolution);
+    let resolution = Arc::new(AtomicU32::new(0));
+    let resolution_for_host = Arc::clone(&resolution);
     let resolver = ServiceModuleResolver::from_fn(move |requested, _| {
         assert_eq!(requested, "dep");
-        let version = resolution_for_host.get() + 1;
-        resolution_for_host.set(version);
+        let version = resolution_for_host.fetch_add(1, Ordering::Relaxed) + 1;
         Ok(ModuleSource::new(
             "dep",
             format!("return {{ version = {version} }}"),
@@ -313,7 +310,7 @@ fn each_install_has_a_fresh_lazy_require_cohort() {
     assert_eq!(new.get::<u32>(&mut rustia, "first").unwrap(), 3);
     assert_eq!(old_later.call::<_, u32>(&mut rustia, ()).unwrap(), 1);
     assert_eq!(new_later.call::<_, u32>(&mut rustia, ()).unwrap(), 3);
-    assert_eq!(resolution.get(), 5);
+    assert_eq!(resolution.load(Ordering::Relaxed), 5);
 }
 
 #[test]

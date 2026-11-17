@@ -1481,7 +1481,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 82,
+      "file_count": 83,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1560,6 +1560,7 @@
         "tests/support/mixed_heap_scenario.rs",
         "tests/support/quota_precision.rs",
         "tests/transactional_install.rs",
+        "tests/transferable_facade.rs",
         "tests/type_grammar.rs",
         "tests/typed_invocation.rs",
         "tests/typed_objects.rs",

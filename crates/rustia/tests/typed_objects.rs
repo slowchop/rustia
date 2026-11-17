@@ -2,8 +2,15 @@ use rustia::{
     Effects, Error, FromRustia, HostContext, HostSchema, Input, IntoRustiaMulti, InvocationLimits,
     NewObject, Object, ObjectType, OwnedValue, Result, Rustia, RustiaBuilder, SlotWrites, Slots,
 };
+#[cfg(not(feature = "transferable"))]
 use std::cell::Cell;
+#[cfg(not(feature = "transferable"))]
 use std::rc::Rc;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 struct Player {
     score: i64,
@@ -174,13 +181,13 @@ fn fresh_results_are_validated_before_owned_result_allocation() -> Result<()> {
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[test]
 fn a_panicking_method_releases_the_borrow_and_reset_drops_payload_once() -> Result<()> {
-    struct Dropped(Rc<Cell<usize>>);
+    struct Dropped(Arc<AtomicUsize>);
     impl Drop for Dropped {
         fn drop(&mut self) {
-            self.0.set(self.0.get() + 1);
+            self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
-    let drops = Rc::new(Cell::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
     let mut lua = Rustia::builder().build()?;
     lua.register_object_type(ObjectType::new("Dropped").method_mut(
         "panic",
@@ -199,12 +206,12 @@ fn a_panicking_method_releases_the_borrow_and_reset_drops_payload_once() -> Resu
     );
     lua.reset_decision()?;
     assert_eq!(
-        drops.get(),
+        drops.load(Ordering::Relaxed),
         1,
         "the stale Rust handle must not retain the payload"
     );
     drop(object);
-    assert_eq!(drops.get(), 1);
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
     assert_eq!(lua.eval::<i64>("return 42")?, 42);
     Ok(())
 }
@@ -331,6 +338,7 @@ fn owned_arguments_keep_nested_tables_alive_during_later_allocations() -> Result
     all(target_arch = "wasm32", target_os = "unknown"),
     wasm_bindgen_test::wasm_bindgen_test
 )]
+#[cfg(not(feature = "transferable"))]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn forbidden_definitions_are_atomic_and_payloads_need_no_clone_or_send() -> Result<()> {
     struct Local(Rc<Cell<i64>>);

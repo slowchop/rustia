@@ -2,9 +2,8 @@
 
 use crate::function::{adapter::Token, host_arg_from_raw, host_return_to_raw};
 use crate::{FromHostArgument, IntoHostReturn, Object};
-use rustia_vm::{HostFunctionOp, HostObjectData, OpCapability, Value, Vm};
+use rustia_vm::{HostFunctionOp, OpCapability, Value, Vm};
 use std::any::{type_name, TypeId};
-use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) mod adapter {
@@ -50,7 +49,7 @@ impl<T: 'static, A, R, F: adapter::Write<T, A, R>> IntoMutObjectMethod<T, A, R> 
 pub(crate) fn checked_receiver<T: 'static>(
     vm: &mut Vm,
     args: &[Value],
-) -> rustia_vm::Result<Rc<HostObjectData>> {
+) -> rustia_vm::Result<rustia_vm::HostObjectOwner> {
     vm.checked_host_object(
         args.first().copied().unwrap_or_else(Value::nil),
         TypeId::of::<T>(),

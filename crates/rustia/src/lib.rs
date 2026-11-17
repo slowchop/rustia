@@ -235,11 +235,16 @@ pub use value::{
 ///
 /// # Threads
 ///
-/// An interpreter and its live handles cannot be sent to or shared with another
-/// thread. Create each interpreter in the worker that will run it. Callback
-/// closures requiring `Send + Sync` do not make the interpreter transferable.
-/// Host-owned [`CompiledModule`] and [`CompiledEntry`] values can be reused across
-/// interpreters without sharing their guest state.
+/// By default, an interpreter and its live handles are thread-affine. Create
+/// each interpreter in the worker that will run it. Enabling the Cargo feature
+/// `transferable` makes the interpreter and its live handles `Send` when their
+/// typed host record and Rust payload types are also transferable. Move the
+/// whole idle interpreter and its handles together; every execution operation
+/// still needs exclusive `&mut` access, so this does not permit concurrent entry.
+/// Transferable service closures require `Send`, entropy providers require
+/// `Fn + Send + Sync`, and object payloads require `Send + Sync`. Host-owned
+/// [`CompiledModule`] and [`CompiledEntry`] values can
+/// always be reused across interpreters without sharing their guest state.
 ///
 /// # Typed host contexts
 ///
@@ -1278,10 +1283,9 @@ mod tests {
     use rustia_parser::parse_source;
     use rustia_vm::{Vm, VmSettings};
     use serde::{Deserialize, Serialize};
-    use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::num::NonZeroU64;
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn install_smoke() {
@@ -2919,15 +2923,15 @@ return ok and done and not protected and string.find(err, 'foo', 1, true) ~= nil
 
     #[test]
     fn deterministic_builder_captures_print_through_the_stdout_sink() {
-        let captured = Rc::new(RefCell::new(String::new()));
-        let sink = Rc::clone(&captured);
+        let captured = Arc::new(Mutex::new(String::new()));
+        let sink = Arc::clone(&captured);
         let mut rustia = RustiaBuilder::deterministic()
-            .stdout(move |text| sink.borrow_mut().push_str(text))
+            .stdout(move |text| sink.lock().unwrap().push_str(text))
             .build()
             .unwrap();
 
         rustia.exec("print('hello', 42)").unwrap();
-        assert_eq!(captured.borrow().as_str(), "hello\t42\n");
+        assert_eq!(captured.lock().unwrap().as_str(), "hello\t42\n");
     }
 
     #[test]

@@ -7,7 +7,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const assert = require("node:assert/strict");
 
 const root = path.resolve(__dirname, "..");
@@ -67,7 +67,8 @@ try {
   fs.writeFileSync(path.join(application, "src", "lib.rs"), "// Clean external application; behavior comes from canonical contract tests.\n");
   const manifest = [
     "[package]", 'name = "rustia-private-consumer"', 'version = "0.0.0"', 'edition = "2021"', "publish = false", "",
-    "[workspace]", "", "[features]", 'default = ["web-live"]', 'web-live = ["rustia/web-live"]', "", "[dependencies]",
+    "[workspace]", "", "[features]", 'default = ["web-live"]', 'web-live = ["rustia/web-live"]',
+    'transferable = ["rustia/transferable"]', "", "[dependencies]",
     `rustia = { path = ${JSON.stringify(packaged.get("rustia"))}, default-features = false }`,
     `serde = { version = "=${serde}", features = ["derive"] }`, "", "[patch.crates-io]",
     ...crates.map((name) => `${name} = { path = ${JSON.stringify(packaged.get(name))} }`), "",
@@ -95,6 +96,30 @@ try {
     console.log(`External archived facade contracts: ${features.length ? "bare" : "default"} features`);
     cargo(["test", "--locked", "--offline", "--tests", ...features, "--", "--nocapture"], application);
   }
+
+  // Cargo unifies dependency features across the graph. A consumer that enables
+  // rustia-vm/send directly must also select the facade's matching bounds.
+  const mixedManifest = manifest.replace(
+    `serde = { version = "=${serde}", features = ["derive"] }`,
+    `serde = { version = "=${serde}", features = ["derive"] }\n` +
+      `rustia-vm = { path = ${JSON.stringify(packaged.get("rustia-vm"))}, features = ["send"] }`,
+  );
+  fs.writeFileSync(path.join(application, "Cargo.toml"), mixedManifest);
+  cargo(["metadata", "--offline", "--format-version", "1"], application, true);
+  const rejected = spawnSync("cargo", ["check", "--locked", "--offline"], {
+    cwd: application, env: environment, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+  });
+  assert.notEqual(rejected.status, 0, "rustia-vm/send without rustia/transferable must be rejected");
+  assert.match(rejected.stderr, /error\[E0277\]/, "mixed feature graph failed for an unexpected reason");
+  assert.match(
+    rejected.stderr,
+    /required by a bound in `StdoutSink::new`/,
+    "mixed feature graph did not fail at the expected facade/send boundary",
+  );
+  console.log("External feature matrix: unmatched rustia-vm/send rejected as unsupported");
+
+  cargo(["check", "--locked", "--offline", "--features", "transferable"], application);
+  console.log("External feature matrix: rustia/transferable forwarding compiled");
   console.log(`External facade acceptance passed: ${contracts.length} reused contract suites, archived runtime, default and bare features.`);
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });

@@ -2,8 +2,30 @@ use rustia::{
     DiagnosticLimits, GuestSurface, ModuleSource, Profile, RustiaBuilder, ServiceClock,
     ServiceDeterminism, ServiceEntropy, ServiceModuleResolver,
 };
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
+#[cfg(not(feature = "transferable"))]
+#[test]
+fn default_services_accept_thread_affine_closures() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let entropy_calls = Rc::new(Cell::new(0));
+    let captured = Rc::clone(&entropy_calls);
+    let mut vm = RustiaBuilder::standard()
+        .entropy(ServiceEntropy::from_fn(move || {
+            captured.set(captured.get() + 1);
+            42
+        }))
+        .build()
+        .unwrap();
+
+    assert_eq!(entropy_calls.get(), 1);
+    assert!(vm.eval::<f64>("return math.random()").unwrap() >= 0.0);
+}
 
 #[test]
 fn built_settings_match_the_requested_limits_and_survive_execution_and_reset() {
@@ -48,29 +70,31 @@ fn built_settings_match_the_requested_limits_and_survive_execution_and_reset() {
 
 #[test]
 fn settings_readback_describes_services_without_calling_them() {
-    let calls = Rc::new(Cell::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
     let output_calls = calls.clone();
     let wall_calls = calls.clone();
     let monotonic_calls = calls.clone();
     let entropy_calls = calls.clone();
     let resolver_calls = calls.clone();
     let builder = RustiaBuilder::standard()
-        .stdout(move |_| output_calls.set(output_calls.get() + 1))
+        .stdout(move |_| {
+            output_calls.fetch_add(1, Ordering::Relaxed);
+        })
         .wall_clock(ServiceClock::from_fn(move || {
-            wall_calls.set(wall_calls.get() + 1);
+            wall_calls.fetch_add(1, Ordering::Relaxed);
             0.0
         }))
         .monotonic_clock(ServiceClock::from_nondeterministic_fn(move || {
-            monotonic_calls.set(monotonic_calls.get() + 1);
+            monotonic_calls.fetch_add(1, Ordering::Relaxed);
             0.0
         }))
         .entropy(ServiceEntropy::from_fn(move || {
-            entropy_calls.set(entropy_calls.get() + 1);
+            entropy_calls.fetch_add(1, Ordering::Relaxed);
             0
         }))
         .module_resolver(ServiceModuleResolver::from_nondeterministic_fn(
             move |_, _| {
-                resolver_calls.set(resolver_calls.get() + 1);
+                resolver_calls.fetch_add(1, Ordering::Relaxed);
                 Ok(ModuleSource::new("example", "return 42"))
             },
         ));
@@ -85,7 +109,7 @@ fn settings_readback_describes_services_without_calling_them() {
     assert_eq!(settings.module_resolver(), Some(ServiceDeterminism::Live));
     assert_eq!(settings, builder.settings());
     assert!(!settings.identity_bytes().is_empty());
-    assert_eq!(calls.get(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -157,12 +181,12 @@ fn canonical_defaults_and_clamped_limits_have_honest_readback() {
 
 #[test]
 fn hardened_leaf_rejects_entropy_without_calling_the_provider() {
-    let calls = Rc::new(Cell::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
     let captured = calls.clone();
     let result = RustiaBuilder::deterministic_leaf()
         .memory_limit_bytes(1024 * 1024)
         .entropy(ServiceEntropy::from_fn(move || {
-            captured.set(captured.get() + 1);
+            captured.fetch_add(1, Ordering::Relaxed);
             1
         }))
         .build_for_host::<()>();
@@ -170,5 +194,5 @@ fn hardened_leaf_rejects_entropy_without_calling_the_provider() {
         result.err().unwrap().as_vm_error().unwrap().kind(),
         rustia::VmErrorKind::HardenedLeafViolation { .. }
     ));
-    assert_eq!(calls.get(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }

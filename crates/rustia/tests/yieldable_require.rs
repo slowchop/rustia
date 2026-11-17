@@ -1,6 +1,5 @@
 use rustia::{ModuleSource, NewObject, ObjectType, Rustia, RustiaBuilder, ServiceModuleResolver};
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 fn module_vm(modules: &[(&'static str, &'static str)]) -> Rustia {
     let modules = modules.to_vec();
@@ -254,11 +253,13 @@ fn rejected_top_level_yields_release_the_loading_identity() {
 )]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn fuel_abort_does_not_leave_a_module_loading() {
-    let resolutions = Rc::new(Cell::new(0));
-    let count = Rc::clone(&resolutions);
+    let resolutions = Arc::new(Mutex::new(0));
+    let count = Arc::clone(&resolutions);
     let resolver = ServiceModuleResolver::from_fn(move |_, _| {
-        let attempt = count.get();
-        count.set(attempt + 1);
+        let mut count = count.lock().unwrap();
+        let attempt = *count;
+        *count += 1;
+        drop(count);
         Ok(ModuleSource::new(
             "retry",
             if attempt == 0 {
@@ -285,7 +286,7 @@ fn fuel_abort_does_not_leave_a_module_loading() {
         vm.load("return require('retry')").eval::<i64>().unwrap(),
         42
     );
-    assert_eq!(resolutions.get(), 2);
+    assert_eq!(*resolutions.lock().unwrap(), 2);
 }
 
 #[cfg_attr(
