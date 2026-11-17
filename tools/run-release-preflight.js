@@ -125,6 +125,7 @@ node("tools/check-crate-metadata.js", "--check");
 node("tools/check-preflight.js");
 run("node", ["--test", "tools/browser/result.test.cjs"]);
 node("tools/check-pre-push.js");
+node("tools/check-validated-push.js");
 node("tools/check-workflows.js");
 node("tools/check-workflows.js", "--self-test");
 run("python3", ["tools/check-browser-correctness.py"]);

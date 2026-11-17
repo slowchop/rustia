@@ -110,6 +110,14 @@ check-quick:
 release-preflight:
     node tools/run-release-preflight.js
 
+# Run the full gate once, recheck exact HEAD/clean state, then push that commit.
+validated-push remote="":
+    node tools/validated-push.js {{ if remote == "" { "" } else { quote(remote) } }}
+
+# Same one-shot gate with an exact observed remote-tip lease; no raw force args.
+validated-force-push remote="":
+    node tools/validated-push.js {{ if remote == "" { "" } else { quote(remote) } }} --force-with-lease
+
 benchmarks:
     @node -e 'console.error("Local benchmark publication is disabled. Measurement happens on the owned host: dispatch the Cross-Engine Matrix or Rustia Memory workflow, or run just bench-history / just bench-pr."); process.exit(2)'
 

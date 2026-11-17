@@ -48,9 +48,11 @@ cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
 ```
 
 `just install-hooks` is equivalent to the Node command above. Install this
-checkout-local guard before pushing. Every push must pass the full
-`just release-preflight` inventory through the hook on the unchanged commit;
-focused checks do not replace it. See [the validation workflow](design/97-validation-workflow.md).
+checkout-local guard before pushing. For a frozen commit, prefer
+`just validated-push`: it runs the full `just release-preflight` inventory once,
+rechecks the unchanged clean HEAD, and pushes that exact commit. Ordinary
+`git push` still runs the full inventory through the hook. Focused checks do not
+replace either route. See [the validation workflow](design/97-validation-workflow.md).
 
 While making a change, run the tests closest to the code you edited. These checks
 are a useful baseline:

@@ -12,6 +12,7 @@ assert(plan.every(entry => stages.has(entry.stage)));
 const matches = (command, args) => plan.filter(entry => entry.command === command && JSON.stringify(entry.args) === JSON.stringify(args));
 assert.equal(matches("cargo", ["test", "--locked", "--workspace"]).length, 1);
 assert.equal(matches("node", ["--test", "bench/memory-protocol.test.js"]).length, 1);
+assert.equal(matches("node", ["tools/check-validated-push.js"]).length, 1);
 assert.equal(matches("cargo", ["test", "--locked", "-p", "rustia-compiler", "--lib"])[0].stage, "quick");
 for (const example of ["embedding", "chunk_builder", "mutable_objects", "live_values", "game_objects", "hardened_decision"]) {
   assert.equal(matches("cargo", ["run", "--locked", "-p", "rustia", "--example", example]).length, 1);

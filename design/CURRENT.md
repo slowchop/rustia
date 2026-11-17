@@ -191,10 +191,14 @@ and requires an already logged-in runner desktop. Two attempts failed that
 prerequisite before any browser tests ran; adding the route is not execution
 acceptance. No runner or browser permissions were changed. [Evidence](96-browser-platform-acceptance.md).
 
-Install the checkout-local hook with `just install-hooks`. Every push must pass
-the full unchanged-commit `just release-preflight` inventory through the normal
-hook. No bypass or evidence regeneration inside validation. [97 — Validation](97-validation-workflow.md)
-defines that inventory; a repaired macOS bootstrap still requires actual native execution.
+Install the checkout-local hook with `just install-hooks`. Prefer
+`just validated-push` for a frozen final commit: it runs the full
+unchanged-commit `just release-preflight` inventory once and immediately pushes
+only that exact clean HEAD. Ordinary `git push` retains the full hook. The
+one-shot route creates no reusable receipt and accepts only exact normal or
+observed-tip leased pushes. No bypass or evidence regeneration inside validation.
+[97 — Validation](97-validation-workflow.md) defines that inventory; a repaired
+macOS bootstrap still requires actual native execution.
 
 **Never run performance measurements locally.** The source correctness profile gives
 correctness jobs no timing authority. Public per-commit/history automation,
@@ -244,6 +248,7 @@ The active backlog is:
 - [Typed owned hooks #54](https://github.com/slowchop/rustia/issues/54).
 - [Sync versus resumable API #55](https://github.com/slowchop/rustia/issues/55).
 - [Borrowed scopes #56](https://github.com/slowchop/rustia/issues/56).
+- [One-shot validated push #61](https://github.com/slowchop/rustia/issues/61).
 
 Tracking work does not authorize source visibility, publication, measurements or
 private infrastructure actions; the active constraints above still apply.

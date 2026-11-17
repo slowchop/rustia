@@ -1,10 +1,25 @@
 # Validation workflow
 
-Run `just install-hooks` once in each checkout, then push normally. The hook
-requires a clean checkout, validates the actual commit being pushed, runs the
-full preflight, and checks that neither HEAD nor the checkout changed during it.
-It refuses to replace an existing hook. Git can bypass local hooks, so required
-CI remains authoritative.
+Run `just install-hooks` once in each checkout. For a frozen final commit, use
+`just validated-push`: one process requires a clean checkout, records the exact
+checked-out branch, commit SHA and remote push URL, runs the full preflight,
+rechecks HEAD, clean state and destination, then pushes the captured SHA to the
+captured URL's same-name branch. On a branch without an upstream, pass the remote
+once (for example, `just validated-push origin`); tracking is established only
+after that successful exact push. A differently named upstream is rejected. The
+process uses `--no-verify` only for its own final push because it has just run the
+same full validation. It creates no reusable receipt or cached authorization.
+
+Ordinary `git push` remains supported and still runs the full checkout-local
+hook. The hook validates the actual commit being pushed and checks that neither
+HEAD nor the checkout changed during validation. Installation refuses to replace
+an existing hook. Git can bypass local hooks, so required CI remains authoritative.
+
+History rewrites use the separate `just validated-force-push` route. It reads the
+remote branch tip before validation and pushes only with an exact
+`--force-with-lease=<ref>:<observed-tip>` after the unchanged-commit check. Raw
+Git options, refspecs, deletions and unleased force are not accepted. A network
+failure or changed lease requires another complete validation.
 
 The temporary first-history bootstrap guard is retained in staging commit
 `417828e` for provenance and is not part of the current source. Current pushes
@@ -48,10 +63,22 @@ The counters describe this diagnostic build and do not recover exact paths from
 previous benchmark binaries or timed legs.
 
 The refactor retains all 68 previous preflight commands. It adds compiler unit
-tests as an early check, plus tests of stage selection and push rejection. No
+tests as an early check, plus tests of stage selection and push rejection. The
+one-shot push adds its own offline self-test to that inventory: clean first push
+and upstream setup, exact ordinary and leased pushes, dirty/index/untracked and
+detached rejection, failed or mutating preflight rejection, Git-environment
+isolation, strict option refusal, same-name destination enforcement, post-check
+HEAD-race pinning, remote-URL mutation rejection, and preservation of the
+ordinary full hook. No
 fixtures, configurations, corpora, examples or package checks were removed.
 Evidence-regeneration overrides are rejected during validation. Partial stage
-runs never authorize the pre-push guard.
+runs never authorize either push path.
+
+No persistent validation receipt is used. A receipt or signing key readable by
+the same OS user that runs Git would be forgeable and would create false
+confidence. Binding validation and push in one process removes the duplicate
+local gate without creating replayable authority. The same user can bypass any
+local Git hook; required CI remains the independent trust boundary.
 
 This changes validation scheduling, not runtime performance. Benchmark
 measurement is paused in the active profile pending the reviewed trusted private
