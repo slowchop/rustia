@@ -8,7 +8,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 
 - `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc provides a task index, callback-state chooser, failure/reuse comparison, owned/live/Serde value chooser, browser setup links, and the default thread-affine versus opt-in `transferable` ownership boundary.
 - `Chunk`: named source, optional rooted lexical environment, then `eval`, `eval_live`, `eval_serde`, `exec`, or transactional `install`.
-- `OwnedValue`/`IntoRustia`/`FromRustia`: owned data conversions; `Value` and `Table`: rooted live guest values.
+- `OwnedValue`/`IntoRustia`/`FromRustia`: owned data conversions; `Value` and `Table`: rooted live guest values. `Rustia::create_vector` creates an immutable rooted Luau vector without broadening the owned snapshot model.
 - `Function`/`Exports` and `HostFunction`: retained script calls and reusable host callbacks.
 - `HostSchema`, `HostContext`, `HostModule`, and `Invocation`: borrowed typed invocation context, capability-scoped callbacks, shared fuel, and bounded ordered output records.
 - `ObjectType`, `Object`, and `NewObject`: typed Rust payload registration and guest method handles. The facade publishes method-only definitions with empty low-level hook slots; owned field/metamethod hooks remain a `rustia-vm` integration seam.
