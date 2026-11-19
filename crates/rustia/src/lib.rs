@@ -1,138 +1,133 @@
-//! Embed Luau scripts in a Rust application.
+//! Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
+//! application or replay a simulation on native and WebAssembly targets.
 //!
-//! Load a script, choose the Rust type to return, and use ordinary Rust functions
-//! to connect it to your application.
+//! Rustia grew out of a game that needed to script character decisions and replay
+//! them on desktop and in a browser. Use [`RustiaBuilder::deterministic`] when
+//! the same script, seed, and inputs need to produce the same decisions.
 //!
-//! ```
+//! # A first script
+//!
+//! Rust gives Luau a score and a function called `double`. Luau calls the function
+//! and returns the new score to Rust. In a [new Cargo app], put this in `src/main.rs`.
+//!
+//! ```rust
 //! use rustia::Rustia;
 //!
-//! let mut vm = Rustia::builder().build()?;
-//! vm.insert_global("price", 21)?;
-//! vm.add_fn("double", |n: i32| n * 2)?;
-//! let answer: i32 = vm.load("return double(price)").eval()?;
-//! assert_eq!(answer, 42);
-//! # Ok::<(), rustia::Error>(())
+//! fn main() -> rustia::Result<()> {
+//!     let mut vm = Rustia::builder().build()?;
+//!     vm.insert_global("base_score", 21)?;
+//!     vm.add_fn("double", |value: f64| value * 2.0)?;
+//!
+//!     let score: f64 = vm
+//!         .load("return double(base_score)")
+//!         .source_name("score.luau")
+//!         .eval()?;
+//!
+//!     println!("The score is {score}");
+//!     assert_eq!(score, 42.0);
+//!     Ok(())
+//! }
 //! ```
+//!
+//! Run `cargo run`. It prints `The score is 42`.
 //!
 //! # Find what you need
 //!
-//! | Task | Start here |
+//! | I want to… | Start here |
 //! | --- | --- |
-//! | Run a script or read its result | [`Rustia::load`], [`Chunk::exec`], [`Chunk::eval`] |
-//! | Pass Rust data to a script | [`Rustia::insert_global`], [`Rustia::insert_serde`] |
-//! | Call Rust from Luau | [`Rustia::add_fn`], [`HostFunction`] |
-//! | Call Luau from Rust | [`Chunk::install`], [`Exports::function`], [`Function::call`] |
-//! | Compile once and install in one or more interpreters | [`Rustia::compile_module`], [`Rustia::install`] |
-//! | Load dependencies with `require` | [`RustiaBuilder::module_resolver`], [`ServiceModuleResolver`] |
-//! | Replace a script while keeping the old version on failure | [`Chunk::install`], [`Exports`] |
-//! | Work with live script objects | [`Value`], [`Table`], [`Chunk::eval_live`] |
-//! | Create live tables or vectors from Rust | [`Rustia::create_table`], [`Rustia::create_vector`] |
-//! | Give Rust objects script methods | [`ObjectType`], [`Rustia::create_object`] |
-//! | Read structured data with Serde | [`Chunk::eval_serde`] |
-//! | Show a script error | [`Error::report`] |
-//! | Set execution and memory limits | [`RustiaBuilder::fuel`], [`RustiaBuilder::memory_limit_bytes`] |
-//! | Borrow application state for a call | [`HostSchema`], [`Rustia::invoke`] |
-//! | Run a bounded stateless decision | [`RustiaBuilder::deterministic_leaf`], [`Rustia::invoke_entry_into`] |
-//! | Reuse an interpreter with fresh guest state | [`Rustia::reset_decision`] |
+//! | Run a script or get a result back | [`Chunk::exec`] runs it. [`Chunk::eval`] returns a Rust value. |
+//! | Pass data from Rust to Luau | [`Rustia::insert_global`] sets a named value. [`Rustia::insert_serde`] passes a struct or collection. |
+//! | Call a Luau function from Rust | [`Chunk::install`] loads its module. [`Exports::function`] looks up the function for [`Function::call`]. |
+//! | Change a script while the app runs | Keep the old functions until the edit installs successfully. See the [hot reload example]. |
+//! | Show where a script failed | Give the script a name with [`Chunk::source_name`] and display [`Error::report`]. |
+//! | Run Luau in a browser | Follow the [browser setup] or build the [bare WebAssembly example]. |
 //!
-//! # Choose a callback and its state
+//! Start with [`Rustia::builder`] for everyday scripting. Use [`RustiaBuilder::live`]
+//! when a script needs the current time or a fresh random seed. To limit a script’s
+//! work or memory, set [`RustiaBuilder::fuel`] or [`RustiaBuilder::memory_limit_bytes`].
 //!
-//! Start with an ordinary callback. Add a typed host context when a call needs
-//! to borrow application data or return staged changes.
+#![doc = include_str!("../compare.md")]
 //!
-//! | Need | Use | Why and example |
-//! | --- | --- | --- |
-//! | Expose a calculation | [`Rustia::add_fn`] | A plain closure converts arguments and results; it is declared pure. See the [embedding example]. |
-//! | Configure a callback's capability or fuel cost | [`HostFunction`] | Use [`Rustia::register_function`] for a registration that survives reset, or [`Rustia::create_function`] for a live function value. |
-//! | Give mutable Rust data script methods | [`ObjectType::method_mut`], [`Rustia::create_object`] | Standard/live applications can change a Rust payload immediately; later guest failure does not undo the change. See the [mutable-object example]. |
-//! | Borrow data for one request or frame | [`HostSchema`], [`HostContext`], [`Rustia::invoke`] | [`Input`] and [`Slots`] let callbacks read the current context without capturing it. See the [typed-invocation example]. |
-//! | Propose deterministic application changes | [`HostFunction::effect`], [`HostFunction::slot_write`] | [`Effects::emit`] and [`SlotWrites::write`] stage records for the host to apply after success. See the [game-object example]. |
+//! # Performance
 //!
-//! Stored callback closures must be `Fn + Send + Sync + 'static`. They can own
-//! captured data, but cannot borrow a short-lived request or frame. A
-//! [`HostContext`] may borrow that data for one invocation; Rustia does not store
-//! the context or its borrowed views. Callback captures must still honor the
-//! declared capability: Rustia trusts declarations such as [`HostFunction::pure`]
-//! and cannot detect hidden mutable state or I/O. Captured allocations are outside
-//! the VM memory limit.
+//! The chart compares five workloads on Linux x86-64. Each language has its own
+//! version. For example, Roto uses a list for sparse lookups and an ordinary
+//! function for the closure test. Compare times within a column. Lower is better.
+//! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
 //!
-//! # Choose a failure and reuse boundary
+#![doc = include_str!("../performance.svg")]
 //!
-//! The table describes an error returned to Rust. Choose installation when a
-//! failed candidate must leave the previous guest state intact, or an invocation
-//! when the host must receive either all staged records or none.
+//! These October 2026 measurements cover scripts already running. Small timing
+//! differences may vary between runs. [Full results] · [Benchmark limitations]
 //!
-//! | Operation | Guest state and staged records after failure | Reuse and reset |
-//! | --- | --- | --- |
-//! | Ordinary [`Chunk::exec`], [`Chunk::eval`], or [`Function::call`] | Completed guest writes remain, including when Rust result conversion fails. There is no staged-record transaction. | Existing live handles remain valid; no automatic reset. |
-//! | [`Chunk::install`] or [`Rustia::install`] | The candidate's guest changes roll back; no candidate exports are published. Previously installed exports and functions are preserved. | Prior handles remain valid; no automatic reset. |
-//! | [`Rustia::invoke`] or [`Rustia::invoke_into`] | No staged records publish. Completed guest writes remain unless covered by an installation savepoint; [`Invocation::install`] adds that guest-state rollback boundary. | Handles that predate the invocation remain valid; no automatic reset. Call [`Rustia::reset_decision`] when fresh guest state is required. |
-//! | Hardened [`Rustia::invoke_entry_into`] | No new records remain in the caller's lane, and decision-local guest state is discarded. | Resets after success and failure; prior live handles become stale. The host-owned [`CompiledEntry`] remains reusable. |
+//! # More about embedding
 //!
-//! The runnable [hardened-decision example] shows a successful decision, a
-//! record-limit failure with no new records, and reuse after automatic reset.
+//! <details>
+//! <summary>Read a Luau table from Rust</summary>
 //!
-//! A guest error caught by `pcall` is different from an escaping error: if the
-//! invocation succeeds, records from earlier completed callbacks can publish.
-//! A failing callback discards its own staged records.
+//! Use [`Chunk::eval`] to copy a value into Rust, or [`Chunk::eval_serde`] to read a
+//! table into a Rust struct. These copies stay usable after the interpreter is gone.
+//! Copying strings into a Rust `String` requires UTF-8. Tables with cycles cannot
+//! be copied, and copying the same table twice makes two independent values.
 //!
-//! Ordinary script errors do not poison the interpreter. A contained host
-//! callback panic does: further guest execution requires a successful
-//! [`Rustia::reset_decision`]. Panic containment requires an unwinding build;
-//! an aborting build terminates or traps. Resource failures can also prevent
-//! further work until the exhausted budget is restored or the decision is reset;
-//! inspect [`Error::as_vm_error`] and [`VmError::kind`] rather than treating every
-//! error as poisoning.
+//! Use [`Chunk::eval_live`] to keep a table with shared references, cycles, or
+//! binary strings in Luau. A live [`Value`], [`Table`], [`Function`], or [`Exports`]
+//! belongs to one interpreter. Resetting it with [`Rustia::reset_decision`] invalidates
+//! those handles. See the [live values example] for a table that refers to itself.
 //!
-//! Reset discards guest state and invalidates live handles; it does not undo
-//! host I/O, callback-capture changes, [`HostMut`] writes, or Rust payload
-//! mutations. Object payloads are released on reset rather than restored to an
-//! earlier value. Host-owned copies of returned data remain usable. See
-//! [`Rustia::reset_decision`] for what configuration survives, and the
-//! [hot-reload example] for keeping the old module after a rejected candidate.
+//! </details>
 //!
-//! # Defaults and values
+//! <details>
+//! <summary>Give scripts access to Rust functions and objects</summary>
 //!
-//! [`Rustia::builder`] uses [`RustiaBuilder::standard`]: repeatable defaults with
-//! platform output support. Choose [`RustiaBuilder::live`] for real clocks,
-//! randomness, and runtime compilation, or [`RustiaBuilder::deterministic`] to
-//! reject providers and callbacks declared nondeterministic.
+//! Use [`Rustia::add_fn`] for a calculation such as `double`. Rustia trusts that
+//! the function only uses its inputs. In the standard and live environments,
+//! scripts can change a Rust object immediately. See the [mutable object example].
 //!
-//! Choose how data crosses the Rust/script boundary:
+//! If a callback needs data borrowed for just one request or frame, pass it in a
+//! [`HostContext`] with [`Rustia::invoke`]. The [typed invocation example] shows how.
+//! For deterministic replay, let scripts propose changes for Rust to apply
+//! after a successful call. See the [game object example]. [`HostFunction`] documents callback permissions
+//! and the rules for data captured by a closure.
 //!
-//! | Need | Use | Ownership and limits |
-//! | --- | --- | --- |
-//! | Copy ordinary data out of a script | [`Chunk::eval`], [`OwnedValue`] | Independent Rust-owned data; strings must be UTF-8 and tables must be acyclic. Shared tables are copied independently. |
-//! | Read a Rust struct or collection with Serde | [`Chunk::eval_serde`], [`Value::deserialize`] | The result owns its data and must match the requested Rust type; it cannot borrow from the VM. |
-//! | Keep binary strings or shared/cyclic script objects | [`Chunk::eval_live`], [`Value`], [`Table`] | Live handles preserve identity and keep objects alive in their original interpreter. |
-//! | Create an immutable Luau vector without parsing source | [`Rustia::create_vector`] | Returns a VM/epoch-bound live value with canonical three-component `f32` semantics. |
+//! </details>
 //!
-//! A live handle belongs to one interpreter and one *decision epoch*: the guest
-//! state generation that ends when [`Rustia::reset_decision`] succeeds. Reset
-//! invalidates existing [`Value`], [`Table`], [`Function`], and [`Exports`] handles.
-//! Rust-owned copies remain usable after reset or after dropping the interpreter.
+//! <details>
+//! <summary>Keep using the interpreter after a script fails</summary>
 //!
-//! # WebAssembly
+//! | What you ran | What happens when an error reaches Rust |
+//! | --- | --- |
+//! | A script or function with [`Chunk::eval`], [`Chunk::exec`], or [`Function::call`] | Changes the script already made stay in the interpreter, even if converting the result to Rust failed. |
+//! | A replacement module with [`Chunk::install`] | Rustia restores the previous script state. You can keep calling the old functions. |
+//! | A call with [`Rustia::invoke`] or [`Rustia::invoke_into`] | Rust receives none of the changes the script queued for it. Changes made in Luau still survive, except those rolled back by [`Invocation::install`]. |
+//! | A stateless decision with [`Rustia::invoke_entry_into`] | Rustia discards the queued changes and resets the script state. It also resets after success. Rust can reuse the [`CompiledEntry`] for the next call. See the [stateless decision example]. |
 //!
-//! The default `web-live` feature supplies JavaScript services for browser Wasm.
-//! Disable default features for bare Wasm and provide services explicitly through
-//! [`RustiaBuilder`]. Enabling this feature does not select the live preset.
-//! Follow the [browser setup recipe] for a complete `wasm-bindgen` application
-//! that returns `42` to the page and prints to the browser console. The
-//! [bare-Wasm demo] instead uses raw Wasm with the standard preset and no stdout.
+//! A Luau `pcall` can catch a script error. If the outer invocation succeeds, it
+//! can still deliver changes queued by earlier successful callbacks. Resetting
+//! the interpreter clears its script state and releases the Rust objects it holds.
+//! Files a callback wrote and changes it made to your application’s state persist.
 //!
-//! The API is currently unpublished. The [first-release checklist] tracks the
-//! remaining work before a stable 1.0 contract.
+//! An ordinary script error lets you keep using the interpreter. If Rustia catches
+//! a panic in a Rust callback, call [`Rustia::reset_decision`] before running more
+//! Luau. For exhausted limits, [`VmError::kind`] identifies the resource.
 //!
-//! [first-release checklist]: https://github.com/slowchop/rustia/blob/main/design/92-first-release.md
-//! [embedding example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs
-//! [mutable-object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs
-//! [typed-invocation example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs
-//! [game-object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs
-//! [hot-reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
-//! [hardened-decision example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs
-//! [browser setup recipe]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
-//! [bare-Wasm demo]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
+//! </details>
+//!
+//! For more, [browse the Rust examples] or read about [moving an idle interpreter
+//! to another thread](struct.Rustia.html#threads).
+//!
+//! [new Cargo app]: https://github.com/slowchop/rustia#try-it
+//! [hot reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
+//! [browser setup]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
+//! [bare WebAssembly example]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
+//! [full results]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md
+//! [benchmark limitations]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md
+//! [live values example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs
+//! [mutable object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs
+//! [typed invocation example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs
+//! [game object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs
+//! [stateless decision example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs
+//! [browse the Rust examples]: https://github.com/slowchop/rustia/tree/main/crates/rustia/examples
 
 #[cfg(doctest)]
 mod brand_contract;
