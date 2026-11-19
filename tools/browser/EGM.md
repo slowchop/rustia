@@ -13,6 +13,7 @@ Pinned Playwright WebKit support for the shared WebAssembly correctness suite. H
 - [The parent coordinator](../run-browser-correctness.sh) selects browser/mode suites and validates aggregate execution evidence.
 - [record-race.cjs](./record-race.cjs) compares native and WebKit/Wasm race traces, drives the [recording canvas](./race-frame.html) by tick, and atomically replaces the MP4 after validating its frames.
 - [record-edits.cjs](./record-edits.cjs) drives the editor in `--hot-reload` mode. It drives real key events, draws a blinking caret at the text insertion point, shows keycaps and checks every tick through valid and invalid edits. It captures frames at 1280×720.
+- [render-hot-reload-gif.sh](./render-hot-reload-gif.sh) converts the hot-reload MP4 to the looping README image.
 
 ## Invariants
 

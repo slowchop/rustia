@@ -8,6 +8,9 @@ record-race:
 record-hot-reload:
     node tools/browser/record-race.cjs --hot-reload
 
+readme-hot-reload: record-hot-reload
+    sh tools/browser/render-hot-reload-gif.sh
+
 gen-progress:
     node design/render-progress.js
 

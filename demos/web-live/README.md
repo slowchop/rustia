@@ -128,3 +128,9 @@ The caret blinks at the insertion point, and a keycap at the bottom shows each
 keypress. The recorder checks the racer's position at every tick and saves a
 12-second, 1280×720 clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
 `node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.
+
+Run `just readme-hot-reload` to record the demo and refresh the [README animation](./hot-reload.gif).
+To use an existing recording, run `sh tools/browser/render-hot-reload-gif.sh path/to/edits.mp4`
+from the repository root.
+After committing a new GIF, update the image URL in the project README to use
+that commit's full SHA. This keeps each README linked to its own recording.
