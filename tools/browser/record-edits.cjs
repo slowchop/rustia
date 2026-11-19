@@ -79,7 +79,7 @@ async function captureEdits(page, work) {
   const right = { x: digit.x + digit.width - 1, y: digit.y };
   const start = { x: left.x + 410, y: left.y + 145 };
   const approach = { x: left.x + 65, y: start.y + 80 };
-  const rest = { x: right.x + 180, y: right.y + 156 };
+  const rest = { x: right.x + 355, y: right.y + 74 };
   const departure = { x: rest.x - 12, y: right.y + 20 };
   await page.mouse.move(start.x, start.y);
   const edits = new Map([
