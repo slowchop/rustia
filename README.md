@@ -7,6 +7,11 @@ or WebAssembly.
 Call Rust functions from scripts, read results as Rust types, and choose whether
 scripts use real clocks and randomness or run reproducibly for simulations and replay.
 
+**Hot reload in the browser.** The racer keeps moving when an edit introduces a syntax
+error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick. [Run the demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#edit-a-running-race).
+
+![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
+
 Rustia is **pre-release and currently private**. Packages are unpublished at
 0.0.1, and the API can still change.
 Source availability is separate from a supported release. Compatibility claims
