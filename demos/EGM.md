@@ -7,7 +7,7 @@ Standalone browser examples for bare Wasm and JavaScript host services.
 ## Interface
 
 - [live-wasm](./live-wasm/EGM.md) contains the bare-Wasm standard-preset page and runner.
-- [web-live](./web-live/EGM.md) contains the wasm-bindgen application, live services recipe, and browser page.
+- [web-live](./web-live/EGM.md) contains the wasm-bindgen application, live services recipe, and seeded native/WebKit race demo.
 
 ## Invariants
 

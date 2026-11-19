@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rustia race replay</title>
+<style>body { margin: 0; background: #122323 } canvas { display: block }</style>
+<canvas width="960" height="448" aria-label="Race positions on native Rustia and browser WebAssembly"></canvas>
+<script>
+const canvas = document.querySelector("canvas");
+const ctx = canvas.getContext("2d");
+const racers = [
+  { name: "Ember", color: "#ff9473" },
+  { name: "Mint", color: "#89e7bb" },
+  { name: "Iris", color: "#bcabff" },
+];
+
+function text(value, x, y, size, color = "#f1f4e9", weight = 500) {
+  ctx.font = weight + " " + size + "px system-ui, sans-serif";
+  ctx.fillStyle = color;
+  ctx.fillText(value, x, y);
+}
+
+function drawTrack(x, title, positions) {
+  const start = x + 78;
+  const finish = x + 414;
+  ctx.fillStyle = "#1b3331";
+  ctx.fillRect(x, 118, 440, 215);
+  text(title, x + 16, 151, 22, "#f1f4e9", 650);
+  for (let lane = 0; lane < racers.length; lane++) {
+    const y = 192 + 51 * lane;
+    const racer = racers[lane];
+    text(racer.name, x + 16, y + 5, 15, racer.color, 650);
+    ctx.fillStyle = "#3c534d";
+    ctx.fillRect(start, y - 1, finish - start, 2);
+    for (let row = 0; row < 6; row++) {
+      for (let col = 0; col < 2; col++) {
+        ctx.fillStyle = (row + col) % 2 ? "#233d37" : "#ccdbca";
+        ctx.fillRect(finish + col * 3, y - 9 + row * 3, 3, 3);
+      }
+    }
+    const nose = start + (finish - start) * positions[lane] / 100;
+    ctx.fillStyle = racer.color;
+    ctx.beginPath();
+    ctx.moveTo(nose - 14, y - 6);
+    ctx.lineTo(nose - 5, y - 6);
+    ctx.lineTo(nose, y);
+    ctx.lineTo(nose - 5, y + 6);
+    ctx.lineTo(nose - 14, y + 6);
+    ctx.fill();
+  }
+}
+
+function positionsAt(trace, tick) {
+  const before = Math.floor(tick);
+  const after = Math.min(before + 1, trace.length / 3 - 1);
+  return racers.map((_, i) => trace[3 * before + i] +
+    (trace[3 * after + i] - trace[3 * before + i]) * (tick - before));
+}
+
+window.drawFrame = function (heat, frame, framesPerHeat) {
+  const lastTick = heat.native.length / 3 - 1;
+  const progress = Math.max(0, Math.min(1, (frame - 12) / (framesPerHeat - 42)));
+  const tick = lastTick * progress;
+  ctx.fillStyle = "#122323";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  text("Rustia", 32, 39, 21, "#89e7bb", 700);
+  text("Same seed, same finish", 30, 90, 46, "#f1f4e9", 700);
+  text("Seed " + heat.seed, 814, 84, 21, "#c2d2c7", 600);
+  drawTrack(32, "Native Rust", positionsAt(heat.native, tick));
+  drawTrack(488, "WebKit / Wasm", positionsAt(heat.wasm, tick));
+  const finishers = racers.filter((_, i) => heat.native[3 * Math.floor(tick) + i] === 100);
+  const winners = heat.winners.map(i => racers[i].name).join(" + ");
+  const status = finishers.length ? (heat.winners.length === 1 ? winners + " wins" : "Tie: " + winners)
+    : progress === 0 ? "Ready to race" : "Racing";
+  text(status, 32, 388, 29, "#f1f4e9", 650);
+  text("Tick " + Math.floor(tick) + " / " + lastTick, 777, 382, 18, "#c2d2c7");
+  ctx.fillStyle = "#324a44";
+  ctx.fillRect(32, 410, 896, 4);
+  ctx.fillStyle = "#89e7bb";
+  ctx.fillRect(32, 410, progress * 896, 4);
+};
+</script>

@@ -36,7 +36,7 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Benchmark sources and artifacts | [bench](./bench/EGM.md) | Workloads, engine adapters, memory protocols, analysis, and report generation. |
 | Repository tooling | [tools](./tools/EGM.md) | Validation, release/package audits, pinned oracle tooling, and controlled benchmark operations. |
 | Fuzzing | [fuzz](./fuzz/EGM.md) | Separate workspace for bounded frontend/VM, stateful embedding, and differential fuzzing. |
-| Browser examples | [demos](./demos/EGM.md) | Bare-Wasm standard demo and wasm-bindgen recipe using JavaScript services. |
+| Browser examples | [demos](./demos/EGM.md) | Bare-Wasm standard demo, wasm-bindgen services recipe, and a recorded native/WebKit race replay. |
 | Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
 

@@ -2,6 +2,12 @@ check-style:
     cargo fmt --all -- --check
     cargo clippy --locked --workspace --all-targets -- -D warnings
 
+record-race:
+    node tools/browser/record-race.cjs
+
+record-hot-reload:
+    node tools/browser/record-race.cjs --hot-reload
+
 gen-progress:
     node design/render-progress.js
 

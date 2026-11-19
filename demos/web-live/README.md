@@ -7,6 +7,8 @@ as `Result: 42`. It does not measure performance.
 
 ## Build and run
 
+For the race recording, see [Record the race](#record-the-race).
+
 Start in the repository root. You need Rustup and Cargo, Python 3, and a browser
 that supports WebAssembly and JavaScript modules. Install the pinned Rust target
 and a `wasm-bindgen` CLI matching this example's dependency:
@@ -85,3 +87,44 @@ standard environment. This recipe is one integration example; browser execution
 evidence and the remaining Safari/mobile release gates are recorded separately
 in [platform acceptance](../../design/96-browser-platform-acceptance.md). A headless
 WebKit check alone does not establish Safari or mobile acceptance.
+## Record the race
+
+The recorder runs [the same Luau script](./race.luau) in a native executable and
+in WebAssembly inside headless WebKit. Each seed starts a fresh deterministic
+VM. The recorder checks every racer's distance at every tick, then draws the
+two runs side by side. Seeds 7 and 11 are recorded in one 15-second clip.
+
+Use the pinned Rust target and wasm-bindgen CLI from the build instructions,
+Node 22, and FFmpeg with `libx264` and `ffprobe`. From the repository root,
+install the browser dependencies once:
+
+```sh
+npm ci --prefix tools/browser --ignore-scripts
+tools/browser/node_modules/.bin/playwright install webkit
+```
+
+Run `just record-race`. Open `target/demo/rustia-replay.mp4` to watch it.
+For a different destination, run `node tools/browser/record-race.cjs path/to/race.mp4`.
+Set `CARGO_TARGET_DIR` to choose the build volume. To change the race, edit
+`race.luau` and record again. The existing MP4 is replaced after the new
+recording passes its trace and frame checks.
+
+The WebKit CI job records both clips automatically and retains them in the
+`rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
+execution has its own [platform evidence](../../design/96-browser-platform-acceptance.md).
+
+## Edit a running race
+
+After the browser build and serve steps above, open
+[the local race editor](http://127.0.0.1:8788/hot-reload.html).
+Place the caret after the `2` in `return x + 2` while the racer is moving.
+Press Backspace and type `2` again. After a few ticks, press Backspace again
+and pause. The editor shows Luau's error while the last good rule keeps the racer
+moving two metres per tick. Type `4` to change its speed to four metres per
+tick from its current position.
+
+Run `just record-hot-reload` to record the same sequence in headless WebKit.
+The caret blinks at the insertion point, and a keycap at the bottom shows each
+keypress. The recorder checks the racer's position at every tick and saves a
+12-second, 1280×720 clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
+`node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.

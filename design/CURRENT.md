@@ -277,6 +277,13 @@ No documentation website is planned. A public `Thread` handle, async callbacks,
 mlua-style `Scope` and a migration shim remain caller-driven optional layers,
 not first-release gates.
 
+The [race recording](../demos/web-live/README.md#record-the-race) runs two seeds
+on native Rustia and headless WebKit/Wasm. The recorder checks every recorded
+distance before rendering the MP4. The [live editor](../demos/web-live/README.md#edit-a-running-race)
+keeps one VM while replacing its Luau movement rule; its recording checks
+continued motion across successful and rejected edits. The WebKit CI job
+retains both clips in the same artifact.
+
 For maintainers: [AGENTS](../AGENTS.md) → this file → [pillars](02-pillars.md) → the
 relevant contract in the [design index](README.md). Keep built-state facts here and
 work status in GitHub Issues. Put completed chronology, run counts and detailed
