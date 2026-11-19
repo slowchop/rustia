@@ -9,7 +9,11 @@ publish = false
 [workspace]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[example]]
+name = "race-native"
+path = "race-native.rs"
 
 [dependencies]
 # Keep Rustia's default web-live feature: this application uses JavaScript services.
