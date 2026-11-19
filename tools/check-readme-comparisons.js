@@ -6,6 +6,8 @@ const { execFileSync } = require("node:child_process");
 const fs = require("fs");
 const path = require("path");
 
+const { measuredTime, renderPerformance } = require("./render-readme-performance.js");
+
 const root = path.resolve(__dirname, "..");
 
 // Keep the friendly description tied to the harness's exact unit. Timings
@@ -38,7 +40,7 @@ function verifySourceReferences(readme, checkReference) {
   const pin = dependencies[0].match(/\brev\s*=\s*"([a-f0-9]{40})"/);
   requireFact(pin, "README Git dependency needs a full source commit SHA");
   checkReference(pin[1], null);
-  for (const match of readme.matchAll(/https:\/\/github\.com\/slowchop\/rustia\/(blob|tree|commit)\/(main|[a-f0-9]{40})(\/[^\s)>\]"`#]+)?/g)) {
+  for (const match of readme.matchAll(/https:\/\/github\.com\/slowchop\/rustia\/(blob|tree|commit|raw)\/(main|[a-f0-9]{40})(\/[^\s)>\]"`#]+)?/g)) {
     const sourcePath = match[3] ? decodeURIComponent(match[3].slice(1)) : null;
     requireFact(match[1] === "commit" || sourcePath, "source links need a file or directory");
     checkReference(match[2], sourcePath);
@@ -120,21 +122,14 @@ function verify(readme, history) {
     requireFact(workUnit, `no checked work-unit description for ${workload}`);
     requireFact(cells[0] === workUnit[0], `${workload}: work-unit label must be ${JSON.stringify(workUnit[0])}`);
     snapshot.engines.forEach((engine, columnIndex) => {
-      const rows = cohort.filter((row) => row.engine === engine && row.workload === workload);
-      requireFact(rows.length === 1, `expected one history row for ${engine}/${workload}, found ${rows.length}`);
-      const row = rows[0];
-      requireFact(row.host === "ci-bench" && row.execution_mode === "interpreter",
-        `${engine}/${workload} must be a ci-bench interpreter result`);
-      requireFact(row.unit === workUnit[1], `${engine}/${workload}: unexpected history unit ${JSON.stringify(row.unit)}`);
-      requireFact(Number.isFinite(row.ns_per_unit_min) && row.ns_per_unit_min > 0,
-        `${engine}/${workload} has no valid minimum time`);
-      const expected = (row.ns_per_unit_min / 1000).toFixed(3);
+      const ns = measuredTime(cohort, engine, "interpreter", workload, workUnit[1]);
+      const expected = (ns / 1000).toFixed(3);
       requireFact(cells[columnIndex + 1] === expected,
         `${engine}/${workload}: README has ${cells[columnIndex + 1]}, history requires ${expected} microseconds`);
       count += 1;
     });
   });
-  return { count, snapshot };
+  return { count, snapshot, cohort };
 }
 
 function selfTest(readme, history) {
@@ -167,6 +162,29 @@ function selfTest(readme, history) {
     assert.throws(() => verify(readme, history.map((row) => row === first ? { ...row, ...invalid } : row)),
       /ci-bench interpreter/);
   }
+  // The figure includes compiled engines that the interpreter-only table omits.
+  const chart = data => {
+    const { cohort } = verify(readme, data);
+    return renderPerformance(snapshot, cohort, workUnits);
+  };
+  const jit = history.find(row => row.commit === snapshot.commit && row.engine === "mlua-luau-jit"
+    && row.workload === first.workload && row.timestamp_unix >= snapshot.start && row.timestamp_unix <= snapshot.end);
+  const native = history.find(row => row.commit === snapshot.commit && row.engine === "roto"
+    && row.workload === first.workload && row.timestamp_unix >= snapshot.start && row.timestamp_unix <= snapshot.end);
+  assert.ok(jit && native, "chart needs both compiled engines");
+  assert.throws(() => chart([...history, jit]), /expected one history row/);
+  for (const [row, change, failure] of [
+    [jit, { commit: "0".repeat(40) }, /expected one history row/],
+    [jit, { unit: "different work" }, /unexpected history unit/],
+    [jit, { execution_mode: "interpreter" }, /ci-bench jit/],
+    [jit, { mode_family: "rustia" }, /wrong execution-mode family/],
+    [jit, { native_verification_ratio: 1 }, /verified Luau JIT/],
+    [jit, { native_verified: false }, /verified Luau JIT/],
+    [native, { native_verification: "not-applicable" }, /verified Cranelift/],
+    [native, { native_verified: false }, /verified Cranelift/],
+  ]) {
+    assert.throws(() => chart(history.map(item => item === row ? { ...item, ...change } : item)), failure);
+  }
   // Weekly publication is independent: newer rows must not invalidate a dated table.
   verify(readme, [...history, { ...first, timestamp_unix: snapshot.end + 604800 }]);
 }
@@ -177,8 +195,22 @@ try {
     .trim().split(/\r?\n/).map((line) => JSON.parse(line));
   checkSourceReferences(readme);
   selfTest(readme, history);
-  const { count, snapshot } = verify(readme, history);
-  console.log(`README sources reachable; ${count} cells match ci-bench history at ${snapshot.commit.slice(0, 7)}`);
+  const { count, snapshot, cohort } = verify(readme, history);
+  const file = path.join(root, "crates", "rustia", "performance.svg");
+  const svg = renderPerformance(snapshot, cohort, workUnits);
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === "--write-chart") {
+    fs.writeFileSync(file, svg);
+  } else {
+    requireFact(args.length === 0, "usage: node tools/check-readme-comparisons.js [--write-chart]");
+    requireFact(fs.readFileSync(file, "utf8") === svg,
+      "crates/rustia/performance.svg has drifted; run node tools/check-readme-comparisons.js --write-chart");
+    const pin = readme.match(/^!\[[^\]\n]+\]\(https:\/\/github\.com\/slowchop\/rustia\/raw\/([a-f0-9]{40})\/crates\/rustia\/performance\.svg\)$/m);
+    requireFact(pin, "README must display performance.svg at an immutable source revision");
+    const linkedSvg = execFileSync("git", ["show", `${pin[1]}:crates/rustia/performance.svg`], { cwd: root, encoding: "utf8" });
+    requireFact(linkedSvg === svg, "README chart pin must point to the version generated from its benchmark snapshot");
+  }
+  console.log(`README sources reachable; ${count} table cells and the comparison chart match ci-bench history at ${snapshot.commit.slice(0, 7)}`);
 } catch (error) {
   console.error(`check-readme-comparisons: ${error.message}`);
   process.exit(1);

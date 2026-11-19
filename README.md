@@ -133,7 +133,12 @@ provide their own scripting language.
 ### Speed: a measured snapshot
 
 Upstream Luau via mlua was faster than Rustia on all five workloads in this run.
-These tests measure scripts already running. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md)
+The chart includes upstream C++ Luau in interpreter and JIT modes alongside the Rust implementations.
+
+![Time per workload for Rustia, luaur, ruau, C++ Luau in two modes, Koto, Rhai, and Roto. Lower is better.](https://github.com/slowchop/rustia/raw/6c1decf946af1a43e104d76fb8fb9ca9dfd11b30/crates/rustia/performance.svg)
+
+Each language has its own version of each workload. Roto uses a list for sparse
+lookups and a regular function for the closure test. The timings cover scripts already running. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md)
 also show how long each engine took to get started.
 
 <details>
