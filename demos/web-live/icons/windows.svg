@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" role="img" aria-labelledby="windows-icon-title">
+  <title id="windows-icon-title">Windows</title>
+  <rect x=".5" y=".5" width="19" height="19" rx="3" fill="#f4f5f6" stroke="#737b80"/>
+  <path fill="#1b2226" d="M3 3h6v6H3zm8 0h6v6h-6zM3 11h6v6H3zm8 0h6v6h-6z"/>
+</svg>
