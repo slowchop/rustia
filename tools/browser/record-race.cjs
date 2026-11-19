@@ -12,6 +12,7 @@ const demo = path.join(root, "demos/web-live");
 const seeds = [7, 11];
 const fps = 20;
 const framesPerHeat = 150;
+const editFrames = 240;
 
 function run(command, args) {
   execFileSync(command, args, { cwd: root, stdio: "inherit" });
@@ -29,33 +30,38 @@ function winners(trace) {
   return [0, 1, 2].filter(i => trace[firstFinish + i] === 100);
 }
 
-async function capture(target, work) {
+async function capture(target, work, editMode) {
   const manifest = ["--locked", "--manifest-path", path.join(demo, "Cargo.toml"), "--target-dir", target];
-  run("cargo", ["build", ...manifest, "--example", "race-native"]);
+  if (!editMode) run("cargo", ["build", ...manifest, "--example", "race-native"]);
   run("cargo", ["build", ...manifest, "--lib", "--release", "--target", "wasm32-unknown-unknown"]);
-  run("wasm-bindgen", ["--target", "web", "--out-dir", work, "--out-name", "race",
+  run("wasm-bindgen", ["--target", "web", "--out-dir", work, "--out-name", "rustia_example",
     path.join(target, "wasm32-unknown-unknown/release/rustia_web_live_example.wasm")]);
-
-  const native = seeds.map(seed => execFileSync(path.join(target, "debug/examples/race-native"),
-    [String(seed)], { encoding: "utf8" }).trim().split(/\s+/).map(Number));
 
   const browser = await webkit.launch({ headless: true });
   try {
-    const page = await browser.newPage();
-    // Serve exactly these three files inside the browser. No port or network access needed.
+    const page = await browser.newPage({ viewport: { width: 960, height: 448 } });
+    // Intercept the demo's HTML, JS and Wasm requests inside the browser.
     const origin = "http://race.localhost";
     const files = new Map([
       [origin + "/", [path.join(__dirname, "race-frame.html"), "text/html"]],
-      [origin + "/race.js", [path.join(work, "race.js"), "application/javascript"]],
-      [origin + "/race_bg.wasm", [path.join(work, "race_bg.wasm"), "application/wasm"]],
+      [origin + "/hot-reload.html?capture", [path.join(demo, "hot-reload.html"), "text/html"]],
+      [origin + "/pkg/rustia_example.js", [path.join(work, "rustia_example.js"), "application/javascript"]],
+      [origin + "/pkg/rustia_example_bg.wasm", [path.join(work, "rustia_example_bg.wasm"), "application/wasm"]],
     ]);
     await page.route("**/*", route => {
       const file = files.get(route.request().url());
       return file ? route.fulfill({ path: file[0], contentType: file[1] }) : route.abort();
     });
+    if (editMode) {
+      await page.goto(origin + "/hot-reload.html?capture");
+      await captureEdits(page, work);
+      return;
+    }
     await page.goto(origin);
+    const native = seeds.map(seed => execFileSync(path.join(target, "debug/examples/race-native"),
+      [String(seed)], { encoding: "utf8" }).trim().split(/\s+/).map(Number));
     const wasm = await page.evaluate(async seeds => {
-      const { default: init, race_frames } = await import("./race.js");
+      const { default: init, race_frames } = await import("./pkg/rustia_example.js");
       await init();
       return seeds.map(seed => Array.from(race_frames(seed)));
     }, seeds);
@@ -79,13 +85,48 @@ async function capture(target, work) {
   }
 }
 
+async function captureEdits(page, work) {
+  const editor = page.getByLabel("movement.luau");
+  const status = page.locator("#status");
+  await page.waitForFunction(() => window.stepRace !== undefined);
+  const original = await editor.inputValue();
+  assert.ok(original.includes("return x + 1"), "unexpected starting movement rule");
+  const edits = new Map([
+    [60, { rule: "return x + 4", state: "applied", stride: 4 }],
+    [140, { rule: "return x +", state: "rejected", stride: 4 }],
+    [200, { rule: "return x + 2", state: "applied", stride: 2 }],
+  ]);
+  let position = 0;
+  let stride = 1;
+  for (let frame = 0; frame < editFrames; frame++) {
+    const edit = edits.get(frame);
+    if (edit) {
+      await editor.fill(original.replace("return x + 1", edit.rule));
+      assert.equal(await status.getAttribute("data-state"), edit.state);
+      if (edit.state === "rejected") assert.match(await page.locator("#detail").innerText(), /movement\.luau/);
+      stride = edit.stride;
+    }
+    if (frame % 3 === 0) {
+      position += stride;
+      assert.equal(await page.evaluate(() => window.stepRace()), position);
+      assert.equal(await page.locator("#distance").innerText(), position + " m");
+    }
+    await page.screenshot({ path: path.join(work, String(frame).padStart(3, "0") + ".png"), caret: "hide" });
+  }
+  console.log("Verified two live swaps and continued motion after a rejected edit.");
+}
+
 async function main() {
-  const output = path.resolve(process.argv[2] || "target/demo/rustia-replay.mp4");
+  const args = process.argv.slice(2);
+  const editMode = args[0] === "--hot-reload";
+  if (editMode) args.shift();
+  assert.ok(args.length <= 1, "usage: record-race.cjs [--hot-reload] [output.mp4]");
+  const output = path.resolve(args[0] || (editMode ? "target/demo/rustia-hot-reload.mp4" : "target/demo/rustia-replay.mp4"));
   const target = path.resolve(process.env.CARGO_TARGET_DIR || path.join(demo, "target"));
   fs.mkdirSync(target, { recursive: true });
   const work = fs.mkdtempSync(path.join(target, "record-"));
   try {
-    await capture(target, work);
+    await capture(target, work, editMode);
     fs.mkdirSync(path.dirname(output), { recursive: true });
     const staging = fs.mkdtempSync(path.join(path.dirname(output), ".rustia-race-"));
     try {
@@ -98,7 +139,7 @@ async function main() {
       const [stream] = probe.streams;
       assert.equal(stream.codec_name, "h264");
       assert.deepEqual([stream.width, stream.height], [960, 448]);
-      assert.equal(Number(stream.nb_read_frames), framesPerHeat * seeds.length);
+      assert.equal(Number(stream.nb_read_frames), editMode ? editFrames : framesPerHeat * seeds.length);
       assert.equal(stream.avg_frame_rate, fps + "/1");
       fs.renameSync(video, output);
       console.log("Saved " + output);

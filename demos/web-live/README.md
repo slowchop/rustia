@@ -109,6 +109,21 @@ Set `CARGO_TARGET_DIR` to choose the build volume. To change the race, edit
 `race.luau` and record again. The existing MP4 is replaced after the new
 recording passes its trace and frame checks.
 
-The WebKit CI job records automatically and retains the `rustia-replay` artifact
-for seven days. This clip shows the headless WebKit engine. Physical iPad Safari
+The WebKit CI job records both clips automatically and retains them in the
+`rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
 execution has its own [platform evidence](../../design/96-browser-platform-acceptance.md).
+
+## Edit a running race
+
+After the browser build and serve steps above, open
+[the local race editor](http://127.0.0.1:8788/hot-reload.html).
+Change `return x + 1` to `return x + 4` while the racer is moving. Its
+position carries over and the next tick moves four metres. Delete the `4`:
+the editor shows Luau's error, and the last good rule keeps moving the racer.
+Type `2` to install a working rule again.
+
+Run `just record-hot-reload` to record those edits automatically. The recorder
+types into the same editor and checks the displayed position against every
+expected step, including the steps after the failed edit. It saves a 12-second
+clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
+`node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.

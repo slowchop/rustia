@@ -1,6 +1,9 @@
 //! Application-side JavaScript boundary for the browser setup recipe.
 #![forbid(unsafe_code)]
 
+mod live_racer;
+pub use live_racer::LiveRacer;
+
 use rustia::RustiaBuilder;
 use wasm_bindgen::prelude::*;
 

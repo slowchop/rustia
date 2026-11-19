@@ -10,6 +10,7 @@ feature, the explicit `live()` preset, and wasm-bindgen's generated JavaScript g
 - [Cargo.toml](./Cargo.toml) and Cargo.lock pin the standalone application dependencies.
 - [src](./src/EGM.md) exports the application's `run_example` JavaScript function.
 - [index.html](./index.html) initializes the generated module and displays the result.
+- [hot-reload.html](./hot-reload.html) keeps one Wasm session while the user edits its movement rule. Capture mode advances the same session by explicit ticks.
 - [race.luau](./race.luau) defines three racers' progress; [race-native.rs](./race-native.rs) emits distances for the native half of the recording.
 - [README.md](./README.md) contains the build, serve, and verification recipe.
 

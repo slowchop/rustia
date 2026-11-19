@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rustia · Edit a running race</title>
+<style>
+  * { box-sizing: border-box }
+  body { margin: 0; color: #f1f4e9; background: #122323; font: 16px system-ui, sans-serif }
+  main { max-width: 960px; margin: auto; padding: 24px 32px }
+  header { color: #89e7bb; font-weight: 700; font-size: 20px }
+  h1 { font-size: clamp(30px, 5vw, 46px); margin: 10px 0 21px; line-height: 1.1 }
+  section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px }
+  article { background: #1b3331; padding: 16px; min-width: 0 }
+  label, h2 { display: block; font-size: 18px; font-weight: 650; margin: 0 0 10px }
+  textarea { width: 100%; height: 118px; resize: none; display: block; background: #142826;
+    color: #f1f4e9; border: 1px solid #47665d; border-radius: 3px; padding: 8px;
+    font: 16px/1.22 ui-monospace, monospace; tab-size: 2; white-space: pre }
+  textarea:focus { outline: 2px solid #89e7bb }
+  #distance { display: block; font-size: 32px; font-weight: 650; margin: 14px 0 13px }
+  #track { height: 6px; background: #4a645c; position: relative; margin: 0 12px 15px 5px }
+  #racer { position: absolute; top: -5px; width: 16px; height: 16px; background: #89e7bb;
+    border-radius: 3px; transform: translateX(-5px) rotate(45deg) }
+  #stride { color: #c2d2c7 }
+  #status { margin: 18px 0 2px; color: #89e7bb; font-weight: 650; font-size: 21px }
+  #status[data-state="rejected"], #status[data-state="error"] { color: #ffab8e }
+  #detail { color: #d2dfd4; margin: 3px 0; font: 14px/1.4 ui-monospace, monospace;
+    white-space: pre-wrap; max-height: 60px; overflow: auto }
+  @media (max-width: 640px) { main { padding: 16px } section { grid-template-columns: 1fr } }
+</style>
+<main>
+  <header>Rustia</header><h1>Edit a running race</h1>
+  <section>
+    <article><label for="source">movement.luau</label><textarea id="source" spellcheck="false" disabled>return {
+  advance = function(x)
+    return x + 1
+  end,
+}</textarea></article>
+    <article><h2>Racer position</h2><output id="distance">0 m</output>
+      <div id="track"><span id="racer"></span></div><span id="stride">Waiting for the first tick</span>
+    </article>
+  </section>
+  <p id="status" role="status" data-state="loading">Loading Rustia…</p>
+  <pre id="detail">Change the distance added each tick.</pre>
+</main>
+<script type="module">
+  import init, { LiveRacer } from "./pkg/rustia_example.js";
+  const el = id => document.getElementById(id);
+  const source = el("source");
+  function status(state, title, detail) {
+    el("status").dataset.state = state;
+    el("status").textContent = title;
+    el("detail").textContent = detail;
+  }
+  try {
+    await init();
+    const session = new LiveRacer(source.value);
+    let position = 0;
+    let paused = false;
+    function tick() {
+      if (paused) return position;
+      try {
+        const next = session.step();
+        const delta = next - position;
+        el("distance").textContent = next + " m";
+        el("stride").textContent = (delta >= 0 ? "+" : "") + delta + " m per tick";
+        el("racer").style.left = (next % 100) + "%";
+        position = next;
+      } catch (error) {
+        paused = true;
+        status("error", "Movement paused", String(error));
+      }
+      return position;
+    }
+    source.addEventListener("input", () => {
+      try {
+        session.reload(source.value);
+        paused = false;
+        status("applied", "Edit applied", "The new rule starts at the current position.");
+      } catch (error) {
+        status("rejected", "Edit rejected · previous rule still installed", String(error));
+      }
+    });
+    source.disabled = false;
+    status("ready", "Rule loaded", "Change the distance added each tick.");
+    // The recorder advances the same tick function once per simulated step.
+    if (new URLSearchParams(location.search).has("capture")) window.stepRace = tick;
+    else setInterval(tick, 150);
+  } catch (error) {
+    status("error", "Could not start Rustia", String(error));
+  }
+</script>
+</html>

@@ -323,11 +323,14 @@ jobs:
         run: |
           apt-get install -y --no-install-recommends ffmpeg
           node tools/browser/record-race.cjs target/demo/rustia-replay.mp4
+          node tools/browser/record-race.cjs --hot-reload target/demo/rustia-hot-reload.mp4
       - name: Save the race recording
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rustia-replay
-          path: target/demo/rustia-replay.mp4
+          path: |
+            target/demo/rustia-replay.mp4
+            target/demo/rustia-hot-reload.mp4
           if-no-files-found: error
           retention-days: 7
 
