@@ -12,7 +12,7 @@ Pinned Playwright WebKit support for the shared WebAssembly correctness suite. H
 - [web-live-example.cjs](./web-live-example.cjs) serves the documented application with Python on an ephemeral loopback port, then checks initialization, returned `42`, console output, repeated calls and reload in real headless WebKit. It can save an optional screenshot through `RUSTIA_EXAMPLE_SCREENSHOT`.
 - [The parent coordinator](../run-browser-correctness.sh) selects browser/mode suites and validates aggregate execution evidence.
 - [record-race.cjs](./record-race.cjs) compares native and WebKit/Wasm race traces, drives the [recording canvas](./race-frame.html) by tick, and atomically replaces the MP4 after validating its frames.
-- [record-edits.cjs](./record-edits.cjs) drives the editor in `--hot-reload` mode. It draws a pointer and keycaps from browser input events, checks every tick through valid and invalid edits, and captures frames at 1280×720.
+- [record-edits.cjs](./record-edits.cjs) drives the editor in `--hot-reload` mode. It drives real key events, draws a blinking caret at the text insertion point, shows keycaps and checks every tick through valid and invalid edits. It captures frames at 1280×720.
 
 ## Invariants
 

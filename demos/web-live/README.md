@@ -117,14 +117,14 @@ execution has its own [platform evidence](../../design/96-browser-platform-accep
 
 After the browser build and serve steps above, open
 [the local race editor](http://127.0.0.1:8788/hot-reload.html).
-Change `return x + 1` to `return x + 4` while the racer is moving. Its
-position carries over and the next tick moves four metres. Delete the `4`:
-the editor shows Luau's error, and the last good rule keeps moving the racer.
-Type `2` to install a working rule again.
+Place the caret after the `2` in `return x + 2` while the racer is moving.
+Press Backspace and type `2` again. After a few ticks, press Backspace again
+and pause. The editor shows Luau's error while the last good rule keeps the racer
+moving two metres per tick. Type `4` to change its speed to four metres per
+tick from its current position.
 
-Run `just record-hot-reload` to record those edits automatically. The pointer
-selects the digit in the editor, and a keycap at the bottom shows each key as
-it is pressed. The recorder checks the racer's position at every tick, including
-after the rejected edit. It saves a 12-second, 1280×720 clip in
-`target/demo/rustia-hot-reload.mp4`. To choose a different path, use
+Run `just record-hot-reload` to record the same sequence in headless WebKit.
+The caret blinks at the insertion point, and a keycap at the bottom shows each
+keypress. The recorder checks the racer's position at every tick and saves a
+12-second, 1280×720 clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
 `node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.
