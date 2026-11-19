@@ -203,8 +203,9 @@ try {
     fs.writeFileSync(file, svg);
   } else {
     requireFact(args.length === 0, "usage: node tools/check-readme-comparisons.js [--write-chart]");
-    requireFact(fs.readFileSync(file, "utf8") === svg,
+    requireFact(fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n") === svg,
       "crates/rustia/performance.svg has drifted; run node tools/check-readme-comparisons.js --write-chart");
+    require("./sync-luau-comparison.js").syncComparison();
     const pin = readme.match(/^!\[[^\]\n]+\]\(https:\/\/github\.com\/slowchop\/rustia\/raw\/([a-f0-9]{40})\/crates\/rustia\/performance\.svg\)$/m);
     requireFact(pin, "README must display performance.svg at an immutable source revision");
     const linkedSvg = execFileSync("git", ["show", `${pin[1]}:crates/rustia/performance.svg`], { cwd: root, encoding: "utf8" });

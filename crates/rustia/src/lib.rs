@@ -46,6 +46,8 @@
 //! when a script needs the current time or a fresh random seed. To limit a script’s
 //! work or memory, set [`RustiaBuilder::fuel`] or [`RustiaBuilder::memory_limit_bytes`].
 //!
+#![doc = include_str!("../compare.md")]
+//!
 //! # Performance
 //!
 //! The chart compares five workloads on Linux x86-64. Each language has its own

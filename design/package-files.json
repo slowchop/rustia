@@ -1481,7 +1481,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 84,
+      "file_count": 85,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1491,6 +1491,7 @@
         "LICENSE-APACHE",
         "LICENSE-MIT",
         "README.md",
+        "compare.md",
         "examples/EGM.md",
         "examples/chunk_builder.rs",
         "examples/diagnostics.rs",
