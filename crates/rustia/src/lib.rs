@@ -46,6 +46,8 @@
 //! when a script needs the current time or a fresh random seed. To limit a script’s
 //! work or memory, set [`RustiaBuilder::fuel`] or [`RustiaBuilder::memory_limit_bytes`].
 //!
+// Keep comparison rows together in Rustdoc's horizontally scrollable table.
+#![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
 #![doc = include_str!("../compare.md")]
 //!
 //! # Performance

@@ -20,10 +20,9 @@ a { color: #17664a; text-underline-offset: .15em; }
 .doc-anchor { margin-inline-end: .35em; font-size: .7em; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
-td, th { text-align: left; vertical-align: top; padding: .65rem; border-bottom: 1px solid #c7d6cc; }
+td, th { text-align: left; vertical-align: middle; white-space: nowrap; padding: .45rem .65rem; border-bottom: 1px solid #c7d6cc; }
 thead th { background: #e4eee6; }
-td:first-child, th:first-child { min-width: 7rem; }
-td { min-width: 8rem; }
+img { vertical-align: middle; }
 svg { display: block; }
 
 @media (prefers-color-scheme: dark) {
