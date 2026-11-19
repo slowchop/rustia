@@ -43,7 +43,6 @@
   <pre id="detail">Change the distance added each tick.</pre>
 </main>
 <script type="module">
-  import init, { LiveRacer } from "./pkg/rustia_example.js";
   const el = id => document.getElementById(id);
   const source = el("source");
   function status(state, title, detail) {
@@ -52,6 +51,7 @@
     el("detail").textContent = detail;
   }
   try {
+    const { default: init, LiveRacer } = await import("./pkg/rustia_example.js");
     await init();
     const session = new LiveRacer(source.value);
     let position = 0;
