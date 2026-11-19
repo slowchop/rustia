@@ -5,6 +5,9 @@ check-style:
 record-race:
     node tools/browser/record-race.cjs
 
+readme-race: record-race
+    sh tools/browser/render-demo-gif.sh target/demo/rustia-replay.mp4 demos/web-live/race.gif
+
 record-hot-reload:
     node tools/browser/record-race.cjs --hot-reload
 

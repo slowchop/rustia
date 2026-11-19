@@ -1,46 +1,24 @@
 # Rustia
 
-Rustia is a Luau interpreter written in Rust. Use it to add game logic,
-configuration, or user-written scripts to a Rust application, on native platforms
-or WebAssembly.
+Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
+application or replay a simulation on native and WebAssembly targets.
 
-Call Rust functions from scripts, read results as Rust types, and choose whether
-scripts use real clocks and randomness or run reproducibly for simulations and replay.
+**Deterministic replay.** The same Luau script runs natively on the left and as
+WebAssembly in a browser on the right. With the same random seed, each racer
+takes the same steps on both tracks. Change the seed and the winner changes
+from Mint to Iris. [Record the race](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race).
 
-**Hot reload in the browser.** The racer keeps moving when an edit introduces a syntax
-error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick. [Run the demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#edit-a-running-race).
-
-![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
-
-Rustia is **pre-release and currently private**. Packages are unpublished at
-0.0.1, and the API can still change.
-Source availability is separate from a supported release. Compatibility claims
-cover the tested behavior in the conformance corpus, not full Luau parity on
-every platform. See the [platform evidence](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
-for executed tests and remaining gaps. Contribution and support policies are
-undecided; source access does not promise either service.
-
-The default application facade is thread-affine. Enable the `transferable`
-Cargo feature when an idle interpreter and its live handles must move between
-worker threads. Execution still requires exclusive mutable access; the feature
-does not allow concurrent entry into one interpreter. Transferable service
-closures require `Send`; entropy providers require `Fn + Send + Sync`, and
-Rust object payloads require `Send + Sync`. Cargo unifies dependency features:
-if another dependency enables `rustia-vm/send`, the application must also
-enable `rustia/transferable`. The unmatched mixed graph is unsupported and
-intentionally rejected.
+![Native and WebAssembly replays side by side. Mint wins with seed 7 and Iris wins with seed 11 on both.](https://github.com/slowchop/rustia/raw/fdcb4bae6d376bc6f323cc47b70521479008133a/demos/web-live/race.gif)
 
 ## Try it
 
-Add this to your application's `Cargo.toml` (Rust 1.95 or newer):
+Rustia is still private and unpublished. With Rust 1.95 or newer and access to
+the repository, add this dependency to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
 rustia = { git = "https://github.com/slowchop/rustia", rev = "b84b5f6715e31756f00d1f39e72c8246f179b174" }
 ```
-
-This pin selects the verified cleaned-source baseline. Historical benchmark
-source IDs remain unchanged in the evidence.
 
 Put this in `src/main.rs` and run `cargo run`:
 
@@ -112,6 +90,11 @@ restores the previous script state. Keep the old exports until a replacement
 succeeds to support [hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs).
 External actions performed by Rust callbacks are outside this rollback.
 
+**Hot reload in the browser.** The racer keeps moving when an edit introduces a syntax
+error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick. [Run the demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#edit-a-running-race).
+
+![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
+
 For structured data, use `eval_serde` with Serde. Your application also needs
 `serde = { version = "1", features = ["derive"] }` in its dependencies to derive
 Rust data types. For shared or cyclic tables, keep
@@ -167,6 +150,7 @@ you do not need to read the VM design documents first.
 | Task | Example |
 | --- | --- |
 | Run scripts, pass data and call Rust functions | [Embedding](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs) |
+| Move an idle interpreter to another thread | [Threading guide](https://github.com/slowchop/rustia/blob/main/design/75-embedded-api.md#transferable-application-facade-2026-11-17) |
 | Give scripts methods on Rust objects | [Mutable objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs), then [staged game objects](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/game_objects.rs) |
 | Keep shared tables and script functions alive | [Live values](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs) |
 | Load modules through a Rust resolver | [Module resolution](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs) |
@@ -272,6 +256,8 @@ startup costs, and [raw snapshot provenance](https://github.com/slowchop/rustia/
 See the [benchmark limitations](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md) for the scope of these comparisons.
 
 ## Project status and source access
+
+The API can still change before release. The [platform test results](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md) list which targets have run the compatibility tests.
 
 Source preparation: this cleaned-history candidate is not yet public. Packages
 remain unpublished at 0.0.1. Historical benchmark records retain their original

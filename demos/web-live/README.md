@@ -87,6 +87,7 @@ standard environment. This recipe is one integration example; browser execution
 evidence and the remaining Safari/mobile release gates are recorded separately
 in [platform acceptance](../../design/96-browser-platform-acceptance.md). A headless
 WebKit check alone does not establish Safari or mobile acceptance.
+
 ## Record the race
 
 The recorder runs [the same Luau script](./race.luau) in a native executable and
@@ -108,6 +109,9 @@ For a different destination, run `node tools/browser/record-race.cjs path/to/rac
 Set `CARGO_TARGET_DIR` to choose the build volume. To change the race, edit
 `race.luau` and record again. The existing MP4 is replaced after the new
 recording passes its trace and frame checks.
+
+Run `just readme-race` to record both races and export the [README animation](./race.gif).
+After committing a new GIF, use its commit SHA in the race image URL in the project README.
 
 The WebKit CI job records both clips automatically and retains them in the
 `rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
