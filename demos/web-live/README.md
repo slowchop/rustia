@@ -122,8 +122,9 @@ position carries over and the next tick moves four metres. Delete the `4`:
 the editor shows Luau's error, and the last good rule keeps moving the racer.
 Type `2` to install a working rule again.
 
-Run `just record-hot-reload` to record those edits automatically. The recorder
-types into the same editor and checks the displayed position against every
-expected step, including the steps after the failed edit. It saves a 12-second
-clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
+Run `just record-hot-reload` to record those edits automatically. The pointer
+selects the digit in the editor, and a keycap at the bottom shows each key as
+it is pressed. The recorder checks the racer's position at every tick, including
+after the rejected edit. It saves a 12-second, 1280×720 clip in
+`target/demo/rustia-hot-reload.mp4`. To choose a different path, use
 `node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.

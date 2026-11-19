@@ -6,13 +6,13 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { webkit } = require("playwright");
+const { captureEdits, editFrames } = require("./record-edits.cjs");
 
 const root = path.resolve(__dirname, "../..");
 const demo = path.join(root, "demos/web-live");
 const seeds = [7, 11];
 const fps = 20;
 const framesPerHeat = 150;
-const editFrames = 240;
 
 function run(command, args) {
   execFileSync(command, args, { cwd: root, stdio: "inherit" });
@@ -30,7 +30,7 @@ function winners(trace) {
   return [0, 1, 2].filter(i => trace[firstFinish + i] === 100);
 }
 
-async function capture(target, work, editMode) {
+async function capture(target, work, editMode, viewport) {
   const manifest = ["--locked", "--manifest-path", path.join(demo, "Cargo.toml"), "--target-dir", target];
   if (!editMode) run("cargo", ["build", ...manifest, "--example", "race-native"]);
   run("cargo", ["build", ...manifest, "--lib", "--release", "--target", "wasm32-unknown-unknown"]);
@@ -39,7 +39,7 @@ async function capture(target, work, editMode) {
 
   const browser = await webkit.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 960, height: 448 } });
+    const page = await browser.newPage({ viewport });
     // Intercept the demo's HTML, JS and Wasm requests inside the browser.
     const origin = "http://race.localhost";
     const files = new Map([
@@ -85,40 +85,10 @@ async function capture(target, work, editMode) {
   }
 }
 
-async function captureEdits(page, work) {
-  const editor = page.getByLabel("movement.luau");
-  const status = page.locator("#status");
-  await page.waitForFunction(() => window.stepRace !== undefined);
-  const original = await editor.inputValue();
-  assert.ok(original.includes("return x + 1"), "unexpected starting movement rule");
-  const edits = new Map([
-    [60, { rule: "return x + 4", state: "applied", stride: 4 }],
-    [140, { rule: "return x +", state: "rejected", stride: 4 }],
-    [200, { rule: "return x + 2", state: "applied", stride: 2 }],
-  ]);
-  let position = 0;
-  let stride = 1;
-  for (let frame = 0; frame < editFrames; frame++) {
-    const edit = edits.get(frame);
-    if (edit) {
-      await editor.fill(original.replace("return x + 1", edit.rule));
-      assert.equal(await status.getAttribute("data-state"), edit.state);
-      if (edit.state === "rejected") assert.match(await page.locator("#detail").innerText(), /movement\.luau/);
-      stride = edit.stride;
-    }
-    if (frame % 3 === 0) {
-      position += stride;
-      assert.equal(await page.evaluate(() => window.stepRace()), position);
-      assert.equal(await page.locator("#distance").innerText(), position + " m");
-    }
-    await page.screenshot({ path: path.join(work, String(frame).padStart(3, "0") + ".png"), caret: "hide" });
-  }
-  console.log("Verified two live swaps and continued motion after a rejected edit.");
-}
-
 async function main() {
   const args = process.argv.slice(2);
   const editMode = args[0] === "--hot-reload";
+  const viewport = editMode ? { width: 1280, height: 720 } : { width: 960, height: 448 };
   if (editMode) args.shift();
   assert.ok(args.length <= 1, "usage: record-race.cjs [--hot-reload] [output.mp4]");
   const output = path.resolve(args[0] || (editMode ? "target/demo/rustia-hot-reload.mp4" : "target/demo/rustia-replay.mp4"));
@@ -126,7 +96,7 @@ async function main() {
   fs.mkdirSync(target, { recursive: true });
   const work = fs.mkdtempSync(path.join(target, "record-"));
   try {
-    await capture(target, work, editMode);
+    await capture(target, work, editMode, viewport);
     fs.mkdirSync(path.dirname(output), { recursive: true });
     const staging = fs.mkdtempSync(path.join(path.dirname(output), ".rustia-race-"));
     try {
@@ -138,7 +108,7 @@ async function main() {
         "-show_entries", "stream=codec_name,width,height,nb_read_frames,avg_frame_rate", "-of", "json", video]));
       const [stream] = probe.streams;
       assert.equal(stream.codec_name, "h264");
-      assert.deepEqual([stream.width, stream.height], [960, 448]);
+      assert.deepEqual([stream.width, stream.height], [viewport.width, viewport.height]);
       assert.equal(Number(stream.nb_read_frames), editMode ? editFrames : framesPerHeat * seeds.length);
       assert.equal(stream.avg_frame_rate, fps + "/1");
       fs.renameSync(video, output);
