@@ -1,18 +1,13 @@
-# Dormant public-source proposals
+# Public correctness workflow inventory
 
 Parent: [repository map](../../EGM.md).
 
-- `ci.yml` and `error-fuzz.yml` are inactive hosted workflow proposals derived
-  from the current private correctness inventory. They use fixed standard hosted
-  labels and no private credentials or runner groups.
-- `README.md` explains verification, unproven hosted execution and activation.
-- `SECURITY.md` is a proposed root security policy; it becomes operative only
-  after maintainer approval and a verified private reporting route.
+- [ci.yml](ci.yml) and [error-fuzz.yml](error-fuzz.yml) mirror the hosted
+  correctness inventory selected in the [source profile](../../design/public-source-profile.json).
+  GitHub executes the files in [workflows](../workflows/).
+- [README.md](README.md) describes the triggers, execution scope and launch verification.
+- [SECURITY.md](SECURITY.md) points to the [active reporting policy](../../SECURITY.md).
 
-No file in this directory is an active GitHub Actions workflow. Current private
-ordinary workflow and source-profile bytes remain unchanged. The separate manual
-rehearsal pair in `.github/workflows/` tests this exact command inventory with
-private/maintainer/main/SHA/confirmation guards and extended work off by default.
-`tools/check-public-source-candidate.js` checks proposal and rehearsal parity,
-negative fixtures and a disposable selected-profile activation without changing
-the live source profile or visibility.
+The source workflow validator checks the required job inventory, hosted runners,
+read-only permissions and event triggers. The `public` event starts both
+workflows at the visibility change. Timing authority stays private.

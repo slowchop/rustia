@@ -1,8 +1,8 @@
 # rustia — continuous perf-benchmark suite + CI (design)
 
-> **Status: [HARNESS IMPLEMENTED — public automation paused; private cohorts available; standalone split pending] (updated 2026-11-15).** Initially scoped by the `bench-scoping` agent (clone+read of
+> **Status: [HARNESS IMPLEMENTED — public automation paused; private cohorts available; standalone split pending] (updated 2026-11-20).** Initially scoped by the `bench-scoping` agent (clone+read of
 > `khvzak/script-bench-rs`, the 11-workload seed in `spikes/bench-suite/`, and the 2025–26 tracker/wasm-shell
-> tooling) under dedicated ephemeral-Linux constraints. The active public-source profile runs private self-hosted
+> tooling) under dedicated ephemeral-Linux constraints. The active public-source profile runs standard GitHub-hosted
 > correctness and artifact checks. Public measurement automation and publication remain paused.
 > A trusted private bridge admits reviewed exact-cohort runtime comparisons and the separately
 > reviewed #33 harness-lifetime repeatability controls; outputs remain private. Committed public results are historical. The owned-host procedures below describe the

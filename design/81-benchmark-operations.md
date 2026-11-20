@@ -1,17 +1,17 @@
 # Benchmark operations and public freshness
 
-> **Historical private operations contract; public-source profile is paused.** This document records how Rustia
+> **Historical private operations contract; public benchmark automation is paused.** This document records how Rustia
 > performance evidence is measured, refreshed, and published. It complements
 > [`80-bench-suite.md`](80-bench-suite.md), which defines the harness and
 > measurement protocol.
 
 ## Public-source profile
 
-The public-source tree runs correctness and artifact validation on ordinary private self-hosted
-runners. Public repositories and fork PRs cannot use these persistent pools,
-and there is no hosted fallback. Public per-commit/history measurement, benchmark-data publication, and
-landscape refresh remain paused. A separate private maintainer bridge is
-available for manually dispatched, reviewed exact-cohort runtime comparisons.
+The public source tree runs correctness and artifact validation on standard
+GitHub-hosted runners. Public per-commit/history measurement, benchmark-data
+publication and landscape refresh remain paused. The separate private
+maintainer bridge retains its reviewed exact-cohort intake rules.
+
 The #33 harness-lifetime repeatability controls use a separately reviewed,
 immutable private protocol. Both stay private, do not update public history, and do not
 authorize public performance claims. The committed benchmark records remain
@@ -20,7 +20,7 @@ stability. Bridge availability does not accept a performance result. No public
 workflow dispatches a benchmark or publishes benchmark data.
 `design/public-source-profile.json` records the bridge's narrow
 availability state, while the public workflow, operations-status, and report
-validators continue to enforce private self-hosted correctness only.
+validators enforce the hosted correctness inventory and keep benchmark execution private.
 
 The runner and publication procedures below describe the retained private
 operations contract. They are not active public-source automation. Resuming

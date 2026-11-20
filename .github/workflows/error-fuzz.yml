@@ -1,6 +1,7 @@
 name: Error behaviour and fuzzing
 
 "on":
+  public:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -9,16 +10,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: error-fuzz-${{ github.event.pull_request.number || github.ref }}
+  group: error-fuzz-${{ github.event_name == 'public' && 'launch' || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   differential-smoke:
-    if: github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on:
-      group: general-linux
-      labels: [self-hosted, Linux, X64, general-linux]
-    timeout-minutes: 20
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -39,10 +38,8 @@ jobs:
 
   campaign:
     # Long campaigns run only after an explicit workflow dispatch.
-    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch'
-    runs-on:
-      group: general-linux
-      labels: [self-hosted, Linux, X64, general-linux]
+    if: github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
     timeout-minutes: 170
     strategy:
       fail-fast: false

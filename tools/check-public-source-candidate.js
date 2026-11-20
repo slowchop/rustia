@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// Dormant proposal only. This tool never activates workflows or changes settings.
+// Validate or render workflow candidates without changing any repository settings.
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
@@ -27,14 +27,20 @@ function proposedWorkflow(name, original) {
     const safari = text.indexOf("\n  safari-runtime:\n");
     assert(safari > 0, "private Safari job must exist before explicit public deferral");
     text = text.replace(/\n  safari-runtime:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/, "");
+    const macSetup = /      - name: Install pinned Rust toolchain\n[\s\S]*?(?=\n\n      - name: Verify native)/;
+    assert(macSetup.test(text), "missing native macOS toolchain installation");
+    text = text.replace(macSetup, privateProfile.HOSTED_MAC_SETUP);
     const triggers = text.indexOf('"on":\n');
     const permissions = text.indexOf("\npermissions:\n", triggers);
     assert(triggers > 0 && permissions > triggers, "private trigger boundary missing");
-    text = `name: CI\n\n# Dormant public-source proposal. Activate only after the reviewed visibility gates.\n${text.slice(triggers, permissions).replace(/  workflow_dispatch:[\s\S]*/, "  workflow_dispatch:\n")}${text.slice(permissions)}`;
+    text = `name: CI\n\n# Run public correctness checks on standard GitHub-hosted runners.\n${text.slice(triggers, permissions).replace(/  workflow_dispatch:[\s\S]*/, "  workflow_dispatch:\n")}${text.slice(permissions)}`;
   } else {
     assert.equal(name, "error-fuzz.yml");
     privateProfile.checkErrorFuzz(text);
   }
+  text = text.replace('"on":\n', '"on":\n  public:\n');
+  const group = name === "ci.yml" ? "github.ref" : "github.event.pull_request.number || github.ref";
+  text = text.replace(`\${{ ${group} }}`, `\${{ github.event_name == 'public' && 'launch' || ${group} }}`);
   text = text.replaceAll(PRIVATE_PR, PUBLIC).replaceAll(PRIVATE_MANUAL, PUBLIC_MANUAL);
   text = text.replace(/runs-on:\n      group: (general-linux|general-macos|general-windows)\n      labels: \[[^\n]+\]/g,
     (_whole, group) => `runs-on: ${RUNNERS[group]}`);
@@ -51,6 +57,11 @@ function checkCandidate(name, actual, original = null) {
     assert.deepEqual(jobIds(actual), jobIds(original).filter((id) => id !== "safari-runtime"),
       `${name}: public jobs must preserve every non-Safari private job`);
   }
+  const launchGroup = name === "ci.yml"
+    ? "ci-${{ github.workflow }}-${{ github.event_name == 'public' && 'launch' || github.ref }}"
+    : "error-fuzz-${{ github.event_name == 'public' && 'launch' || github.event.pull_request.number || github.ref }}";
+  assert(actual.includes(`\nconcurrency:\n  group: ${launchGroup}\n  cancel-in-progress: true\n`),
+    "the visibility run must have its own concurrency group");
   const runnerLines = [...actual.matchAll(/^    runs-on: (.+)$/gm)].map((m) => m[1]);
   const expected = name === "ci.yml" ? 8 : 2;
   assert.equal(runnerLines.length, expected, `${name}: unexpected public job inventory`);
@@ -129,6 +140,8 @@ function selfTest(root) {
     (s) => s.replace("node tools/browser/web-live-example.cjs", "true"),
     (s) => s.replace("sha512sum --check --status", "true"),
     (s) => s.replace(PUBLIC, PRIVATE_PR),
+    (s) => s.replace("  public:\n", ""),
+    (s) => s.replace("github.event_name == 'public' && 'launch' || ", ""),
     (s) => s.replace("pull_request:", "pull_request_target:"),
     (s) => `${s}\n# secrets.DEPLOY_KEY\n`,
   ]) {
@@ -142,6 +155,10 @@ function selfTest(root) {
     assert.throws(() => checkCandidate("ci.yml", changed));
     cases += 1;
   }
+  const fuzzSource = fs.readFileSync(path.join(root, ".github/workflows/error-fuzz.yml"), "utf8");
+  const fuzz = hosted ? fuzzSource : proposedWorkflow("error-fuzz.yml", fuzzSource);
+  assert.throws(() => checkCandidate("error-fuzz.yml", fuzz.replace("run: node tools/audit-release-errors.mjs", "run: true")), /diagnostic parity/);
+  cases += 1;
   if (!hosted) {
     const rehearsal = rehearsalWorkflow("ci.yml", canonical);
     for (const [from, to] of [
@@ -205,5 +222,5 @@ module.exports = { proposedWorkflow, rehearsalWorkflow, checkCandidate, readChec
 if (require.main === module) {
   const root = path.resolve(__dirname, "..");
   const result = process.argv.includes("--self-test") ? selfTest(root) : readCheckout(root, process.argv.includes("--write"));
-  console.log(`dormant public-source candidate ok: ${JSON.stringify(result)}`);
+  console.log(`public-source workflow candidate ok: ${JSON.stringify(result)}`);
 }

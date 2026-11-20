@@ -1,13 +1,14 @@
 # Rustia build and maintenance notes
 
-Source access, package releases, and outside contributions are separate decisions.
-The policy for accepting outside contributions has not been decided. These notes
-explain how to build the source and maintain the repository; they do not establish
-an issue-reporting or review service. Start with the [README](README.md) to try the API.
+Rustia is available for inspection and experimental use under MIT OR Apache-2.0.
+Start with the [README](README.md) to try the API. GitHub Issues serves the
+maintainer backlog. Issues and pull requests are publicly readable. Creating
+either is restricted to repository collaborators. For private
+vulnerability reports, see [SECURITY.md](SECURITY.md).
 
 ## Issue-driven development
 
-[GitHub Issues](https://github.com/slowchop/rustia/issues) is the primary development
+For maintainers, [GitHub Issues](https://github.com/slowchop/rustia/issues) is the primary development
 backlog. It tracks bugs, features, documentation, maintenance, priorities and work
 in progress. Search existing open and closed issues before creating one. Each
 issue should name a concrete outcome, relevant design/oracle evidence and checks
@@ -28,8 +29,7 @@ Issues own work status and priority. [CURRENT](design/CURRENT.md) records built
 behavior and constraints; design docs and the pinned Luau oracle remain the
 specification. Keep backlog checklists in Issues rather than duplicating them in
 CURRENT or chat. Private infrastructure tasks belong in `rustia-ops`.
-This is the private maintainer workflow; outside contribution and public support
-policies remain undecided.
+The experimental source release has no support or review deadline.
 
 ## Build and test
 
@@ -134,11 +134,8 @@ pending measurements. Use a **merge commit** to preserve reviewed commit identit
 Checks and independent reviews must pass without blocking findings; never bypass
 protection, reviews, or failing checks.
 
-As of private staging on 2026-10-29, the new repository's protection and merge
-settings await approval: no required-check ruleset is configured, auto-merge is
-off, and squash/rebase remain available. The intended configuration requires
-checks, permits only merge commits, and enables auto-merge when changes are ready.
-That configuration has not yet been applied.
+Check the live ruleset and merge settings before delivery. Preserve the required
+checks and use merge commits so the recorded source revisions stay reachable.
 
 ## Keep committed material public-safe
 

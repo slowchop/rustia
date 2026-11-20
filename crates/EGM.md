@@ -24,7 +24,7 @@ The workspace packages and their boundaries are documented in their package maps
 - [`design/CURRENT.md`](../design/CURRENT.md) is authoritative when staged design snapshots differ from the current implementation.
 - Deterministic execution is an explicitly selected contract. `standard()` and `live()` retain the general embedding surface, with policies and defaults selected by profile.
 - Luau 0.709 is the pinned compatibility oracle. Passing corpus rows do not imply full language parity.
-- Do not run performance benchmarks on a developer machine. Only the repository's `ci-bench` workflow provides benchmark evidence.
+- Do not run performance benchmarks on a developer machine. Only the private `ci-bench` service provides benchmark evidence.
 
 ## Side Effects
 

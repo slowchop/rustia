@@ -1,6 +1,7 @@
 name: Error behaviour and fuzzing
 
 "on":
+  public:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -9,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: error-fuzz-${{ github.event.pull_request.number || github.ref }}
+  group: error-fuzz-${{ github.event_name == 'public' && 'launch' || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

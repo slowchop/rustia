@@ -1,7 +1,8 @@
 # Rustia
 
 Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
-application or replay a simulation on native and WebAssembly targets.
+application or replay a simulation on native and WebAssembly targets. The source
+is public for experimental use.
 
 **Deterministic replay.** The same Luau script runs natively on the left and as
 WebAssembly in a browser on the right. With the same random seed, each racer
@@ -12,8 +13,8 @@ from Mint to Iris. [Record the race](https://github.com/slowchop/rustia/blob/mai
 
 ## Try it
 
-You’ll need Rust 1.95 or newer and access to the private repository. To try Rustia
-before its first crate release, run `cargo new hello-rustia`, then `cd hello-rustia`.
+Install this interpreter from Git until its first crates.io release. Use the pinned revision below.
+With Rust 1.95 or newer, run `cargo new hello-rustia`, then `cd hello-rustia`.
 Add this line under `[dependencies]` in `Cargo.toml`.
 
 ```toml
@@ -228,11 +229,13 @@ steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
 
 ## Project status and source access
 
-Rustia’s API may change before the first release. See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
+Rustia’s API may change before its first supported release. See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
 and [what’s left before release](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md).
 
-Maintainers track development in [GitHub Issues](https://github.com/slowchop/rustia/issues).
-Policies for outside contributions and support are still undecided.
+Anyone can read the [maintainer backlog](https://github.com/slowchop/rustia/issues) and pull requests.
+Only repository collaborators can open issues or pull requests. See the
+[contribution policy](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md) and
+[private reporting instructions](https://github.com/slowchop/rustia/security/policy).
 
 ## License
 

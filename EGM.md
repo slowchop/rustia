@@ -5,8 +5,10 @@
 Rustia implements a portable Luau interpreter in Rust. Source moves through the lexer,
 parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
 and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
-one engine. The workspace is private and unpublished, with private self-hosted correctness CI under
-the explicit source profile. Public benchmark automation and publication remain paused.
+one engine. The experimental source release uses standard GitHub-hosted correctness
+CI and keeps all eight workspace crates unpublished. Public benchmark automation
+and publication remain paused.
+
 A separate private maintainer bridge supports only manually dispatched, reviewed
 exact-cohort runtime comparisons and the separately reviewed #33 harness-lifetime
 repeatability controls; its outputs stay private and do not authorize public
@@ -20,12 +22,11 @@ the canonical state, design contracts, or pinned Luau 0.709 oracle.
 
 ## Interface
 
-The [dormant public CI proposal](.github/public-ci/EGM.md) preserves the full
-required correctness inventory on fixed standard hosted VMs. Its separate manual
-private readiness rehearsal requires maintainer/main/exact-SHA confirmation;
-ordinary private PR/push routing and the selected profile remain unchanged.
-An explicit future correctness selector is validated independently from historical
-benchmark provenance and never grants timing or publication authority.
+The [hosted CI inventory](.github/public-ci/EGM.md) covers required correctness
+and differential fuzz checks. The `public` event starts both workflows on
+visibility change. The [launch decision](design/public-source-activation.md)
+defines the scope and verification steps. [SECURITY.md](SECURITY.md) identifies
+the private vulnerability reporting route.
 
 The [workspace manifest](./Cargo.toml) contains seven runtime/tooling crates and the
 benchmark harness. Follow these maps from the root toward the file being edited:
@@ -48,21 +49,19 @@ The drift report is not release acceptance.
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).
 Tests, fixture-only trees, vendored code, generated output, ignored directories, and
-symlinks have no separate maps. Hidden configuration is outside the bootstrap tree. Self-hosted
-CI workflows under [.github/workflows](./.github/workflows/) are operational correctness
-entry points; the macOS arm64 runtime job uses its account-provisioned Rustup to install the
-pinned toolchain and target without system package writes, then verifies the native host
-before running shared correctness suites. A private manual-only real Firefox job uses the existing Linux Docker correctness pool with checksum-pinned official browser/driver archives inside its disposable container. An explicitly opted-in private Safari job uses the existing Mac ARM64 pool only with an already logged-in runner-owned GUI session. The [Justfile](./Justfile) remains the local
-validation entry point. The ignored private sibling is a separate repository and is outside
-this map.
+symlinks have no separate maps. [Source workflows](./.github/workflows/) run on
+standard hosted VMs. Native Windows and real Firefox are manual checks. See the
+[platform record](design/96-browser-platform-acceptance.md) for the earlier
+private Safari attempts. The [Justfile](./Justfile) remains the local validation
+entry point. The ignored private sibling is a separate repository.
+
 The hosted Linux workspace job additionally runs the default-off executor accounting
 diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.
 
 ## Invariants
 
-- Correctness workflows use ordinary self-hosted groups only, with private-repository
-  and same-repository PR admission. Benchmark access remains in the separate private
-  bridge; public visibility requires a new isolated execution decision.
+- Correctness workflows have read-only repository permissions and use standard
+  hosted runners. Private runner groups and benchmark infrastructure stay isolated.
 
 - `standard()` has reproducible defaults and permits explicit nondeterministic providers;
   `deterministic()` enforces its replay contract; `live()` intentionally provides live
@@ -78,7 +77,7 @@ diagnostic. Its fixed workload path counts are CI-only and carry no timing claim
   boundaries.
 - Performance evidence comes only from `ci-bench`; local correctness/static checks are
   not measurements. Do not run benchmark binaries or timing/profiling scripts locally.
-- GitHub Issues owns source-development work status and coordination; AGENTS.md and CONTRIBUTING.md define the issue-to-PR workflow. CURRENT links to the backlog and remains authoritative for built state and constraints. Issue/PR templates live under `.github/`.
+- GitHub Issues is the maintainer backlog. Anyone can read issues and PRs. Only collaborators can create them; AGENTS.md and CONTRIBUTING.md define the issue-to-PR workflow. CURRENT links to the backlog and remains authoritative for built state and constraints. Issue/PR templates live under `.github/`.
 - Keep affected maps and parent links current alongside code. Preserve human-facing
   READMEs and report disagreements with authoritative documents explicitly.
 

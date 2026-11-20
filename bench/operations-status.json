@@ -4,10 +4,10 @@
   "profile": "public-source",
   "benchmark_bridge": "private-maintainer-cohorts-v1",
   "runner_classes": {
-    "self-hosted-linux": {
-      "environment": "self-hosted-shared",
+    "hosted-linux": {
+      "environment": "github-hosted",
       "timing_authority": false,
-      "reason": "Private self-hosted CI runs correctness and artifact validation only. Its wall-clock results are not performance evidence.",
+      "reason": "GitHub-hosted runners check correctness. Their timings are not benchmark results.",
       "allowed_roles": [
         "build",
         "correctness-test",
@@ -15,20 +15,20 @@
         "fuzz-smoke"
       ]
     },
-    "self-hosted-macos": {
-      "environment": "self-hosted-shared",
+    "hosted-macos": {
+      "environment": "github-hosted",
       "timing_authority": false,
-      "reason": "Private self-hosted CI runs platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "reason": "GitHub-hosted runners check correctness. Their timings are not benchmark results.",
       "allowed_roles": [
         "build",
         "correctness-test",
         "artifact-validation"
       ]
     },
-    "self-hosted-windows": {
-      "environment": "self-hosted-shared",
+    "hosted-windows": {
+      "environment": "github-hosted",
       "timing_authority": false,
-      "reason": "Private self-hosted CI runs manual platform correctness checks only. Its wall-clock results are not performance evidence.",
+      "reason": "GitHub-hosted runners check correctness. Their timings are not benchmark results.",
       "allowed_roles": [
         "build",
         "correctness-test",
