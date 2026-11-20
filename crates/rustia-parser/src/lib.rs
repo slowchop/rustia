@@ -79,6 +79,11 @@ pub enum Stmt {
     Continue {
         span: Span,
     },
+    TypeFunction {
+        name: String,
+        exported: bool,
+        span: Span,
+    },
     TypeAlias {
         name: String,
         generics: Vec<String>,
@@ -969,15 +974,68 @@ fn long_bracket_closer_matches(source: &[u8], cursor: usize, level: usize) -> bo
     source.get(cursor).copied() == Some(b']')
 }
 
+/// Tracks lexical bindings only in chunks that contain the declaration syntax.
+/// A type function can use globals and its own locals, including from nested
+/// closures, but cannot capture a local from before its declaration.
+#[derive(Default)]
+struct TypeFunctionLocals {
+    enabled: bool,
+    visible: BTreeMap<String, usize>,
+    bindings: Vec<(String, Option<usize>)>,
+    boundary: Option<usize>,
+}
+
+impl TypeFunctionLocals {
+    fn new(tokens: &[Token]) -> Self {
+        Self {
+            enabled: tokens.windows(2).any(|pair| {
+                matches!(pair[0].kind, TokenKind::Type)
+                    && matches!(pair[1].kind, TokenKind::Function)
+            }),
+            ..Self::default()
+        }
+    }
+
+    fn bind(&mut self, name: &str) {
+        if self.enabled {
+            let previous = self.visible.insert(name.to_owned(), self.bindings.len());
+            self.bindings.push((name.to_owned(), previous));
+        }
+    }
+
+    fn restore(&mut self, mark: usize) {
+        for (name, shadowed) in self.bindings.drain(mark..).rev() {
+            if let Some(previous) = shadowed {
+                self.visible.insert(name, previous);
+            } else {
+                self.visible.remove(&name);
+            }
+        }
+    }
+
+    fn is_outer_local(&self, name: &str) -> bool {
+        self.boundary
+            .is_some_and(|start| self.visible.get(name).is_some_and(|index| *index < start))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FunctionBinding<'a> {
+    Plain,
+    Local(&'a str),
+    Method,
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     newlines_before: Vec<bool>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
     active_parse_frames: usize,
+    type_function_locals: TypeFunctionLocals,
     function_is_vararg: bool,
     loop_depth: usize,
-    in_erased_type_expression: bool,
+    in_erased_code: bool,
     #[cfg(test)]
     type_primary_visits: usize,
 }
@@ -985,18 +1043,7 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let newlines_before = vec![false; tokens.len()];
-        Self {
-            tokens,
-            newlines_before,
-            interpolations: BTreeMap::new(),
-            cursor: 0,
-            active_parse_frames: 0,
-            function_is_vararg: true,
-            loop_depth: 0,
-            in_erased_type_expression: false,
-            #[cfg(test)]
-            type_primary_visits: 0,
-        }
+        Self::new_with_newlines_and_interpolations(tokens, newlines_before, BTreeMap::new())
     }
 
     fn new_with_source_and_interpolations(
@@ -1014,6 +1061,7 @@ impl Parser {
         interpolations: BTreeMap<usize, PendingInterpolatedString>,
     ) -> Self {
         Self {
+            type_function_locals: TypeFunctionLocals::new(&tokens),
             tokens,
             newlines_before,
             interpolations,
@@ -1021,7 +1069,7 @@ impl Parser {
             active_parse_frames: 0,
             function_is_vararg: true,
             loop_depth: 0,
-            in_erased_type_expression: false,
+            in_erased_code: false,
             #[cfg(test)]
             type_primary_visits: 0,
         }
@@ -1086,16 +1134,16 @@ impl Parser {
             return self.parse_if(if_token.span.start);
         }
         if let Some(while_token) = self.eat_simple(SimpleToken::While) {
-            return self.parse_while(while_token.span.start);
+            return self.with_local_scope(|parser| parser.parse_while(while_token.span.start));
         }
         if let Some(for_token) = self.eat_simple(SimpleToken::For) {
-            return self.parse_for(for_token.span.start);
+            return self.with_local_scope(|parser| parser.parse_for(for_token.span.start));
         }
         if let Some(repeat_token) = self.eat_simple(SimpleToken::Repeat) {
-            return self.parse_repeat(repeat_token.span.start);
+            return self.with_local_scope(|parser| parser.parse_repeat(repeat_token.span.start));
         }
         if let Some(do_token) = self.eat_simple(SimpleToken::Do) {
-            return self.parse_do(do_token.span.start);
+            return self.with_local_scope(|parser| parser.parse_do(do_token.span.start));
         }
         self.parse_non_control_statement()
     }
@@ -1117,23 +1165,25 @@ impl Parser {
                 Some(TokenKind::Type)
             )
         {
+            let start = self.advance().span.start;
+            self.check_value_name("export")?;
             self.advance();
-            self.advance();
-            return self.parse_type_alias();
+            return self.parse_type_declaration(start, true);
         }
-        let type_alias = self.at_simple(SimpleToken::Type)
+        if self.at_simple(SimpleToken::Type)
             && matches!(
                 self.tokens
                     .get(self.peek_index() + 1)
                     .map(|token| &token.kind),
-                Some(TokenKind::Ident(_))
-            );
-        if type_alias {
-            self.advance();
-            return self.parse_type_alias();
+                Some(TokenKind::Ident(_) | TokenKind::Function)
+            )
+        {
+            let start = self.advance().span.start;
+            self.check_value_name("type")?;
+            return self.parse_type_declaration(start, false);
         }
         if let Some(break_token) = self.eat_simple(SimpleToken::Break) {
-            if self.in_erased_type_expression && self.loop_depth == 0 {
+            if self.in_erased_code && self.loop_depth == 0 {
                 return Err(ParseError {
                     unclosed_block: None,
                     span: break_token.span,
@@ -1147,7 +1197,8 @@ impl Parser {
         }
         if self.at_ident("continue") && self.next_starts_statement_boundary() {
             let continue_token = self.advance().clone();
-            if self.in_erased_type_expression && self.loop_depth == 0 {
+            self.check_value_name("continue")?;
+            if self.in_erased_code && self.loop_depth == 0 {
                 return Err(ParseError {
                     unclosed_block: None,
                     span: continue_token.span,
@@ -1210,6 +1261,9 @@ impl Parser {
         } else {
             Vec::new()
         };
+        for binding in &bindings {
+            self.type_function_locals.bind(&binding.name);
+        }
         let end = init.last().map_or_else(
             || bindings.last().map_or(start, |binding| binding.span.end),
             Expr::span_end,
@@ -1224,7 +1278,8 @@ impl Parser {
 
     fn parse_local_function(&mut self, start: usize) -> Result<Stmt> {
         let name = self.expect_name("expected local function name")?;
-        let (params, is_vararg, body, end) = self.parse_function_body(start)?;
+        let (params, is_vararg, body, end) =
+            self.parse_function_body(start, FunctionBinding::Local(&name.text))?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::LocalFunction {
             name: name.text,
@@ -1238,7 +1293,12 @@ impl Parser {
 
     fn parse_function_statement(&mut self, start: usize) -> Result<Stmt> {
         let (target, is_method) = self.parse_function_statement_target()?;
-        let (params, is_vararg, body, end) = self.parse_function_body(start)?;
+        let binding = if is_method {
+            FunctionBinding::Method
+        } else {
+            FunctionBinding::Plain
+        };
+        let (params, is_vararg, body, end) = self.parse_function_body(start, binding)?;
         self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::Function {
             target,
@@ -1252,6 +1312,7 @@ impl Parser {
 
     fn parse_function_statement_target(&mut self) -> Result<(AssignmentTarget, bool)> {
         let name = self.expect_name("expected function name")?;
+        self.check_value_name(&name.text)?;
         let mut expr = Expr::Name(name.text, name.span);
         while self.eat_simple(SimpleToken::Dot).is_some() {
             let field = self.expect_name("expected field name after '.'")?;
@@ -1279,13 +1340,17 @@ impl Parser {
         Ok((assignment_target_from_expr(expr)?, is_method))
     }
 
+    fn parse_binding_annotation(&mut self) -> Result<Option<TypeExpr>> {
+        if self.eat_simple(SimpleToken::Colon).is_some() {
+            Ok(Some(self.parse_single_type(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn parse_local_binding(&mut self) -> Result<LocalBinding> {
         let name = self.expect_name("expected local name")?;
-        let annotation = if self.eat_simple(SimpleToken::Colon).is_some() {
-            Some(self.parse_type(0)?)
-        } else {
-            None
-        };
+        let annotation = self.parse_binding_annotation()?;
         let end = annotation
             .as_ref()
             .map_or(name.span.end, TypeExpr::span_end);
@@ -1344,16 +1409,20 @@ impl Parser {
     fn parse_if_chain_inner(&mut self, start: usize) -> Result<(Stmt, usize)> {
         let condition = self.parse_expr(0, 0)?;
         self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
-        let then_body = self.parse_delimited_block(
-            &[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End],
-            start,
-            "end",
-        )?;
+        let then_body = self.with_local_scope(|parser| {
+            parser.parse_delimited_block(
+                &[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End],
+                start,
+                "end",
+            )
+        })?;
         let (else_body, end) = if let Some(elseif_token) = self.eat_simple(SimpleToken::ElseIf) {
             let (elseif_stmt, end) = self.parse_if_chain(elseif_token.span.start)?;
             (vec![elseif_stmt], end)
         } else if self.eat_simple(SimpleToken::Else).is_some() {
-            let else_body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+            let else_body = self.with_local_scope(|parser| {
+                parser.parse_delimited_block(&[SimpleToken::End], start, "end")
+            })?;
             let end_token =
                 self.expect_simple(SimpleToken::End, "expected 'end' after if block")?;
             (else_body, end_token.span.end)
@@ -1386,8 +1455,14 @@ impl Parser {
         })
     }
 
+    fn parse_for_binding(&mut self, expected: &'static str) -> Result<IdentToken> {
+        let name = self.expect_name(expected)?;
+        self.parse_binding_annotation()?;
+        Ok(name)
+    }
+
     fn parse_for(&mut self, start: usize) -> Result<Stmt> {
-        let first = self.expect_name("expected for loop variable")?;
+        let first = self.parse_for_binding("expected for loop variable")?;
         if self.eat_simple(SimpleToken::Equal).is_some() {
             return self.parse_numeric_for(start, first);
         }
@@ -1397,7 +1472,7 @@ impl Parser {
             span: first.span,
         }];
         while self.eat_simple(SimpleToken::Comma).is_some() {
-            let variable = self.expect_name("expected generic for loop variable")?;
+            let variable = self.parse_for_binding("expected generic for loop variable")?;
             variables.push(GenericForBinding {
                 name: variable.text,
                 span: variable.span,
@@ -1406,6 +1481,9 @@ impl Parser {
         self.expect_simple(SimpleToken::In, "expected 'in' after generic for variables")?;
         let iter = self.parse_expr_list()?;
         self.expect_simple(SimpleToken::Do, "expected 'do' after generic for iterator")?;
+        for variable in &variables {
+            self.type_function_locals.bind(&variable.name);
+        }
         let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
@@ -1427,6 +1505,7 @@ impl Parser {
             None
         };
         self.expect_simple(SimpleToken::Do, "expected 'do' after for loop range")?;
+        self.type_function_locals.bind(&variable.text);
         let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
         self.eat_simple(SimpleToken::Semicolon);
@@ -1470,6 +1549,26 @@ impl Parser {
             values.push(self.parse_expr(0, 0)?);
         }
         Ok(values)
+    }
+
+    fn parse_type_declaration(&mut self, start: usize, exported: bool) -> Result<Stmt> {
+        let Some(function) = self.eat_simple(SimpleToken::Function) else {
+            return self.parse_type_alias();
+        };
+        let name = self.expect_name("expected type function name")?;
+        let mark = self.type_function_locals.bindings.len();
+        let old_boundary = self.type_function_locals.boundary.replace(mark);
+        let old_erasure = std::mem::replace(&mut self.in_erased_code, true);
+        let result = self.parse_function_body(function.span.start, FunctionBinding::Plain);
+        self.in_erased_code = old_erasure;
+        self.type_function_locals.boundary = old_boundary;
+        let (_, _, _, end) = result?;
+        self.eat_simple(SimpleToken::Semicolon);
+        Ok(Stmt::TypeFunction {
+            name: name.text,
+            exported,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_type_alias(&mut self) -> Result<Stmt> {
@@ -1606,7 +1705,8 @@ impl Parser {
     }
 
     fn parse_function_expression_inner(&mut self, start: usize) -> Result<Expr> {
-        let (params, is_vararg, body, end) = self.parse_function_body(start)?;
+        let (params, is_vararg, body, end) =
+            self.parse_function_body(start, FunctionBinding::Plain)?;
         Ok(Expr::Function {
             params,
             is_vararg,
@@ -1779,10 +1879,14 @@ impl Parser {
                 if let Some(interpolation) = self.interpolations.remove(&token.span.start) {
                     return self.parse_interpolated_string(interpolation, depth + 1);
                 }
+                self.check_value_name(&name)?;
                 Ok(Expr::Name(name, token.span))
             }
-            TokenKind::Type => Ok(Expr::Name("type".to_owned(), token.span)),
-            TokenKind::Ellipsis if self.in_erased_type_expression && !self.function_is_vararg => {
+            TokenKind::Type => {
+                self.check_value_name("type")?;
+                Ok(Expr::Name("type".to_owned(), token.span))
+            }
+            TokenKind::Ellipsis if self.in_erased_code && !self.function_is_vararg => {
                 Err(ParseError {
                     unclosed_block: None,
                     span: token.span,
@@ -1877,13 +1981,15 @@ impl Parser {
     fn parse_function_body(
         &mut self,
         start: usize,
+        binding: FunctionBinding<'_>,
     ) -> Result<(Vec<FunctionParam>, bool, Vec<Stmt>, usize)> {
-        self.with_parse_frame(|parser| parser.parse_function_body_inner(start))
+        self.with_parse_frame(|parser| parser.parse_function_body_inner(start, binding))
     }
 
     fn parse_function_body_inner(
         &mut self,
         start: usize,
+        binding: FunctionBinding<'_>,
     ) -> Result<(Vec<FunctionParam>, bool, Vec<Stmt>, usize)> {
         self.parse_optional_function_generics()?;
         self.expect_simple(SimpleToken::LParen, "expected '(' after function name")?;
@@ -1894,7 +2000,11 @@ impl Parser {
                 if self.eat_simple(SimpleToken::Ellipsis).is_some() {
                     is_vararg = true;
                     if self.eat_simple(SimpleToken::Colon).is_some() {
-                        self.parse_type(0)?;
+                        if self.at_named_type_pack() {
+                            self.parse_type_pack_tail(0)?;
+                        } else {
+                            self.parse_single_type(0)?;
+                        }
                     }
                     break;
                 }
@@ -1911,11 +2021,24 @@ impl Parser {
         if self.eat_simple(SimpleToken::Colon).is_some() {
             self.parse_function_return_annotation(0)?;
         }
+        // A recursive local is visible in its body and subsequent statements;
+        // its own signature still sees the preceding binding.
+        if let FunctionBinding::Local(name) = binding {
+            self.type_function_locals.bind(name);
+        }
         let enclosing_vararg = self.function_is_vararg;
         let enclosing_loops = self.loop_depth;
         self.function_is_vararg = is_vararg;
         self.loop_depth = 0;
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end");
+        let body = self.with_local_scope(|parser| {
+            if matches!(binding, FunctionBinding::Method) {
+                parser.type_function_locals.bind("self");
+            }
+            for param in &params {
+                parser.type_function_locals.bind(&param.name);
+            }
+            parser.parse_delimited_block(&[SimpleToken::End], start, "end")
+        });
         self.function_is_vararg = enclosing_vararg;
         self.loop_depth = enclosing_loops;
         let body = body?;
@@ -1996,11 +2119,7 @@ impl Parser {
 
     fn parse_function_param(&mut self) -> Result<FunctionParam> {
         let name = self.expect_name("expected function parameter name")?;
-        let annotation = if self.eat_simple(SimpleToken::Colon).is_some() {
-            Some(self.parse_type(0)?)
-        } else {
-            None
-        };
+        let annotation = self.parse_binding_annotation()?;
         let end = annotation
             .as_ref()
             .map_or(name.span.end, TypeExpr::span_end);
@@ -2093,13 +2212,16 @@ impl Parser {
         }
     }
 
+    fn at_named_type_pack(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+            && matches!(
+                self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                Some(TokenKind::Ellipsis)
+            )
+    }
+
     fn at_type_pack_tail(&self) -> bool {
-        self.at_simple(SimpleToken::Ellipsis)
-            || (matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
-                && matches!(
-                    self.tokens.get(self.cursor + 1).map(|token| &token.kind),
-                    Some(TokenKind::Ellipsis)
-                ))
+        self.at_simple(SimpleToken::Ellipsis) || self.at_named_type_pack()
     }
 
     fn parse_type_pack_tail(&mut self, depth: usize) -> Result<TypeExpr> {
@@ -2353,10 +2475,10 @@ impl Parser {
     fn parse_typeof_expression_inner(&mut self, depth: usize) -> Result<TypeExpr> {
         let start = self.advance().span.start;
         self.expect_simple(SimpleToken::LParen, "expected '(' after typeof")?;
-        let enclosing_erasure = self.in_erased_type_expression;
-        self.in_erased_type_expression = true;
+        let enclosing_erasure = self.in_erased_code;
+        self.in_erased_code = true;
         let expression = self.parse_expr(0, depth + 1);
-        self.in_erased_type_expression = enclosing_erasure;
+        self.in_erased_code = enclosing_erasure;
         expression?;
         let close =
             self.expect_simple(SimpleToken::RParen, "expected ')' after typeof expression")?;
@@ -2647,6 +2769,30 @@ impl Parser {
             span: self.peek().span,
             message: message.to_owned(),
         }
+    }
+
+    // Luau resolves statement-leading contextual names (type, export, continue)
+    // as value references before recognizing the declaration or statement.
+    fn check_value_name(&self, name: &str) -> Result<()> {
+        if self.type_function_locals.is_outer_local(name) {
+            return Err(ParseError {
+                unclosed_block: None,
+                // Luau reports the current token after consuming the name.
+                span: self.peek().span,
+                message: format!("Type function cannot reference outer local '{name}'"),
+            });
+        }
+        Ok(())
+    }
+
+    fn with_local_scope<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if !self.type_function_locals.enabled {
+            return parse(self);
+        }
+        let mark = self.type_function_locals.bindings.len();
+        let result = parse(self);
+        self.type_function_locals.restore(mark);
+        result
     }
 
     fn with_parse_frame<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
@@ -2998,6 +3144,193 @@ mod tests {
         parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Parser,
         SimpleToken, Stmt, TableField, TypeExpr, UnaryOp,
     };
+
+    #[test]
+    fn parses_plain_exported_and_nested_type_function_declarations() {
+        let source = "type function first() return types.number end;\n\
+            export type function other<T, P...>(x: T, ...: P...): T\n\
+                type function nested() return types.string end\n\
+                return x\n\
+            end";
+        let chunk = parse_source(source).unwrap();
+        let [Stmt::TypeFunction {
+            name: first,
+            exported: false,
+            span: first_span,
+        }, Stmt::TypeFunction {
+            name: other,
+            exported: true,
+            span: export_span,
+        }] = chunk.statements.as_slice()
+        else {
+            panic!("expected two type function declarations");
+        };
+        assert_eq!(first, "first");
+        assert_eq!(other, "other");
+        assert_eq!(
+            &source[first_span.start..first_span.end],
+            "type function first() return types.number end"
+        );
+        assert_eq!(export_span.start, source.find("export").unwrap());
+        assert_eq!(export_span.end, source.len());
+    }
+
+    #[test]
+    fn type_functions_reject_captures_across_their_lexical_boundary() {
+        let cases = [
+            ("local x; type function f() return x end", "x"),
+            ("local x; type function f() x = 1 end", "x"),
+            (
+                "local x; type function f() function x.method() end end",
+                "x",
+            ),
+            (
+                "local x; type function f() return function() return x end end",
+                "x",
+            ),
+            ("local x; type function f(x: typeof(x)) end", "x"),
+            (
+                "local x; type function f() local function x(): typeof(x) end end",
+                "x",
+            ),
+            ("local x; type function f() local x = x end", "x"),
+            ("local x; type function f() for x in x do end end", "x"),
+            ("local x; type function f() return `value {x}` end", "x"),
+            (
+                "function obj:method() type function f() return self end end",
+                "self",
+            ),
+            ("for x=1,2 do type function f() return x end end", "x"),
+            (
+                "for k,v in pairs(t) do type function f() return v end end",
+                "v",
+            ),
+            (
+                "repeat local x=1 until (function() type function f() return x end end)()",
+                "x",
+            ),
+            ("type function f(x) type function g() return x end end", "x"),
+            ("local type; type function f() return type end", "type"),
+            ("local type; type function f() type T=number end", "type"),
+            (
+                "local export; type function f() export type T=number end",
+                "export",
+            ),
+            (
+                "local continue; type function f() for i=1,2 do continue end end",
+                "continue",
+            ),
+        ];
+        for (source, name) in cases {
+            let Err(super::SourceError::Parse(error)) = parse_source(source) else {
+                panic!("expected a parse error for {source}");
+            };
+            assert_eq!(
+                error.message,
+                format!("Type function cannot reference outer local '{name}'"),
+                "{source}"
+            );
+        }
+        let source = "local x; type function f() return x\nend";
+        let Err(super::SourceError::Parse(error)) = parse_source(source) else {
+            panic!("expected a capture error");
+        };
+        assert_eq!(&source[error.span.start..error.span.end], "end");
+    }
+
+    #[test]
+    fn type_function_value_names_follow_block_scope_and_declaration_order() {
+        for source in [
+            "type function f(x) local function g() x = x end return g end",
+            "local x; type function f(x) if x then local x = x else return x end end",
+            "local x; type function f() local function x() return x end end",
+            "local self; type function f() function t:m() return self end end",
+            "local x; type function f() return ({x=1}).x end",
+            "local x; type function f() repeat local x=true until x end",
+            "local x; type function f() for x=1,3 do print(x) end end",
+            "local x; type function f() for x in next,t do print(x) end end",
+            "type function f(x) type function g(x) return x end return x end",
+            "local x = (function() type function f() return x end end)()",
+            "if true then local x=1 else type function f() return x end end",
+            "do local x end; while false do local y end; for z=1,1 do end; type function f() return x,y,z end",
+            "local type; type function f() export type T=number end",
+            "local continue; type function f() local continue; for i=1,2 do continue end end",
+            "type function f() end; local function g() return ... end",
+        ] {
+            assert!(parse_source(source).is_ok(), "{source}");
+        }
+    }
+
+    #[test]
+    fn local_annotations_require_a_single_type_in_value_and_type_functions() {
+        for declaration in ["local function", "type function"] {
+            for ty in [
+                "number",
+                "(number)",
+                "(A...) -> (string,number)",
+                "Box<A...>",
+            ] {
+                let source = format!("{declaration} f() local x:{ty} end");
+                assert!(parse_source(&source).is_ok(), "{source}");
+            }
+            for ty in ["(number,string)", "...number", "A...", "(A...)"] {
+                let source = format!("{declaration} f() local x:{ty} end");
+                assert!(parse_source(&source).is_err(), "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn value_and_type_function_parameters_use_the_pinned_type_pack_grammar() {
+        for declaration in ["local function", "type function"] {
+            for annotation in [
+                "x: (number)",
+                "x: (A...) -> (string, number)",
+                "...: number",
+                "...: (number)",
+                "...: A...",
+                "...: type...",
+                "...: <T>(T) -> T",
+                "...: Box<A...>",
+                "...: (number, string) -> ()",
+            ] {
+                let source = format!("{declaration} f({annotation}) end");
+                assert!(parse_source(&source).is_ok(), "{source}");
+            }
+            for annotation in [
+                "x: (number, string)",
+                "x: ...number",
+                "x: A...",
+                "...: ...number",
+                "...: (number, string)",
+                "...: Mod.A...",
+                "...: Box<A>...",
+                "...: (A)...",
+                "...: A...?",
+                "...: A... | number",
+                "...: A?...",
+            ] {
+                let source = format!("{declaration} f({annotation}) end");
+                assert!(parse_source(&source).is_err(), "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn type_function_bodies_validate_syntax_before_erasure() {
+        for source in [
+            "type function () end",
+            "type function f.x() end",
+            "export type function f:x() end",
+            "type function f<T=number>() end",
+            "type function f() return ... end",
+            "while true do type function f() break end end",
+            "type function f() continue end",
+            "type function f() if true then return 1 end",
+        ] {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
 
     #[test]
     fn exported_aliases_and_assertions_require_complete_types() {
@@ -4091,6 +4424,33 @@ mod tests {
             panic!("expected do block");
         };
         assert!(matches!(body[0], Stmt::Break { .. }));
+    }
+
+    #[test]
+    fn typed_for_bindings_validate_annotations_before_entering_scope() {
+        for source in [
+            "for i:(number)=1,2 do end",
+            "for i:typeof(unknown()),v: number in ipairs(t) do end",
+            "type function f(y, xs) for i:typeof(y)=1,2 do y=i end; for k:string,v:typeof(y) in pairs(xs) do y=v end end",
+        ] {
+            assert!(parse_source(source).is_ok(), "{source}");
+        }
+        for source in [
+            "for i:(number,string)=1,1 do end",
+            "for i:...number=1,1 do end",
+            "for i:number,v:(string,number) in pairs({}) do end",
+        ] {
+            assert!(parse_source(source).is_err(), "{source}");
+        }
+        for source in [
+            "local outer; type function f() for i:typeof(outer)=1,2 do end end",
+            "local outer; type function f() for outer:number,v:typeof(outer) in pairs({}) do end end",
+        ] {
+            let Err(super::SourceError::Parse(error)) = parse_source(source) else {
+                panic!("expected a capture error for {source}");
+            };
+            assert_eq!(error.message, "Type function cannot reference outer local 'outer'", "{source}");
+        }
     }
 
     #[test]

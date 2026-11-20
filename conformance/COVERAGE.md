@@ -5,7 +5,7 @@ The declared behavior-topic catalog is `REFS.tsv`.
 
 ## Current Status
 
-- The current manifest contains 734 fixtures and 524 refs: 716 executable `luau-0.709` fixtures, 0
+- The current manifest contains 735 fixtures and 525 refs: 717 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, 18 `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and 0 whole upstream
   Luau 0.709 conformance scripts as `pending-impl` inventory.
 - The `puc-lua-5.1.5` rows are the `Puc51Compat` differential corpus: expectations were captured offline

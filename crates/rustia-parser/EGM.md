@@ -16,7 +16,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 - Parser recursion is capped by `MAX_PARSE_DEPTH` (512).
 - AST statements and expressions carry byte spans for diagnostics and compiler mapping.
-- Type aliases and annotations are syntax represented in the AST; static type checking is out of scope here.
+- Type aliases and annotations are represented in the AST. Type function declarations validate the body and retain the declaration name, export status and span. Static type checking is out of scope here.
 
 ## Side Effects
 

@@ -523,3 +523,4 @@ type.generic-function	parser-runtime	upstream-luau-0.709:tests/TypeInfer.generic
 type.return-annotation	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Return annotation single/pack disambiguation and pinned one-fixed-plus-tail suffix behavior parse then erase.
 type.table-grammar	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Table type fields, indexers, separators, contextual qualifiers and array shorthand parse then erase.
 type.typeof-expression	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Typeof annotations parse ordinary expressions, including interpolation, then erase without executing their effects.
+type.function-declaration	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Ordinary and exported type function declarations parse with isolated lexical scopes and erase before runtime.
