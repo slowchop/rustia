@@ -273,6 +273,7 @@ boundaries. The VM marks reachable objects, sweeps weak tables and reclaims elig
 unreachable objects. Standard scripts can pause automatic collection with
 `collectgarbage("stop")`. The instruction counter still advances while collection is paused.
 DeterministicSim keeps the scheduled collections and exposes no guest GC controls.
+Its collection interval is part of the replay ABI.
 Allocation-debt pacing for Standard remains a design option. The
 [VM scheduler](../crates/rustia-vm/src/vm.rs) and [heap](../crates/rustia-vm/src/heap.rs)
 implement the current behavior.
@@ -358,15 +359,9 @@ implement the current behavior.
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual
-  `MIT OR Apache-2.0` license. *Optional:* native-only JIT (cranelift first). **VALIDATED tier — wasm-emit
-  JIT/AOT-to-wasm (the in-browser speed answer, spike `65-wasmjit`):** emitting a hot kernel to wasm at runtime
-  (via `wasm-encoder`) and instantiating it in V8 runs at **~4.6 ns/op = ~176× the interpreter** (within 1.35×
-  of native LLVM), for a **~4.7 µs one-time standup → crossover ≈ 6 calls**; generated modules can import the
-  VM's linear memory (no bounds-check penalty). Gate emission behind a **hotness counter** (`calls × interp_cost
-  > ~5 µs`). Caveat: measured on a **monomorphic f64** kernel; dynamically-typed Luau needs **type guards +
-  deopt/fallback** — which is exactly where **type-directed compilation** pays (Luau's types let us emit
-  guard-free specialized wasm). So the in-browser high-speed path = **type-directed AOT-to-wasm for hot,
-  proven-monomorphic kernels.** Use sync `new WebAssembly.Module` for the tiny (<1.1 KB) modules.
+  `MIT OR Apache-2.0` license. *Optional:* native-only JIT (cranelift first). The [Wasm code generation experiment](65-wasmjit.md) compared a single
+  numeric kernel with a skeleton interpreter and statically compiled Wasm in Node and Deno.
+  Browser and production performance remain unmeasured. A Wasm JIT or AOT tier is optional research.
 
 ## 5. Public vs private (the release model)
 

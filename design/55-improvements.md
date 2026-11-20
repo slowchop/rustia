@@ -85,8 +85,9 @@ axis E. **Cost:** low (CI config). **← cheap insurance for the core determinis
 
 **6. Make numeric conversions deterministic for each API.** The original proposal suggested a
 single saturating conversion. In the [implemented VM](../crates/rustia-vm/src/vm.rs), signed integer
-formatting uses a saturating cast. Buffer integer operands reject nonfinite values. Unsigned
-`bit32` operands reject nonfinite values and truncate and wrap finite values modulo 2³².
+formatting uses a saturating cast. Buffer integer operands reject nonfinite values. `bit32`
+data words reject nonfinite values and truncate and wrap finite values modulo 2³². Shift counts,
+field positions and widths have separate range checks.
 [String index conversion](95-numeric-index-contract.md) has its own checked range.
 
 **7. Capability-typed, fuel-declaring contract on the host-operation hook.** *(public-clean · determinism #4 ·
