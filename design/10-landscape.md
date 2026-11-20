@@ -9,10 +9,9 @@
 
 ## The three decisive findings
 
-1. **The gap is the engine, not the boundary.** grabby measured koto-int at **5.4 µs/decision (~39× the
-   0.14 µs native floor)**; koto-**float** with *zero* host calls is still **4.0 µs (~29×)**. Only ~26% of
-   cost is the FFI boundary. ⇒ An "integer-ops fork" of an interpreter will **not** rescue hot-path perf.
-   Closing the gap demands real VM work (dispatch + value layout + GC), not a thin wrapper.
+1. **The historical Koto comparison changed two things.** The integer variant with host calls took
+   5.4 µs per decision. The floating-point variant without host calls took 4.0 µs. The second variant
+   took about 26% less time. Measuring the host-call cost alone would require holding the arithmetic fixed.
 2. **A good register Luau interpreter is the credible MVP target.** Cross-engine bench (script-bench-rs,
    M5 Max): mlua+**Luau 11.94 ms** vs **koto 49.21 ms** vs rhai 114 ms — ~4× koto. SOTA interpreter
    (Deegen / LuaJIT-Remake, CPS tail-call) beats LuaJIT's hand-written asm interpreter by **+31%**.

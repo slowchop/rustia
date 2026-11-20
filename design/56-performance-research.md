@@ -5,11 +5,13 @@
 > conformance contract; it is the ordered implementation bet list for making rustia fast while keeping the public
 > workspace under `unsafe_code = "forbid"`.
 
-## Ground truth
+## July 2026 baseline
+
+For the later retained comparisons and their limits, see the [benchmark claims record](../bench/CLAIMS.md).
 
 The public cross-engine benchmark posture is still conservative: rustia remains behind `mlua-luau` and Luaur
 on every workload. `mlua-luau` wraps the reference C++ runtime; Luaur is a separate pure-Rust Luau
-implementation. The current exact-commit
+implementation. The July exact-commit
 `34f6deff4a42501b6d66d257249eecfcbca1976a` Linux matrix places Luaur 2.615x-7.135x faster by minimum time with a
 4.336x five-workload minimum-time geometric mean, and `mlua-luau` 2.615x-5.880x faster by minimum time with a
 3.944x geometric mean. Rustia beats the Rust-native Ruau adapter on three of five workloads by minimum time. The snapshots used separate but identically specified dedicated instances, so movements are follow-up
@@ -180,8 +182,9 @@ and small-function inlining without weakening policy/fuel/GC/coverage fallback.
 Expected gain: 1.2x-4x on closure/upvalue/coroutine-shaped workloads.
 
 **9. Allocation, GC, and string model overhaul.**
-Use per-program intern pools, short-string storage, shared frozen stdlib state, and profile-specific GC
-scheduling: allocation-debt pacing for Standard/LuauCompat, instruction-count boundaries for DeterministicSim.
+This proposal called for per-program intern pools, short-string storage, a shared frozen stdlib and
+profile-specific GC pacing. The implemented [collection schedule](30-architecture.md#collection-schedule)
+uses instruction-count boundaries across profiles.
 Keep non-moving handles friendly to inline caches, but keep the VM thread-affine and safe.
 Current plan delta: VM-local indexed atoms and per-loaded-program constant caches have landed. Shared cross-VM
 compiled constant storage and the 13-byte inline literal/runtime-string form have now landed too. Lookup-only
@@ -921,7 +924,7 @@ wired into a runner workflow before this becomes the standing protocol. Evidence
 
 | state | likely position vs C++ Luau interpreter |
 |---|---|
-| Current public cross-engine snapshot | The two faster Luau adapters are 2.615x-7.135x faster on the five tracked workloads, with 3.944x (`mlua-luau`, reference C++) and 4.336x (pure-Rust Luaur) geometric means. Rustia beats Rust-native Ruau on three of five by minimum time. |
+| July 2026 Linux snapshot at `34f6def` | The two faster Luau adapters are 2.615x-7.135x faster on the five tracked workloads, with 3.944x (`mlua-luau`, reference C++) and 4.336x (pure-Rust Luaur) geometric means. Rustia beats Rust-native Ruau on three of five by minimum time. |
 | Full tables + shared atoms + broader ICs + FASTCALL/GETIMPORT | Could close most table/global/stdlib gaps; target 0.5x-1.0x Luau on many interpreter workloads. |
 | Extend HotIR + hot-loop hygiene + superinstructions + O2 optimizer | Plausible 0.8x-1.5x Luau interpreter on favorable workloads, but only measurement can bless this. |
 | Add type-directed wasm/AOT tier | Hot type-stable kernels can plausibly beat the C++ Luau interpreter by multiples; this is the main better-than-Luau-interpreter route. |

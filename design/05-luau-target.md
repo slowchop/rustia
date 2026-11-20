@@ -9,8 +9,7 @@
 - **Why 0.709:** it is *bit-identical* to what our local oracle builds — `mlua 0.11.6` → `mlua-sys 0.10.0` →
   `luau0-src 0.18.3+luau709` (checksum `e73f7d752fe2ef0a41f132b83d0be154c6ae0ed84967b4df80a16901866be075`).
   Pinning the spec to the oracle means every conformance row can be mechanically verified against a running
-  binary. mlua is the *oracle vehicle only* — **rustia is a from-scratch engine that targets 0.709 semantics; it
-  does not embed mlua/Luau.**
+  binary. The oracle and optional benchmark adapters use mlua. Rustia itself implements the interpreter in Rust.
 
 ## Surface
 - **Standalone luau.org language + stdlib** as registered in `linit.cpp` at 0.709: `base` globals, `coroutine`,
@@ -25,7 +24,9 @@
   in the 0.709 VM all default **false**, and neither the luau CLI nor mlua flips them, so oracle == flags-off:
   `LuauStacklessPcall` (pcall/xpcall + yield/error edges), `UseNewTraceback` (traceback string format),
   `LuauMathSeedEncode` (default seed of *unseeded* `math.random` — irrelevant; we always seed explicitly).
-  rustia replicates flags-off semantics.
+  These are the VM defaults. One imported **parser** fixture uses a different configuration:
+  the [upstream test harness](../conformance/upstream/luau-0.709/tests/Conformance.test.cpp)
+  enables `LuauExplicitTypeInstantiationSyntax`. Rustia accepts that call syntax by default.
 
 ## Numbers are f64-only (verified, not assumed)
 At 0.709, **`f64` (IEEE-754 double) is the only script-level number type.** Oracle-proven:

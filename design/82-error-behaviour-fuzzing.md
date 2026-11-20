@@ -414,10 +414,10 @@ publication or supported-release acceptance is claimed.
 
 ### Targeted type-grammar differential coverage
 
-The generated differential target includes twenty-one type shapes in addition to its
-40 existing runtime shapes. These cover valid/invalid assertions, alias defaults,
+The generated differential target includes twenty-one type-grammar templates in addition to its
+40 earlier templates, which include both executable programs and invalid syntax. These cover valid/invalid assertions, alias defaults,
 pack defaults, generic function signatures, ordering and result adjustment. CI smoke takes its shape bound
-from the generator and exercises all eight type variants. Parser and facade
+from the generator and supplies eight variant bytes per enumerated template. Parser and facade
 negative tests additionally require Source rejection before any guest write in
 all four profiles. The existing `export_type_assertions.luau` pinned fixture now
 also exercises erased defaults and valid pack/grouping boundaries.

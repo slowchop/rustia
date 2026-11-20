@@ -78,10 +78,9 @@ confidence. Binding validation and push in one process removes the duplicate
 local gate without creating replayable authority. The same user can bypass any
 local Git hook; required CI remains the independent trust boundary.
 
-This changes validation scheduling, not runtime performance. Benchmark
-measurement is paused in the active profile pending the reviewed trusted private
-bridge; retained private procedures do not authorize a new run. CI job durations
-can show whether scheduling helps; they are not interpreter performance evidence.
+Public CI validates correctness. The [private benchmark bridge](81-benchmark-operations.md#public-source-profile)
+is available for separately reviewed comparisons on exact revisions. Public benchmark
+automation and publication remain paused.
 
 ## First CI observation
 

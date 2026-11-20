@@ -1,7 +1,7 @@
-# rustia — wasm-emit JIT / AOT-to-wasm spike (the in-browser speed answer)
+# Rustia Wasm code generation experiment in Node and Deno
 
-> **Status: [SPIKE — verified] (2026-06-30).** Answers "can rustia approach native/LuaJIT speed *in the
-> browser*?" Built + adversarially re-run; bit-identical checksum across all paths proves honesty. Crate:
+> **Status: [SPIKE — verified] (2026-06-30).** Measures one numeric kernel in Node and Deno.
+> The native build supplied a checksum comparison. Crate:
 > [`../spikes/spike-wasmjit/`](../spikes/spike-wasmjit/); raw: [`65-wasmjit-raw.json`](65-wasmjit-raw.json).
 
 ## The question
@@ -26,7 +26,7 @@ distinct ⇒ same kernel + anti-DCE. Verifier independently reproduced every nod
 | path | ns/op | vs interpreter |
 |---|---:|---:|
 | interpreter (real VM, fuel off = its best case) | ~803 | 1× |
-| **runtime-generated, unrolled/kind-specialized (shippable)** | **~4.6** | **~176×** |
+| **runtime-generated, unrolled/kind-specialized (spike)** | **~4.6** | **~176×** |
 | runtime-generated, naive looped | ~10.0 | ~80× |
 | shared-heap (imported VM memory) | ~4.6 | ~176× (no bounds penalty) |
 | static-AOT (LLVM ideal) | ~3.4 | ~237× |
@@ -37,21 +37,15 @@ distinct ⇒ same kernel + anti-DCE. Verifier independently reproduced every nod
 - Runtime-generated reaches **within 1.35×** of LLVM static-AOT (residual = scalar hand-emit vs LLVM
   autovectorization).
 
-## Verdict
-- **GO for grabby:** the per-agent selector is called tens of millions of times → the ~4.7 µs standup amortizes
-  after ~6 calls → an **unconditional ~176× win** on the hot path, reaching within 1.35× of native — *in the
-  browser*. This is the route to LuaJIT-adjacent speed that survives wasm.
-- **CONDITIONAL for general scripts:** gate emission behind a **hotness counter** (`calls × interp_cost > ~5 µs`).
-- **Caveat (load-bearing):** this kernel is **monomorphic f64 compute.** Real dynamically-typed Luau needs
-  **type guards + a deopt/fallback path** (per-op cost not modeled here). The fix is **type-directed
-  compilation** — Luau's type info lets us emit **guard-free specialized wasm** where types prove monomorphism.
-  So the in-browser high-speed path = **type-directed AOT-to-wasm for hot, proven-monomorphic kernels**;
-  polymorphic/table/string-heavy code wins less and crosses over later.
-- Engine note: absolute numbers will differ on JSC/SpiderMonkey, but the *structure* (emitted wasm → ~native
-  after a ~µs standup) is engine-independent. Confirm at the P1 cross-engine gate.
+## What the experiment established
 
-## Design impact
-Promotes wasm-emit JIT / AOT-to-wasm from "research option" to a **validated optimization tier** (ADR §4):
-interpreter-primary everywhere; **wasm-emit JIT for hot kernels (browser + native)**; native machine-code JIT
-(cranelift) optional native-only. Unifies with the **type-directed compilation** lever — same machinery, and
-the type info is what removes the guard/deopt cost the caveat names.
+For this numeric kernel, the generated Wasm ran about 176 times faster than the
+skeleton interpreter in V8. The static Rust-to-Wasm version ran about 1.35 times
+faster than the generated version. Both timings came from Wasm running in V8.
+The native executable was checked for the same result.
+
+The kernel used known numeric types. General Luau would need guards and an
+interpreter fallback, or proof that its types stay fixed. Production Rustia,
+browser engines outside these V8 hosts, and the complete application workload
+still need their own measurements before this experiment can support a release
+claim. Rustia ships the interpreter. Wasm code generation remains a research option.

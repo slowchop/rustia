@@ -33,10 +33,9 @@ execution dominates (same as koto), so a batched decide-N API helps but isn't th
 | **`match`→`br_table`** (recommended) | 1.217 | 1.028 | 1.338 | **0.85–1.10× (parity)** |
 | fn-pointer / call-threaded | 2.234 | 2.995 | 3.361 | 1.34–1.51× |
 
-⇒ **The feared ~4× wasm tax is refuted.** A portable big-`match` loop runs at **parity** in V8 (node V8 is
-*faster* than the native build). **One portable core works on both targets — no native/wasm dispatch split,
-and the "tail-call/CPS on native" hypothesis is overturned** (fn-pointer threading is strictly worse on
-*both* targets — `call_indirect` bounds+type checks). JIT-to-native is a native-only stretch tier only.
+The portable match loop had similar times on native and V8 for this spike. Calling each handler
+through a function pointer was slower on both tested targets. In the [spike implementation](../spikes/spike-b-dispatch/src/lib.rs),
+each handler returns to the dispatch loop. Tail-call dispatch remains a separate, unmeasured design.
 
 ### libm cross-arch bit-identity — gates T1 (Spike C), FNV-1a over a 46-value sweep
 | target | combined_canon | combined_raw |

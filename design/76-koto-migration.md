@@ -254,7 +254,9 @@ guest-state savepoint and returns exports only after that savepoint commits.
 - Rooted `Value`, `Table`, and `Exports` handles now deserialize directly through
   snapshot-free live-value serde. `OwnedValue` remains the explicit eager,
   acyclic validation and serialization path.
-- Userdata/scope APIs remain deferred while the rich-value boundary evolves.
+- [Typed Rust objects](83-rust-objects.md) support methods, length and iteration.
+  Borrowed scopes and broader typed object hooks are tracked separately in
+  [#56](https://github.com/slowchop/rustia/issues/56) and [#54](https://github.com/slowchop/rustia/issues/54).
 - Async and reentrant host callbacks are intentionally outside this first
   lexical invocation design.
 - Public `0.1.0` stability still waits on packaging and the remaining

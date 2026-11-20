@@ -331,7 +331,7 @@ The preparation slice is implemented and merged ahead of the whole-function tape
   and the separate standalone-clear elision — are default-disabled machinery with per-family differential
   tests, corpus-wide structural checks, and a generated workload preview
   (`design/58-vm-core2-c23-o2-preview.json`). Constant/RK operand emission is explicitly deferred: the census
-  counts only 1-5 static candidates per tracked workload, far below the 33-69 removable clears, so spending
+  counts only 1-5 static candidates per tracked workload, far below the 26–61 removable clears, so spending
   new public opcode surface there is not yet measurement-justified; the analysis keeps counting candidates.
 
 With the C2.2 tape merged, the logical receipts are now connected to the executor: optimized programs carry a

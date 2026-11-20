@@ -148,9 +148,8 @@ at construction, matching runtime validation. Final-head checks passed in
 The method fixture now contains 31 cases, including a local receiver changed
 after argument suspension, an upvalue control, and a parenthesized local. All
 four profiles pass it before and after reset. The broader diagnostic findings
-were recorded here while GitHub Issues was disabled. Current maintainer follow-up
-is tracked in [semantic coverage #31](https://github.com/slowchop/rustia/issues/31);
-recheck these dated findings against main before filing a focused defect.
+were recorded here while GitHub Issues was disabled. The later [semantic coverage audit, #31](https://github.com/slowchop/rustia/issues/31),
+is closed. The diagnostic follow-up below records the outcome for this inventory.
 
 Independent reviews of the compiler/VM changes and conformance evidence found
 no blocking issue. Eight additional receiver/argument probes matched the pinned
@@ -333,4 +332,6 @@ The active #27/#28 parser candidate re-ran the locked 27-case inventory with
 the documented oracle source-name wrapper was normalized. The historical thirteen
 differences above are not current defects in this fixed inventory. This is local
 correctness evidence, not complete semantic or platform acceptance; review,
-preflight and PR CI still gate delivery. Remaining work is tracked in issue #31.
+preflight and PR CI were the delivery gates for that candidate. The
+[platform record](96-browser-platform-acceptance.md) links the separate Intel Mac
+and remote Safari follow-ups.

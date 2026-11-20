@@ -349,7 +349,7 @@ Core pieces:
 - typed host functions support fallible `rustia::Result<T>` returns.
 - typed host functions and retained script calls support tuple-shaped arguments/results through arity 8.
 - retained `Function` and `Exports` handles checked by VM identity and decision epoch.
-- internal gc-arena `Value` remains behind the facade.
+- The internal VM value representation remains behind the facade.
 
 Runtime services are part of the same builder (implemented per [`72-host-services.md`](72-host-services.md)):
 `RustiaBuilder::standard()` (= `Rustia::builder()`) adds a real stdout print sink on native targets while

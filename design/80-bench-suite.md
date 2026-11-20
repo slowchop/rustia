@@ -41,9 +41,8 @@ Split by what's measurable; never use one for the other's job:
   recorded results, including Deno/V8, Bun/JavaScriptCore and SpiderMonkey portability evidence, are historical.
   The broader platform support matrix in `00-constraints.md` remains a correctness/build concern, not a
   license to mix noisy macOS or Windows timings into the active benchmark product.
-- **determinism:** a **golden-hash column** (bit-identical cross-arch/engine?) + rustia's `mode`
-  (LuauCompat/ReproducibleStandard/DeterministicSim). A pass/fail **correctness gate**, NOT a perf trend — a
-  hash mismatch FAILS CI; never tracked as a number.
+- **correctness:** each measurement records a workload `checksum`. The separate
+  [cross-platform correctness gate](84-private-platform-acceptance.md) compares the Rustia transcripts.
 - **workload:** 20 source-covered entries, with five default measured families (`dense_tables`, `sparse_tables`,
   `closures_upvalues`, `generic_iteration`, `stdlib_math_table`) and opt-in additions including
   `string_building`.

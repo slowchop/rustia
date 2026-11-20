@@ -183,8 +183,8 @@ Do not add a required method to a public extension trait during 1.x.
 | Confirm collection settings suit long-running applications | Correctness coverage exists; tuning open | Preserve the deterministic scheduling contract; use remote measurements for any tuning or performance claim |
 | Retain clear source diagnostics and recovery behavior | Implemented | Keep the diagnostics and error/fuzz regressions green; add fixtures for newly found gaps |
 
-The current corpus has 726 fixtures covering 520 named behaviors with zero pending
-cases. This describes the tested inventory, not universal compatibility. Roblox
+The [coverage inventory](../conformance/COVERAGE.md) lists the fixtures, named
+behaviors and pending cases for each oracle. Roblox
 APIs, a Luau typechecker, raw Luau C API compatibility, async Rust callbacks, and a
 JIT are outside this first release. These exclusions do not waive any existing
 runtime or embedding requirement above.

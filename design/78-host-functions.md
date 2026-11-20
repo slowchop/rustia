@@ -33,7 +33,9 @@ remain concise, and the existing registration conveniences share the implementat
 Owned arguments/results use the existing typed conversions. The same typed signatures can accept
 `Value`/`Table`/`Function` and return mixed owned/live tuples through arity eight, preserving graph
 identity. Owned containers remain snapshots. Callback closures retain the
-existing `Send + Sync + 'static` bounds; arbitrary live handles cannot be hidden in those captures.
+existing `Send + Sync + 'static` bounds. Default live handles are thread-affine.
+With the `transferable` feature, an owned handle can be captured when its storage
+also satisfies the closure's `Sync` bound.
 Per-invocation state is supplied by the existing borrowed capability views. Captured host heap
 allocations remain host-owned and are not claimed as VM quota-accounted memory.
 Captured destructors must not panic; reclamation is not a guest finalizer or fallible callback.

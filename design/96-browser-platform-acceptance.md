@@ -68,8 +68,9 @@ runtime paths. Cargo, Rustup, Git and runner-mounted home ownership stay unchang
 The job invokes the existing browser runner, which verifies versions and
 requires eighteen nonzero passing suite groups and both goldens across default
 and bare modes. The workflow policy checks the public manual-dispatch guard, hosted runner,
-pinned image, tool checksums and execution command. Negative
-fixtures reject PR execution, missing checksum checks and omitted execution.
+pinned image, tool checksums and execution command. The hosted policy self-test
+mutates the Firefox download checksum. The older private-profile fixtures also
+exercised incorrect dispatch and omitted execution.
 Existing required PR checks remain in place. No host/browser permission setting,
 runner-group access or benchmark authorization is changed.
 
