@@ -10,8 +10,7 @@
 > [`40-spikes/`](40-spikes/), [`25-review-raw.json`](25-review-raw.json), spike crates in [`../spikes/`](../spikes/).
 >
 > **v3.1 refinements (2026-06-30 historical snapshot):** the per-behavior conformance table was then 709 design
-> rows; the live executable state is now tracked in [`CURRENT.md`](CURRENT.md) at 726 fixtures / 520 refs /
-> 0 pending (708/502 Luau 0.709 plus 18/18 PUC 5.1.5). **10 adopted, conformance-verified
+> rows; the [executable coverage inventory](../conformance/COVERAGE.md) gives today's counts. **10 adopted, conformance-verified
 > improvements** are in [`55-improvements.md`](55-improvements.md) — they REFINE the axes below (notably: axis D's
 > flat map → Luau's **dual-part table** with stable logical-deletion order; a **per-Program `Arc` string-intern pool +
 > short-string inlining** resolving the const-pool seam; generic **FASTCALL/GETIMPORT**; a **capability+fuel
@@ -66,12 +65,11 @@ One opcode-handler core, **one portable engine for all targets** (native + wasm3
 
 ```
 rustia-lexer      hand-written Luau lexer
-rustia-parser     recursive-descent → AST; FULLY PARSES the Luau type grammar (generics, type packs,
-                  f<a,b>(c) disambiguation) but does NOT typecheck (types runtime-erased; the gradual
-                  type CHECKER is a separate, deferred, LSP-only subsystem)
+rustia-parser     recursive-descent → AST; validates supported Luau type syntax, including generics and type packs.
+                  Types are erased at runtime. A static type checker is deferred.
 rustia-compiler   AST → rustia bytecode; constant folding (SAME pinned libm + canon as the VM), builtin
                   recognition, GENERIC superinstruction fusion, register allocation; O0 mode for hot-reload
-rustia-vm         16-byte tagged Value, VM heap + profile-specific gc-arena scheduling, big-match→br_table
+rustia-vm         16-byte tagged Value, owned tracing heap with instruction-count collection, big-match→br_table
                   dispatch, per-instruction fuel + recursion cap, stackless trampoline, coroutines, and the
                   math/table/string/bit32/base/coroutine/buffer/vector/utf8/string.pack standard-library surface
 rustia            embedding API: koto-shaped Vm facade + typed FromRustia/IntoRustia core + owned/live serde;
@@ -88,7 +86,7 @@ against an independent frontend remains planned; `full_moon` is not currently a 
 **A. Execution / dispatch — LOCKED: one portable big-`match`→`br_table` loop everywhere + GENERIC
 superinstructions, plus an op-extension hook.** Considered: target-split CPS/tail-call; single portable match
 [✓]; closure/threaded; fused-decode; two-tier native JIT. *Evidence:* Spike B + skeleton → match→br_table at
-~parity in V8; fn-pointer/CPS strictly worse on both targets. **Superinstruction policy (gak):** generic,
+~parity in V8. The measured function-pointer handlers returned to the dispatch loop and ran slower on both targets. **Superinstruction policy (gak):** generic,
 app-agnostic superinstructions (numeric-for, NAMECALL, FASTCALL, GETIMPORT — the families Luau itself uses)
 are **welcome in public** because they speed up *any* Luau and preserve compatibility. **Bespoke/app-specific
 fused ops** (grabby's `OP_UTIL`) are **private-fork only**, registered through a public **op-extension hook**
@@ -99,7 +97,7 @@ missing tail-call optimization, so `br_table` (one in-function branch, zero call
 contender was **`call_ref`** (typed funcref, skips the runtime type-check); the production microbench now
 confirms `br_table` across the measured engine families. **wasm-GC is REJECTED** for the script heap (objects aren't byte-addressable,
 engine-defined layout → forfeits deterministic full-collect + host-columnar rollback AND isn't bit-identical
-across engines); rustia keeps gc-arena on linear memory. **relaxed-SIMD stays banned** (FMA/rounding
+across engines); Rustia keeps its guest heap in linear memory on Wasm. **relaxed-SIMD stays banned** (FMA/rounding
 nondeterminism); only fixed `f32x4` where proven bit-identical. **M3:** the **hot/cold opcode split moves to P1**
 (tight hot-core br_table + `#[cold]` rare ops — de-risks the JSC/SpiderMonkey baseline tiers). Per-loaded-program
 cache metadata uses a 4-byte site-map entry per PC and allocates 16-byte shape/key/live-slot records only when
@@ -128,10 +126,9 @@ fixed-point primitive in the Value. **Canon split (confirmed correct by the f64 
 quiet-NaN at **every** f64-producing op; `-0.0`→`+0.0` **only at table-key normalization** (preserves Luau
 `1/-0.0 = -inf` sign-of-zero). Luau int64 is FFlag-off/library-only → deferred.
 
-**D. GC / memory — LOCKED target: one safe tracing/reclaiming VM heap using gc-arena 0.6 where appropriate,
-with allocation-debt pacing for Standard/LuauCompat and deterministic instruction-count full-cycle boundaries
-for DeterministicSim; ALL rollback-relevant AI state stays host-columnar (off the script heap) — a hard
-constraint.** Considered: gc-arena [✓ component]; slotmap [✓ for host-columnar state, not the main heap];
+**D. GC / memory — the original design targeted one safe tracing heap, allocation-debt pacing for
+Standard/LuauCompat, and instruction-count collection for DeterministicSim. The implemented schedule is
+[described below](#collection-schedule). Rollback-relevant AI state lives in host-owned columns outside the script heap.** Considered: gc-arena [✓ component]; slotmap [✓ for host-columnar state, not the main heap];
 hand-rolled mark&sweep [fallback]; Rc+cycle-collector [rejected]; region/no-GC for the kernel [✓ complement].
 *Evidence (spike-d-gc):* the key GC integration risks **retired by measurement** — write barrier is
 **free** (3.18 ns/mut in Marked phase = no-barrier; `make_gray_again` is `#[cold]`), and the **retain pattern**
@@ -188,7 +185,7 @@ storage. Per-op NaN canon
 path).
 
 **F. Parser / frontend — LOCKED: own hand-written recursive-descent → rustia bytecode; pinned Luau 0.709
-reference corpus as the current oracle, with independent frontend fuzzing planned.** Fully parses the Luau type grammar (real work) but does not typecheck. Floored `%` (Lua/Luau is
+reference corpus as the current oracle, with independent frontend fuzzing planned.** Parses and erases the supported Luau type syntax. [Current syntax coverage](CURRENT.md#error-locations-and-luau-type-syntax) describes the tested scope. Floored `%` (Lua/Luau is
 floored; Rust truncates), comparison-based `math.min`/`max`. Not consuming Luau LBC v7.
 
 **G. Steppability / fuel — LOCKED: stackless trampoline + per-instruction deterministic fuel + recursion cap;
@@ -243,8 +240,7 @@ Determinism work splits in two, and only the second part needs a flag:
 ⇒ **ONE engine with THREE concrete `Profile` variants** (review M1; a fourth source-compat variant,
 `Puc51Compat`, was added 2026-07-31 — see below):
 - **`ReproducibleStandard` (the public default):** targets the full pinned standalone surface with Group A on
-  and the Standard service surface available; the current 520-ref executable denominator (502 Luau 0.709 plus
-  18 PUC 5.1.5 compatibility refs) is pending-free.
+  and the Standard service surface available. The [coverage inventory](../conformance/COVERAGE.md) lists the tested behaviors for each oracle.
   It is cross-platform-reproducible for scripts inside the proven surface that avoid environment services.
   *Honest framing: this is
   reproducible-conformant, NOT byte-identical to reference Luau on unspecified behavior (iteration order,
@@ -270,15 +266,17 @@ buffers/vectors/coroutines, dynamic compilation, and captured upvalues are absen
 logical-live memory limit and a versioned guest-surface ABI make this a fail-closed embedding contract without
 inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-leaf-environment.md).
 
-**GC scheduling per profile (review M2): two triggers over the current hybrid heap.**
-- **ReproducibleStandard/LuauCompat:** allocation-debt-driven gc-arena pacing and weak sweeping are implemented.
-  Ordinary objects and programs are reclaimed with maintained logical-live accounting. Bounded-pause
-  behavior and pacing/interval tuning remain open; use the landed mixed-heap correctness gate.
-- **DeterministicSim:** an instruction-count trigger finishes the gc-arena cycle and sweeps weak tables (never
-  byte-debt, because object sizes differ 32/64-bit). **Version the collection interval as part of the determinism
-  ABI.** Ordinary-object reclamation is implemented; interval tuning on realistic heaps remains open.
-  Weak-table disappearance can occur at a different point than Standard by design, but remains deterministic
-  within this profile.
+### Collection schedule
+
+All profiles run a full tracing pass on the VM-owned heap at scheduled instruction-count
+boundaries. The VM marks reachable objects, sweeps weak tables and reclaims eligible
+unreachable objects. Standard scripts can pause automatic collection with
+`collectgarbage("stop")`. The instruction counter still advances while collection is paused.
+DeterministicSim keeps the scheduled collections and exposes no guest GC controls.
+Its collection interval is part of the replay ABI.
+Allocation-debt pacing for Standard remains a design option. The
+[VM scheduler](../crates/rustia-vm/src/vm.rs) and [heap](../crates/rustia-vm/src/heap.rs)
+implement the current behavior.
 
 ## 3b. Determinism + snapshot spec (operational — applies to the Deterministic profile)
 
@@ -330,8 +328,7 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
 
 - **P0 / P0.5 — DONE ✅.** Fused-op (~0.20 µs, private-fork validation) + the vertical slice (general-script
   ~0.9–1.0 µs, canon-ON golden, real `call_indirect`, gc-arena heap, retain+serde) measured. Axes B/D/H closed.
-- **P1 — engine core (substantial, release gates remain).** Lexer + recursive-descent parser (full type-grammar
-  parse, no typecheck) + compiler
+- **P1 — engine core (substantial, release gates remain).** Lexer + recursive-descent parser (type syntax and erasure) + compiler
   (constant-fold w/ pinned libm+canon, generic-superinstruction fusion, regalloc, O0 mode); `rustia-vm` with
   the **16-byte tagged Value**, owned tracing heap with default thread-affine and
   opt-in transferable ownership, plus owned long-string storage
@@ -362,15 +359,9 @@ inventing a fourth profile. See [`77-hardened-leaf-environment.md`](77-hardened-
   cross-target correctness/golden matrix, API/semver stabilization, and crate publication. The gradual
   typechecker/LSP is a separate later track, not a
   runtime-release gate. Keep the public codebase clean (no grabby-specific code) under the settled dual
-  `MIT OR Apache-2.0` license. *Optional:* native-only JIT (cranelift first). **VALIDATED tier — wasm-emit
-  JIT/AOT-to-wasm (the in-browser speed answer, spike `65-wasmjit`):** emitting a hot kernel to wasm at runtime
-  (via `wasm-encoder`) and instantiating it in V8 runs at **~4.6 ns/op = ~176× the interpreter** (within 1.35×
-  of native LLVM), for a **~4.7 µs one-time standup → crossover ≈ 6 calls**; generated modules can import the
-  VM's linear memory (no bounds-check penalty). Gate emission behind a **hotness counter** (`calls × interp_cost
-  > ~5 µs`). Caveat: measured on a **monomorphic f64** kernel; dynamically-typed Luau needs **type guards +
-  deopt/fallback** — which is exactly where **type-directed compilation** pays (Luau's types let us emit
-  guard-free specialized wasm). So the in-browser high-speed path = **type-directed AOT-to-wasm for hot,
-  proven-monomorphic kernels.** Use sync `new WebAssembly.Module` for the tiny (<1.1 KB) modules.
+  `MIT OR Apache-2.0` license. *Optional:* native-only JIT (cranelift first). The [Wasm code generation experiment](65-wasmjit.md) compared a single
+  numeric kernel with a skeleton interpreter and statically compiled Wasm in Node and Deno.
+  Browser and production performance remain unmeasured. A Wasm JIT or AOT tier is optional research.
 
 ## 5. Public vs private (the release model)
 

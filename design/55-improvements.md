@@ -70,7 +70,7 @@ from a fresh borrowed `HostContext<H>` threaded structurally through a lexical `
 `Slots`, `Effects`, `SlotWrites`, and `HostMut` views expose only the registered capability. This supersedes the
 earlier proposed public `Box<dyn Fn(&[OwnedValue])>` firewall and `Ctx<'gc>` sketch. **Why better:** it keeps
 tick-local borrows zero-copy, makes context escape impossible in safe Rust, avoids owned-value deep copies on
-host calls, and still leaves the VM thread-affine. Typed callback arities through eight, fallible returns,
+host calls, and preserves the default thread-affine VM. The optional `transferable` feature permits idle moves between workers. Typed callback arities through eight, fallible returns,
 metadata, panic containment, and contextual dispatch are implemented. See
 [`70-host-bridge-contract.md`](70-host-bridge-contract.md) and
 [`75-embedded-api.md`](75-embedded-api.md).
@@ -83,13 +83,12 @@ native and wasm run identical source, which is exactly what Spike-C's bit-identi
 **Conformant:** transcendental ULPs are UNSPECIFIED → enforcing one impl is conformant; only *enforces* locked
 axis E. **Cost:** low (CI config). **← cheap insurance for the core determinism bet.**
 
-**6. Pin float→int conversion to saturating `as` (= wasm `trunc_sat`).** *(determinism #4 · wasm #3 · compat
-#4)* Lock out-of-range/NaN float→int (for `%d`/`%x`, `buffer`, `bit32`) to Rust's saturating `as i64`/`as u64`
-(NaN→0), which lowers to the single non-trapping `i64.trunc_sat_f64` opcode. **Why better:** the trapping
-alternative would **abort the whole wasm module — taking down the iOS WKWebView page** — on a NaN/overflow;
-saturating is one branchless opcode and bit-identical across engines. **Conformant:** in-range floats still
-truncate-toward-zero exactly like Luau (SPECIFIED, untouched); out-of-range is C-UB in reference Luau →
-UNSPECIFIED → free to pick the deterministic option. **Cost:** low.
+**6. Make numeric conversions deterministic for each API.** The original proposal suggested a
+single saturating conversion. In the [implemented VM](../crates/rustia-vm/src/vm.rs), signed integer
+formatting uses a saturating cast. Buffer integer operands reject nonfinite values. `bit32`
+data words reject nonfinite values and truncate and wrap finite values modulo 2³². Shift counts,
+field positions and widths have separate range checks.
+[String index conversion](95-numeric-index-contract.md) has its own checked range.
 
 **7. Capability-typed, fuel-declaring contract on the host-operation hook.** *(public-clean · determinism #4 ·
 DX #5 · IMPLEMENTED, REFINED 2026-07-28)* Every host operation declares a non-zero fuel charge and one of seven
@@ -134,7 +133,10 @@ Fuel exhaustion remains a distinct, `pcall`-**uncatchable** kind (axis G). See
 [`79-script-diagnostics.md`](79-script-diagnostics.md) and the diagnostic follow-up in
 [`94-release-compatibility-audit.md`](94-release-compatibility-audit.md).
 
-## Strong runners-up (several worth doing later)
+## Other proposals at the time of the review
+
+Rustia has since shipped Serde serialization, rooted function handles and module replacement.
+The [embedding API](75-embedded-api.md) describes the available interfaces.
 > **PROMOTED per review M3:** the two below are no longer "P4 runner-ups" — **hot/cold opcode split → P1**
 > (de-risks the JSC/SpiderMonkey baseline tiers; design-in, not retrofit). Loaded-program cache metadata now uses
 > a 4-byte per-PC site map and lazily allocated 16-byte atom/slot/shape records for existing global/index paths

@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-20 (Australia/Hobart).
+Updated: 2026-11-21 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -25,30 +25,24 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
 The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
-## Issue #18 and #19 corrections
+## Error locations and Luau type syntax
 
-Metamethod calls preserve their triggering instruction location for positive `error`
-levels and `debug.info`, including expanded method arguments and resumed calls. Exported type aliases and `expr :: T` assertions (including module-qualified types) parse and
-have no runtime type-checking effect; assertions select one result. Two focused
-fixtures were checked against the pinned Luau 0.709 oracle and through the facade
-on all four profiles. The #18 follow-up resolves caller-selected error reports
-against the exact caller program, including reused source names and generated
-wrappers. Non-table writes use oracle-checked index messages. Wrapped coroutines
-preserve their original host report across yield/resume while keeping the guest
-error value unchanged. Manual string rethrows retain their explicit error site. Return annotations now distinguish single types from packs, including the pinned
-one-fixed-plus-tail suffix quirk. Table types validate fields, indexers, separators,
-contextual qualifiers and standalone array shorthand instead of skipping braces. Assertions now reject bare tuple/variadic packs
-while retaining grouped single types and function/generic pack positions. Alias
-generics accept defaults, enforce regular-before-pack/default ordering, and erase
-defaults at runtime. Generic function types (`<U>(U)->U`) now parse and erase in
-annotations, assertions, aliases, defaults and nested type arguments, with named
-parameters and final pack tails. The pinned upstream test excerpts and runtime
-checks are in `generic_function_types.luau`; negative parser/facade cases and
-differential shapes cover malformed forms. Typeof annotations validate ordinary expression syntax, permit expression interpolation,
-and erase without executing those expressions. The differential generator includes
-21 targeted type shapes and shares its 61-shape bound with CI smoke. Broader
-grammar coverage remains open;
-these fixes do not establish full syntax or analyzer parity.
+A metamethod can use `error(message, 2)` to blame the expression that called it.
+For example, an error raised by `__add` points to the line containing `a + b`,
+including when the metamethod was defined in another source file. The host
+diagnostic uses the selected caller's source. [Issue #18](https://github.com/slowchop/rustia/issues/18)
+and the [diagnostics contract](79-script-diagnostics.md) cover the details.
+
+Rustia accepts `export type`, generic function types such as `<T>(T) -> T`,
+and type assertions such as `value :: T`. Types are erased. As in Luau, asserting
+the type of a call selects one return value, even when the function returns several.
+The parser checks the syntax inside `typeof(...)` without executing the expression.
+The [four-profile regressions](../crates/rustia/tests/issue_18_19.rs) and
+[type grammar cases](../crates/rustia/tests/type_grammar.rs) cover
+[issue #19](https://github.com/slowchop/rustia/issues/19) and later fixes.
+One known gap is a `type function` declaration. Pinned Luau accepts it and Rustia
+currently rejects it during parsing. This is distinct from the generic function
+type syntax above. Rustia does not provide a static type checker.
 
 ## Issue #21 memory recovery
 
@@ -125,7 +119,9 @@ resumable.
   surface. **Puc51Compat** separately targets tested PUC Lua 5.1.5 table/order,
   sorting and formatting behavior with reproducible host-service rules.
 
-Standard modes use paced/incremental collection; HardenedLeaf narrows DeterministicSim.
+All profiles schedule automatic full collections by executed instruction count.
+Standard scripts can pause and restart automatic collection. DeterministicSim keeps
+the schedule fixed. HardenedLeaf further restricts the DeterministicSim environment.
 Ordinary builder defaults have no fuel or accounted-memory limit: set budgets explicitly.
 [Services](72-host-services.md) and [architecture](30-architecture.md) define these contracts.
 
@@ -195,8 +191,8 @@ unchanged-commit `just release-preflight` inventory once and immediately pushes
 only that exact clean HEAD. Ordinary `git push` retains the full hook. The
 one-shot route creates no reusable receipt and accepts only exact normal or
 observed-tip leased pushes. No bypass or evidence regeneration inside validation.
-[97 — Validation](97-validation-workflow.md) defines that inventory; a repaired
-macOS bootstrap still requires actual native execution.
+[97 — Validation](97-validation-workflow.md) defines that inventory. The public
+[launch run](public-source-activation.md) executed the native macOS arm64 tests.
 
 **Never run performance measurements locally.** The source correctness profile gives
 correctness jobs no timing authority. Public per-commit/history automation,

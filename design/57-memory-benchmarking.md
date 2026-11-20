@@ -213,7 +213,7 @@ All existing benchmark sources gain memory rows without changing their source:
 - `closures_upvalues`
 - `generic_iteration`
 - `stdlib_math_table`
-- then the seven non-default inventory workloads as their adapter coverage permits.
+- then the [non-default workloads](80-bench-suite.md#the-matrix) as their adapter coverage permits.
 
 These rows expose realistic preparation cost, short spikes, quiescent retention, and memory-time cost alongside
 the existing speed comparison. They use exactly the same fixed work and checksums as throughput, but execute in

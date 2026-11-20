@@ -41,10 +41,8 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
 
-The latest [drift report](./2026-10-29_DRIFT_REPORT.md) records this static design/source audit,
-applied corrections and memory-protocol gaps at the audit date. The prospective v2 fixes and
-pending measurement acceptance are tracked in [memory benchmarking](./design/57-memory-benchmarking.md).
-The drift report is not release acceptance.
+The latest [drift report](./2026-11-21_DRIFT_REPORT.md) records the design/source review, including
+parser coverage, collection scheduling and the scope of platform and benchmark evidence.
 
 The test-only [conformance corpus](./conformance/README.md) is indexed by
 [MANIFEST.tsv](./conformance/MANIFEST.tsv) and [REFS.tsv](./conformance/REFS.tsv).

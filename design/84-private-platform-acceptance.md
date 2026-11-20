@@ -25,8 +25,9 @@ The private Mac job used the runner account’s Rustup installation. The current
 `aarch64-apple-darwin` using the pinned toolchain action. Compiler warnings are errors.
 CI logs the tested checkout and the exact golden transcript.
 The shared runner requires exactly one transcript sentinel, rejecting empty
-test runs as well as failed execution. Policy self-tests exercise wrong runner
-placement, missing checks, and zero/duplicate/failed golden execution.
+test runs as well as failed execution. The private profile's policy self-tests
+exercised wrong placement, missing checks and zero, duplicate or failed golden
+execution. The hosted jobs still require the sentinel at runtime.
 
 The separate eight-target engine build matrix remains unchanged. Build success
 for Intel macOS, Linux arm64, Windows, iOS and Android is not runtime evidence.
