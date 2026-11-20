@@ -18,11 +18,18 @@
 
 - `typeof(expr)` uses the ordinary expression parser with its normal depth/span checks, then discards the expression AST. Interpolation is legal inside the expression; invalid expressions reject before execution.
 
-- Contextual `export type` uses the alias grammar; `expr :: T` parses the type and lowers to a single-result parenthesized expression without runtime checks. Named types accept the module-qualified `Module.Type` form and optional generic arguments.
+- An optionally exported `type function` declaration validates its ordinary function signature and body.
+  The parser tracks lexical locals in chunks containing this syntax. A type function can reference
+  globals and its own locals. A nested type function establishes a new capture boundary. The AST
+  retains the declaration name, export status and span.
+- Local variables, fixed parameters and numeric or generic for-loop binders share the optional
+  single-type annotation grammar in value and type functions. Vararg annotations also accept a
+  bare named type pack such as `A...`. Loop variables enter scope after all header expressions.
+- Contextual `export type` also supports ordinary type aliases; `expr :: T` parses the type and lowers to a single-result parenthesized expression without runtime checks. Named types accept the module-qualified `Module.Type` form and optional generic arguments.
 
 - Value-function return annotations distinguish a single type from a return pack. Suffixes require exactly one fixed entry; the pinned Luau 0.709 one-fixed-plus-tail suffix quirk is retained. Bare tails cannot take suffixes and nested bare packs reject. Suffixes consume the already-parsed node without backtracking; a test-only visit counter enforces one primary visit per nested type node. Leading union/intersection operators are supported; mixed unparenthesized operators reject.
 
-- Recursive parser paths share a 512-frame budget across statements, types, expressions and function signatures, alongside local depth checks. typeof expression mode validates function-body loop/vararg context before erasure; signatures keep the enclosing context and ordinary invalid functions retain their compiler error phase.
+- Recursive parser paths share a 512-frame budget across statements, types, expressions and function signatures, alongside local depth checks. Erased `typeof` expressions and type function declarations validate function-body loop/vararg context before erasure; signatures keep the enclosing context and ordinary invalid functions retain their compiler error phase.
 - AST source spans are byte offsets inherited from lexer tokens.
 - Type syntax is parsed and retained as syntax; this module does not type-check it.
 

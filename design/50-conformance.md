@@ -2,7 +2,7 @@
 
 > **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-08-13).** This file began as
 > a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live executable
-> ground truth is now **734 fixtures / 524 refs / 0 pending**: 716/506 are Luau 0.709 oracle-backed and 18/18
+> ground truth is now **735 fixtures / 525 refs / 0 pending**: 717/507 are Luau 0.709 oracle-backed and 18/18
 > are offline PUC 5.1.5 oracle-backed. The corpus is
 > enforced by project-status checks. The CORRECTIONS block below still supersedes contradictory historical rows;
 > that named executable denominator does not imply a one-to-one audit of every historical inventory row. New or
@@ -51,8 +51,11 @@
 >    `runtime.builtin-callee-evaluation-order`; see the [focused follow-up](82-error-behaviour-fuzzing.md#expanded-arguments-and-builtin-lookup-order).
 >
 > **Implementation notes (2026-11-21).** Three older table entries need qualification.
-> - A declaration such as `type function id(x) return x end` parses in the default
->   pinned Luau oracle. Rustia rejects it before execution.
+> - Rustia and pinned Luau accept ordinary and exported `type function` declarations.
+>   The parser validates the function body and rejects captures of enclosing locals.
+>   Declarations create no runtime binding and the interpreter never executes their bodies.
+>   The [oracle fixture](../conformance/fixtures/upstream-luau-0.709/type_function_declarations.luau)
+>   and [four-profile tests](../crates/rustia/tests/type_grammar.rs) cover this behavior.
 > - Rustia accepts explicit type arguments at a call, such as `id<<number>>(1)`.
 >   The [upstream conformance harness](../conformance/upstream/luau-0.709/tests/Conformance.test.cpp)
 >   enables `LuauExplicitTypeInstantiationSyntax` for this case. The default oracle rejects it.

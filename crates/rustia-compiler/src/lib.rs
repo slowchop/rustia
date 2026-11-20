@@ -168,6 +168,7 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::Break { span }
         | Stmt::Continue { span }
         | Stmt::TypeAlias { span, .. }
+        | Stmt::TypeFunction { span, .. }
         | Stmt::Return { span, .. }
         | Stmt::Expr { span, .. } => *span,
     }
@@ -412,7 +413,7 @@ impl Compiler {
             Stmt::Do { body, .. } => self.compile_scoped_block(body),
             Stmt::Break { span } => self.compile_break(*span),
             Stmt::Continue { span } => self.compile_continue(*span),
-            Stmt::TypeAlias { .. } => Ok(()),
+            Stmt::TypeAlias { .. } | Stmt::TypeFunction { .. } => Ok(()),
             Stmt::Return {
                 value,
                 extra_values,
@@ -7153,6 +7154,26 @@ mod tests {
         let mut vm = Vm::new(Profile::DeterministicSim);
         let result = vm.run(&program).unwrap();
         assert_eq!(result.as_number(), Some(42.0));
+    }
+
+    #[test]
+    fn numeric_and_generic_for_bindings_erase_their_annotations() {
+        let source = "local n=0; for i:typeof(unknown())=1,2 do n+=i end; \
+            for k:number,v:number in ipairs({4}) do n+=v end; return n";
+        let program = compile(&parse_source(source).unwrap()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        assert_eq!(vm.run(&program).unwrap().as_number(), Some(7.0));
+    }
+
+    #[test]
+    fn type_function_erasure_emits_no_body_constants_or_prototypes() {
+        let ordinary = compile(&parse_source("return 42").unwrap()).unwrap();
+        let declared = compile(&parse_source(
+            "export type function f() local function g() error('unused') end return g end; return 42",
+        ).unwrap()).unwrap();
+        assert_eq!(declared.main.code, ordinary.main.code);
+        assert_eq!(declared.constants().len(), ordinary.constants().len());
+        assert!(declared.functions.is_empty());
     }
 
     #[test]

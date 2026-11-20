@@ -40,9 +40,10 @@ The parser checks the syntax inside `typeof(...)` without executing the expressi
 The [four-profile regressions](../crates/rustia/tests/issue_18_19.rs) and
 [type grammar cases](../crates/rustia/tests/type_grammar.rs) cover
 [issue #19](https://github.com/slowchop/rustia/issues/19) and later fixes.
-One known gap is a `type function` declaration. Pinned Luau accepts it and Rustia
-currently rejects it during parsing. This is distinct from the generic function
-type syntax above. Rustia does not provide a static type checker.
+Rustia also parses and erases [type function declarations](https://github.com/slowchop/rustia/issues/74),
+including exported declarations. A type function can use its own locals and globals.
+Capturing a local from outside the declaration is a parse error. Its body never
+runs in the interpreter. Rustia does not provide a static type checker.
 
 ## Issue #21 memory recovery
 
@@ -152,8 +153,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **734 fixtures**, **524 refs**, **0 pending-oracle**
-and **0 pending-impl**: 716 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **735 fixtures**, **525 refs**, **0 pending-oracle**
+and **0 pending-impl**: 717 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and

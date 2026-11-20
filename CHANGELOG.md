@@ -27,6 +27,8 @@ The benchmark workflows described in earlier entries ran in the private predeces
   and `debug.info` (#18).
 - Parse contextual `export type` declarations and single-result `::` type
   assertions, erasing their type syntax at runtime (#19).
+- Parse and erase Luau `type function` and `export type function` declarations,
+  including the restriction on capturing outer locals (#74).
 
 - Match Luau method selection after arguments, including local receiver changes,
   expanded results and coroutine suspension. Preserve trailing varargs in

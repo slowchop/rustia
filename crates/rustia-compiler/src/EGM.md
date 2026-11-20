@@ -14,6 +14,7 @@
 
 ## Invariants
 
+- Type function declarations emit no bytecode, constants or function prototypes for their erased bodies.
 - Capture discovery is a whole-tree prepass so assignment sites account for captures and source-later global writes.
 - Each compiled capture retains its lexical name at the matching upvalue-descriptor index, including transitive captures and direct immutable values. Source provenance stays in `Program::source_name` and function debug metadata. Names do not change capture execution or cell sharing.
 - Capture interning consults existing descriptors after lexical local-name maps
