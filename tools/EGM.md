@@ -6,16 +6,11 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Interface
 
-- `check-public-source-candidate.js` derives and validates dormant public CI and
-  a manual private hosted rehearsal with unchanged required commands. Negative
-  fixtures reject boundary/coverage drift; disposable activation tests exercise
-  the actual selected-profile entrypoints. `--write` explicitly refreshes proposal
-  files before validation; normal checks never activate or regenerate them.
-  The workflow validator keeps private and hosted guard/runner configurations
-  separate while sharing coverage, pins and permission checks. The optional
-  `correctness_ci` selector defaults to private-self-hosted and grants no visibility
-  or timing authority. Operations rendering preserves historical benchmark data
-  while naming only the selected non-authoritative correctness environment.
+- [`check-public-source-candidate.js`](check-public-source-candidate.js) checks
+  hosted workflow parity and negative fixtures for the selected source profile.
+  CI selection is independent of visibility and benchmark provenance. See the
+  [hosted workflow inventory](../.github/public-ci/README.md).
+
 - [`benchmark-disk-space.js`](benchmark-disk-space.js) shares the 20 GiB and 20% available-filesystem reserve between coordinator admission and all three post-build runner checks. Numeric post-build snapshots, including refusals, are saved before quiet windows; no device names or paths are exported. The coordinator explicitly ships the helper with each runner and tests that inbox dependency list. This is admission and a post-build check, not continuous disk monitoring.
 - [`run-dedicated-benchmark.js`](run-dedicated-benchmark.js) coordinates owned-host history, per-commit, PR screening, A/B acceptance, live-Serde, calibration, matrix, and memory work. It obtains its SSH destination from an environment variable; the published host label is deliberately not the connection target.
 - `just check-benchmark-results` runs offline self-tests for benchmark analyzers, runners, and renderers plus committed-artifact validators ([Justfile](../Justfile)). `just release-preflight` invokes the full staged release preflight inventory; `just check-quick` runs its early checks.
@@ -24,9 +19,15 @@ This directory contains internal Node and shell tools for benchmark validation, 
 - Memory config freezing detects committed v2 inputs and pins the shared protocol module in addition to sampler/analyzer/cohort/publisher source. The owned-host runner refuses fresh legacy execution; evidence validation retains historical v1 support and independently derives v2 warmup/control counts and hashes. Memory summaries and data merging separate measurement protocols as well as host identities.
 - The package audit is [`check-package-files.js`](check-package-files.js); release validation is in [`run-release-preflight.js`](run-release-preflight.js). Workflow and facade boundaries are checked by [`check-workflows.js`](check-workflows.js), [`check-facade-api.js`](check-facade-api.js), and [`check-external-facade.js`](check-external-facade.js).
 - Release preflight and `just check-examples` execute the introductory embedding, chunk-builder, mutable-object, and live-value examples, followed by game objects and the correctness-only [`hardened_decision` example](../crates/rustia/examples/hardened_decision.rs). [`check-preflight.js`](check-preflight.js) guards all six executions. Timing examples remain outside local execution.
-- The [browser embedding recipe](../demos/web-live/README.md) has standalone formatting and Wasm Clippy checks in preflight. The existing self-hosted WebKit job builds its documented artifact and executes [`browser/web-live-example.cjs`](browser/web-live-example.cjs); public workflow fixtures reject missing build or execution commands.
+- The [browser embedding recipe](../demos/web-live/README.md) has standalone formatting and Wasm Clippy checks in preflight. The hosted WebKit job builds its documented artifact and executes [`browser/web-live-example.cjs`](browser/web-live-example.cjs); public workflow fixtures reject missing build or execution commands.
 - [`history-projection.js`](history-projection.js) validates the complete cleaned-history map and protected runtime-input fingerprints, resolves legacy source IDs without rewriting measurements, and checks projected metadata hashes. Its tests cover missing/duplicate mappings, unreachable commits and altered fingerprints. [`check-benchmark-commit-reachability.js`](check-benchmark-commit-reachability.js) refuses absent IDs and runs in the full preflight; its synthetic orphan-commit self-test supplies and verifies its own Git identity so CI runners need no global identity configuration.
-- [`check-public-workflow-profile.js`](check-public-workflow-profile.js) enforces the source private-only self-hosted correctness/fuzz workflow profile, including exact `$GITHUB_WORKSPACE`-only Git safe-directory setup before the containerized WebKit tests; wildcard trust is rejected. The manual-only real Firefox job must retain its private guard, ordinary Docker pool, pinned image/downloads, checksum verification, a Firefox-only temporary home and browser execution; negative fixtures reject changes to those boundaries. The Safari job requires explicit private dispatch opt-in, existing console/GUI ownership, an exact browser version and checksum-pinned temporary Wasm tools; its policy rejects permission enabling and system-package bootstrap. The macOS bootstrap must use account-provisioned Rustup without system package writes. The fixed workflow allowlist stays on ordinary self-hosted pools for either private bridge state. [`check-workflows.js`](check-workflows.js) routes to it only when the explicit profile marker exists and retains the private workflow checks otherwise.
+- [`check-public-workflow-profile.js`](check-public-workflow-profile.js) enforces
+  the source profile's correctness and differential-fuzz workflow inventory,
+  standard hosted runners, read-only permissions, pinned dependencies and required
+  execution blocks. [`check-workflows.js`](check-workflows.js) selects it when
+  the explicit source profile marker exists. The original private profile has
+  separate runner and workflow checks.
+
 - [`render-benchmark-operations-status.js`](render-benchmark-operations-status.js) renders either the unchanged private v2 operations policy or the separate public-source policy into `bench/operations-status.json`. Public timing authority, history automation, landscape refresh, and publication stay paused; the profile may record a private manual-cohort bridge without changing those permissions.
 - Other generators and artifact renderers include [`render-benchmark-data-readme.js`](render-benchmark-data-readme.js) and the config creators listed in this directory.
 - Publication-related tools include [`land-matrix-publication.js`](land-matrix-publication.js), [`merge-rustia-ci-memory-data.js`](merge-rustia-ci-memory-data.js), and [`push-benchmark-data-publication.js`](push-benchmark-data-publication.js). They form an operational boundary and are not verification commands.
@@ -65,4 +66,4 @@ Run from the repository root: `node --check tools/check-workflows.js` performs s
 
 ## Spec Alignment
 
-[The benchmark design](../design/80-bench-suite.md), [CURRENT](../design/CURRENT.md), and [operations contract](../design/81-benchmark-operations.md) describe the predecessor owned-host lifecycle implemented by `run-dedicated-benchmark.js`. The explicit source profile selects private self-hosted correctness CI and keeps public measurement automation and publication paused. Its private bridge permits reviewed manual exact-cohort comparisons only; results remain private and do not update public history or authorize claims. Earlier cloud protocols are historical evidence; provisioning, billing ceilings, and deletion gates are retired.
+[The benchmark design](../design/80-bench-suite.md), [CURRENT](../design/CURRENT.md), and [operations contract](../design/81-benchmark-operations.md) describe the predecessor owned-host lifecycle implemented by `run-dedicated-benchmark.js`. The explicit source profile selects standard GitHub-hosted correctness CI and keeps public measurement automation and publication paused. Its private bridge permits reviewed manual exact-cohort comparisons only; results remain private and do not update public history or authorize claims. Earlier cloud protocols are historical evidence; provisioning, billing ceilings, and deletion gates are retired.

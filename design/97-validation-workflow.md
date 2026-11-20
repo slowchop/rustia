@@ -97,24 +97,18 @@ The quick stage finished in 41 seconds including setup. All three stages passed.
 The overall manual run failed separately during Windows Rust startup, before
 Windows correctness tests executed; this observation does not close that gate.
 
-## Prepared public source profile
+## Experimental source release
 
-An explicit public-source marker selects private self-hosted correctness CI while retaining
-the full preflight stages and aggregate gate. Benchmark automation is paused;
-existing measurements are historical records. The full inventory additionally
-checks the history projection and refuses missing benchmark source identifiers.
-All jobs use ordinary self-hosted groups with private-repository and trusted
-same-repository PR guards; the final aggregate retains its always-run failure
-check within that trusted scope. Windows native and real Firefox execution stay manual. Windows requires an
-online Windows runner; Firefox uses the existing Linux Docker correctness pool
-with checksum-pinned official browser/driver downloads inside its disposable
-container. The optional Firefox job does not replace the required WebKit gate. An additional
-private Safari job requires explicit `safari=true` dispatch, an exact installed
-browser version and an already logged-in runner desktop. It checks prerequisites
-without changing browser/OS permissions and is skipped by routine PR/main CI.
-On 2026-11-15 the user explicitly deferred remote Safari acceptance from #31
-to the open follow-up #40. The failed desktop-prerequisite attempts remain
-failures; the opt-in route and this deferral do not claim executed Safari tests.
-The optional real-browser jobs do not weaken the required aggregate gate. Public visibility needs a separate isolated
-execution plan. No hosted fallback or benchmark-runner access is added.
-This does not authorize a package release or replace platform release gates.
+The [source profile](public-source-profile.json) selects `public-hosted`
+correctness on standard GitHub-hosted runners. The `public` event starts both
+required workflows when the repository becomes public. PR checks include the
+full preflight stages, aggregate, native and browser execution, target builds
+and differential smoke. Windows native, real Firefox and longer fuzz campaigns
+remain manual. The public workflows use read-only permissions and have no private
+runner or benchmark access. The private desktop Safari route remains historical.
+See the [CI inventory](../.github/public-ci/README.md) and
+[platform execution record](96-browser-platform-acceptance.md).
+
+The full inventory checks the history projection and benchmark source reachability.
+All retained measurements are historical. Inspect the actual launch jobs for
+their exact revision before recording hosted acceptance.

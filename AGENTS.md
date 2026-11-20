@@ -3,7 +3,7 @@
 rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby).
 Public source access is separate from package publication and supported-release acceptance; full Luau parity
 is not implied by source visibility. **This is an LLM-first codebase** — written and maintained mostly by agents, read and
-reviewed by humans. Outside contribution and support policies are undecided. Optimise for *both*: code an agent can reason about locally and a human can trust.
+reviewed by humans. Issues and PRs are publicly readable. Only repository collaborators can open either. Optimise for *both*: code an agent can reason about locally and a human can trust.
 
 **Start every session here:** read [`design/CURRENT.md`](design/CURRENT.md) (the single canonical state), then
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
@@ -11,6 +11,7 @@ serves them.
 
 ## Development starts from GitHub Issues
 
+- Maintainers use the issue workflow below. Security reports follow [SECURITY.md](SECURITY.md).
 - The [GitHub issue tracker](https://github.com/slowchop/rustia/issues) is the primary
   development backlog for source bugs, features, documentation and maintenance.
   Search open and closed issues before starting; reuse an existing issue or create
@@ -45,12 +46,11 @@ serves them.
 
 ## Benchmark policy
 
-- This checkout uses the private self-hosted correctness profile in `design/public-source-profile.json`.
-  The separately guarded manual #29 readiness rehearsal uses standard hosted
-  VMs for correctness only; ordinary private routing has no hosted fallback.
-  This does not authorize visibility, larger runners, billing-setting changes or benchmarks.
-  Public per-commit/history measurement, landscape refresh, and benchmark publication remain paused.
-  Its correctness workflows and public coordinator provide no timing authority.
+- This checkout selects `public-hosted` correctness in `design/public-source-profile.json`.
+  The GitHub `public` event starts the required suites when the source repository becomes public.
+  Use the standard hosted runners and keep private runners and credentials outside this repository.
+  Public per-commit/history measurement, landscape refresh and benchmark publication remain paused.
+
 - A separate private maintainer bridge is available only for manually dispatched,
   reviewed exact-cohort runtime comparisons on `ci-bench`. The #33 harness-lifetime
   repeatability controls use a separately reviewed, immutable private protocol.
@@ -66,12 +66,11 @@ serves them.
 ## Pull request delivery
 
 - Enable auto-merge once a pull request is ready and let required checks and reviews gate it; do not leave a fully green pull request open for separate approval.
-- The cleaned source repository uses private self-hosted correctness CI. Its main-branch ruleset and
-  auto-merge settings await separate approval; do not describe them as already enforced.
-  Check every applicable PR check and independent review before merging. Historical
-  benchmark publication permissions belong to the private historic repository and do not
-  grant a bypass in this repository. See `design/81-benchmark-operations.md`.
-- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`. Use merge commits even while the repository settings still offer squash and rebase.
+- Verify all applicable hosted checks and independent review before merging.
+  Verify the repository settings directly before relying on protection or auto-merge.
+  Historic benchmark publication permissions apply only to the private historic repository.
+
+- Use a merge commit, not squash or rebase, because generated benchmark-operations artifacts derive their state from the reviewed commit history and must retain those commit identities on `main`.
 
 ## The 10 principles (follow these; CI enforces the mechanical ones)
 
@@ -140,21 +139,23 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
 
 ## Pre-release API development
 
-- Until Rustia's first public release, prefer the cleanest coherent long-term API over compatibility with
+- Until Rustia's first supported release, prefer the cleanest coherent long-term API over compatibility with
   controlled clients. Treat necessary completeness as part of the feature and migrate every active client in the
   same rollout. Existing public-looking names are design candidates during `0.0.x`, not reasons to preserve a
   confusing split API.
 
 ## Where things live (public vs private boundary)
-- **This repo `rustia` (public-bound):** code + `design/` (the spec). Public issue and contribution policies are undecided. **Nothing secret
-  or infra-identifying ever lands here** (no runner hostnames/IPs/config, no credentials).
+- **`slowchop/rustia`** holds the experimental source release and its design documents.
+  Keep credentials, private infrastructure and sensitive client details out of source and hosted content.
+- **`slowchop/rustia-historic`** retains the original evidence and stays private.
+
 - **`private/` — the `rustia-ops` private sibling repo, git-ignored mount** (separate git history → the
   self-hosted CI/infra can never appear in public history by construction). Holds private notes, the CI-runner
   setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
 - **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
 - **Tasks:** source development uses GitHub Issues in `slowchop/rustia`; private/infra tasks use files or Issues in
-  `rustia-ops`. This private maintainer workflow does not establish outside contribution or public support policy. **No Linear**.
-- Self-hosted CI is referenced in public workflows ONLY by a generic label (e.g. `[self-hosted, bench]`).
+  `rustia-ops`. Only collaborators create issues and PRs. **No Linear**.
+- The source workflows use only standard GitHub-hosted runners. Private operations and benchmark runners stay isolated.
 
 ## Before pushing
 

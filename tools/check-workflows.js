@@ -1305,14 +1305,14 @@ if (fs.existsSync(publicSourceProfilePath)) {
       console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);
     }
     const candidate = require("./check-public-source-candidate.js").selfTest(root);
-    console.log(`dormant hosted candidate self-tests ok (${candidate.cases} negative fixtures)`);
+    console.log(`hosted workflow candidate self-tests ok (${candidate.cases} negative fixtures)`);
     process.exit(0);
   }
   try {
     const result = publicProfile.readCheckout(root);
     console.log(`workflow policy ok for ${result.files} public workflow file(s) (${result.profile})`);
     const candidate = require("./check-public-source-candidate.js").readCheckout(root);
-    console.log(`dormant hosted candidate ok (${candidate.workflows} inactive workflow proposals)`);
+    console.log(`hosted workflow policy ok (${candidate.workflows} ${candidate.active ? "active workflows" : "inactive proposals"})`);
   } catch (error) {
     fail(`public-source profile: ${error.message}`);
   }

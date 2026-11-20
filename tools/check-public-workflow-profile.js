@@ -5,6 +5,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const EXPECTED_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
+const HOSTED_MAC_SETUP = [
+  "      - name: Install pinned Rust toolchain",
+  "        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1",
+  "        with:",
+  "          toolchain: 1.95.0",
+  "          target: aarch64-apple-darwin",
+  "          cache: false",
+].join("\n");
 const PRIVATE_PR = "github.event.repository.private == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)";
 const PRIVATE_MANUAL = "github.event.repository.private == true && github.event_name == 'workflow_dispatch'";
 const PRIVATE_SAFARI = `${PRIVATE_MANUAL} && inputs.safari`;
@@ -186,7 +194,7 @@ function checkCi(text, mode = "private") {
   if (!["private", "public", "rehearsal"].includes(mode)) reject("unknown correctness CI mode");
   const label = ".github/workflows/ci.yml";
   const triggers = mode === "rehearsal" ? REHEARSAL_TRIGGERS : mode === "public"
-    ? '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n'
+    ? '"on":\n  public:\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n'
     : '"on":\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n    inputs:\n      safari:\n        description: Run visible Safari tests on an existing logged-in runner desktop\n        type: boolean\n        default: false\n      safari_version:\n        description: Exact installed Safari version required by the explicit Safari run\n        type: string\n        default: "26.6.2"\n';
   checkTriggers(text, triggers, label);
   checkPermissions(text, label);
@@ -316,18 +324,22 @@ function checkCi(text, mode = "private") {
   const windows = jobs.get("windows-runtime");
   requireText(windows, `if: ${mode === "private" ? PRIVATE_MANUAL : mode === "public" ? PUBLIC_MANUAL : `${REHEARSAL} && inputs.extended`}`, `${label} windows-runtime`);
   const macos = jobs.get("macos-arm64-runtime");
-  requireText(macos, [
-    '          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
-    '          if [ ! -x "$cargo_bin/rustup" ]; then',
-    '            echo "::error::Rustup is missing from this account\'s Cargo tools directory."',
-    "            exit 1",
-    "          fi",
-    '          export PATH="$cargo_bin:$PATH"',
-    '          echo "$cargo_bin" >> "$GITHUB_PATH"',
-    "          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update",
-  ].join("\n"), `${label} macOS rustup setup`);
-  forbidText(macos, "brew ", `${label} macOS bootstrap`);
-  forbidText(macos, "uses: actions-rust-lang/setup-rust-toolchain@", `${label} macOS bootstrap`);
+  if (mode === "private") {
+    requireText(macos, [
+      '          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"',
+      '          if [ ! -x "$cargo_bin/rustup" ]; then',
+      '            echo "::error::Rustup is missing from this account\'s Cargo tools directory."',
+      "            exit 1",
+      "          fi",
+      '          export PATH="$cargo_bin:$PATH"',
+      '          echo "$cargo_bin" >> "$GITHUB_PATH"',
+      "          rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --no-self-update",
+    ].join("\n"), `${label} macOS rustup setup`);
+    forbidText(macos, "brew ", `${label} macOS bootstrap`);
+    forbidText(macos, "uses: actions-rust-lang/setup-rust-toolchain@", `${label} macOS bootstrap`);
+  } else {
+    requireText(macos, HOSTED_MAC_SETUP, label + " hosted macOS rustup setup");
+  }
   const release = jobs.get("release-preflight");
   if (!release.includes("stage: [quick, workspace, release]")) reject(`${label} must run all canonical preflight stages`);
 }
@@ -335,15 +347,20 @@ function checkCi(text, mode = "private") {
 function checkErrorFuzz(text, mode = "private") {
   if (!["private", "public", "rehearsal"].includes(mode)) reject("unknown correctness CI mode");
   const label = ".github/workflows/error-fuzz.yml";
-  checkTriggers(text, mode === "rehearsal" ? REHEARSAL_TRIGGERS : '"on":\n  pull_request:\n    types: [opened, synchronize, reopened]\n  workflow_dispatch:\n', label);
+  const ordinaryTriggers = '  pull_request:\n    types: [opened, synchronize, reopened]\n  workflow_dispatch:\n';
+  const triggers = mode === "public" ? '"on":\n  public:\n' : '"on":\n';
+  checkTriggers(text, mode === "rehearsal" ? REHEARSAL_TRIGGERS : triggers + ordinaryTriggers, label);
   checkPermissions(text, label);
   checkJobRunners(text, mode === "private" ? FUZZ_JOBS : hostedJobs(FUZZ_JOBS), label, mode);
   checkActionPins(text, label);
   checkNoForbidden(text, label);
-  requireText(text, "name: Verify release diagnostic parity against pinned Luau", label);
   requireText(text, "cargo test --locked --manifest-path fuzz/Cargo.toml generated_differential_smoke -- --ignored", label);
   requireText(text, `timeout-minutes: ${mode === "private" ? 20 : 60}`, `${label} differential-smoke`);
   const jobs = jobBlocks(text, label);
+  requireText(jobs.get("differential-smoke"), [
+    "      - name: Verify release diagnostic parity against pinned Luau",
+    "        run: node tools/audit-release-errors.mjs",
+  ].join("\n"), label + " diagnostic parity");
   const stepGuards = [...text.matchAll(/^        if:([^\n]*)$/gm)].map((match) => match[1].trim());
   if (JSON.stringify(stepGuards) !== JSON.stringify(["always()"])) reject(`${label} must retain only its evidence-upload step guard`);
   const campaign = jobs.get("campaign");
@@ -393,7 +410,7 @@ function validatePublicProfile({ profile, files, workflows }) {
     checkCi(workflows[rehearsalFiles[0]], "rehearsal");
     checkErrorFuzz(workflows[rehearsalFiles[1]], "rehearsal");
   }
-  return { files: sortedFiles.length, profile: profile.state };
+  return { files: sortedFiles.length, profile: profile.correctness_ci ?? "private-self-hosted" };
 }
 
 function readCheckout(root) {
@@ -438,9 +455,9 @@ function selfTest(root) {
     cases += 1;
   };
   try {
-    assert.deepEqual(run(), { files: 2, profile: "private-rehearsal" });
+    assert.deepEqual(run(), { files: 2, profile: "private-self-hosted" });
     assert.deepEqual(run({ ...profile, benchmark_bridge: "private-maintainer-cohorts-v1" }), {
-      files: 2, profile: "private-rehearsal",
+      files: 2, profile: "private-self-hosted",
     });
     expectFail("extra workflow", () => run(profile, [...files, "main-bench.yml"], workflows), /active workflows must be exactly/);
     expectFail("missing workflow", () => run(profile, ["ci.yml"], workflows), /active workflows must be exactly/);
@@ -511,5 +528,5 @@ function selfTest(root) {
   }
 }
 
-module.exports = { validatePublicProfile, checkCi, checkErrorFuzz, readCheckout, selfTest,
+module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, readCheckout, selfTest,
   REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };

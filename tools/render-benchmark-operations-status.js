@@ -345,7 +345,11 @@ function renderPublicStatus(policy, results, bridgeState = "pending-private-trus
     profile: "public-source",
     benchmark_bridge: bridgeState,
     runner_classes: correctnessCi === "public-hosted" ? Object.fromEntries(Object.entries(policy.runner_classes).map(([name, runner]) =>
-      [name.replace("self-hosted-", "hosted-"), { ...runner, environment: "github-hosted" }])) : policy.runner_classes,
+      [name.replace("self-hosted-", "hosted-"), {
+        ...runner,
+        environment: "github-hosted",
+        reason: "GitHub-hosted runners check correctness. Their timings are not benchmark results.",
+      }])) : policy.runner_classes,
     measurement,
     publication,
     progress: {

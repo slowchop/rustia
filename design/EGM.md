@@ -6,9 +6,10 @@ Design specifications, canonical project state, structured evidence, and a gener
 
 ## Interface
 
-- [Public-source activation](public-source-activation.md) prepares the exact
-  privacy, hosted-evidence, CI, reporting and visibility gates. The hosted pair
-  is dormant; manual guarded readiness rehearsals do not publish source or packages.
+- [Public-source activation](public-source-activation.md) records the 2026-11-20
+  launch decision, required hosted jobs on the `public` event, reporting policy
+  and historical preparation.
+
 - Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and links to the GitHub issue backlog.
 - Historical pre-compaction text: [CURRENT-2026-10-30-snapshot.md](./CURRENT-2026-10-30-snapshot.md). Its original authority statements are historical; it must never override CURRENT.
 - Architecture: [30-architecture.md](./30-architecture.md).
@@ -21,7 +22,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 - Hosted executor-accounting path counts are a default-off CI diagnostic, described
   in the validation contract and [VM Core 2](./58-vm-core2.md); they provide no timing acceptance.
 - Source-access preparation, history-audit scope and visibility gates: [98-public-source-readiness.md](./98-public-source-readiness.md). Separate from supported releases and package publication.
-- [history-projection.json](./history-projection.json) maps the frozen private history to its cleaned projection and fingerprints protected runtime inputs; [public-source-profile.json](./public-source-profile.json) selects private self-hosted correctness CI, keeps public benchmark automation paused, and records the private bridge's exact-cohort-only availability. Original signatures and private metadata bytes are not authenticated by the projection.
+- [history-projection.json](./history-projection.json) maps the frozen private history to its cleaned projection and fingerprints protected runtime inputs; [public-source-profile.json](./public-source-profile.json) selects standard hosted correctness CI, keeps public benchmark automation paused, and records the private bridge's exact-cohort-only availability. Original signatures and private metadata bytes are not authenticated by the projection.
 - Benchmark graph publication ordering, host-control investigation and history presentation: [99-benchmark-history-integrity.md](./99-benchmark-history-integrity.md).
 - Latest reviewed host-calibration result used by the graph: [99-benchmark-host-calibration.json](./99-benchmark-host-calibration.json). This is a dated review record, not a live runner-health feed or a replacement for the control ledger.
 - Human documentation audit, completed browser and practical embedding recipes, introductory example guidance, and remaining add/change/cut recommendations: [100-documentation-review.md](./100-documentation-review.md). This is a dated review, not a separate status authority or contribution policy.

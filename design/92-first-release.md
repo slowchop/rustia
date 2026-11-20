@@ -1,15 +1,10 @@
 # Private API milestone and future 1.0 release
 
-Current target: **a private 0.x milestone for API and real-application readiness**.
-Keep the repository private and every workspace crate at `publish = false`.
-The workspace version remains `0.0.1`; this plan does not authorize publication,
-a public release candidate, or a version bump.
-
-The later source-access preparation in
-[98-public-source-readiness.md](98-public-source-readiness.md) is a separate
-track. Source inspection may precede a supported release after its own audit and
-explicit visibility approval. It does not change the package/runtime/platform
-release requirements below; the repository remains private during preparation.
+This plan defines the private 0.x application-acceptance milestone and the later
+supported release. The [experimental public source launch](public-source-activation.md)
+covers source inspection and use. All workspace crates remain at `0.0.1` with
+`publish = false`. Package publication, supported platforms, API stability and
+consumer rollout keep their separate acceptance gates.
 
 The future stable target remains **Rustia 1.0**, after a separate publication
 and release-candidate decision. That compatibility promise will cover the
@@ -19,7 +14,7 @@ conformance tooling remain unpublished unless separately selected later.
 
 The goal is straightforward: a Rust developer should be able to try Rustia in a
 few minutes, understand its limits, and use it without application workarounds.
-Make necessary API changes during this private phase and migrate active clients
+Make necessary API changes during private consumer acceptance and migrate active clients
 together. Record the proposed API baseline after consumer validation; do not
 freeze known design mistakes into 1.0.
 

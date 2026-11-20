@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-17 (Australia/Hobart).
+Updated: 2026-11-20 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -11,34 +11,25 @@ and evidence. When an older status statement disagrees, this file wins.
 ## Status and permissions
 
 Rustia is a from-scratch Rust interpreter for pinned standalone **Luau 0.709**.
-Development remains private and at 0.x. Source access, exact consumer acceptance
-and supported releases have separate gates; full parity and API stability are not promised.
+The 2026-11-20 launch decision covers the cleaned **`slowchop/rustia`** source
+under MIT OR Apache-2.0 for inspection and experimental use. All eight workspace
+packages remain at **0.0.1**, with **all 8 blocked by publish=false**. Stable APIs, full Luau
+parity, consumer rollout and supported releases retain their own acceptance gates.
 
-- Work in **`slowchop/rustia`**, the cleaned source repository. The original
-  **`slowchop/rustia-historic`** remains a separate private evidence repository.
-- **Both repositories stay private.** All eight workspace packages remain at
-  **`0.0.1`**, **all 8 blocked by publish=false**. Public source visibility,
-  package publication and supported releases require separate explicit decisions.
-- GitHub Issues is the private maintainer development backlog. Outside contribution,
-  public issue-reporting and support policies remain **undecided**. Do not invite
-  outside submissions or promise public review/support.
-- Main protections and auto-merge settings still await separate approval.
-  Check applicable CI and independent review before merging; use merge commits.
-- Keep private infrastructure and secrets in the separate ignored `private/`
-  sibling repository. The public/private boundary is in [AGENTS](../AGENTS.md).
+- **`slowchop/rustia-historic`** retains the original private evidence. The
+  operations sibling **`rustia-ops`** and private benchmark infrastructure stay private.
+- [GitHub Issues](https://github.com/slowchop/rustia/issues) is the maintainer
+  backlog. Issues and pull requests are publicly readable. Only repository
+  collaborators can create either. [CONTRIBUTING](../CONTRIBUTING.md) describes that workflow.
+- Suspected vulnerabilities belong in GitHub’s private reporting channel. Its
+  availability must be verified after visibility changes. See [SECURITY](../SECURITY.md).
 
-[98 — Source readiness](98-public-source-readiness.md) records the audit, history
-projection and visibility gates. Historic PR/CI links remain private evidence.
-
-Issue #29 now has a dormant standard-hosted public CI proposal, shared coverage
-validation and a separately guarded manual private readiness rehearsal. Ordinary
-private PR/push routing is unchanged. Rehearsals require the maintainer, main ref,
-exact SHA and dispatch confirmation; extended manual platform/campaign work is
-off by default. A disposable activation fixture verifies the explicit future
-correctness selector without granting visibility, benchmark or publication
-authority. Actual hosted execution and final privacy clearance remain gates;
-see the [activation proposal](public-source-activation.md). Contribution/security
-policy text is proposed only, and no public invitation is adopted yet.
+The [selected source profile](public-source-profile.json) uses standard
+GitHub-hosted correctness CI. Private Actions billing blocked the hosted
+rehearsal. Both workflows subscribe to GitHub’s `public` event so the visibility
+change starts their required suites. Inspect the resulting jobs for the
+exact default-branch commit before recording hosted acceptance. [Launch decision](public-source-activation.md)
+and [historical preparation](98-public-source-readiness.md).
 
 ## Issue #18 and #19 corrections
 
@@ -180,15 +171,16 @@ reset against an independent host model in all four profiles, within the existin
 input/fuel/memory bounds. This is correctness coverage, not a new remote campaign
 or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-exports-and-functions-2026-10-30).
 
-Private self-hosted CI covers lints, workspace/external-package contracts, Rustdoc/examples,
-bounded fuzz/differential smoke, native Linux x86-64 and macOS ARM64, Node/V8 and
-headless WebKit goldens, plus cross-builds. Builds are not runtime acceptance.
-Ordinary correctness jobs use generic Linux/macOS/Windows self-hosted groups,
-with private-repository and same-repository PR guards. Public visibility requires
-a separate isolation review; there is no hosted fallback or benchmark-runner access.
+The source workflows run lints, workspace and external-package checks,
+Rustdoc/examples, bounded fuzz/differential smoke, native Linux x86-64 and
+macOS ARM64, Node/V8 and headless WebKit goldens, and cross-builds on standard
+GitHub-hosted VMs. The public transition runs the required inventory. Windows
+native, real Firefox and longer fuzz campaigns remain manual. Cross-builds
+establish compilation for their targets.
+
 The 2026-11-13 type-grammar candidate executed shared contracts on native Linux
 ARM64, a physical iPad, an ARM64 Android emulator and local real Firefox/Safari.
-A private manual-only job now runs real Firefox with checksum-pinned official
+A former private manual-only job ran real Firefox with checksum-pinned official
 Mozilla binaries in the existing Docker correctness pool. Its 2026-11-13
 immutable candidate executed all 96 browser contracts with matching goldens;
 the exact head and raw job evidence are recorded separately. Physical iPad Safari
@@ -198,8 +190,8 @@ final-candidate acceptance. On 2026-11-15, the user explicitly deferred native
 Intel Mac execution (#39) and remote desktop Safari execution (#40) from #31.
 Both remain unverified, open follow-ups and future release gates; the delivered
 local Safari and physical-iPad results do not substitute for remote execution.
-A private explicit opt-in Safari dispatch uses the existing Apple Silicon pool
-and requires an already logged-in runner desktop. Two attempts failed that
+The former private opt-in Safari dispatch used the Apple Silicon pool
+and required an already logged-in runner desktop. Two attempts failed that
 prerequisite before any browser tests ran; adding the route is not execution
 acceptance. No runner or browser permissions were changed. [Evidence](96-browser-platform-acceptance.md).
 
@@ -263,8 +255,8 @@ The active backlog is:
 - [One-shot validated push #61](https://github.com/slowchop/rustia/issues/61).
 - [Typed object length and iteration #63](https://github.com/slowchop/rustia/issues/63).
 
-Tracking work does not authorize source visibility, publication, measurements or
-private infrastructure actions; the active constraints above still apply.
+Use the launch decision above for source visibility. Package publication, measurements
+and private infrastructure actions require their own authorization.
 
 ## Reading path and retained history
 
