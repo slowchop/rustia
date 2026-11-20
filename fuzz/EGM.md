@@ -8,7 +8,7 @@ Independent cargo-fuzz workspace with bounded frontend, VM, stateful API and dif
 
 - Target adapters: [fuzz_targets](./fuzz_targets/EGM.md).
 - Shared harness logic: [src](./src/EGM.md).
-- Bounds and campaign commands: [README.md](./README.md).
+- [README.md](./README.md) documents input bounds, the hosted PR smoke and manually dispatched campaigns.
 
 ## Invariants
 

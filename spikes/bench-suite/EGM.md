@@ -6,7 +6,7 @@ Standalone reference Luau benchmark suite and Koto baseline harness. Its recorde
 
 ## Interface
 
-- [README.md](./README.md) documents oracle versions, method, workloads, and run commands.
+- [README.md](./README.md) documents oracle versions, method, workloads, and historical commands. The current benchmark policy is linked from that record.
 - Rustia source is absent by design; workloads live in [luau](./luau/EGM.md) and the harness in [src](./src/EGM.md).
 - Koto comparison is in [koto-harness](./koto-harness/EGM.md).
 

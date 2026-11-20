@@ -7,8 +7,7 @@ Design specifications, canonical project state, structured evidence, and a gener
 ## Interface
 
 - [Public-source activation](public-source-activation.md) records the 2026-11-20
-  launch decision, required hosted jobs on the `public` event, reporting policy
-  and historical preparation.
+  launch commit, completed hosted CI and differential runs, reporting policy and historical preparation.
 
 - Canonical state: [CURRENT.md](./CURRENT.md), kept to current contracts, permissions and links to the GitHub issue backlog.
 - Historical pre-compaction text: [CURRENT-2026-10-30-snapshot.md](./CURRENT-2026-10-30-snapshot.md). Its original authority statements are historical; it must never override CURRENT.

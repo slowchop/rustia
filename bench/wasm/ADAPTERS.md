@@ -1,26 +1,25 @@
 # Wasm Target Adapter Status
 
-The wasm target bench measures adapters that both compile to
+The retained Wasm benchmark protocol covers adapters that compile to
 `wasm32-unknown-unknown` and execute the default workload set inside JS
 `WebAssembly` runtimes.
 
-Currently measured:
+Adapters measured in the recorded cohort:
 
 - `rustia` - production rustia crate compiled to wasm.
 - `koto` - pure Rust Koto adapter compiled to wasm.
 - `rhai` - Rhai adapter compiled to wasm with deterministic hashing features.
 
-The active recurring runtime is Node/V8. The accepted Deno/V8,
-Bun/JavaScriptCore-family, and SpiderMonkey `js` shell measurements are kept in
-[`history/`](history/) as portability evidence instead of being repeated in
-every public benchmark run.
+The last recurring cohort used Node/V8. Public benchmark measurement is paused.
+The accepted Deno/V8, Bun/JavaScriptCore-family and SpiderMonkey `js` shell
+measurements are preserved in [history](history/) as portability evidence.
 
 The rustia wasm32 quota/recovery check also executes a 300-decision reset
 lifecycle. It verifies reusable compiled modules, restored host bindings,
 cleared decision inputs, deterministic RNG restart, epoch-stale handles, and an
 exact post-warmup VM-owned-memory plateau inside Node/V8.
 
-Not currently measured:
+Adapters excluded from that cohort:
 
 - `boa` - compile probe reaches `getrandom`'s wasm support gate.
 - `luaur` - native adapter added; wasm adapter compatibility has not yet been
@@ -37,5 +36,4 @@ Not currently measured:
 - `wasmtime` - native virtual-memory/JIT dependencies do not compile for
   `wasm32-unknown-unknown`.
 
-Those exclusions are not permanent product decisions. They are the current
-evidence-backed wasm target status for this benchmark harness.
+These exclusions describe the toolchain and workloads used for that cohort.

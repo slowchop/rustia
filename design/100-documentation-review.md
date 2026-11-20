@@ -6,7 +6,7 @@ Date: 2026-10-29 (Australia/Hobart). Reviewed source baseline: `b84b5f6715e31756
 
 Rustia needs a clearer route through its existing documentation, not a book or a documentation website. The most useful additions explain choices that currently require reading several API pages. The most useful cuts remove duplicate status, chronology and implementation detail from the user path.
 
-Source access, supported releases and accepting outside contributions are separate decisions. Both source repositories remain private and packages remain unpublished. An outside contribution, issue-reporting or support policy has not been chosen. This review does not choose one, invite submissions, enable Issues, change repository protections, publish documentation or authorize packages.
+At the October review, both repositories were private and the contribution policy was undecided. The [November launch record](public-source-activation.md) documents public source access and collaborator-only issue and pull request creation.
 
 Four agent reviews covered first use, advanced embedding contracts, documentation structure, and an independent check of the resulting diff. Findings were compared with source, existing tests and the current source profile. These are technical and editorial reviews, not observations from usability tests with outside readers.
 
@@ -120,4 +120,4 @@ Fresh application, README, Rustdoc, CLI and repository preflight checks can esta
 
 The documentation patch requires the unchanged-commit full release-preflight inventory through the normal push guard and all applicable hosted CI. README source references have local reachability/path checks; a fresh external application should exercise the actual Git dependency as well. No local timing or profiling is part of this review.
 
-Remaining decisions are outside contribution/issue/support policy, eventual source visibility, repository protection settings and package/release acceptance. They are not silently resolved by fixing documentation.
+At the review date, visibility, outside contributions, support, repository protections and package acceptance were open decisions. See [current state](CURRENT.md) for their status.

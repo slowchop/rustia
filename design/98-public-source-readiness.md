@@ -3,8 +3,7 @@
 Date: 2026-10-27 (Australia/Hobart).
 Audited baseline: `a62ef708e63c02fdea5630c32e3f8c78d173b82a`.
 Verdict at the audit date: do not change repository visibility yet.
-The [2026-11-20 launch decision](public-source-activation.md) records the later
-experimental source release scope and hosted execution sequence.
+The sections below preserve what was known at each audit date. The [public launch record](public-source-activation.md) documents the November 20 release, the passing hosted jobs and the reporting policy now in effect.
 
 ## Decision and scope
 

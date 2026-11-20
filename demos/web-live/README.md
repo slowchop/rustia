@@ -1,6 +1,6 @@
 # Embed Rustia in a browser with JavaScript services
 
-[Compare Rustia with other Luau projects](./compare.html) for features, platform support, and measured performance.
+[Compare Rustia with other Luau projects](../../README.md#compare-luau-projects) for features and platform support.
 
 This standalone application keeps Rustia's default `web-live` feature and uses
 `wasm-bindgen` to connect WebAssembly to JavaScript. It runs a short Luau script,
@@ -35,7 +35,8 @@ python3 -m http.server 8788 --bind 127.0.0.1 --directory demos/web-live
 
 Open [the local example](http://127.0.0.1:8788/). Wait for `Ready`, then click
 **Run example**. The page should show `Result: 42`; open the browser's developer
-console to see `Hello from Luau`. Stop the server with Ctrl-C.
+console to see `Hello from Luau`. The same server hosts the [comparison page and performance chart](http://127.0.0.1:8788/compare.html).
+Stop the server with Ctrl-C.
 
 Generated files live in `pkg/` and `target/`; they are not source files. Serve
 the directory rather than opening `index.html` through a `file:` URL, so the
@@ -85,10 +86,9 @@ needs those services and permits results that need not repeat.
 
 For direct `WebAssembly.instantiate` with no JavaScript imports, see the
 [bare-Wasm demo](../live-wasm/README.md). It disables `web-live` and uses the
-standard environment. This recipe is one integration example; browser execution
-evidence and the remaining Safari/mobile release gates are recorded separately
-in [platform acceptance](../../design/96-browser-platform-acceptance.md). A headless
-WebKit check alone does not establish Safari or mobile acceptance.
+standard environment. The [platform record](../../design/96-browser-platform-acceptance.md)
+lists the separate native mobile and physical-iPad Safari runs, their tested
+revisions and the remaining release gates.
 
 ## Record the race
 

@@ -40,8 +40,9 @@ pack defaults, generic function binders/named parameters/final tails, and assert
 rejection with the oracle before observing execution. Raw frontend fuzzing remains
 a crash/robustness check; neither it nor this targeted generator covers all type grammar.
 
-The Error behaviour and fuzzing workflow runs the differential smoke on PRs.
-Explicit workflow dispatch runs 30 minutes per target, then two additional hours for
+The [Error behaviour and fuzzing workflow](../.github/workflows/error-fuzz.yml)
+ran the differential smoke at public launch and also runs it on PRs and manual
+dispatch. Only manual dispatch starts the longer campaigns. It runs 30 minutes per target, then two additional hours for
 stateful and differential. It retains revision, toolchain, seed-bearing logs,
 corpora and findings. These are correctness runs, not performance evidence.
 Timeouts, abnormal worker exits and mismatches require triage. The current

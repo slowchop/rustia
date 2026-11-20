@@ -20,7 +20,7 @@ before relying on unit tests in an individual crate.
 
 ## Local Runner
 
-Run the conformance manifest directly:
+From the repository root, run the conformance manifest:
 
 ```sh
 cargo run -p rustia-conformance -- .

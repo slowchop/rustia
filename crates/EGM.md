@@ -2,7 +2,7 @@
 
 ## System Overview
 
-`crates/` groups the interpreter's public application facade, lower-level engine crates, command-line runner, and conformance tooling. The implementation is a deterministic-by-contract Luau interpreter with multiple selectable profiles. The code and [`design/CURRENT.md`](../design/CURRENT.md) describe the built state; this tree does not establish full Luau parity or public-release readiness.
+`crates/` groups the interpreter's public application facade, lower-level engine crates, command-line runner, and conformance tooling. The implementation is a deterministic-by-contract Luau interpreter with multiple selectable profiles. The code and [`design/CURRENT.md`](../design/CURRENT.md) describe the built state; this tree does not establish full Luau parity or supported-release readiness.
 
 ## Interface
 

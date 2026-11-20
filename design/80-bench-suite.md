@@ -99,9 +99,9 @@ and the supplemental #24 `string_opcodes` probe. The string probe runs a top-lev
 so compiler specialization reaches all nine dedicated string opcodes; it is outside the five default workloads.
 It also owns `bench/wasm-gate.json`, a deterministic pre-lock gate tracker
 exposed by `script-bench --wasm-gate-json` and rendered by the generated HTML report. The wasm target bench builds
-`bench/wasm/adapter-runner` and records `rustia`, `koto`, and `rhai` under Node/V8 in
+`bench/wasm/adapter-runner`. Its last recurring cohort recorded `rustia`, `koto`, and `rhai` under Node/V8 in
 `bench/wasm/current-results.json`; the accepted four-runtime matrix is retained under `bench/wasm/history/`, and
-adapter exclusions are documented in `bench/wasm/ADAPTERS.md`. The recurring dispatch gate records `call_ref`
+adapter exclusions are documented in `bench/wasm/ADAPTERS.md`. The last recurring dispatch gate recorded `call_ref`
 versus `br_table` under Node/V8 in `bench/wasm/dispatch-current-results.json`; the completed cross-engine result
 is retained beside the historical matrix.
 The native harness now offers `--samples-json` for raw sidecars and isolates every calibration probe and timed
@@ -157,19 +157,19 @@ five-workload minimum-time gaps at that snapshot were 3.494x to `mlua-luau` and 
 that cross-host comparison are stability signals, not causal regression claims; current generated artifacts and
 the retained raw evidence remain authoritative.
 
-The historical small-regression milestone used three independent fixed-N publication runs. Current A/B
-acceptance uses the [owned-host acceptance lane](81-benchmark-operations.md#ab-acceptance-on-the-owned-host)
-and publishes no history rows; the recurring language matrix has its own completeness and publication gate.
+The historical small-regression milestone used three independent fixed-N publication runs. The private maintainer bridge supports reviewed exact-cohort A/B comparisons.
+Its results remain private. The [owned-host acceptance protocol](81-benchmark-operations.md#ab-acceptance-on-the-owned-host)
+records the evidence requirements. Public matrix measurement and publication remain paused.
 
 **Rustia's column:** the `bench` crate enumerates engines by **cargo feature**; `rustia` now runs through the
 default `rustia-engine` feature while the external adapters stay independently gated for standalone builds.
 
-## Closed wasm pre-lock gate; recurring evidence remains
-Production rustia wasm now runs through the bench wasm adapter runner, with koto and rhai as wasm-compatible
-comparison adapters. The recurring public benchmark uses Node/V8. Accepted V8, Bun/JavaScriptCore-family, and
-SpiderMonkey measurements show `call_ref` behind `br_table` and remain archived as portability evidence. The
-pre-lock wasm gate is closed. A future trusted bridge must refresh Node/V8 evidence as the harness changes;
-that requirement remains pending while measurement is paused.
+## Closed Wasm pre-lock gate
+
+The Wasm benchmark adapter runs Rustia, Koto and Rhai. The last recurring matrix used Node/V8.
+The archived V8, Bun/JavaScriptCore-family and SpiderMonkey measurements showed `call_ref` behind
+`br_table` on the tested revisions and closed the pre-lock gate. Public measurement is paused.
+Refreshing the Node/V8 matrix requires a separately approved measurement lane.
 
 ## Where it lives
 ```

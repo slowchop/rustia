@@ -56,8 +56,8 @@ implementation into independently reviewable changes. Use README + rustdoc.
 The full native/mobile/Firefox/Safari runtime matrix remains a **future public
 release gate**, not a blocker for this private milestone. Do not remove that
 matrix from the platform contract or imply that cross-compilation proves it.
-Public package publication, docs.rs verification, public issue-tracker opening,
-and 1.0 promotion are deferred. A documentation site, async/scoped callbacks,
+Registry publication, docs.rs verification and 1.0 promotion are deferred.
+The public [issue tracker](https://github.com/slowchop/rustia/issues) serves the maintainer backlog. A documentation site, async/scoped callbacks,
 custom object fields/metamethods, a JIT, VM-owned mutable-object snapshots, and
 benchmark-project extraction are outside the private milestone.
 
@@ -191,7 +191,7 @@ runtime or embedding requirement above.
 
 ## 3. Verify the platforms we promise
 
-The [private platform checks](84-private-platform-acceptance.md) implement a
+The [recorded private platform milestone](84-private-platform-acceptance.md) established a
 shared exact transcript for Linux x86-64, native macOS arm64 and Node/V8, plus
 clean external archived-facade contracts. Default and bare features are covered.
 The exact candidate and its CI/review/merge evidence are in the acceptance
@@ -203,8 +203,9 @@ record; the broader public matrix below remains open.
 - [ ] Run the declared browser correctness tests in real Firefox and Safari,
   including the supported JavaScript adapters. Existing Node/V8 coverage remains
   part of the gate. [The browser record](96-browser-platform-acceptance.md)
-  documents passing local Firefox and Safari runs; remote browser-runner
-  readiness remains open.
+  documents scoped local Safari and remote Firefox execution. The public CI
+  offers Firefox on manual dispatch. Remote desktop Safari remains open in
+  [issue #40](https://github.com/slowchop/rustia/issues/40).
 - [ ] Repeat the bounded fuzz and long-running memory/reload/reset checks on the
   final candidate. Record exact commits and CI links.
 - [ ] Keep the public workspace free of unsafe code and all required correctness,
@@ -218,10 +219,10 @@ record; the broader public matrix below remains open.
 - [x] Add maintainer build/validation notes and keep local worktrees out of Git's untracked list.
 - [ ] Complete the API reference: defaults, failure behavior, lifetime/reset rules,
   and at least one useful example for each supported public workflow.
-- [ ] Decide the outside contribution, issue-reporting and support policy before
-  inviting participation. Source visibility does not require accepting contributions;
-  private maintainer work uses [GitHub Issues](https://github.com/slowchop/rustia/issues);
-  this does not open a public contribution or support channel.
+- [x] Document the source-launch contribution policy. Issues and pull requests are
+  publicly readable. Only repository collaborators may submit either. See the
+  [maintenance notes](../CONTRIBUTING.md) and [private security reporting route](../SECURITY.md).
+- [ ] Define any support commitment offered with the supported release.
 - [ ] Check all documentation links in the packaged crates and build the docs
   with warnings treated as errors. Both checks now run in release preflight;
   final candidate verification remains required.
@@ -250,10 +251,10 @@ contract; this documentation pass does not close the full API-reference gate.
 - [ ] Present disadvantages as clearly as strengths. A speed lead over every
   other engine is not a release requirement; accurate evidence is.
 
-No performance benchmarks run on a developer's machine. The active hosted
-profile has no benchmark workflows: PR screening and fresh measurements remain
-pending until a reviewed trusted private bridge is enabled. The final-candidate
-benchmark requirements above remain in force; missing evidence stays pending.
+Developer machines and public correctness CI do not run performance benchmarks.
+Maintainers can request reviewed exact-cohort runtime comparisons through the
+private bridge. Its results remain private. Public benchmark publication is paused,
+and the final-candidate evidence and publication requirements above remain open.
 
 ## 6. Ship a candidate, then 1.0
 

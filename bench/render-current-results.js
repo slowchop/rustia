@@ -3809,7 +3809,7 @@ function render(data, operationsStatus, wasmResults, memoryResults, memoryHistor
       <a href="#history">History</a>
     </nav>
 
-    ${renderGrabbyBuilds(readGrabbyBuilds())}
+    ${renderGrabbyBuilds(readGrabbyBuilds(), publicSource)}
     ${operationsStatusSection(operationsStatus)}
     ${optimizationEvidenceSection(cohorts, publicSource)}
     ${linuxComparisonSection(summary.linuxComparisonViews)}

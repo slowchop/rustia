@@ -6,7 +6,7 @@ This leaf renders a selected, checked-in public dataset of Grabby build and runt
 
 ## Interface
 
-- [`render.js`](render.js) reads `results.json`, validates its schema, source identities, and paired-statistic arithmetic, then renders the Grabby build section.
+- [`render.js`](render.js) reads `results.json`, validates its schema, source identities, and paired-statistic arithmetic, then renders the Grabby build section. The public source report links to the JSON in Rustia’s repository. The Pages publisher serves its copy as `grabby-builds.json`. The linked source reports and CI evidence require private Grabby access.
 - Its renderer and validators are internal reporting code, not a Rustia embedding interface.
 
 ## Invariants

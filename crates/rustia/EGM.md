@@ -2,7 +2,7 @@
 
 ## Overview
 
-`rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Its API is still an unpublished 0.x contract; the broader parity and public-release audits remain open.
+`rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Applications can use the experimental 0.x API from Git. The crate is unpublished, and supported-release acceptance remains open.
 
 Package metadata: [Cargo.toml](./Cargo.toml).
 

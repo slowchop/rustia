@@ -457,8 +457,7 @@ Node/V8, the most widely used JavaScript runtime. Promotion requires the exact
 65 native rows, 15 wasm rows, one dispatch run, Linux-only target identities,
 and a single source revision.
 The accepted four-runtime matrix is retained under `bench/wasm/history/` as
-historical portability evidence; it is not repeated in the recurring public
-benchmark. The matrix v4 host gate keeps every prewindow at zero steal. It also retains
+historical portability evidence. Public benchmark measurement remains paused. The matrix v4 host gate keeps every prewindow at zero steal. It also retains
 per-repetition preparation, first-call, combined cold-start, and warmed steady-state timings. The
 JIT row is published only when a matched JIT-off/JIT-on sentinel has the same checksum and shows at
 least a 1.5x native execution signal. A timed group

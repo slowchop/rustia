@@ -22,8 +22,8 @@ workflow dispatches a benchmark or publishes benchmark data.
 availability state, while the public workflow, operations-status, and report
 validators enforce the hosted correctness inventory and keep benchmark execution private.
 
-The runner and publication procedures below describe the retained private
-operations contract. They are not active public-source automation. Resuming
+The runner and publication procedures below describe the predecessor private repository’s
+operations contract, including its runner names, branch rules and workflow filenames. They are not active public-source automation. Resuming
 history measurement, landscape refresh, or publication requires a separate
 reviewed private lane and an explicitly updated profile; changing the public
 workflow profile alone cannot enable those operations.
@@ -597,17 +597,11 @@ rather than 95%: five independent 95% readings give roughly a 23% chance one
 moves on a null change, and more repetitions narrow the intervals without
 changing that rate.
 
-**Untrusted pull requests.** The lane executes the branch's code on the machine
-that produces every published number, which holds persistent cargo roots and
-target directories later runs read. `pr-bench.yml` therefore carries
-`if: github.event.pull_request.head.repo.full_name == github.repository`, pinned
-by `checkPrBench` so it cannot be dropped silently, and fork pull requests get
-correctness CI only. This costs nothing while the repository is private, where
-every author is already trusted; it is in place now because the day it starts to
-matter is the day the repository goes public. Going public should additionally
-split the runner identity — a trusted lane for `main` and the weekly matrix, and
-an `--ephemeral` unprivileged lane for pull requests — and require approval for
-outside collaborators.
+**Pull-request isolation.** The predecessor’s `pr-bench.yml` ran branch code on a persistent
+benchmark machine. Its same-repository guard excluded fork branches. A separate ephemeral
+runner for external PRs was proposed at the time. The public repository instead runs
+correctness checks on standard GitHub-hosted runners. Its workflows have no access to the
+benchmark host.
 
 ## Freshness model
 

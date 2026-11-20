@@ -111,14 +111,13 @@ cargo doc --locked -p rustia --no-deps --open
 
 ### Run Luau from the command line
 
-From the same checkout, you can run a file or try one line of Luau.
+Run this command from the checkout to try one line of Luau.
 
 ```sh
-cargo run --locked -p rustia-cli -- path/to/script.luau
 cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
 ```
 
-The second command prints `42`. For an interactive prompt, pass `--repl`.
+The command prints `42`. To run a file, pass its path after `--`. For an interactive prompt, pass `--repl`.
 Type `=40 + 2` to see the result and `:quit` to exit.
 
 <a id="how-does-it-compare"></a>

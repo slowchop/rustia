@@ -11,25 +11,19 @@ and evidence. When an older status statement disagrees, this file wins.
 ## Status and permissions
 
 Rustia is a from-scratch Rust interpreter for pinned standalone **Luau 0.709**.
-The 2026-11-20 launch decision covers the cleaned **`slowchop/rustia`** source
-under MIT OR Apache-2.0 for inspection and experimental use. All eight workspace
-packages remain at **0.0.1**, with **all 8 blocked by publish=false**. Stable APIs, full Luau
-parity, consumer rollout and supported releases retain their own acceptance gates.
+The experimental interpreter became public on 20 November 2026 under MIT OR Apache-2.0.
+All eight workspace packages remain at **`0.0.1`**, with **all 8 blocked by publish=false**.
+Stable APIs, full Luau parity, consumer rollout and supported releases have separate acceptance gates.
 
 - **`slowchop/rustia-historic`** retains the original private evidence. The
   operations sibling **`rustia-ops`** and private benchmark infrastructure stay private.
 - [GitHub Issues](https://github.com/slowchop/rustia/issues) is the maintainer
   backlog. Issues and pull requests are publicly readable. Only repository
   collaborators can create either. [CONTRIBUTING](../CONTRIBUTING.md) describes that workflow.
-- Suspected vulnerabilities belong in GitHub’s private reporting channel. Its
-  availability must be verified after visibility changes. See [SECURITY](../SECURITY.md).
+- [Report a vulnerability privately](https://github.com/slowchop/rustia/security/advisories/new).
 
-The [selected source profile](public-source-profile.json) uses standard
-GitHub-hosted correctness CI. Private Actions billing blocked the hosted
-rehearsal. Both workflows subscribe to GitHub’s `public` event so the visibility
-change starts their required suites. Inspect the resulting jobs for the
-exact default-branch commit before recording hosted acceptance. [Launch decision](public-source-activation.md)
-and [historical preparation](98-public-source-readiness.md).
+Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
+The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
 ## Issue #18 and #19 corrections
 
@@ -174,7 +168,7 @@ or runtime change. [Coverage record](82-error-behaviour-fuzzing.md#retained-expo
 The source workflows run lints, workspace and external-package checks,
 Rustdoc/examples, bounded fuzz/differential smoke, native Linux x86-64 and
 macOS ARM64, Node/V8 and headless WebKit goldens, and cross-builds on standard
-GitHub-hosted VMs. The public transition runs the required inventory. Windows
+GitHub-hosted VMs. Windows
 native, real Firefox and longer fuzz campaigns remain manual. Cross-builds
 establish compilation for their targets.
 
@@ -237,23 +231,8 @@ this section is a navigation index, not a duplicate checklist or priority order.
 The [maintainer workflow](../CONTRIBUTING.md#issue-driven-development) explains
 selection, coordination, review and closure.
 
-Delivered foundation (closed):
-[lower-level transferable/reentrant embedding #50](https://github.com/slowchop/rustia/issues/50).
-The active backlog is:
-
-- [Source-access readiness #29](https://github.com/slowchop/rustia/issues/29).
-- [Documentation and stable API review #30](https://github.com/slowchop/rustia/issues/30).
-- [Semantic coverage and platform acceptance #31](https://github.com/slowchop/rustia/issues/31).
-- [Memory policy and evidence #32](https://github.com/slowchop/rustia/issues/32).
-- [Benchmark repeatability and trusted evidence #33](https://github.com/slowchop/rustia/issues/33).
-- [Supported-release acceptance #34](https://github.com/slowchop/rustia/issues/34).
-- [Pinned target maintenance #35](https://github.com/slowchop/rustia/issues/35).
-- [Opt-in transferable facade #53](https://github.com/slowchop/rustia/issues/53).
-- [Typed owned hooks #54](https://github.com/slowchop/rustia/issues/54).
-- [Sync versus resumable API #55](https://github.com/slowchop/rustia/issues/55).
-- [Borrowed scopes #56](https://github.com/slowchop/rustia/issues/56).
-- [One-shot validated push #61](https://github.com/slowchop/rustia/issues/61).
-- [Typed object length and iteration #63](https://github.com/slowchop/rustia/issues/63).
+The [open issue list](https://github.com/slowchop/rustia/issues?q=is%3Aissue%20is%3Aopen) shows current work.
+The issue descriptions and linked pull requests track delivery and acceptance.
 
 Use the launch decision above for source visibility. Package publication, measurements
 and private infrastructure actions require their own authorization.
@@ -265,7 +244,7 @@ library guides belong in the [Rustdoc introduction](../crates/rustia/src/lib.rs)
 with method details beside methods. Browser build/loading instructions live beside
 its [tested demo](../demos/web-live/README.md), linked from README/Rustdoc. Callback,
 failure, hardened-decision and introductory example guidance are implemented.
-No documentation website is planned. A public `Thread` handle, async callbacks,
+A hosted live editor and examples are deferred. A public `Thread` handle, async callbacks,
 mlua-style `Scope` and a migration shim remain caller-driven optional layers,
 not first-release gates.
 

@@ -6,6 +6,11 @@ Current unpublished workspace version: `0.0.1`.
 
 ## [Unreleased]
 
+On 20 November 2026, the experimental interpreter source became public. All eight
+workspace crates remain unpublished. The launch ran [hosted correctness CI](https://github.com/slowchop/rustia/actions/runs/44695193616)
+and [differential smoke](https://github.com/slowchop/rustia/actions/runs/44695193576).
+The benchmark workflows described in earlier entries ran in the private predecessor.
+
 ### Changed
 
 - Required modules can yield and resume inside guest coroutines. Results enter
