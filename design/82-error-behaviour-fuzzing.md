@@ -1,7 +1,12 @@
 # Error behaviour and fuzzing
 
-Status: complete. Runtime acceptance, both six-target remote campaigns, final CI
-and the controlled-client rollout pass; all four implementation PRs are merged.
+The original runtime acceptance, both six-target remote campaigns and the controlled-client
+rollout passed. All four implementation PRs merged. Links to `rustia-historic` and
+controlled-client repositories below require private access.
+
+The [public launch smoke](https://github.com/slowchop/rustia/actions/runs/44695193576)
+passed on `e54fd4e`. The public workflow runs the release-diagnostic audit and bounded
+differential smoke on pull requests. Its six-target campaigns require manual dispatch.
 
 ## Contract and evidence
 

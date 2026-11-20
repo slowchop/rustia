@@ -20,8 +20,9 @@ used as performance evidence.
 The native jobs verify the actual OS and architecture and pass their target
 triples explicitly to Cargo. The Mac job also checks the compiler host triple;
 runner configuration cannot silently substitute Intel execution for arm64.
-The Mac job discovers the account's Cargo tools and installs the pinned
-toolchain with rustup, without system package changes. Compiler warnings are errors.
+The private Mac job used the runner account’s Rustup installation. The current
+[hosted macOS job](../.github/workflows/ci.yml) installs Rust 1.95.0 for
+`aarch64-apple-darwin` using the pinned toolchain action. Compiler warnings are errors.
 CI logs the tested checkout and the exact golden transcript.
 The shared runner requires exactly one transcript sentinel, rejecting empty
 test runs as well as failed execution. Policy self-tests exercise wrong runner
@@ -29,8 +30,10 @@ placement, missing checks, and zero/duplicate/failed golden execution.
 
 The separate eight-target engine build matrix remains unchanged. Build success
 for Intel macOS, Linux arm64, Windows, iOS and Android is not runtime evidence.
-Real Firefox/Safari and the wider native/mobile execution matrix remain future
-public-release gates.
+The [browser and platform record](96-browser-platform-acceptance.md) records later
+Firefox, Safari and mobile execution on specific candidates. Native Intel Mac and
+remote desktop Safari remain open. Full supported-release acceptance requires testing
+the final candidate.
 
 ## One shared transcript
 

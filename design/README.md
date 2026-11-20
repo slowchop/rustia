@@ -33,7 +33,7 @@ These documents describe contracts and intent. Use the code, tests, and
   [91 — Versioning policy](91-semver-policy.md), and
   [92 — First release](92-first-release.md).
 - [97 — Validation workflow](97-validation-workflow.md): staged checks and the full pre-push inventory.
-- [Experimental source launch](public-source-activation.md) records the visibility and CI decision.
+- [Experimental source launch](public-source-activation.md) records the public launch commit, reporting policy and completed CI runs.
   [98 — Source readiness](98-public-source-readiness.md) retains the earlier privacy audit.
 - Generated package audits: [metadata](crate-metadata.json),
   [file lists](package-files.json), and [publishability](publishability.json).

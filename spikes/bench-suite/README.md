@@ -1,15 +1,20 @@
 # rustia broad benchmark suite + reference-Luau baseline ([H2])
 
-Measures **THE BAR** rustia must beat. rustia does not exist yet — these numbers are the
-reference-Luau target (and the koto incumbent it replaces), NOT rustia.
+This early spike measured reference Luau and Koto before Rustia’s interpreter existed.
+The results document the original comparison protocol. For the interpreter’s recorded
+results and current measurement policy, see the [benchmark README](../../bench/README.md).
 
 ## Oracle versions
 - Luau: `luau0-src 0.18.3+luau709` (Luau **0.709**) via `mlua 0.11.6` (`luau` + `vendored`), `_VERSION="Luau 0.709"`.
 - koto: `0.16.1`, `default-features=false, features=["arc"]` (matches grabby's `ai_bakeoff`/`scenario`).
 - Host: aarch64-mac. Builds: `--release`, opt-level=3, LTO=fat, codegen-units=1, single thread.
 
-## Run
-```
+## Historical commands
+
+These commands identify how the original evidence was produced. Repository policy
+prohibits running the timing harnesses on developer machines.
+
+```sh
 cargo run --release --manifest-path Cargo.toml            # Luau baseline (11 workloads)
 cargo run --release --manifest-path koto-harness/Cargo.toml   # koto baseline (subset)
 cargo run --release --manifest-path koto-harness/Cargo.toml -- probe   # koto API probe
@@ -20,8 +25,7 @@ Each workload is a `.luau`/`.koto` file that `return`s/`export`s `f(n)` doing **
 of representative work and returning a checksum (prevents dead-code elision; keeps results live).
 The harness makes ONE host->VM call per measurement, so FFI/marshalling overhead is amortised to ~0 and
 the number is pure in-VM throughput. n is auto-calibrated to ~0.25 s/rep; we report **min of N reps**
-(min = least scheduler noise). Metric = **ns per unit**; the "unit" differs per workload, so compare a
-future rustia run against this table **per-workload**, never across workloads.
+(min = least scheduler noise). Metric = **ns per unit**; the "unit" differs per workload, so each number applies only to its workload and the original measurement conditions.
 
 ## Workloads (and koto feasibility)
 | # | workload | unit | koto? |

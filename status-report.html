@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rustia Project Status</title>
+  <title>Archived Rustia project status · 3 July 2026</title>
   <style>
     :root {
       color-scheme: light;
@@ -156,6 +156,10 @@
       max-width: 880px;
     }
 
+    header a {
+      color: #a8e6dc;
+    }
+
     .kicker {
       color: #a8e6dc;
       font-weight: 700;
@@ -284,19 +288,19 @@
 <body>
   <main>
     <header>
-      <div class="kicker">rustia status report</div>
+      <div class="kicker">Archived status report · 3 July 2026</div>
       <h1>Conformance-first Luau engine implementation</h1>
       <p class="header-meta">
-        Current objective: build a full, deterministic Luau implementation with P1 engine core underway.
-        The project is moving through upstream Luau 0.709 behavior slices while keeping design, fixtures,
-        and executable gates in sync.
+        This snapshot records the early engine work and plans before CI existed. For today’s
+        implementation and workflow, see the <a href="design/CURRENT.md">current project state</a>
+        and <a href=".github/public-ci/README.md">hosted CI guide</a>.
       </p>
-      <div class="status-row" aria-label="Current status tags">
+      <div class="status-row" aria-label="Status on 3 July 2026">
         <span class="tag ok">Design locked</span>
         <span class="tag info">P1 engine core underway</span>
         <span class="tag info">Luau 0.709 pinned</span>
         <span class="tag wait">CI not started</span>
-        <span class="tag hold">Keep .github empty</span>
+        <span class="tag hold">CI wiring deferred</span>
       </div>
     </header>
 
@@ -483,17 +487,16 @@
     </section>
 
     <section class="blocked">
-      <h2>CI Boundary</h2>
+      <h2>CI plan on 3 July 2026</h2>
       <p>
-        CI configuration has not started. Do not create or edit workflow files yet. <code>.github</code> should
-        remain empty until the owner explicitly begins CI wiring. When CI begins, public workflow files should
-        target only <code>[self-hosted, bench]</code> and must not contain private host, path, service, runner,
-        IP, or repository details.
+        At this point the project had deferred CI wiring. The proposal described a self-hosted benchmark
+        runner. The subsequent public source release uses standard GitHub-hosted runners for correctness.
+        Benchmark execution stays private.
       </p>
     </section>
 
     <section>
-      <h2>Next Concrete Actions</h2>
+      <h2>Planned work on 3 July 2026</h2>
       <ol>
         <li>
           Finish the current direct one-result math slice by adding compiler lowering and <code>math.pi</code>
@@ -512,7 +515,7 @@
           oracle rather than model-derived rows.
         </li>
         <li>
-          Leave CI and <code>.github</code> untouched until the owner starts that phase.
+          Defer CI wiring until the engine work reaches the planned stage.
         </li>
       </ol>
     </section>

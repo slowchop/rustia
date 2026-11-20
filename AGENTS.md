@@ -47,7 +47,7 @@ serves them.
 ## Benchmark policy
 
 - This checkout selects `public-hosted` correctness in `design/public-source-profile.json`.
-  The GitHub `public` event starts the required suites when the source repository becomes public.
+  The GitHub `public` event ran the required suites when the source repository became public.
   Use the standard hosted runners and keep private runners and credentials outside this repository.
   Public per-commit/history measurement, landscape refresh and benchmark publication remain paused.
 
@@ -90,7 +90,7 @@ serves them.
    determinism must reject nondeterminism; do not cripple the shared advanced API for `live()` users.
 
 3. **Measure, don't assert — perf is a number or it didn't happen.** No "this should be faster." Perf claims
-   come from the benchmark suite (a CI gate vs reference Luau + koto, per-workload). Add a tier/optimisation
+   cite the accepted `ci-bench` results for the workload. New private comparisons stay private. Add a tier/optimisation
    (JIT, inline cache, …) only when a measurement demands it. "Done" means tested + measured, not hoped.
 
 4. **KISS — one core, earn every abstraction.** One portable engine (no per-target forks); no bespoke ops in
@@ -98,8 +98,8 @@ serves them.
    the simplest thing that passes the golden + the bench. Strangler: small, always-green steps.
 
 5. **Mechanical enforcement over good intentions (the LLM-first lever).** rustfmt, `clippy -D warnings`, the
-   determinism lints, `unsafe_code = "forbid"` for the public workspace, the golden test, the bench gate, and
-   bounded frontend/VM fuzz smoke and differential checks against the pinned Luau 0.709 oracle — all in CI
+   determinism lints, `unsafe_code = "forbid"` for the public workspace, the golden test, and
+   bounded frontend/VM fuzz smoke and differential checks against the pinned Luau 0.709 oracle run in hosted CI
    (see [the fuzz harness](fuzz/README.md) and [oracle workflow](.github/workflows/error-fuzz.yml)).
    Independent-frontend comparison such as `full_moon` remains planned, not an implemented CI gate.
    If a rule matters, make it a check, not a comment. Agents forget; CI doesn't.

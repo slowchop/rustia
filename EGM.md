@@ -23,9 +23,9 @@ the canonical state, design contracts, or pinned Luau 0.709 oracle.
 ## Interface
 
 The [hosted CI inventory](.github/public-ci/EGM.md) covers required correctness
-and differential fuzz checks. The `public` event starts both workflows on
-visibility change. The [launch decision](design/public-source-activation.md)
-defines the scope and verification steps. [SECURITY.md](SECURITY.md) identifies
+and differential fuzz checks. Both workflows ran on the public visibility event.
+The [launch decision](design/public-source-activation.md) describes the release.
+The [3 July 2026 status page](status-report.html) archives the early implementation plan. [SECURITY.md](SECURITY.md) identifies
 the private vulnerability reporting route.
 
 The [workspace manifest](./Cargo.toml) contains seven runtime/tooling crates and the

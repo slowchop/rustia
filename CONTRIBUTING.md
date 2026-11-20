@@ -118,7 +118,8 @@ allows real-world services such as clocks and entropy; preserve that option.
 Use structured errors for bad scripts and host input. Public workspace crates
 forbid unsafe code.
 
-The API is still unpublished. Necessary API improvements should update examples,
+The experimental API is available from Git. All workspace crates are unpublished.
+Necessary API improvements should update examples,
 documentation, and active clients in the same rollout. The
 [release checklist](design/90-release-readiness.md) and
 [versioning policy](design/91-semver-policy.md) explain the release contract.

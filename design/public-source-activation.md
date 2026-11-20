@@ -1,38 +1,26 @@
 # Experimental public source launch
 
-## Decision of 2026-11-20
+## Launch on 20 November 2026
 
-Release the cleaned `slowchop/rustia` source under MIT OR Apache-2.0 for
-inspection and experimental use. The visibility change applies only to this
-repository. The historic repository, operations repository and benchmark
-service stay private. All eight workspace crates stay unpublished. Supported
-releases and consumer deployment have separate acceptance gates.
+Rustia became public at [commit `e54fd4e`](https://github.com/slowchop/rustia/commit/e54fd4eb763837ab186f3a3fd05b75c76bcda551) after [PR #72](https://github.com/slowchop/rustia/pull/72).
+The repository contains the experimental interpreter under MIT OR Apache-2.0.
+All eight workspace packages had publication disabled at launch.
+The historic and operations repositories stayed private.
 
-Keep GitHub Issues enabled for the maintainer backlog. The public may read existing
-issues and pull requests. Restrict creation of both to repository collaborators
-on an ongoing basis. Verify both controls at the visibility change. Handle security
-reports through [GitHub private vulnerability reporting](../SECURITY.md).
-Enable and verify the reporting route after the repository becomes public.
-Until the route works, reporters should keep details private.
+Anyone can read the issue tracker and pull requests. Only collaborators can open
+either. GitHub private vulnerability reporting is enabled. [Security policy](../SECURITY.md).
 
-The private rehearsal could not start its hosted jobs because of private
-Actions billing. The workflows use the visibility transition for the first
-required hosted run. Land both on the default branch before changing visibility. The GitHub `public` event triggers the standard
-hosted correctness and differential-fuzz suites for the default-branch HEAD.
-Keep existing billing limits and the complete required inventory. Keep
-private runner groups and benchmark credentials inaccessible to public repos.
+The private rehearsal stopped before GitHub assigned a runner. At launch, the
+`public` event ran both workflows on the reviewed commit using standard GitHub-hosted
+runners. All 15 required CI jobs and the differential smoke job passed. The eight
+target builds checked compilation. The runtime jobs exercised Linux x86-64, macOS
+arm64, Node/V8 and headless WebKit. Windows, real Firefox and the long fuzz
+campaign were manual jobs and did not run at launch. [CI run](https://github.com/slowchop/rustia/actions/runs/44695193616) · [Differential smoke run](https://github.com/slowchop/rustia/actions/runs/44695193576).
 
-At transition, verify the reviewed refs and publicly visible repository
-content, the repository and runner access settings, and the private status of the
-historic and operations repositories. Record the two workflow run IDs, check
-their actual jobs for the visibility commit, and confirm private reporting works.
-Record failures or skipped required jobs as failures. Local preflight and any
-earlier private jobs cannot establish hosted execution. If the launch run needs
-repair, keep its result and verify the repaired revision on hosted CI.
-
-[Hosted workflow inventory](../.github/public-ci/README.md) ·
-[Readiness and history audit](98-public-source-readiness.md) ·
-[Release readiness](90-release-readiness.md).
+The launch checks also verified anonymous access to the README and demos, both
+README examples from the pinned Git dependency, and the exclusion of public
+repositories from the private runner groups. Supported package release and
+consumer acceptance are tracked separately. [Release checklist](90-release-readiness.md).
 
 ## Historical preparation for issue #29
 

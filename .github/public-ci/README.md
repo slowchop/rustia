@@ -4,6 +4,9 @@ The [active CI](../workflows/ci.yml) and [differential fuzz workflow](../workflo
 run on standard GitHub-hosted runners. The [selected profile](../../design/public-source-profile.json)
 is `public-hosted`. GitHub reads the workflows under `.github/workflows/`. The
 copies in this directory let the source-profile validator detect inventory drift.
+The `state: private-rehearsal` field dates from the original rehearsal.
+`correctness_ci` selects the active runners. `visibility_authorized: false` keeps
+repository visibility changes outside the authority of this file.
 
 | Trigger | Required execution |
 | --- | --- |
@@ -20,9 +23,6 @@ access, pinned actions and checkout credentials disabled. Keep private runner
 groups and benchmark infrastructure outside this repository. Native Intel Mac
 and remote Safari execution are still open platform acceptance items.
 
-Private Actions billing prevented the proposed hosted rehearsal from running.
-At visibility change, inspect the actual job outcomes in both workflows for
-the reviewed commit. The selected profile and static validators establish the
-configuration. Hosted acceptance requires completed checks on the hosted VMs.
-Run `node tools/check-workflows.js` to check the workflow policy. See
-[the launch decision](../../design/public-source-activation.md).
+The public launch completed all 16 required jobs on `e54fd4e`. Run
+`node tools/check-workflows.js` to verify the configuration locally.
+The [launch record](../../design/public-source-activation.md) links both runs.

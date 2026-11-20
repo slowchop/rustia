@@ -2,9 +2,12 @@
 
 ## PR checks and release candidates
 
-Every PR runs the same browser suites in headless Playwright WebKit on Docker-capable
-Linux runners. Playwright is pinned to 1.64.1 in `tools/browser/package-lock.json`;
-the matching official container is pinned by digest and includes its browser and
+Public PRs run the browser suites in headless Playwright WebKit on GitHub-hosted
+Ubuntu. The [public launch run](https://github.com/slowchop/rustia/actions/runs/44695193616)
+passed on `e54fd4e`. The Windows and real Firefox jobs require manual dispatch.
+
+Playwright is pinned to 1.64.1 in `tools/browser/package-lock.json`. The
+matching official container is pinned by digest and includes its browser and
 system libraries. A macOS service-account trial timed out launching WebKit, so
 PR execution does not depend on a logged-in Mac desktop. This
 uses no Safari window or Safari automation permission. The required Release
@@ -19,8 +22,8 @@ passed all 88 tests in 16 groups with matching bare/default golden transcripts
 on WebKit 27.2 (Playwright build 2370). Remote execution is also verified
 for the checked-cast candidate in the evidence below.
 
-WebKit is not the Safari product shipped by Apple. Real Firefox and Safari
-remain release-candidate acceptance requirements. The private
+Apple Safari and headless Playwright WebKit have separate acceptance requirements.
+The supported-release candidate also needs real Firefox and Safari testing. The private
 `browser-correctness.yml` workflow is historical and is absent from the active
 correctness profile; the retained local runner supports explicit real-browser checks.
 Safari requires a prepared, logged-in desktop session and explicit automation
@@ -46,13 +49,14 @@ The historical private `browser-correctness.yml` workflow used generic Linux
 and Mac pools with exact browser versions as dispatch inputs. It is absent from
 this tree. The retained local script accepts those versions explicitly; browser
 installation and Safari automation permission remain prerequisites, not implicit
-mutations. The active PR gate uses headless WebKit. Local real-browser success
-does not prove remote Firefox/Safari runner readiness; that requirement remains open.
+mutations. The active PR gate uses headless WebKit. The remote Firefox result below covers
+its recorded revision. Remote desktop Safari
+remains open in [issue #40](https://github.com/slowchop/rustia/issues/40).
 
 ## Manual remote Firefox execution
 
-The active `ci.yml` includes a private, `workflow_dispatch`-only real Firefox job
-on the existing generic Linux Docker correctness pool. It uses the same pinned
+The public [CI workflow](../.github/workflows/ci.yml) includes a manual real
+Firefox job on GitHub-hosted `ubuntu-24.04`. It uses the same pinned
 container as the WebKit job for dependencies, but launches the official Mozilla
 Firefox 160.0 release through geckodriver 0.37.1. Playwright's patched Firefox is
 not selected. Downloaded archives are verified before extraction against the
@@ -63,14 +67,14 @@ runtime paths. Cargo, Rustup, Git and runner-mounted home ownership stay unchang
 
 The job invokes the existing browser runner, which verifies versions and
 requires eighteen nonzero passing suite groups and both goldens across default
-and bare modes. The workflow policy checks the private/manual guard, ordinary
-Docker pool, pinned image/tools/checksums and actual execution command. Negative
+and bare modes. The workflow policy checks the public manual-dispatch guard, hosted runner,
+pinned image, tool checksums and execution command. Negative
 fixtures reject PR execution, missing checksum checks and omitted execution.
 Existing required PR checks remain in place. No host/browser permission setting,
 runner-group access or benchmark authorization is changed.
 
 After a reviewed branch is pushed, invoke `gh workflow run ci.yml --ref BRANCH`.
-The dispatch runs the existing Windows/shared checks and real Firefox. Inspect
+This dispatch runs the ordinary checks, native Windows and real Firefox. Inspect
 actual Firefox job logs, test summaries and goldens on that exact head before
 claiming remote acceptance. Adding the job alone is not execution evidence.
 Remote Safari still requires a prepared logged-in Mac and existing automation
@@ -91,34 +95,17 @@ Firefox-only temporary home resolved the runner/container ownership mismatch.
 This establishes remote Firefox shared-contract execution for that exact head,
 not remote Safari, physical-iPad Safari, full language parity or a later release candidate.
 
-## Explicit remote Safari execution
+## Historical remote desktop Safari route
 
-The private `ci.yml` has a manual Safari job on the existing generic macOS ARM64
-correctness pool. It is disabled by default and runs only for a private
-`workflow_dispatch` with the boolean `safari` input set. Ordinary PR/main checks
-and normal Windows/Firefox dispatches do not open Safari windows.
+The predecessor’s private CI used manual `safari` and `safari_version` inputs. Its
+job required a logged-in desktop owned by the runner account, an existing Safari
+automation permission and the requested Safari version. The preflight logged
+only whether the runner owned the console and had a GUI session. It used the
+account’s Rustup and checksum-pinned wasm-bindgen 0.2.126 tools.
 
-The job first requires the runner account to own the logged-in console desktop
-and have a live GUI session, then checks the exact installed `safari_version`.
-The readiness step prints only console-ownership and GUI-domain-presence
-booleans, not account names. Missing prerequisites fail before browser tests
-rather than reporting an empty pass. It uses account-provisioned Rustup and checksum-pinned wasm-bindgen 0.2.126
-binaries in the job's temporary directory. No system package install, runner
-access change or Safari automation permission toggle is performed. Existing
-Safari automation permission is required. The normal browser runner executes
-both feature modes and rejects zero-test or missing-golden results.
-
-After independent review and the normal push guard, request the visible browser
-execution explicitly:
-
-```bash
-gh workflow run ci.yml --ref BRANCH -f safari=true -f safari_version=26.6.2
-```
-
-Use the exact version installed on the selected prepared runner. A failed GUI,
-version or automation prerequisite is an unfulfilled acceptance gate, not Safari
-execution evidence. Inspect actual eighteen-group test results and both goldens
-on the immutable head before accepting the remote Safari item in #40.
+The public workflow has no Safari job or Safari dispatch inputs. The two attempts
+below stopped at the desktop check. Remote desktop Safari acceptance still needs
+both feature modes and matching goldens on the candidate revision.
 
 ### Intel Mac deferral — 2026-11-15
 
@@ -145,11 +132,13 @@ at `283af87624b2c1cb84a5014898460379ceee0640` reported
 Both stopped before checkout/tool setup and executed zero Safari tests. These
 failures are retained as failed attempts, not accepted runtime evidence; they
 do not establish fleet-wide GUI readiness. No account names or private host
-configuration are recorded here. The guard remains unchanged, and no OS/browser
-permission or runner setup was changed. Do not dispatch `safari=true` again until
-a deliberately selected runner has the required desktop and automation setup.
+configuration are recorded here. Neither attempt changed the runner or its browser permissions.
 
 ## Observed evidence
+
+The following records name the revision, platform and suite that ran. Links to
+`rustia-historic` and local log paths are private evidence references. The counts
+and transcript results are included here for public readers.
 
 On 2026-10-23 (Australia/Hobart), the runtime at
 `04d502590448c14355f645b27ff14b2194cd98fe` passed real Firefox 158.0.1 on

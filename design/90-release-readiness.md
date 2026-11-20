@@ -9,15 +9,14 @@ The first stable release target and its acceptance checklist are in
 unpublished; passing preflight does not by itself close this checklist.
 
 This checklist gates package publication and supported releases. Public source
-inspection is a separate decision, with privacy, history, CI trust and reporting
-requirements tracked in [98-public-source-readiness.md](98-public-source-readiness.md).
-Preparing source access does not authorize visibility changes or waive this
-release checklist.
+access launched on 2026-11-20. The [launch record](public-source-activation.md)
+covers visibility, CI and reporting. The package and supported-release checklist below
+remains open.
 
 The active public-source profile runs hosted correctness and artifact checks.
-Benchmark measurement and publication are paused pending a reviewed trusted
-private bridge. Retained private-lane procedures below remain protocol and
-release-evidence requirements; they are not active workflows in this tree.
+Public benchmark measurement and publication remain paused. The private maintainer
+bridge accepts reviewed exact-cohort runtime comparisons. Outputs stay private.
+The private-lane procedures below document the release-evidence requirements.
 Missing fresh evidence stays pending. See [the operations profile](81-benchmark-operations.md#public-source-profile).
 
 These gates protect memory safety, lifecycle, compatibility, and the environment contract selected by the
@@ -41,8 +40,8 @@ VMs avoid batched execution paths and use the scalar dispatcher's existing
 instruction-boundary checks. Cross-profile append regressions compare unmetered
 execution with a fuel-forced scalar reference; execution counters verify the
 admission policy without instrumentation. See [`58-vm-core2.md`](58-vm-core2.md).
-Remote screening was part of the recorded private delivery. Fresh screening is
-pending the trusted bridge; no new speed claim is made.
+Remote screening was part of the recorded private delivery. A fresh comparison
+requires a reviewed private cohort. No new measurement is recorded here.
 
 1. Complete the release value ergonomics on the implemented VM/epoch-safe,
    graph-preserving rooted `Value`/`Table`/`Function` spine. It already covers
@@ -281,8 +280,8 @@ registry installation, public release, or complete platform matrix is implied.
   satisfy their focused tests; failed extension/module installation cannot
   leave guest partial state.
 - The value-layout and dispatch wasm pre-lock gate is closed with retained V8,
-  JavaScriptCore-family, and SpiderMonkey evidence; recurring Node/V8 evidence
-  remains current.
+  JavaScriptCore-family and SpiderMonkey evidence. The last recurring Node/V8
+  cohort is retained as historical evidence.
 - Native and browser correctness/build/golden coverage reaches the full
   `design/00-constraints.md` matrix before release, independently of the
   dedicated-Linux-only benchmark policy.

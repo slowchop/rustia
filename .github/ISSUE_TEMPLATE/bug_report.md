@@ -12,7 +12,8 @@ Describe the actual result and its impact. Search existing open and closed issue
 
 Include the smallest script or host call, source revision, profile and relevant limits.
 For language behavior, include the pinned Luau 0.709 result and how it was obtained.
-Keep credentials, infrastructure details and sensitive client data in rustia-ops.
+Omit credentials, private infrastructure details and sensitive client data.
+For a suspected vulnerability, use the [private reporting form](https://github.com/slowchop/rustia/security/advisories/new).
 
 ## Expected behavior and authority
 

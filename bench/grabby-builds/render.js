@@ -144,8 +144,11 @@ function runtime(run, scene, metric) {
   return run.runtime_comparisons.find(row => row.scene === scene && row.metric === metric);
 }
 
-function renderSection(data) {
+function renderSection(data, publicSource = false) {
   validateResults(data);
+  const datasetUrl = publicSource
+    ? "https://github.com/slowchop/rustia/blob/main/bench/grabby-builds/results.json"
+    : "grabby-builds.json";
   const [lto, quick] = data.runs;
   const quickArm = quick.arms[quick.candidate];
   const tail = runtime(quick, "crash-landing.luau", "tick_p95_ns");
@@ -178,8 +181,8 @@ function renderSection(data) {
           <li>Host-global swap activity and variable wall time remain limitations. The linked data labels GNU-time maximum process/child RSS, not aggregate concurrent memory; target footprints are per arm. Keeping both profiles consumes combined disk space.</li>
         </ul>
       </details>
-      <p class="grabby-evidence"><a href="grabby-builds.json">Selected results and paired samples (JSON)</a> · ${data.runs.map((run, i) => `<a href="${REPO}/actions/runs/${run.measurement.run_id}">Experiment ${i + 1} run</a> · <a href="${REPO}/pull/${run.delivery.pr}">Merged PR ${run.delivery.pr}</a> · <a href="${REPO}/blob/${run.source_report.commit}/${run.source_report.path}">Reviewed report ${i + 1}</a>`).join(" · ")}</p>
-      <p>GitHub evidence requires repository access; uploaded raw artifacts have seven-day retention. This page contains selected results, not private logs. Consistency checks do not repeat the recorded raw/compiler/screenshot audits.</p>
+      <p class="grabby-evidence"><a href="${datasetUrl}">Selected results and paired samples (JSON)</a> · Private Grabby evidence · ${data.runs.map((run, i) => `<a href="${REPO}/actions/runs/${run.measurement.run_id}">Experiment ${i + 1} run</a> · <a href="${REPO}/pull/${run.delivery.pr}">Merged PR ${run.delivery.pr}</a> · <a href="${REPO}/blob/${run.source_report.commit}/${run.source_report.path}">Reviewed report ${i + 1}</a>`).join(" · ")}</p>
+      <p>Uploaded raw artifacts have seven-day retention. This page contains selected results, not private logs. Consistency checks do not repeat the recorded raw/compiler/screenshot audits.</p>
     </div>
   </section>`;
 }

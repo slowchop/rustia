@@ -23,9 +23,7 @@ failure or changed lease requires another complete validation.
 
 The temporary first-history bootstrap guard is retained in staging commit
 `417828e` for provenance and is not part of the current source. Current pushes
-use the ordinary exact-HEAD and full-preflight guard above. The initial private
-transfer was verified with Actions disabled; accepting staged revisions requires
-the CI correctness checks. This does not authorize public visibility.
+use the ordinary exact-HEAD and full-preflight guard above. The initial private transfer was verified with Actions disabled. Current pull requests run the hosted correctness checks.
 
 For iteration, `just check-quick` runs formatting, repository/evidence checks,
 tool self-tests and all compiler unit tests. This is early feedback, not release
@@ -100,8 +98,7 @@ Windows correctness tests executed; this observation does not close that gate.
 ## Experimental source release
 
 The [source profile](public-source-profile.json) selects `public-hosted`
-correctness on standard GitHub-hosted runners. The `public` event starts both
-required workflows when the repository becomes public. PR checks include the
+correctness on standard GitHub-hosted runners. Both workflows ran on the `public` event at launch. PR checks include the
 full preflight stages, aggregate, native and browser execution, target builds
 and differential smoke. Windows native, real Firefox and longer fuzz campaigns
 remain manual. The public workflows use read-only permissions and have no private
@@ -110,5 +107,4 @@ See the [CI inventory](../.github/public-ci/README.md) and
 [platform execution record](96-browser-platform-acceptance.md).
 
 The full inventory checks the history projection and benchmark source reachability.
-All retained measurements are historical. Inspect the actual launch jobs for
-their exact revision before recording hosted acceptance.
+All retained benchmark measurements are historical. The [launch record](public-source-activation.md) links both passing hosted workflows on the exact launch commit.

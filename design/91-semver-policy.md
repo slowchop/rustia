@@ -5,19 +5,19 @@ workspace to publishable public crates. It applies to the public rustia project
 only; grabby-specific integration code remains outside this repository.
 
 Repository visibility is separate from package versions and publication.
-Making source available for inspection does not establish a released API
-baseline, change `publish = false`, or close supported-release gates. Source
-access has its own [readiness record](98-public-source-readiness.md).
+Rustia’s source is public for inspection and experimental use. The workspace
+remains unpublished and its API is still under development. The [launch record](public-source-activation.md)
+covers source access.
 
 ## Current Status
 
 - All public workspace crates are currently `0.0.1` and `publish = false`.
-- The current milestone is private 0.x API and real-application readiness.
+- The 0.x milestone validates the API with controlled client applications.
   Keep publication disabled; a public candidate or stable release needs a
   separate publication decision. See [`92-first-release.md`](92-first-release.md).
 - `0.0.x` means implementation-preview only. APIs may still change while P1
   engine, conformance, benchmark, and release gates are open.
-- Until Rustia's first public release, prefer the cleanest coherent long-term
+- Until Rustia’s first published crate release, prefer the cleanest coherent long-term
   API over compatibility with controlled clients. Treat necessary completeness
   as part of the feature and migrate every active client in the same rollout.
 - The public compatibility target is Luau 0.709 until `design/05-luau-target.md`
@@ -32,11 +32,11 @@ access has its own [readiness record](98-public-source-readiness.md).
   contract. Supporting lexer/parser/compiler/VM packages retain separately
   versioned 0.x APIs; conformance and benchmark tooling remain unpublished.
   Separate package versions and update uniform-version release checks when
-  preparing that future public candidate, not during this private plan update.
+  preparing the first package release candidate.
 
 ## Public Crate Roles
 
-- `rustia` is the primary public embedding crate. It owns the stable facade:
+- `rustia` is the primary public embedding crate. Its planned stable facade covers
   `Rustia`, `RustiaBuilder`, `RustiaExtension`, `Profile`, `Settings`,
   `OwnedValue`, conversion traits, retained `Function` handles, `Exports`,
   serde helpers, and public error types.
@@ -66,7 +66,7 @@ access has its own [readiness record](98-public-source-readiness.md).
 
 ## Release Line Rules
 
-- `0.0.x`: unpublished or private-preview snapshots. Breaking changes are
+- `0.0.x`: unpublished development snapshots, including the experimental public source. Breaking changes are
   allowed, but docs and examples should stay current.
 - `0.1.x`: optional public preview. The embedding facade should compile from the
   examples and README without private setup. Breaking API changes are allowed
@@ -90,11 +90,11 @@ baseline in CI. Migration notes explain a breaking change; they do not make it
 compatible with 1.x. Replay/fuel/module ABI identifiers remain separately
 versioned and must be included in an application's replay identity.
 
-## Private API inventory
+## Pre-release facade inventory
 
 [`facade-api.json`](facade-api.json) records the current reachable embedding API
-for native and browser Wasm, with default and bare features. It is a reviewed
-private snapshot, not a released 1.0 compatibility baseline. Update it with
+for native and browser Wasm, with default and bare features. This reviewed snapshot
+is available in the public source tree. The 1.0 compatibility baseline remains open. Update it with
 `node tools/check-facade-api.js --write` when deliberately changing the facade;
 release preflight verifies the committed result.
 
@@ -119,8 +119,8 @@ Before a breaking public-facade change lands after `0.1.0`:
 - Update `crates/rustia/examples/` and README commands.
 - Add or update tests proving the new behavior.
 - Document migration impact in [`../CHANGELOG.md`](../CHANGELOG.md).
-- Keep `design/CURRENT.md`, `design/progress.json`, and generated progress HTML
-  aligned with the new status.
+- Update [CURRENT.md](CURRENT.md) with the implemented change. The October 2026
+  progress JSON and HTML preserve the project state at that date.
 - If a schema changes, bump its schema version and keep the old behavior
   documented until downstream consumers can migrate.
 

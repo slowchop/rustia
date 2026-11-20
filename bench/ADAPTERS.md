@@ -1,13 +1,13 @@
 # Engine Adapter Plan
 
-The standalone benchmark project tracks these engine slots from the start:
+The benchmark harness in this repository tracks these engine modes:
 
 - `rustia`
 - `boa`
 - `koto`
 - `luaur`
 - `mlua-lua54`
-- `mlua-luau`
+- `mlua-luau` (interpreter and JIT modes)
 - `rhai`
 - `roto`
 - `ruau`
@@ -22,7 +22,7 @@ Implemented adapters:
 - `koto`
 - `luaur`
 - `mlua-lua54`
-- `mlua-luau`
+- `mlua-luau` (interpreter and JIT modes)
 - `rhai`
 - `roto`
 - `ruau`
@@ -50,6 +50,6 @@ workload set.
 
 The `wasmi` and `wasmtime` adapters are benchmark baselines for the shared `.wat`
 workloads. They do not close rustia's browser-wasm pre-lock gate. That completed
-gate is tracked separately in [`wasm-gate.json`](wasm-gate.json): the recurring
-benchmark uses Node/V8, while accepted JavaScriptCore and SpiderMonkey results
-remain retained as historical portability evidence.
+gate is recorded in [`wasm-gate.json`](wasm-gate.json). The last recurring
+cohort used Node/V8. The JavaScriptCore and SpiderMonkey results are historical
+portability evidence. Public benchmark measurement remains paused.
