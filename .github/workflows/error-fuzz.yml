@@ -32,6 +32,8 @@ jobs:
           node-version: "22"
       - name: Verify release diagnostic parity against pinned Luau
         run: node tools/audit-release-errors.mjs
+      - name: Compare the parser ports with pinned Luau
+        run: cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser
       - run: cargo test --locked --manifest-path fuzz/Cargo.toml generated_differential_smoke -- --ignored
         env:
           RUSTIA_DIFF_WORKER: ${{ github.workspace }}/fuzz/target/debug/error-oracle-worker

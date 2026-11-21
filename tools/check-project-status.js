@@ -64,6 +64,27 @@ function dataRows(relativePath) {
     .filter((line) => line !== "" && !line.startsWith("#"));
 }
 
+function checkParserInventory() {
+  const file = "conformance/upstream/luau-0.709/parser-cases.tsv";
+  const upstream = [];
+  for (const row of dataRows(file)) {
+    const [line, name, status, evidence, extra] = row.split("\t");
+    if (extra !== undefined || !evidence || !["existing", "ported", "outside"].includes(status)) {
+      fail(`invalid parser case at upstream line ${line}`);
+    }
+    upstream.push(`${line}\t${name}\n`);
+    if (status === "outside") continue;
+    const match = evidence.match(/^(crates\/[\w./-]+\.rs)::(?:tests::)?(\w+)/);
+    if (!match || !readText(match[1]).includes(`fn ${match[2]}(`)) {
+      fail(`missing Rust test for upstream parser case ${name} at line ${line}`);
+    }
+  }
+  // SHA-256 of "line<TAB>test name<LF>" for each TEST_CASE(_FIXTURE) in
+  // tests/Parser.test.cpp at b968ef742741bb2b703afc3b3c53f06608c87481.
+  const digest = require("crypto").createHash("sha256").update(upstream.join("")).digest("hex");
+  assertEqual(digest, "cf23db794dfe83b38dd729714d647677f8e56941f89301e6d8b8b05f11cfcf6d", "pinned Luau parser inventory");
+}
+
 function conformanceSummary() {
   const manifestRows = dataRows("conformance/MANIFEST.tsv");
   const refsRows = dataRows("conformance/REFS.tsv");
@@ -304,6 +325,7 @@ const readme = readText("README.md");
 const current = readText("design/CURRENT.md");
 
 checkProgressMetadata(progress);
+checkParserInventory();
 checkConformance(progress, current, readme);
 checkBenchmark(progress, current);
 checkPublishability(current);

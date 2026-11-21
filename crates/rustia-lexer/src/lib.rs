@@ -1,3 +1,5 @@
+mod confusables;
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,7 +24,10 @@ pub struct Token {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
     Eof,
+    Invalid(String),
     Ident(String),
+    Attribute(String),
+    AttributeOpen,
     Number(f64),
     String(Vec<u8>),
     Local,
@@ -113,7 +118,13 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
 }
 
 pub fn lex_bytes(source: &[u8]) -> Result<Vec<Token>> {
-    Lexer::new(source).lex_all()
+    Lexer::new(source).lex_all(false)
+}
+
+/// Keeps unrecognized punctuation and Unicode tokens so parser errors can
+/// identify both the unexpected token and the grammatical context.
+pub fn lex_for_parser(source: &[u8]) -> Result<Vec<Token>> {
+    Lexer::new(source).lex_all(true)
 }
 
 struct Lexer<'a> {
@@ -131,7 +142,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_all(mut self) -> Result<Vec<Token>> {
+    fn lex_all(mut self, keep_invalid: bool) -> Result<Vec<Token>> {
         while let Some(byte) = self.peek() {
             match byte {
                 b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c => {
@@ -142,7 +153,16 @@ impl<'a> Lexer<'a> {
                     self.lex_number()?
                 }
                 b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident_or_keyword(),
-                b'"' | b'\'' => self.lex_string(byte)?,
+                b'"' | b'\'' => {
+                    let start = self.cursor;
+                    if let Err(error) = self.lex_string(byte) {
+                        return Err(if keep_invalid {
+                            self.short_string_error(start, byte)
+                        } else {
+                            error
+                        });
+                    }
+                }
                 b'+' => self.single_or_equal(TokenKind::Plus, TokenKind::PlusEqual),
                 b'*' => self.single_or_equal(TokenKind::Star, TokenKind::StarEqual),
                 b'/' => self.lex_slash(),
@@ -155,6 +175,7 @@ impl<'a> Lexer<'a> {
                 b':' => self.single(TokenKind::Colon),
                 b'.' => self.lex_dot(),
                 b'#' => self.single(TokenKind::Hash),
+                b'@' => self.lex_attribute(),
                 b'(' => self.single(TokenKind::LParen),
                 b')' => self.single(TokenKind::RParen),
                 b'{' => self.single(TokenKind::LBrace),
@@ -166,7 +187,8 @@ impl<'a> Lexer<'a> {
                 b'|' => self.single(TokenKind::Pipe),
                 b'&' => self.single(TokenKind::Ampersand),
                 b'?' => self.single(TokenKind::Question),
-                b'-' => self.lex_minus_or_comment()?,
+                b'-' => self.lex_minus_or_comment(keep_invalid)?,
+                _ if keep_invalid => self.lex_invalid(),
                 _ => {
                     let span = Span::new(self.cursor, self.cursor + 1);
                     return Err(LexError {
@@ -183,128 +205,75 @@ impl<'a> Lexer<'a> {
         Ok(self.tokens)
     }
 
+    fn lex_invalid(&mut self) {
+        let start = self.cursor;
+        let byte = self.bytes[start];
+        self.cursor += 1;
+        let description = if byte.is_ascii() {
+            format!("'{}'", char::from(byte))
+        } else {
+            let width = byte.leading_ones() as usize;
+            let mut codepoint = u32::from(byte & (0x7f >> width.min(7)));
+            let mut valid = (2..=4).contains(&width);
+            if valid {
+                for _ in 1..width {
+                    let Some(next) = self.peek().filter(|next| next & 0xc0 == 0x80) else {
+                        valid = false;
+                        break;
+                    };
+                    codepoint = (codepoint << 6) | u32::from(next & 0x3f);
+                    self.cursor += 1;
+                }
+            }
+            if !valid || codepoint == 0 {
+                "invalid UTF-8 sequence".to_owned()
+            } else if let Some(suggestion) = confusables::ascii_lookalike(codepoint) {
+                format!("Unicode character U+{codepoint:x} (did you mean '{suggestion}'?)")
+            } else {
+                format!("Unicode character U+{codepoint:x}")
+            }
+        };
+        self.tokens.push(Token {
+            kind: TokenKind::Invalid(description),
+            span: Span::new(start, self.cursor),
+        });
+    }
+
     fn lex_number(&mut self) -> Result<()> {
         let start = self.cursor;
-        if self.peek() == Some(b'0') && matches!(self.peek_next(), Some(b'x' | b'X')) {
-            self.cursor += 2;
-            let digits_start = self.cursor;
-            let digit_count = self.take_radix_digits(|byte| byte.is_ascii_hexdigit());
-            if digit_count == 0 {
-                return Err(LexError {
-                    span: Span::new(start, self.cursor),
-                    message: "expected hexadecimal digits".to_owned(),
-                });
-            }
-            let text = &self.bytes[digits_start..self.cursor];
-            self.reject_radix_number_continuation(start, "hexadecimal")?;
-            let value = wrapping_radix_value(text, 16) as f64;
-            self.tokens.push(Token {
-                kind: TokenKind::Number(value),
-                span: Span::new(start, self.cursor),
-            });
-            return Ok(());
-        }
-        if self.peek() == Some(b'0') && matches!(self.peek_next(), Some(b'b' | b'B')) {
-            self.cursor += 2;
-            let digits_start = self.cursor;
-            let digit_count = self.take_radix_digits(|byte| matches!(byte, b'0' | b'1'));
-            if digit_count == 0 {
-                return Err(LexError {
-                    span: Span::new(start, self.cursor),
-                    message: "expected binary digits".to_owned(),
-                });
-            }
-            let text = &self.bytes[digits_start..self.cursor];
-            self.reject_radix_number_continuation(start, "binary")?;
-            let value = wrapping_radix_value(text, 2) as f64;
-            self.tokens.push(Token {
-                kind: TokenKind::Number(value),
-                span: Span::new(start, self.cursor),
-            });
-            return Ok(());
-        }
-
-        let mut fraction_digits = 0;
-        if self.peek() == Some(b'.') {
-            self.cursor += 1;
-            fraction_digits = self.take_radix_digits(|byte| byte.is_ascii_digit());
-        } else {
-            self.take_radix_digits(|byte| byte.is_ascii_digit());
-            if self.peek() == Some(b'.') {
-                self.cursor += 1;
-                fraction_digits = self.take_radix_digits(|byte| byte.is_ascii_digit());
-            }
-        }
-
-        let mut has_exponent = false;
+        // The reference lexer first consumes the complete number-like token.
+        // Verification comes afterwards, so diagnostics name the whole literal.
+        self.take_while(|b| b.is_ascii_digit() || matches!(b, b'.' | b'_'));
         if matches!(self.peek(), Some(b'e' | b'E')) {
-            let exponent = self.cursor;
             self.cursor += 1;
-            has_exponent = true;
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.cursor += 1;
             }
-            let digits_start = self.cursor;
-            let digit_count = self.take_radix_digits(|byte| byte.is_ascii_digit());
-            if digit_count == 0 {
-                return Err(LexError {
-                    span: Span::new(exponent, self.cursor),
-                    message: "expected exponent digits".to_owned(),
-                });
-            }
-            debug_assert!(self.cursor > digits_start);
         }
-
-        self.reject_decimal_number_continuation(start, fraction_digits > 0, has_exponent)?;
-        let text = &self.bytes[start..self.cursor];
-        let digits = number_text_without_separators(text);
-        let value = digits.parse::<f64>().map_err(|_| LexError {
-            span: Span::new(start, self.cursor),
-            message: format!("invalid number literal {text:?}"),
+        self.take_while(|b| b.is_ascii_alphanumeric() || b == b'_');
+        let span = Span::new(start, self.cursor);
+        let digits = number_text_without_separators(&self.bytes[start..self.cursor]);
+        let value = if let Some(text) = digits
+            .strip_prefix("0x")
+            .or_else(|| digits.strip_prefix("0X"))
+        {
+            radix_literal_value(text, 16)
+        } else if let Some(text) = digits
+            .strip_prefix("0b")
+            .or_else(|| digits.strip_prefix("0B"))
+        {
+            radix_literal_value(text, 2)
+        } else {
+            digits.parse::<f64>().ok()
+        }
+        .ok_or_else(|| LexError {
+            span,
+            message: "Malformed number".to_owned(),
         })?;
         self.tokens.push(Token {
             kind: TokenKind::Number(value),
-            span: Span::new(start, self.cursor),
+            span,
         });
-        Ok(())
-    }
-
-    fn reject_radix_number_continuation(&self, start: usize, radix_name: &str) -> Result<()> {
-        let Some(byte) = self.peek() else {
-            return Ok(());
-        };
-        let invalid = byte.is_ascii_alphanumeric()
-            || byte == b'_'
-            || (byte == b'.' && self.peek_next() != Some(b'.'));
-        if invalid {
-            return Err(LexError {
-                span: Span::new(start, self.cursor + 1),
-                message: format!("invalid {radix_name} number literal"),
-            });
-        }
-        Ok(())
-    }
-
-    fn reject_decimal_number_continuation(
-        &self,
-        start: usize,
-        has_fraction_digits: bool,
-        has_exponent: bool,
-    ) -> Result<()> {
-        let Some(byte) = self.peek() else {
-            return Ok(());
-        };
-        let invalid = byte.is_ascii_alphabetic()
-            || byte == b'_'
-            || (byte == b'.'
-                && self.peek_next().is_some_and(|next| next.is_ascii_digit())
-                && (has_fraction_digits || has_exponent));
-        if invalid {
-            return Err(LexError {
-                span: Span::new(start, self.cursor + 1),
-                message: "invalid number literal".to_owned(),
-            });
-        }
         Ok(())
     }
 
@@ -341,6 +310,46 @@ impl<'a> Lexer<'a> {
             kind,
             span: Span::new(start, self.cursor),
         });
+    }
+
+    /// Recover the complete raw token only when decoding has failed. A
+    /// closing quote distinguishes a bad escape from an unfinished literal.
+    fn short_string_error(&self, start: usize, quote: u8) -> LexError {
+        let mut end = start + 1;
+        let mut message = "Malformed string; did you forget to finish it?";
+        while let Some(&byte) = self.bytes.get(end) {
+            match byte {
+                b'\r' | b'\n' => break,
+                b if b == quote => {
+                    end += 1;
+                    message = "String literal contains malformed escape sequence";
+                    break;
+                }
+                b'\\' => {
+                    end += 1;
+                    match self.bytes.get(end) {
+                        Some(b'z') => {
+                            end += 1;
+                            while self
+                                .bytes
+                                .get(end)
+                                .is_some_and(|b| b.is_ascii_whitespace() || *b == 0x0b)
+                            {
+                                end += 1;
+                            }
+                        }
+                        Some(b'\r') if self.bytes.get(end + 1) == Some(&b'\n') => end += 2,
+                        Some(_) => end += 1,
+                        None => break,
+                    }
+                }
+                _ => end += 1,
+            }
+        }
+        LexError {
+            span: Span::new(start, end),
+            message: message.to_owned(),
+        }
     }
 
     fn lex_string(&mut self, quote: u8) -> Result<()> {
@@ -399,22 +408,6 @@ impl<'a> Lexer<'a> {
                                 self.cursor += 1;
                                 value.push(0x0b);
                             }
-                            b'\\' => {
-                                self.cursor += 1;
-                                value.push(b'\\');
-                            }
-                            b'"' => {
-                                self.cursor += 1;
-                                value.push(b'"');
-                            }
-                            b'\'' => {
-                                self.cursor += 1;
-                                value.push(b'\'');
-                            }
-                            b'`' => {
-                                self.cursor += 1;
-                                value.push(b'`');
-                            }
                             b'x' => {
                                 self.cursor += 1;
                                 value.push(self.lex_hex_string_escape(start)?);
@@ -430,13 +423,8 @@ impl<'a> Lexer<'a> {
                                 });
                             }
                             other => {
-                                return Err(LexError {
-                                    span: Span::new(start, self.cursor),
-                                    message: format!(
-                                        "invalid escape sequence \\{}",
-                                        char::from(other)
-                                    ),
-                                });
+                                self.cursor += 1;
+                                value.push(other);
                             }
                         }
                     }
@@ -571,12 +559,23 @@ impl<'a> Lexer<'a> {
     fn lex_left_bracket(&mut self) -> Result<()> {
         let start = self.cursor;
         if let Some((level, content_start)) = self.long_bracket_opener_at(start) {
-            let (content_start, value) = self.read_long_bracket(start, level, content_start)?;
+            let range = self.read_long_bracket(start, level, content_start)?;
+            let raw = &self.bytes[range];
+            // 0.709 ignores one initial LF or CRLF, and converts later CRLF pairs to LF.
+            let raw = raw
+                .strip_prefix(b"\r\n")
+                .or_else(|| raw.strip_prefix(b"\n"))
+                .unwrap_or(raw);
+            let mut value = Vec::with_capacity(raw.len());
+            for (index, &byte) in raw.iter().enumerate() {
+                if byte != b'\r' || raw.get(index + 1) != Some(&b'\n') {
+                    value.push(byte);
+                }
+            }
             self.tokens.push(Token {
                 kind: TokenKind::String(value),
                 span: Span::new(start, self.cursor),
             });
-            debug_assert!(content_start <= self.cursor);
         } else {
             self.single(TokenKind::LBracket);
         }
@@ -587,28 +586,20 @@ impl<'a> Lexer<'a> {
         &mut self,
         opener_start: usize,
         level: usize,
-        mut content_start: usize,
-    ) -> Result<(usize, Vec<u8>)> {
+        content_start: usize,
+    ) -> Result<std::ops::Range<usize>> {
         self.cursor = content_start;
-        if let Some(newline_end) = self.newline_end_at(self.cursor) {
-            self.cursor = newline_end;
-            content_start = newline_end;
-        }
-        let content_start = content_start;
         while self.cursor < self.bytes.len() {
             if self.long_bracket_closer_matches(level) {
                 let content_end = self.cursor;
                 self.cursor += level + 2;
-                return Ok((
-                    content_start,
-                    self.bytes[content_start..content_end].to_vec(),
-                ));
+                return Ok(content_start..content_end);
             }
             self.cursor += 1;
         }
         Err(LexError {
             span: Span::new(opener_start, self.cursor),
-            message: "unterminated long string".to_owned(),
+            message: "Malformed string; did you forget to finish it?".to_owned(),
         })
     }
 
@@ -732,13 +723,44 @@ impl<'a> Lexer<'a> {
         });
     }
 
-    fn lex_minus_or_comment(&mut self) -> Result<()> {
+    fn lex_attribute(&mut self) {
+        let start = self.cursor;
+        self.cursor += 1;
+        let kind = if self.peek() == Some(b'[') {
+            self.cursor += 1;
+            TokenKind::AttributeOpen
+        } else {
+            let name_start = self.cursor;
+            if self
+                .peek()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+            {
+                self.take_while(|b| b.is_ascii_alphanumeric() || b == b'_');
+            }
+            TokenKind::Attribute(ascii_identifier(&self.bytes[name_start..self.cursor]))
+        };
+        self.tokens.push(Token {
+            kind,
+            span: Span::new(start, self.cursor),
+        });
+    }
+
+    fn lex_minus_or_comment(&mut self, keep_invalid: bool) -> Result<()> {
         let start = self.cursor;
         self.cursor += 1;
         if self.peek() == Some(b'-') {
             self.cursor += 1;
             if let Some((level, content_start)) = self.long_bracket_opener_at(self.cursor) {
-                self.read_long_bracket(start, level, content_start)?;
+                if let Err(error) = self.read_long_bracket(start, level, content_start) {
+                    if keep_invalid {
+                        self.tokens.push(Token {
+                            kind: TokenKind::Invalid("unfinished comment".to_owned()),
+                            span: error.span,
+                        });
+                    } else {
+                        return Err(error);
+                    }
+                }
             } else {
                 while let Some(byte) = self.peek() {
                     if matches!(byte, b'\n' | b'\r') {
@@ -801,21 +823,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn take_radix_digits(&mut self, mut is_digit: impl FnMut(u8) -> bool) -> usize {
-        let mut digits = 0;
-        while let Some(byte) = self.peek() {
-            if is_digit(byte) {
-                self.cursor += 1;
-                digits += 1;
-            } else if byte == b'_' {
-                self.cursor += 1;
-            } else {
-                break;
-            }
-        }
-        digits
-    }
-
     #[inline]
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.cursor).copied()
@@ -854,17 +861,6 @@ impl<'a> Lexer<'a> {
         }
         self.bytes.get(cursor).copied() == Some(b']')
     }
-
-    fn newline_end_at(&self, start: usize) -> Option<usize> {
-        match (
-            self.bytes.get(start).copied(),
-            self.bytes.get(start + 1).copied(),
-        ) {
-            (Some(b'\r'), Some(b'\n')) | (Some(b'\n'), Some(b'\r')) => Some(start + 2),
-            (Some(b'\r' | b'\n'), _) => Some(start + 1),
-            _ => None,
-        }
-    }
 }
 
 fn hex_value(byte: u8) -> Option<u8> {
@@ -902,17 +898,18 @@ fn number_text_without_separators(text: &[u8]) -> String {
         .collect()
 }
 
-fn wrapping_radix_value(text: &[u8], radix: u32) -> u64 {
-    let mut value = 0_u64;
-    for byte in text.iter().copied().filter(|byte| *byte != b'_') {
-        let digit = u64::from(
-            char::from(byte)
-                .to_digit(radix)
-                .expect("scanner only accepts digits for this radix"),
-        );
-        value = value.wrapping_mul(u64::from(radix)).wrapping_add(digit);
+fn radix_literal_value(text: &str, radix: u32) -> Option<f64> {
+    if text.is_empty() {
+        return None;
     }
-    value
+    // Luau 0.709 converts through strtoull. Out-of-range magnitudes
+    // saturate, but a trailing invalid digit still makes the literal malformed.
+    let mut value = 0_u64;
+    for digit in text.chars() {
+        let digit = u64::from(digit.to_digit(radix)?);
+        value = value.saturating_mul(u64::from(radix)).saturating_add(digit);
+    }
+    Some(value as f64)
 }
 
 fn ascii_identifier(text: &[u8]) -> String {
@@ -968,14 +965,35 @@ mod tests {
     }
 
     #[test]
-    fn lexes_wrapping_radix_integer_literals() {
-        let tokens = lex("0xffff_ffff_ffff_ffff 0x1_0000_0000_0000_0000 0b1_0000000000000000000000000000000000000000000000000000000000000000").unwrap();
-        assert!(matches!(
-            tokens[0].kind,
-            TokenKind::Number(value) if value == u64::MAX as f64
-        ));
-        assert!(matches!(tokens[1].kind, TokenKind::Number(0.0)));
-        assert!(matches!(tokens[2].kind, TokenKind::Number(0.0)));
+    fn radix_literals_round_to_nearest_and_saturate_at_u64_max() {
+        // Expected IEEE-754 bit patterns from Luau 0.709 AstExprConstantNumber.
+        // 2^53 + 1 and + 3 round in opposite directions at the nearest-even ties.
+        let cases = [
+            ("0x20000000000001", 0x4340_0000_0000_0000),
+            ("0x20000000000003", 0x4340_0000_0000_0002),
+            ("0xFFFFFFFFFFFFFBFF", 0x43ef_ffff_ffff_ffff),
+            ("0xFFFFFFFFFFFFFC00", 0x43f0_0000_0000_0000),
+            ("0x0000_ffff_ffff_ffff_ffff", 0x43f0_0000_0000_0000),
+            ("0x1_0000_0000_0000_0000", 0x43f0_0000_0000_0000),
+            ("0X2_0000_0000_0000_0000", 0x43f0_0000_0000_0000),
+            (
+                "0B1_00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000",
+                0x43f0_0000_0000_0000,
+            ),
+        ];
+        for (literal, expected) in cases {
+            let tokens = lex(literal).unwrap();
+            let TokenKind::Number(value) = tokens[0].kind else {
+                panic!("{literal}");
+            };
+            assert_eq!(value.to_bits(), expected, "{literal}");
+        }
+        for malformed in [
+            "0X2_0000_0000_0000_0000g",
+            "0B111111111111111111111111111111111111111111111111111111111111111112",
+        ] {
+            assert_eq!(lex(malformed).unwrap_err().message, "Malformed number");
+        }
     }
 
     #[test]
@@ -1009,7 +1027,6 @@ mod tests {
         for source in [
             "\"a\nb\"",
             "\"a\rb\"",
-            r#""\q""#,
             r#""\u{}""#,
             r#""\u{110000}""#,
             r#""\xG0""#,

@@ -72,3 +72,9 @@ The deterministic harness tests do not require nightly:
 ```sh
 cargo test --manifest-path fuzz/Cargo.toml
 ```
+
+## Upstream parser examples
+
+Run `cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser`
+to compare the ported examples with Luau 0.709. The [inventory](../conformance/upstream/luau-0.709/parser-cases.tsv)
+identifies which Rustia assertions check each applicable upstream case.

@@ -2,7 +2,7 @@
 
 > **HISTORICAL DESIGN INVENTORY; EXECUTABLE CORPUS IS AUTHORITATIVE (updated 2026-08-13).** This file began as
 > a 709-row model-assisted inventory, and its older body prose can still lag implementation. The live executable
-> ground truth is now **735 fixtures / 525 refs / 0 pending**: 717/507 are Luau 0.709 oracle-backed and 18/18
+> ground truth is now **736 fixtures / 526 refs / 0 pending**: 718/508 are Luau 0.709 oracle-backed and 18/18
 > are offline PUC 5.1.5 oracle-backed. The corpus is
 > enforced by project-status checks. The CORRECTIONS block below still supersedes contradictory historical rows;
 > that named executable denominator does not imply a one-to-one audit of every historical inventory row. New or
@@ -116,7 +116,7 @@ no portable contract outside its representable domain; see
 | Escape `\u{...}` (Unicode) | specified | 1–16 hex digits in braces; max codepoint `0x10FFFF`; encoded as UTF-8; >max → error | identical cap `0x10FFFF`, UTF-8 encode | both | DIVERGENCE FROM LUA 5.3 (which allows up to 0x7FFFFFFF/6-byte). Watch: enforce Luau's stricter cap. |
 | Escape `\z` (skip whitespace) | specified | Skips all following whitespace incl. newlines | identical | both | Match. |
 | Escape `\<newline>` (line continuation) | specified | A backslash immediately before a newline inserts a single `\n` into the string (all 4 newline forms normalized to `\n`) | identical normalize-to-`\n` | both | Match Lexer newline normalization. |
-| Unknown escape e.g. `\q` | error | Invalid escape sequence → lex error | reject | both | Match; don't pass through unknown escapes. |
+| Unknown escape e.g. `\q` | specified | An unrecognized escape keeps the escaped byte and drops the backslash. | Preserve that byte in quoted and interpolated strings. | both | Hex, decimal and Unicode escapes still validate their payloads. |
 | Long strings `[[ ... ]]` / `[==[ ... ]==]` | specified | No escape processing; raw bytes; closed by matching level | Implemented in P1 lexer with level-matched delimiters. | both | Match level algorithm. |
 | Long-string first-newline skip | specified | A newline immediately after the opener is skipped | Implemented in P1 lexer. | both | Match: `[[\nfoo]]` == `"foo"`. |
 | Unterminated long string / EOF in string | error | Lex error | reject | both | Match. |
@@ -127,11 +127,11 @@ no portable contract outside its representable domain; see
 | Interp lexeme split | impl-defined | Lexed as `InterpStringBegin/Mid/End` or `InterpStringSimple` | internal representation free; observable result must match | both | Internal token shape unobservable; only the parsed string/expr sequence matters. |
 | Decimal integer literal `123` | specified | Parsed to f64 (no integer subtype) | f64, correctly-rounded | both | Luau is f64-only (T1). Match. |
 | Float forms `3.14`, `.5`, `3.`, `3e2`, `3.14E-2`, `1e10` | specified | All accepted; `e`/`E` exponent with optional sign | identical | both | Match. |
-| Hex integer `0x1A`, `0xFF` | specified | Hex digits after `0x`/`0X`; converted to f64 | parse hex → u64 (wrapping) → f64 | both | Watch: >2^53 loses precision identically; see overflow row. |
+| Hex integer `0x1A`, `0xFF` | specified | Hex digits after `0x`/`0X`; converted to f64 | saturate the integer at u64::MAX, then convert to f64 | both | Watch: >2^53 loses precision identically; see overflow row. |
 | Binary integer `0b1010` | specified | `0b`/`0B` prefix, digits 0/1 → f64 | parse binary → integer → f64 | both | Luau-specific (not in Lua). Match. |
 | Hex FLOAT `0x1.8p4` (p-exponent) | error | NOT supported by Luau (unlike Lua 5.2+); parse error | reject hex floats | both | DIVERGENCE FROM LUA 5.2+. Must error to stay Luau-exact. |
 | Underscore digit separators `1_000`, `0xFF_FF`, `0b_0101_0101` | specified | Allowed anywhere within integer literals incl. right after the `0x`/`0b` prefix | identical | both | Luau-specific. Watch: also allowed in decimal/float mantissa; match Luau's permissive rule. |
-| Large hex/binary literal overflow `0xFFFFFFFFFFFFFFFF` | impl-defined | Accumulated in 64-bit unsigned (wraps mod 2^64) then cast to f64 | replicate u64-wrapping then `as f64` | both | DIVERGENCE RISK: must match Luau's exact wrap+cast, not saturate or error. Differential-test. |
+| Large hex/binary literal overflow `0x1_0000_0000_0000_0000` | impl-defined | Luau 0.709 parseInteger uses strtoull, which saturates at 2^64 − 1 on overflow. | saturating u64 accumulation, then nearest-even f64 conversion | both | The maximum and all larger magnitudes round to 2^64. Invalid digits still reject the literal. |
 | Huge decimal literal `1e400` | specified | strtod → `inf` (HUGE_VAL), no error | parse to `+inf` | both | IEEE round-to-nearest overflow → inf; match. |
 | Decimal→f64 rounding of e.g. `0.1`, `2.2250738585072011e-308` | specified | Correctly-rounded (round-to-nearest-even) via strtod | use Rust core correctly-rounded f64 parser | deterministic-only critical | Both are correctly-rounded ⇒ bit-identical; Rust's is platform-independent (good for determinism). Watch: ensure NOT using a fast/lossy parser. |
 | Malformed numbers `0x`, `0b2`, `1e`, `1.2.3`, `0xG` | error | Lex/parse error | reject | both | Match. |
@@ -165,11 +165,11 @@ no portable contract outside its representable domain; see
 | Parenthesized expression truncates multivalue `(f())` | specified | `(f())` adjusts to exactly 1 value | identical adjust-to-1 | both | Parse marks paren-adjust; match (affects multret). |
 | Method/index chains `a.b.c:d().e[f]` | specified | Standard primary-expr suffix chain | identical | both | Match. |
 | Max nesting / recursion depth, local/upvalue/constant limits | impl-defined | Luau imposes limits (e.g. ~200 locals, parser depth cap) → error past limit | impose our own limits; values may differ | both | DIVERGENCE: exact limit numbers differ; choose ≥ Luau's where cheap; error message differs. |
-| Attribute `@native` on functions | impl-defined | Codegen hint before `function`/`local function`; ignored by interpreter | parse, record, ignore (or honor as JIT hint later) | both | We don't require native codegen; parse-and-ignore is conformant at runtime. |
-| Attribute `@checked` | impl-defined | Used on `declare function` (definition files) for runtime arg checking | parse; honor only if we implement declaration files (P4); else ignore | both | Mostly LSP/declaration-file scope; no runtime divergence for normal scripts. |
-| Attribute `@deprecated` and arg form `@[deprecated { use=..., reason=... }]` | impl-defined | Newer attribute-with-arguments syntax via `@[ ... ]` token; validated args (`use`/`reason` strings) | parse the `@[...]` grammar; record; no runtime effect | both | Watch: must accept the `@[` argument syntax, not only bare `@name`. |
-| Multiple/unknown attributes | impl-defined | Multiple attributes stack; unknown attribute name → analyzer warning, not a hard parse error in the compiler | accept and ignore unknown attributes (parse-then-erase) | both | We are lenient (no analysis); matches the runtime compiler, not the analyzer. |
-| Attribute placement (only before function decls/declares) | specified | Attributes only legal before `function`, `local function`, `declare function` | enforce placement; reject elsewhere | both | Match grammar; mis-placed `@x` is an error. |
+| Attribute `@native` | specified syntax | Permits a native-code hint on a function. | Parse and retain the attribute and its span. The interpreter runs the function normally. | both | See executable `function.attributes`. |
+| Attribute `@checked` | specified syntax | Accepted on value functions and on function declarations in definition files. | Parse value-function attributes. | both | Definition files are outside the interpreter target. |
+| Attribute `@deprecated` and argument list | specified syntax | Optional table argument with string-valued `use` and `reason` fields. | Validate and retain literal arguments. | both | Attribute arguments never execute. |
+| Multiple, duplicate and unknown attributes | specified syntax | Multiple different attributes can be stacked or listed inside `@[...]`. Duplicate and unknown names are parse errors. | Match Luau's rejection and first diagnostic. | both | See the attribute cases in the pinned parser inventory. |
+| Attribute placement | specified syntax | Ordinary functions, local functions and function expressions accept attributes. | Enforce placement on executable source. | both | Declaration-file-only forms are recorded in the parser inventory. |
 | TYPE: local/param/return annotations `local x: T`, `(a: T) -> R` | impl-defined (parse-then-erase) | Fully parsed; runtime-ERASED (interpreter ignores types) | full parse, full erase, NO typecheck | both | Real Luau runtime also erases → no runtime divergence. Static checking deferred to LSP subsystem. |
 | TYPE: `type Name = T`, `type Name<...> = T`, `export type` | impl-defined (parse-then-erase) | Parsed as declarations; erased at runtime; `export type` marks module export (LSP) | parse + erase; `export type` recorded, no runtime effect | both | Match parse; export only matters for analysis/modules. |
 | TYPE: user-defined `type function name(...) ... end` | impl-defined (parse-then-erase) | Newer Luau type-functions feature (runs at analysis time) | parse the grammar; erase (we do not evaluate type functions) | both | DIVERGENCE: real Luau analysis evaluates these; rustia (no typecheck) ignores. No runtime difference for normal scripts; full LSP parity deferred (P4). |
@@ -878,7 +878,7 @@ no portable contract outside its representable domain; see
 
 | Category | Behavior | Real Luau | rustia | Why |
 |---|---|---|---|---|
-| 1 | Large hex/binary integer literal overflow (e.g. 0xFFFFFFFFFFFFFFFF, 0x1_0000_0000_0000_0000) | Accumulates the literal in a 64-bit unsigned integer (wraps mod 2^64) then casts to f64; no error | Must replicate u64-wrapping accumulation then `as f64`; a naive bigint-or-error path would diverge | Observable: the resulting f64 differs if rustia saturates, errors, or accumulates differently. High differential-test priority. |
+| 1 | Large hex/binary integer literal overflow (e.g. 0xFFFFFFFFFFFFFFFF, 0x1_0000_0000_0000_0000) | Luau 0.709 saturates out-of-range magnitudes before converting the unsigned integer to f64. | Saturate at u64::MAX and convert to f64, with nearest-even rounding. | The numeric_literals.luau fixture checks both radices above the integer boundary and rounding at 2^53. |
 | 1 | Decimal/float literal -> f64 conversion | Uses C strtod (correctly-rounded, round-to-nearest-even) — platform libc dependent in principle | Uses Rust core's correctly-rounded, platform-independent f64 parser | Both are correctly-rounded so results are bit-identical for valid inputs; the divergence is theoretical (a non-conformant libc) and rustia is the more deterministic one. Must NOT use a fast/lossy parser. Low risk but on the determinism-critical path. |
 | 1 | Hex float literals 0x1.8p4 (p-exponent) | Parse error (Luau does not support hex floats, unlike Lua 5.2+) | Must also reject — but a Rust impl that reuses a Lua-5.2-style number parser would accidentally accept | Accepting would make rustia a non-Luau superset; valid in rustia, error in Luau. |
 | 1 | \u{...} codepoint cap | Max 0x10FFFF; larger -> error | Must cap at 0x10FFFF (NOT Lua 5.3's 0x7FFFFFFF / 6-byte extended UTF-8) | If rustia allows >0x10FFFF it accepts strings Luau rejects (and emits non-standard UTF-8). |

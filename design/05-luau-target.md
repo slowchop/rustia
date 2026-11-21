@@ -26,7 +26,9 @@
   `LuauMathSeedEncode` (default seed of *unseeded* `math.random` — irrelevant; we always seed explicitly).
   These are the VM defaults. One imported **parser** fixture uses a different configuration:
   the [upstream test harness](../conformance/upstream/luau-0.709/tests/Conformance.test.cpp)
-  enables `LuauExplicitTypeInstantiationSyntax`. Rustia accepts that call syntax by default.
+  enables `LuauExplicitTypeInstantiationSyntax`. Rustia accepts this syntax on calls and value expressions by default. The shared parser comparison enables
+  the same flag in the pinned compiler. The [case inventory](../conformance/upstream/luau-0.709/parser-cases.tsv)
+  maps each upstream parser test to executable evidence or a reason it is outside the standalone target.
 
 ## Numbers are f64-only (verified, not assumed)
 At 0.709, **`f64` (IEEE-754 double) is the only script-level number type.** Oracle-proven:

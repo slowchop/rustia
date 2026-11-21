@@ -103,8 +103,8 @@ number.add	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basi
 number.div	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Number division always produces Luau f64 division results.
 number.exponent-literal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	Decimal exponent numeric literals parse to f64.
 number.floor-div	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Floor division uses Luau floor-toward-negative-infinity semantics.
-number.hex-literal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/bitwise.luau	luau-0.709	Hex integer numeric literals parse to f64.
-number.binary-literal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/buffers.luau	luau-0.709	Binary integer numeric literals with 0b or 0B prefix parse to f64.
+number.hex-literal	parser-runtime	upstream-luau-0.709:Ast/src/Parser.cpp	luau-0.709	Hex literals saturate at unsigned 64-bit maximum before rounding to f64.
+number.binary-literal	parser-runtime	upstream-luau-0.709:Ast/src/Parser.cpp	luau-0.709	Binary literals with 0b or 0B prefix saturate at unsigned 64-bit maximum before rounding to f64.
 number.literal-separators	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/bitwise.luau	luau-0.709	Numeric source literals allow underscore digit separators that do not affect the parsed f64 value.
 number.leading-dot-literal	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Leading-dot float literals parse to f64.
 number.mod-floored	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Percent operator uses Luau floored modulo semantics.
@@ -126,7 +126,7 @@ string.short-utf8	parser-runtime	conformance/upstream/luau-0.709/tests/conforman
 string.high-byte-escapes	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	Decimal and hexadecimal string escapes preserve byte values above 127.
 string.unicode-escape	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/utf8.luau	luau-0.709	Unicode string escapes encode codepoints up to 0x10FFFF as UTF-8 bytes, including surrogate byte sequences used by utf8 invalid-input tests.
 string.line-continuation-escape	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Backslash-newline in a short string inserts one normalized newline byte.
-string.invalid-short-escape	parser-runtime	upstream-luau-0.709:Ast/src/Lexer.cpp	luau-0.709	Unknown short-string escapes are lex errors.
+string.unknown-short-escape	parser-runtime	upstream-luau-0.709:Ast/src/Lexer.cpp	luau-0.709	Quoted and interpolated strings preserve the byte after an unrecognized escape.
 string.short-string-newline-error	parser-runtime	upstream-luau-0.709:Ast/src/Lexer.cpp	luau-0.709	Unescaped raw newlines in short strings are lex errors.
 stdlib.string-byte	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	string.byte returns numeric byte values for one-based or negative indices, clamps explicit range starts below 1, and returns no value when the selected range is empty or out of bounds.
 stdlib.string-char	stdlib	conformance/upstream/luau-0.709/tests/conformance/strings.luau	luau-0.709	string.char builds a byte string from integer byte values in the inclusive range 0..255 and returns errors for out-of-range values.
@@ -524,3 +524,4 @@ type.return-annotation	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	
 type.table-grammar	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Table type fields, indexers, separators, contextual qualifiers and array shorthand parse then erase.
 type.typeof-expression	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Typeof annotations parse ordinary expressions, including interpolation, then erase without executing their effects.
 type.function-declaration	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Ordinary and exported type function declarations parse with isolated lexical scopes and erase before runtime.
+function.attributes	parser-runtime	upstream-luau-0.709:tests/Parser.test.cpp	luau-0.709	Function attributes validate their names and literal arguments and preserve ordinary interpreter execution.

@@ -1,4 +1,8 @@
-use rustia_lexer::{lex_bytes, LexError, Span, Token, TokenKind};
+mod attributes;
+mod diagnostics;
+pub use attributes::{AttributeKind, FunctionAttribute};
+
+use rustia_lexer::{lex_for_parser, LexError, Span, Token, TokenKind};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -17,6 +21,7 @@ pub enum Stmt {
         span: Span,
     },
     LocalFunction {
+        attributes: Box<[FunctionAttribute]>,
         name: String,
         name_span: Span,
         params: Vec<FunctionParam>,
@@ -25,6 +30,7 @@ pub enum Stmt {
         span: Span,
     },
     Function {
+        attributes: Box<[FunctionAttribute]>,
         target: AssignmentTarget,
         is_method: bool,
         params: Vec<FunctionParam>,
@@ -99,6 +105,29 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+}
+
+impl Stmt {
+    fn span_mut(&mut self) -> &mut Span {
+        match self {
+            Self::Local { span, .. }
+            | Self::LocalFunction { span, .. }
+            | Self::Function { span, .. }
+            | Self::Assignment { span, .. }
+            | Self::If { span, .. }
+            | Self::While { span, .. }
+            | Self::ForNumeric { span, .. }
+            | Self::ForGeneric { span, .. }
+            | Self::Repeat { span, .. }
+            | Self::Do { span, .. }
+            | Self::Break { span }
+            | Self::Continue { span }
+            | Self::TypeFunction { span, .. }
+            | Self::TypeAlias { span, .. }
+            | Self::Return { span, .. }
+            | Self::Expr { span, .. } => span,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,12 +228,18 @@ pub enum Expr {
         span: Span,
     },
     Function {
-        params: Vec<FunctionParam>,
+        attributes: Box<[FunctionAttribute]>,
+        params: Box<[FunctionParam]>,
         is_vararg: bool,
-        body: Vec<Stmt>,
+        body: Box<[Stmt]>,
         span: Span,
     },
     Paren {
+        expr: Box<Expr>,
+        span: Span,
+    },
+    /// A single value evaluated at this point; type arguments are erased.
+    TypeInstantiation {
         expr: Box<Expr>,
         span: Span,
     },
@@ -369,7 +404,7 @@ pub fn parse_source(source: &str) -> std::result::Result<Chunk, SourceError> {
 pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceError> {
     let lowered = lower_interpolated_strings(source).map_err(SourceError::Lex)?;
     if let Some(mut lowered) = lowered {
-        let mut tokens = lex_bytes(&lowered.source)
+        let mut tokens = lex_for_parser(&lowered.source)
             .map_err(|error| SourceError::Lex(lowered.remap_lex_error(error)))?;
         for token in &mut tokens {
             token.span = lowered.remap_span(token.span);
@@ -379,12 +414,12 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
             .into_iter()
             .map(|(offset, interpolation)| (lowered.remap_start(offset), interpolation))
             .collect();
-        Parser::new_with_source_and_interpolations(tokens, source, interpolations)
+        SourceParser::new(tokens, source, interpolations)
             .parse_chunk()
             .map_err(SourceError::Parse)
     } else {
-        let tokens = lex_bytes(source).map_err(SourceError::Lex)?;
-        Parser::new_with_source_and_interpolations(tokens, source, BTreeMap::new())
+        let tokens = lex_for_parser(source).map_err(SourceError::Lex)?;
+        SourceParser::new(tokens, source, BTreeMap::new())
             .parse_chunk()
             .map_err(SourceError::Parse)
     }
@@ -467,7 +502,7 @@ impl LoweredOutput {
 #[derive(Clone, Debug)]
 struct PendingInterpolatedString {
     parts: Vec<InterpolatedStringPart>,
-    expression_count: usize,
+    sections: Vec<Span>,
     span: Span,
 }
 
@@ -522,7 +557,8 @@ fn lower_interpolated_string(
         Span::new(start, start),
     );
     *next_interpolation_id += 1;
-    let mut expression_count = 0usize;
+    let mut sections: Vec<Span> = Vec::new();
+    let mut section_start = start;
     let mut cursor = start + 1;
     let mut parts = Vec::new();
     let mut text = Vec::new();
@@ -541,7 +577,7 @@ fn lower_interpolated_string(
                     placeholder_start,
                     PendingInterpolatedString {
                         parts,
-                        expression_count,
+                        sections,
                         span: Span::new(start, cursor),
                     },
                 );
@@ -550,17 +586,18 @@ fn lower_interpolated_string(
             b'{' => {
                 if source.get(cursor + 1) == Some(&b'{') {
                     return Err(LexError {
-                        span: Span::new(cursor, cursor + 2),
-                        message: "double '{{' is not valid in interpolated strings".to_owned(),
+                        span: sections.last().copied().unwrap_or(Span::new(start, cursor)),
+                        message: r"Double braces are not permitted within interpolated strings; did you mean '\{'?".to_owned(),
                     });
                 }
                 if !text.is_empty() {
                     parts.push(InterpolatedStringPart::Text(std::mem::take(&mut text)));
                 }
-                if expression_count > 0 {
+                if !sections.is_empty() {
                     output.push_synthetic(b',', Span::new(cursor, cursor));
                 }
                 output.push_synthetic(b'(', Span::new(cursor, cursor + 1));
+                sections.push(Span::new(section_start, cursor + 1));
                 cursor = lower_interpolated_expression(
                     source,
                     cursor + 1,
@@ -569,8 +606,8 @@ fn lower_interpolated_string(
                     next_interpolation_id,
                 )?;
                 output.push_synthetic(b')', Span::new(cursor - 1, cursor));
-                parts.push(InterpolatedStringPart::Expr(expression_count));
-                expression_count += 1;
+                parts.push(InterpolatedStringPart::Expr(sections.len() - 1));
+                section_start = cursor - 1;
             }
             b'\\' => {
                 cursor += 1;
@@ -613,11 +650,17 @@ fn lower_interpolated_string(
                     }
                     b'x' => {
                         cursor += 1;
-                        text.push(interpolation_hex_escape(source, &mut cursor, start)?);
+                        text.push(
+                            interpolation_hex_escape(source, &mut cursor, start)
+                                .map_err(|_| invalid_interpolation_escape(source, start, cursor))?,
+                        );
                     }
                     b'u' => {
                         cursor += 1;
-                        text.extend(interpolation_unicode_escape(source, &mut cursor, start)?);
+                        text.extend(
+                            interpolation_unicode_escape(source, &mut cursor, start)
+                                .map_err(|_| invalid_interpolation_escape(source, start, cursor))?,
+                        );
                     }
                     b'z' => {
                         cursor += 1;
@@ -628,20 +671,10 @@ fn lower_interpolated_string(
                         }
                     }
                     escaped if escaped.is_ascii_digit() => {
-                        text.push(interpolation_decimal_escape(source, &mut cursor, start)?);
-                    }
-                    b'\\' | b'"' | b'\'' | b'`' | b'{' => {
-                        cursor += 1;
-                        text.push(escaped);
-                    }
-                    other if other.is_ascii_alphanumeric() || other == b'_' => {
-                        return Err(LexError {
-                            span: Span::new(start, cursor + 1),
-                            message: format!(
-                                "invalid interpolation escape \\{}",
-                                char::from(other)
-                            ),
-                        });
+                        text.push(
+                            interpolation_decimal_escape(source, &mut cursor, start)
+                                .map_err(|_| invalid_interpolation_escape(source, start, cursor))?,
+                        );
                     }
                     other => {
                         cursor += 1;
@@ -649,12 +682,7 @@ fn lower_interpolated_string(
                     }
                 }
             }
-            b'\n' | b'\r' => {
-                return Err(LexError {
-                    span: Span::new(start, cursor),
-                    message: "unfinished interpolated string near newline".to_owned(),
-                });
-            }
+            b'\n' | b'\r' => break,
             byte => {
                 text.push(byte);
                 cursor += 1;
@@ -662,9 +690,37 @@ fn lower_interpolated_string(
         }
     }
     Err(LexError {
-        span: Span::new(start, cursor),
-        message: "unterminated interpolated string".to_owned(),
+        span: Span::new(section_start, cursor),
+        message: if sections.is_empty() {
+            "Malformed string; did you forget to finish it?"
+        } else {
+            MISSING_INTERPOLATION_BACKTICK
+        }
+        .to_owned(),
     })
+}
+
+const MISSING_INTERPOLATION_BRACE: &str =
+    "Malformed interpolated string; did you forget to add a '}'?";
+const MISSING_INTERPOLATION_BACKTICK: &str =
+    "Malformed interpolated string; did you forget to add a '`'?";
+
+fn invalid_interpolation_escape(source: &[u8], start: usize, mut cursor: usize) -> LexError {
+    while let Some(&byte) = source.get(cursor) {
+        match byte {
+            b'{' | b'`' => {
+                cursor += 1;
+                break;
+            }
+            b'\r' | b'\n' => break,
+            b'\\' if cursor + 1 < source.len() => cursor += 2,
+            _ => cursor += 1,
+        }
+    }
+    LexError {
+        span: Span::new(start, cursor),
+        message: "Interpolated string literal contains malformed escape sequence".to_owned(),
+    }
 }
 
 fn lower_interpolated_expression(
@@ -674,7 +730,8 @@ fn lower_interpolated_expression(
     interpolations: &mut BTreeMap<usize, PendingInterpolatedString>,
     next_interpolation_id: &mut usize,
 ) -> std::result::Result<usize, LexError> {
-    let start = cursor - 1;
+    let start = cursor;
+    let output_start = output.len();
     let mut depth = 1usize;
     while cursor < source.len() {
         match source[cursor] {
@@ -685,7 +742,13 @@ fn lower_interpolated_expression(
                     output,
                     interpolations,
                     next_interpolation_id,
-                )?;
+                )
+                .map_err(|mut error| {
+                    if error.message == "Malformed string; did you forget to finish it?" {
+                        error.message = MISSING_INTERPOLATION_BRACE.to_owned();
+                    }
+                    error
+                })?;
             }
             b'\'' | b'"' => {
                 copy_short_string(source, &mut cursor, output)?;
@@ -713,9 +776,21 @@ fn lower_interpolated_expression(
             }
         }
     }
+    // Luau blames the last token of an unfinished expression, skipping trivia.
+    let tokens = lex_for_parser(&output.source[output_start..])?;
+    let span = tokens
+        .iter()
+        .rev()
+        .nth(1)
+        .map_or(Span::new(start - 1, start), |token| {
+            Span::new(
+                output.origins[output_start + token.span.start].start,
+                output.origins[output_start + token.span.end - 1].end,
+            )
+        });
     Err(LexError {
-        span: Span::new(start, cursor),
-        message: "unterminated interpolation expression".to_owned(),
+        span,
+        message: MISSING_INTERPOLATION_BRACE.to_owned(),
     })
 }
 
@@ -868,28 +943,39 @@ fn copy_short_string(
     output: &mut LoweredOutput,
 ) -> std::result::Result<(), LexError> {
     let start = *cursor;
-    let quote = source[*cursor];
-    output.push_original(quote, *cursor);
+    let quote = source[start];
     *cursor += 1;
-    while let Some(byte) = source.get(*cursor).copied() {
-        output.push_original(byte, *cursor);
-        *cursor += 1;
-        if byte == b'\\' {
-            let Some(escaped) = source.get(*cursor).copied() else {
-                return Err(LexError {
-                    span: Span::new(start, *cursor),
-                    message: "unterminated escape sequence".to_owned(),
-                });
-            };
-            output.push_original(escaped, *cursor);
-            *cursor += 1;
-        } else if byte == quote {
-            return Ok(());
+    while let Some(&byte) = source.get(*cursor) {
+        match byte {
+            b'\n' | b'\r' => break,
+            b if b == quote => {
+                *cursor += 1;
+                output.extend_original(source, start, *cursor);
+                return Ok(());
+            }
+            b'\\' => {
+                *cursor += 1;
+                match source.get(*cursor) {
+                    Some(b'z') => {
+                        *cursor += 1;
+                        while source
+                            .get(*cursor)
+                            .is_some_and(|b| b.is_ascii_whitespace() || *b == 0x0b)
+                        {
+                            *cursor += 1;
+                        }
+                    }
+                    Some(b'\r' | b'\n') => take_interpolation_newline(source, cursor),
+                    Some(_) => *cursor += 1,
+                    None => break,
+                }
+            }
+            _ => *cursor += 1,
         }
     }
     Err(LexError {
         span: Span::new(start, *cursor),
-        message: "unterminated string literal".to_owned(),
+        message: "Malformed string; did you forget to finish it?".to_owned(),
     })
 }
 
@@ -903,7 +989,9 @@ fn copy_comment(
     debug_assert_eq!(source.get(*cursor + 1), Some(&b'-'));
     output.extend_original(source, *cursor, *cursor + 2);
     *cursor += 2;
-    if copy_long_bracket(source, cursor, output)? {
+    // A broken long comment has already been copied through EOF. The lexer
+    // supplies its token so the parser can report the surrounding context.
+    if !matches!(copy_long_bracket(source, cursor, output), Ok(false)) {
         return Ok(());
     }
     while let Some(byte) = source.get(*cursor).copied() {
@@ -940,7 +1028,7 @@ fn copy_long_bracket(
     }
     Err(LexError {
         span: Span::new(start, *cursor),
-        message: "unterminated long string".to_owned(),
+        message: "Malformed string; did you forget to finish it?".to_owned(),
     })
 }
 
@@ -1027,6 +1115,23 @@ enum FunctionBinding<'a> {
 
 pub struct Parser {
     tokens: Vec<Token>,
+}
+
+impl Parser {
+    /// Parses an existing token stream as one line. Use [`parse_source_bytes`] to
+    /// preserve line breaks and original literal spellings in diagnostics.
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Self { tokens }
+    }
+
+    pub fn parse_chunk(self) -> Result<Chunk> {
+        SourceParser::new(self.tokens, &[], BTreeMap::new()).parse_chunk()
+    }
+}
+
+struct SourceParser<'source> {
+    tokens: Vec<Token>,
+    source: &'source [u8],
     line_feeds: Vec<usize>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
@@ -1034,21 +1139,16 @@ pub struct Parser {
     type_function_locals: TypeFunctionLocals,
     function_is_vararg: bool,
     loop_depth: usize,
+    end_mismatch_suspect: Option<(usize, &'static str)>,
     in_erased_code: bool,
     #[cfg(test)]
     type_primary_visits: usize,
 }
 
-impl Parser {
-    /// Parses an existing token stream as one line. Use [`parse_source_bytes`]
-    /// to preserve line breaks between tokens and check call syntax.
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Self::new_with_source_and_interpolations(tokens, &[], BTreeMap::new())
-    }
-
-    fn new_with_source_and_interpolations(
+impl<'source> SourceParser<'source> {
+    fn new(
         tokens: Vec<Token>,
-        source: &[u8],
+        source: &'source [u8],
         interpolations: BTreeMap<usize, PendingInterpolatedString>,
     ) -> Self {
         // Only LF advances the pinned Luau lexer's source line. Keep original
@@ -1061,38 +1161,52 @@ impl Parser {
         Self {
             type_function_locals: TypeFunctionLocals::new(&tokens),
             tokens,
+            source,
             line_feeds,
             interpolations,
             cursor: 0,
             active_parse_frames: 0,
             function_is_vararg: true,
             loop_depth: 0,
+            end_mismatch_suspect: None,
             in_erased_code: false,
             #[cfg(test)]
             type_primary_visits: 0,
         }
     }
 
-    pub fn parse_chunk(mut self) -> Result<Chunk> {
-        let statements = self.parse_block_until(&[SimpleToken::Eof])?;
+    fn parse_chunk(mut self) -> Result<Chunk> {
+        let statements = self.parse_block()?;
+        if !self.at_simple(SimpleToken::Eof) {
+            return Err(ParseError {
+                span: self.diagnostic_span(self.peek().span),
+                message: format!("Expected <eof>, got {}", self.describe_token()),
+                unclosed_block: None,
+            });
+        }
         Ok(Chunk { statements })
     }
 
-    fn parse_block_until(&mut self, terminators: &[SimpleToken]) -> Result<Vec<Stmt>> {
+    fn parse_block(&mut self) -> Result<Vec<Stmt>> {
         let mut statements = Vec::new();
-        while !self.at_any(terminators) {
-            let statement = self.parse_statement()?;
-            let final_error = match statement {
-                Stmt::Return { .. } => Some("return must be the final statement in a block"),
-                Stmt::Break { .. } => Some("break must be the final statement in a block"),
-                Stmt::Continue { .. } => Some("continue must be the final statement in a block"),
-                _ => None,
-            };
+        while !self.at_any(&[
+            SimpleToken::Eof,
+            SimpleToken::End,
+            SimpleToken::Else,
+            SimpleToken::ElseIf,
+            SimpleToken::Until,
+        ]) {
+            let mut statement = self.parse_statement()?;
+            if let Some(semicolon) = self.eat_simple(SimpleToken::Semicolon) {
+                statement.span_mut().end = semicolon.span.end;
+            }
+            let terminal = matches!(
+                statement,
+                Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. }
+            );
             statements.push(statement);
-            if let Some(message) = final_error {
-                if !self.at_any(terminators) {
-                    return Err(self.error_here(message));
-                }
+            if terminal {
+                break;
             }
         }
         Ok(statements)
@@ -1101,26 +1215,53 @@ impl Parser {
     fn parse_delimited_block(
         &mut self,
         terminators: &[SimpleToken],
-        start: usize,
+        open: Token,
         expected: &'static str,
     ) -> Result<Vec<Stmt>> {
-        self.with_parse_frame(|parser| {
-            parser.parse_delimited_block_inner(terminators, start, expected)
-        })
-    }
-
-    fn parse_delimited_block_inner(
-        &mut self,
-        terminators: &[SimpleToken],
-        start: usize,
-        expected: &'static str,
-    ) -> Result<Vec<Stmt>> {
-        self.parse_block_until(terminators).map_err(|mut error| {
-            if self.at_simple(SimpleToken::Eof) && error.unclosed_block.is_none() {
-                error.unclosed_block = Some(Box::new(UnclosedBlock { start, expected }));
+        let body = self.with_parse_frame(|parser| parser.parse_block())?;
+        let line = self.line_feeds.partition_point(|&lf| lf < open.span.start);
+        if !self.at_any(terminators) {
+            let mut error = self.expected_match(&open, expected);
+            if self.at_simple(SimpleToken::Eof) {
+                error.unclosed_block = Some(Box::new(UnclosedBlock {
+                    start: open.span.start,
+                    expected,
+                }));
             }
-            error
-        })
+            if let Some((suspect, name)) = self
+                .end_mismatch_suspect
+                .filter(|(suspect, _)| *suspect > line)
+            {
+                use std::fmt::Write;
+                let _ = write!(
+                    error.message,
+                    "; did you forget to close '{name}' at line {}?",
+                    suspect + 1
+                );
+            }
+            return Err(error);
+        }
+        if self.at_any(&[SimpleToken::End, SimpleToken::Until]) {
+            let close = self.peek().span.start;
+            let close_line = self.line_feeds.partition_point(|&lf| lf < close);
+            // Luau remembers the most recent successfully closed block whose
+            // closing keyword is on another line at a different indentation.
+            if line != close_line
+                && self.column(open.span.start) != self.column(close)
+                && line > self.end_mismatch_suspect.map_or(0, |(line, _)| line)
+            {
+                let name = match open.kind {
+                    TokenKind::Else => "else",
+                    TokenKind::Then => "then",
+                    TokenKind::Do => "do",
+                    TokenKind::Repeat => "repeat",
+                    TokenKind::Function => "function",
+                    _ => unreachable!("block opener"),
+                };
+                self.end_mismatch_suspect = Some((line, name));
+            }
+        }
+        Ok(body)
     }
 
     fn parse_statement(&mut self) -> Result<Stmt> {
@@ -1128,6 +1269,9 @@ impl Parser {
     }
 
     fn parse_statement_inner(&mut self) -> Result<Stmt> {
+        if self.at_attribute() {
+            return self.parse_attributed_statement();
+        }
         if let Some(if_token) = self.eat_simple(SimpleToken::If) {
             return self.parse_if(if_token.span.start);
         }
@@ -1138,10 +1282,10 @@ impl Parser {
             return self.with_local_scope(|parser| parser.parse_for(for_token.span.start));
         }
         if let Some(repeat_token) = self.eat_simple(SimpleToken::Repeat) {
-            return self.with_local_scope(|parser| parser.parse_repeat(repeat_token.span.start));
+            return self.with_local_scope(|parser| parser.parse_repeat(repeat_token));
         }
         if let Some(do_token) = self.eat_simple(SimpleToken::Do) {
-            return self.with_local_scope(|parser| parser.parse_do(do_token.span.start));
+            return self.with_local_scope(|parser| parser.parse_do(do_token));
         }
         self.parse_non_control_statement()
     }
@@ -1149,12 +1293,12 @@ impl Parser {
     fn parse_non_control_statement(&mut self) -> Result<Stmt> {
         if let Some(local_token) = self.eat_simple(SimpleToken::Local) {
             if self.eat_simple(SimpleToken::Function).is_some() {
-                return self.parse_local_function(local_token.span.start);
+                return self.parse_local_function(local_token.span.start, Vec::new());
             }
             return self.parse_local(local_token.span.start);
         }
         if let Some(function_token) = self.eat_simple(SimpleToken::Function) {
-            return self.parse_function_statement(function_token.span.start);
+            return self.parse_function_statement(function_token.span.start, Vec::new());
         }
         // `export` is contextual: ordinary variables with this name remain valid.
         if matches!(&self.peek().kind, TokenKind::Ident(name) if name == "export")
@@ -1168,18 +1312,6 @@ impl Parser {
             self.advance();
             return self.parse_type_declaration(start, true);
         }
-        if self.at_simple(SimpleToken::Type)
-            && matches!(
-                self.tokens
-                    .get(self.peek_index() + 1)
-                    .map(|token| &token.kind),
-                Some(TokenKind::Ident(_) | TokenKind::Function)
-            )
-        {
-            let start = self.advance().span.start;
-            self.check_value_name("type")?;
-            return self.parse_type_declaration(start, false);
-        }
         if let Some(break_token) = self.eat_simple(SimpleToken::Break) {
             if self.in_erased_code && self.loop_depth == 0 {
                 return Err(ParseError {
@@ -1188,24 +1320,8 @@ impl Parser {
                     message: "break statement must be inside a loop".to_owned(),
                 });
             }
-            self.eat_simple(SimpleToken::Semicolon);
             return Ok(Stmt::Break {
                 span: break_token.span,
-            });
-        }
-        if self.at_ident("continue") && self.next_starts_statement_boundary() {
-            let continue_token = self.advance().clone();
-            self.check_value_name("continue")?;
-            if self.in_erased_code && self.loop_depth == 0 {
-                return Err(ParseError {
-                    unclosed_block: None,
-                    span: continue_token.span,
-                    message: "continue statement must be inside a loop".to_owned(),
-                });
-            }
-            self.eat_simple(SimpleToken::Semicolon);
-            return Ok(Stmt::Continue {
-                span: continue_token.span,
             });
         }
         if let Some(return_token) = self.eat_simple(SimpleToken::Return) {
@@ -1222,30 +1338,57 @@ impl Parser {
                 || value.as_ref().map_or(return_token.span.end, Expr::span_end),
                 Expr::span_end,
             );
-            self.eat_simple(SimpleToken::Semicolon);
             return Ok(Stmt::Return {
                 value,
                 extra_values,
                 span: Span::new(return_token.span.start, end),
             });
         }
-        let expr = self.parse_expr(0, 0)?;
+        if !matches!(
+            self.peek().kind,
+            TokenKind::Ident(_) | TokenKind::Type | TokenKind::LParen
+        ) || self.interpolations.contains_key(&self.peek().span.start)
+        {
+            let span = self.diagnostic_span(self.peek().span);
+            let token = self.describe_token();
+            return Err(ParseError {
+                span,
+                message: format!("Expected identifier when parsing expression, got {token}"),
+                unclosed_block: None,
+            });
+        }
+        let primary = self.parse_primary(0)?;
+        let expr = self.parse_postfix(primary, 0)?;
+        let span = expr.span();
+        if matches!(expr, Expr::Call { .. } | Expr::MethodCall { .. }) {
+            return Ok(Stmt::Expr { expr, span });
+        }
         if self.at_simple(SimpleToken::Equal)
             || self.at_simple(SimpleToken::Comma)
             || self.peek_compound_assignment_op().is_some()
         {
             return self.parse_assignment(expr);
         }
-        if !matches!(expr, Expr::Call { .. } | Expr::MethodCall { .. }) {
-            return Err(ParseError {
-                unclosed_block: None,
-                span: expr.span(),
-                message: "expected statement".to_owned(),
-            });
+        if let Expr::Name(name, _) = &expr {
+            if name == "type" {
+                return self.parse_type_declaration(span.start, false);
+            }
+            if name == "continue" {
+                if self.in_erased_code && self.loop_depth == 0 {
+                    return Err(ParseError {
+                        span,
+                        unclosed_block: None,
+                        message: "continue statement must be inside a loop".to_owned(),
+                    });
+                }
+                return Ok(Stmt::Continue { span });
+            }
         }
-        let span = expr.span();
-        self.eat_simple(SimpleToken::Semicolon);
-        Ok(Stmt::Expr { expr, span })
+        Err(ParseError {
+            unclosed_block: None,
+            span,
+            message: "Incomplete statement: expected assignment or a function call".to_owned(),
+        })
     }
 
     fn parse_local(&mut self, start: usize) -> Result<Stmt> {
@@ -1262,11 +1405,9 @@ impl Parser {
         for binding in &bindings {
             self.type_function_locals.bind(&binding.name);
         }
-        let end = init.last().map_or_else(
-            || bindings.last().map_or(start, |binding| binding.span.end),
-            Expr::span_end,
-        );
-        self.eat_simple(SimpleToken::Semicolon);
+        let end = init
+            .last()
+            .map_or_else(|| self.tokens[self.cursor - 1].span.end, Expr::span_end);
         Ok(Stmt::Local {
             bindings,
             init,
@@ -1274,12 +1415,24 @@ impl Parser {
         })
     }
 
-    fn parse_local_function(&mut self, start: usize) -> Result<Stmt> {
+    fn parse_local_function(
+        &mut self,
+        start: usize,
+        attributes: Vec<FunctionAttribute>,
+    ) -> Result<Stmt> {
+        // On the same line Luau matches the indentation of the declaration
+        // (including any attributes), rather than the later function keyword.
+        let keyword = self.tokens[self.cursor - 1].span.start;
+        let function_start = if self.has_line_feed_between(start, keyword) {
+            keyword
+        } else {
+            start
+        };
         let name = self.expect_name("expected local function name")?;
         let (params, is_vararg, body, end) =
-            self.parse_function_body(start, FunctionBinding::Local(&name.text))?;
-        self.eat_simple(SimpleToken::Semicolon);
+            self.parse_function_body(function_start, FunctionBinding::Local(&name.text))?;
         Ok(Stmt::LocalFunction {
+            attributes: attributes.into_boxed_slice(),
             name: name.text,
             name_span: name.span,
             params,
@@ -1289,16 +1442,22 @@ impl Parser {
         })
     }
 
-    fn parse_function_statement(&mut self, start: usize) -> Result<Stmt> {
+    fn parse_function_statement(
+        &mut self,
+        start: usize,
+        attributes: Vec<FunctionAttribute>,
+    ) -> Result<Stmt> {
+        let keyword = start;
+        let start = attributes.first().map_or(keyword, |attr| attr.span.start);
         let (target, is_method) = self.parse_function_statement_target()?;
         let binding = if is_method {
             FunctionBinding::Method
         } else {
             FunctionBinding::Plain
         };
-        let (params, is_vararg, body, end) = self.parse_function_body(start, binding)?;
-        self.eat_simple(SimpleToken::Semicolon);
+        let (params, is_vararg, body, end) = self.parse_function_body(keyword, binding)?;
         Ok(Stmt::Function {
+            attributes: attributes.into_boxed_slice(),
             target,
             is_method,
             params,
@@ -1309,7 +1468,7 @@ impl Parser {
     }
 
     fn parse_function_statement_target(&mut self) -> Result<(AssignmentTarget, bool)> {
-        let name = self.expect_name("expected function name")?;
+        let name = self.expect_name("Expected identifier when parsing function name")?;
         self.check_value_name(&name.text)?;
         let mut expr = Expr::Name(name.text, name.span);
         while self.eat_simple(SimpleToken::Dot).is_some() {
@@ -1347,15 +1506,12 @@ impl Parser {
     }
 
     fn parse_local_binding(&mut self) -> Result<LocalBinding> {
-        let name = self.expect_name("expected local name")?;
+        let name = self.expect_name("Expected identifier when parsing variable name")?;
         let annotation = self.parse_binding_annotation()?;
-        let end = annotation
-            .as_ref()
-            .map_or(name.span.end, TypeExpr::span_end);
         Ok(LocalBinding {
             name: name.text,
             annotation,
-            span: Span::new(name.span.start, end),
+            span: name.span,
         })
     }
 
@@ -1365,7 +1521,6 @@ impl Parser {
             let value = self.parse_expr(0, 0)?;
             let start = targets[0].span_start();
             let end = value.span_end();
-            self.eat_simple(SimpleToken::Semicolon);
             return Ok(Stmt::Assignment {
                 targets,
                 op,
@@ -1378,14 +1533,22 @@ impl Parser {
             let target = self.parse_expr(0, 0)?;
             targets.push(assignment_target_from_expr(target)?);
         }
-        self.expect_simple(SimpleToken::Equal, "expected '=' in assignment")?;
+        if self.eat_simple(SimpleToken::Equal).is_none() {
+            return Err(ParseError {
+                span: self.diagnostic_span(self.peek().span),
+                unclosed_block: None,
+                message: format!(
+                    "Expected '=' when parsing assignment, got {}",
+                    self.describe_token()
+                ),
+            });
+        }
         let values = self.parse_expr_list()?;
         let start = targets.first().map_or(0, AssignmentTarget::span_start);
         let end = values.last().map_or_else(
             || targets.last().map_or(start, AssignmentTarget::span_end),
             Expr::span_end,
         );
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::Assignment {
             targets,
             op: AssignmentOp::Assign,
@@ -1396,7 +1559,6 @@ impl Parser {
 
     fn parse_if(&mut self, start: usize) -> Result<Stmt> {
         let (statement, _) = self.parse_if_chain(start)?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(statement)
     }
 
@@ -1406,20 +1568,20 @@ impl Parser {
 
     fn parse_if_chain_inner(&mut self, start: usize) -> Result<(Stmt, usize)> {
         let condition = self.parse_expr(0, 0)?;
-        self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
+        let then = self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
         let then_body = self.with_local_scope(|parser| {
             parser.parse_delimited_block(
                 &[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End],
-                start,
+                then,
                 "end",
             )
         })?;
         let (else_body, end) = if let Some(elseif_token) = self.eat_simple(SimpleToken::ElseIf) {
             let (elseif_stmt, end) = self.parse_if_chain(elseif_token.span.start)?;
             (vec![elseif_stmt], end)
-        } else if self.eat_simple(SimpleToken::Else).is_some() {
+        } else if let Some(open) = self.eat_simple(SimpleToken::Else) {
             let else_body = self.with_local_scope(|parser| {
-                parser.parse_delimited_block(&[SimpleToken::End], start, "end")
+                parser.parse_delimited_block(&[SimpleToken::End], open, "end")
             })?;
             let end_token =
                 self.expect_simple(SimpleToken::End, "expected 'end' after if block")?;
@@ -1442,10 +1604,9 @@ impl Parser {
 
     fn parse_while(&mut self, start: usize) -> Result<Stmt> {
         let condition = self.parse_expr(0, 0)?;
-        self.expect_simple(SimpleToken::Do, "expected 'do' after while condition")?;
-        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
+        let open = self.expect_simple(SimpleToken::Do, "expected 'do' after while condition")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], open, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after while block")?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::While {
             condition,
             body,
@@ -1478,13 +1639,13 @@ impl Parser {
         }
         self.expect_simple(SimpleToken::In, "expected 'in' after generic for variables")?;
         let iter = self.parse_expr_list()?;
-        self.expect_simple(SimpleToken::Do, "expected 'do' after generic for iterator")?;
+        let open =
+            self.expect_simple(SimpleToken::Do, "expected 'do' after generic for iterator")?;
         for variable in &variables {
             self.type_function_locals.bind(&variable.name);
         }
-        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], open, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForGeneric {
             variables,
             iter,
@@ -1502,11 +1663,10 @@ impl Parser {
         } else {
             None
         };
-        self.expect_simple(SimpleToken::Do, "expected 'do' after for loop range")?;
+        let open = self.expect_simple(SimpleToken::Do, "expected 'do' after for loop range")?;
         self.type_function_locals.bind(&variable.text);
-        let body = self.parse_loop_body(&[SimpleToken::End], start, "end")?;
+        let body = self.parse_loop_body(&[SimpleToken::End], open, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after for loop")?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::ForNumeric {
             variable: variable.text,
             variable_span: variable.span,
@@ -1518,12 +1678,12 @@ impl Parser {
         })
     }
 
-    fn parse_repeat(&mut self, start: usize) -> Result<Stmt> {
-        let body = self.parse_loop_body(&[SimpleToken::Until], start, "until")?;
+    fn parse_repeat(&mut self, open: Token) -> Result<Stmt> {
+        let start = open.span.start;
+        let body = self.parse_loop_body(&[SimpleToken::Until], open, "until")?;
         self.expect_simple(SimpleToken::Until, "expected 'until' after repeat block")?;
         let condition = self.parse_expr(0, 0)?;
         let end = condition.span_end();
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::Repeat {
             body,
             condition,
@@ -1531,10 +1691,10 @@ impl Parser {
         })
     }
 
-    fn parse_do(&mut self, start: usize) -> Result<Stmt> {
-        let body = self.parse_delimited_block(&[SimpleToken::End], start, "end")?;
+    fn parse_do(&mut self, open: Token) -> Result<Stmt> {
+        let start = open.span.start;
+        let body = self.parse_delimited_block(&[SimpleToken::End], open, "end")?;
         let end_token = self.expect_simple(SimpleToken::End, "expected 'end' after do block")?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::Do {
             body,
             span: Span::new(start, end_token.span.end),
@@ -1551,7 +1711,7 @@ impl Parser {
 
     fn parse_type_declaration(&mut self, start: usize, exported: bool) -> Result<Stmt> {
         let Some(function) = self.eat_simple(SimpleToken::Function) else {
-            return self.parse_type_alias();
+            return self.parse_type_alias(start);
         };
         let name = self.expect_name("expected type function name")?;
         let mark = self.type_function_locals.bindings.len();
@@ -1561,7 +1721,6 @@ impl Parser {
         self.in_erased_code = old_erasure;
         self.type_function_locals.boundary = old_boundary;
         let (_, _, _, end) = result?;
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::TypeFunction {
             name: name.text,
             exported,
@@ -1569,18 +1728,17 @@ impl Parser {
         })
     }
 
-    fn parse_type_alias(&mut self) -> Result<Stmt> {
-        let name = self.expect_name("expected type alias name")?;
-        let start = name.span.start;
+    fn parse_type_alias(&mut self, start: usize) -> Result<Stmt> {
+        let name = self.expect_name("Expected identifier when parsing type name")?;
         let mut generics = Vec::new();
-        if self.eat_simple(SimpleToken::Less).is_some() {
+        if let Some(open) = self.eat_simple(SimpleToken::Less) {
             let mut seen_pack = false;
             let mut seen_default = false;
             loop {
-                generics.push(self.expect_name("expected generic type parameter")?.text);
+                generics.push(self.expect_name("Expected identifier")?.text);
                 let pack = self.eat_simple(SimpleToken::Ellipsis).is_some();
                 if seen_pack && !pack {
-                    return Err(self.error_here("generic types must precede generic type packs"));
+                    return Err(self.error_here("Generic types come before generic type packs"));
                 }
                 seen_pack |= pack;
                 if self.eat_simple(SimpleToken::Equal).is_some() {
@@ -1591,21 +1749,27 @@ impl Parser {
                         self.parse_single_type(0)?;
                     }
                 } else if seen_default {
-                    return Err(self.error_here("expected a default after generic parameter"));
+                    return Err(self.error_here(if pack {
+                        "Expected default type pack after type pack name"
+                    } else {
+                        "Expected default type after type name"
+                    }));
                 }
                 if self.eat_simple(SimpleToken::Comma).is_none() {
                     break;
                 }
             }
-            self.expect_simple(
-                SimpleToken::Greater,
-                "expected '>' after generic parameters",
-            )?;
+            self.eat_simple(SimpleToken::Greater)
+                .ok_or_else(|| self.expected_match(&open, ">"))?;
         }
-        self.expect_simple(SimpleToken::Equal, "expected '=' in type alias")?;
+        self.eat_simple(SimpleToken::Equal).ok_or_else(|| {
+            self.error_here(format!(
+                "Expected '=' when parsing type alias, got {}",
+                self.describe_token()
+            ))
+        })?;
         let value = self.parse_single_type(0)?;
         let span = Span::new(start, value.span().end);
-        self.eat_simple(SimpleToken::Semicolon);
         Ok(Stmt::TypeAlias {
             name: name.text,
             generics,
@@ -1630,13 +1794,19 @@ impl Parser {
 
     fn parse_expr_prefix_inner(&mut self, depth: usize) -> Result<Expr> {
         self.check_depth(depth + 1)?;
+        if self.at_attribute() {
+            return self.parse_attributed_expression();
+        }
         if let Some(function) = self.eat_simple(SimpleToken::Function) {
-            return self.parse_function_expression(function.span.start);
+            return self.parse_function_expression(function.span.start, Vec::new());
         }
         self.parse_non_function_prefix(depth)
     }
 
     fn parse_non_function_prefix(&mut self, depth: usize) -> Result<Expr> {
+        if matches!(&self.peek().kind, TokenKind::Invalid(text) if text == "'!'") {
+            return Err(self.error_here("Unexpected '!'; did you mean 'not'?"));
+        }
         let expr = if let Some(token) = self.eat_simple(SimpleToken::Minus) {
             let expr = self.parse_expr(7, depth + 1)?;
             let span = Span::new(token.span.start, expr.span_end());
@@ -1695,20 +1865,58 @@ impl Parser {
             };
         }
 
+        if matches!(
+            self.peek().kind,
+            TokenKind::Ampersand | TokenKind::Pipe | TokenKind::Invalid(_)
+        ) {
+            if let Some(next) = self.tokens.get(self.cursor + 1) {
+                if self.peek().span.end == next.span.start {
+                    let message = match (&self.peek().kind, &next.kind) {
+                        (TokenKind::Ampersand, TokenKind::Ampersand) => {
+                            Some("Unexpected '&&'; did you mean 'and'?")
+                        }
+                        (TokenKind::Pipe, TokenKind::Pipe) => {
+                            Some("Unexpected '||'; did you mean 'or'?")
+                        }
+                        (TokenKind::Invalid(s), TokenKind::Equal) if s == "'!'" => {
+                            Some("Unexpected '!='; did you mean '~='?")
+                        }
+                        _ => None,
+                    };
+                    if let Some(message) = message {
+                        return Err(ParseError {
+                            unclosed_block: None,
+                            span: Span::new(self.peek().span.start, next.span.end),
+                            message: message.to_owned(),
+                        });
+                    }
+                }
+            }
+        }
         Ok(lhs)
     }
 
-    fn parse_function_expression(&mut self, start: usize) -> Result<Expr> {
-        self.with_parse_frame(|parser| parser.parse_function_expression_inner(start))
+    fn parse_function_expression(
+        &mut self,
+        start: usize,
+        attributes: Vec<FunctionAttribute>,
+    ) -> Result<Expr> {
+        self.with_parse_frame(|parser| parser.parse_function_expression_inner(start, attributes))
     }
 
-    fn parse_function_expression_inner(&mut self, start: usize) -> Result<Expr> {
+    fn parse_function_expression_inner(
+        &mut self,
+        start: usize,
+        attributes: Vec<FunctionAttribute>,
+    ) -> Result<Expr> {
         let (params, is_vararg, body, end) =
             self.parse_function_body(start, FunctionBinding::Plain)?;
+        let start = attributes.first().map_or(start, |attr| attr.span.start);
         Ok(Expr::Function {
-            params,
+            attributes: attributes.into_boxed_slice(),
+            params: params.into_boxed_slice(),
             is_vararg,
-            body,
+            body: body.into_boxed_slice(),
             span: Span::new(start, end),
         })
     }
@@ -1728,7 +1936,15 @@ impl Parser {
             if self.at_type_assertion() || !expr_accepts_postfix(&expr) {
                 break;
             }
-            if let Some((args, end)) = self.parse_call_suffix(depth + 1, None)? {
+            if self.at_explicit_type_instantiation_open() {
+                let end = self.parse_explicit_type_instantiation(depth + 1)?;
+                // Luau compiles an instantiated value as a single expression result.
+                let span = Span::new(expr.span_start(), end);
+                expr = Expr::TypeInstantiation {
+                    expr: Box::new(expr),
+                    span,
+                };
+            } else if let Some((args, end)) = self.parse_call_args_suffix(depth + 1, None)? {
                 let span = Span::new(expr.span_start(), end);
                 expr = Expr::Call {
                     callee: Box::new(expr),
@@ -1737,12 +1953,23 @@ impl Parser {
                 };
             } else if self.eat_simple(SimpleToken::Colon).is_some() {
                 let method = self.expect_name("expected method name after ':'")?;
+                if self.at_explicit_type_instantiation_open() {
+                    self.parse_explicit_type_instantiation(depth + 1)?;
+                }
                 let (args, end) = self
-                    .parse_call_suffix(depth + 1, Some(method.span.end))?
-                    .ok_or_else(|| ParseError {
-                        unclosed_block: None,
-                        span: self.peek().span,
-                        message: "expected arguments after method name".to_owned(),
+                    .parse_call_args_suffix(depth + 1, Some(method.span.end))?
+                    .ok_or_else(|| {
+                        let next = self.peek().span.start;
+                        let new_line = self.has_line_feed_between(method.span.end, next);
+                        ParseError {
+                            unclosed_block: None,
+                            span: Span::new(expr.span_start(), if new_line { method.span.end } else { next }),
+                            message: if new_line {
+                                "Expected function call arguments after '('".to_owned()
+                            } else {
+                                format!("Expected '(', '{{' or <string> when parsing function call, got {}", self.describe_token())
+                            },
+                        }
                     })?;
                 let span = Span::new(expr.span_start(), end);
                 expr = Expr::MethodCall {
@@ -1778,23 +2005,9 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_call_suffix(
-        &mut self,
-        depth: usize,
-        method_name_end: Option<usize>,
-    ) -> Result<Option<(Vec<Expr>, usize)>> {
-        if self.at_explicit_type_instantiation_open() {
-            self.parse_explicit_type_instantiation(depth + 1)?;
-            let Some(args) = self.parse_call_args_suffix(depth + 1, method_name_end)? else {
-                return Err(ParseError {
-                    unclosed_block: None,
-                    span: self.peek().span,
-                    message: "expected arguments after explicit type instantiation".to_owned(),
-                });
-            };
-            return Ok(Some(args));
-        }
-        self.parse_call_args_suffix(depth, method_name_end)
+    fn has_line_feed_between(&self, start: usize, end: usize) -> bool {
+        let next = self.line_feeds.partition_point(|&lf| lf < start);
+        self.line_feeds.get(next).is_some_and(|&lf| lf < end)
     }
 
     fn parse_call_args_suffix(
@@ -1807,14 +2020,7 @@ impl Parser {
             // For a regular call, the preceding token ends the callee (including any '>>').
             let callee_end =
                 method_name_end.unwrap_or_else(|| self.tokens[self.cursor - 1].span.end);
-            let next_lf = self
-                .line_feeds
-                .partition_point(|&offset| offset < callee_end);
-            if self
-                .line_feeds
-                .get(next_lf)
-                .is_some_and(|&lf| lf < self.peek().span.start)
-            {
+            if self.has_line_feed_between(callee_end, self.peek().span.start) {
                 return Err(self.error_here(concat!(
                     "Ambiguous syntax: this looks like an argument list for a function call, ",
                     "but could also be a start of new statement; use ';' to separate statements"
@@ -1827,6 +2033,11 @@ impl Parser {
                     args.push(self.parse_expr(0, depth + 1)?);
                     if self.eat_simple(SimpleToken::Comma).is_none() {
                         break;
+                    }
+                    if self.at_simple(SimpleToken::RParen) {
+                        return Err(
+                            self.error_here("Expected expression after ',' but got ')' instead")
+                        );
                     }
                 }
             }
@@ -1849,41 +2060,47 @@ impl Parser {
         Ok(None)
     }
 
-    fn parse_explicit_type_instantiation(&mut self, depth: usize) -> Result<()> {
+    fn parse_explicit_type_instantiation(&mut self, depth: usize) -> Result<usize> {
         self.check_depth(depth)?;
-        self.expect_simple(SimpleToken::Less, "expected '<<' before type arguments")?;
-        self.expect_simple(SimpleToken::Less, "expected '<<' before type arguments")?;
-        if self.at_explicit_type_instantiation_close() {
-            return Err(self.error_here("expected type argument"));
-        }
-        loop {
-            self.parse_explicit_type_instantiation_arg(depth + 1)?;
-            if self.eat_simple(SimpleToken::Comma).is_none() {
-                break;
-            }
-        }
-        self.expect_simple(SimpleToken::Greater, "expected '>>' after type arguments")?;
-        self.expect_simple(SimpleToken::Greater, "expected '>>' after type arguments")?;
-        Ok(())
+        let open = self.advance().clone(); // first '<' of '<<'
+        self.parse_type_arguments(depth + 1)?;
+        let close = self
+            .eat_simple(SimpleToken::Greater)
+            .ok_or_else(|| self.expected_match(&open, ">"))?;
+        Ok(close.span.end)
     }
 
-    fn parse_explicit_type_instantiation_arg(&mut self, depth: usize) -> Result<()> {
-        self.check_depth(depth)?;
-        if self.at_simple(SimpleToken::LParen) {
-            self.advance();
-            if !self.at_simple(SimpleToken::RParen) {
-                loop {
-                    self.parse_type(depth + 1)?;
-                    if self.eat_simple(SimpleToken::Comma).is_none() {
-                        break;
+    // Named generic applications and explicit instantiation share Luau's type-or-pack list.
+    fn parse_type_arguments(&mut self, depth: usize) -> Result<(Vec<TypeExpr>, usize)> {
+        let open = self.expect_simple(SimpleToken::Less, "expected '<' before type arguments")?;
+        let mut args = Vec::new();
+        if !self.at_simple(SimpleToken::Greater) {
+            loop {
+                let arg = if self.at_type_pack_tail() {
+                    self.parse_type_pack_tail(depth + 1)?
+                } else if self.at_simple(SimpleToken::LParen) {
+                    // A parenthesized pack can take a type suffix only when it is a single type.
+                    let primary = self.parse_type_primary(depth + 1)?;
+                    if primary.is_single_type() {
+                        let start = primary.span_start();
+                        let ty = self.parse_type_postfix_suffix(primary)?;
+                        self.parse_type_combinators(ty, None, start, depth + 1)?
+                    } else {
+                        primary
                     }
+                } else {
+                    self.parse_single_type(depth + 1)?
+                };
+                args.push(arg);
+                if self.eat_simple(SimpleToken::Comma).is_none() {
+                    break;
                 }
             }
-            self.expect_simple(SimpleToken::RParen, "expected ')' after type pack")?;
-        } else {
-            self.parse_type(depth + 1)?;
         }
-        Ok(())
+        let close = self
+            .eat_simple(SimpleToken::Greater)
+            .ok_or_else(|| self.expected_match(&open, ">"))?;
+        Ok((args, close.span.end))
     }
 
     fn parse_primary(&mut self, depth: usize) -> Result<Expr> {
@@ -1917,19 +2134,29 @@ impl Parser {
             TokenKind::If => self.parse_if_expression(token.span.start, depth + 1),
             TokenKind::LParen => {
                 let expr = self.parse_expr(0, depth + 1)?;
-                let close =
-                    self.expect_simple(SimpleToken::RParen, "expected ')' after expression")?;
+                let close = self.eat_simple(SimpleToken::RParen).ok_or_else(|| {
+                    let mut error = self.expected_match(&token, ")");
+                    if self.at_simple(SimpleToken::Equal) {
+                        error
+                            .message
+                            .push_str("; did you mean to use '{' when defining a table?");
+                    }
+                    error
+                })?;
                 Ok(Expr::Paren {
                     span: Span::new(token.span.start, close.span.end),
                     expr: Box::new(expr),
                 })
             }
-            TokenKind::Function => self.parse_function_expression(token.span.start),
+            TokenKind::Function => self.parse_function_expression(token.span.start, Vec::new()),
             TokenKind::LBrace => self.parse_table_literal(token.span, depth + 1),
             _ => Err(ParseError {
                 unclosed_block: None,
                 span: token.span,
-                message: "expected expression".to_owned(),
+                message: format!(
+                    "Expected identifier when parsing expression, got {}",
+                    self.describe_kind(&token.kind, token.span)
+                ),
             }),
         }
     }
@@ -1944,26 +2171,41 @@ impl Parser {
             SimpleToken::LParen,
             "expected '(' after interpolated string placeholder",
         )?;
-        let mut expressions = Vec::new();
-        if !self.at_simple(SimpleToken::RParen) {
-            loop {
-                expressions.push(self.parse_expr(0, depth + 1)?);
-                if self.eat_simple(SimpleToken::Comma).is_none() {
-                    break;
-                }
+        let mut expressions = Vec::with_capacity(interpolation.sections.len());
+        for section in interpolation.sections {
+            if !expressions.is_empty() {
+                self.expect_simple(SimpleToken::Comma, "expected interpolation separator")?;
             }
+            let open =
+                self.expect_simple(SimpleToken::LParen, "expected interpolation expression")?;
+            if self.at_simple(SimpleToken::RParen) {
+                return Err(ParseError {
+                    span: section,
+                    unclosed_block: None,
+                    message: "Malformed interpolated string, expected expression inside '{}'"
+                        .to_owned(),
+                });
+            }
+            let expr = self.parse_expr(0, depth + 1)?;
+            let Some(close) = self.eat_simple(SimpleToken::RParen) else {
+                return Err(ParseError {
+                    span: section,
+                    unclosed_block: None,
+                    message: format!(
+                        "Malformed interpolated string, got {}",
+                        self.describe_token()
+                    ),
+                });
+            };
+            expressions.push(Expr::Paren {
+                expr: Box::new(expr),
+                span: Span::new(open.span.start, close.span.end),
+            });
         }
         self.expect_simple(
             SimpleToken::RParen,
             "expected ')' after interpolated string placeholder",
         )?;
-        if expressions.len() != interpolation.expression_count {
-            return Err(ParseError {
-                unclosed_block: None,
-                span: interpolation.span,
-                message: "interpolated string expression count mismatch".to_owned(),
-            });
-        }
         Ok(Expr::InterpolatedString {
             parts: interpolation.parts,
             expressions,
@@ -2012,7 +2254,12 @@ impl Parser {
         binding: FunctionBinding<'_>,
     ) -> Result<(Vec<FunctionParam>, bool, Vec<Stmt>, usize)> {
         self.parse_optional_function_generics()?;
-        self.expect_simple(SimpleToken::LParen, "expected '(' after function name")?;
+        let open = self.eat_simple(SimpleToken::LParen).ok_or_else(|| {
+            self.error_here(format!(
+                "Expected '(' when parsing function, got {}",
+                self.describe_token()
+            ))
+        })?;
         let mut params = Vec::new();
         let mut is_vararg = false;
         if !self.at_simple(SimpleToken::RParen) {
@@ -2034,12 +2281,18 @@ impl Parser {
                 }
             }
         }
-        self.expect_simple(
-            SimpleToken::RParen,
-            "expected ')' after function parameters",
-        )?;
+        self.eat_simple(SimpleToken::RParen)
+            .ok_or_else(|| self.expected_match(&open, ")"))?;
+        if self.at_simple(SimpleToken::Arrow) {
+            return Err(self.error_here(
+                "Function return type annotations are written after ':' instead of '->'",
+            ));
+        }
         if self.eat_simple(SimpleToken::Colon).is_some() {
             self.parse_function_return_annotation(0)?;
+            if self.at_simple(SimpleToken::Comma) {
+                return Err(self.error_here("Expected a statement, got ','; did you forget to wrap the list of return types in parentheses?"));
+            }
         }
         // A recursive local is visible in its body and subsequent statements;
         // its own signature still sees the preceding binding.
@@ -2057,7 +2310,14 @@ impl Parser {
             for param in &params {
                 parser.type_function_locals.bind(&param.name);
             }
-            parser.parse_delimited_block(&[SimpleToken::End], start, "end")
+            parser.parse_delimited_block(
+                &[SimpleToken::End],
+                Token {
+                    kind: TokenKind::Function,
+                    span: Span::new(start, start + "function".len()),
+                },
+                "end",
+            )
         });
         self.function_is_vararg = enclosing_vararg;
         self.loop_depth = enclosing_loops;
@@ -2120,14 +2380,17 @@ impl Parser {
 
         let mut seen_pack = false;
         loop {
-            self.expect_name("expected generic type parameter")?;
+            self.expect_name("Expected identifier")?;
             let pack = self.eat_simple(SimpleToken::Ellipsis).is_some();
             if seen_pack && !pack {
-                return Err(self.error_here("generic types must precede generic type packs"));
+                return Err(self.error_here("Generic types come before generic type packs"));
             }
             seen_pack |= pack;
             if self.eat_simple(SimpleToken::Comma).is_none() {
                 break;
+            }
+            if self.at_simple(SimpleToken::Greater) {
+                return Err(self.error_here("Expected type after ',' but got '>' instead"));
             }
         }
         self.expect_simple(
@@ -2155,6 +2418,7 @@ impl Parser {
         let mut fields = Vec::new();
         if !self.at_simple(SimpleToken::RBrace) {
             loop {
+                let field_start = self.peek().span.start;
                 fields.push(self.parse_table_field(depth + 1)?);
                 if self.eat_simple(SimpleToken::Comma).is_some()
                     || self.eat_simple(SimpleToken::Semicolon).is_some()
@@ -2163,11 +2427,26 @@ impl Parser {
                         break;
                     }
                 } else {
+                    if matches!(
+                        self.peek().kind,
+                        TokenKind::LBracket | TokenKind::Ident(_) | TokenKind::Type
+                    ) && self.column(self.peek().span.start) == self.column(field_start)
+                    {
+                        return Err(self.error_here("Expected ',' after table constructor element"));
+                    }
                     break;
                 }
             }
         }
-        let close = self.expect_simple(SimpleToken::RBrace, "expected '}' after table literal")?;
+        let close = self.eat_simple(SimpleToken::RBrace).ok_or_else(|| {
+            self.expected_match(
+                &Token {
+                    kind: TokenKind::LBrace,
+                    span: open_span,
+                },
+                "}",
+            )
+        })?;
         Ok(Expr::Table {
             fields,
             span: Span::new(open_span.start, close.span.end),
@@ -2188,22 +2467,21 @@ impl Parser {
             });
         }
 
-        if let TokenKind::Ident(name) = &self.peek().kind {
-            if matches!(
-                self.tokens.get(self.cursor + 1).map(|token| &token.kind),
-                Some(TokenKind::Equal)
-            ) {
-                let name = name.clone();
-                let name_span = self.advance().span;
-                self.expect_simple(SimpleToken::Equal, "expected '=' after table field name")?;
-                let value = self.parse_expr(0, depth + 1)?;
-                return Ok(TableField::Named {
-                    span: Span::new(name_span.start, value.span_end()),
-                    name,
-                    name_span,
-                    value,
-                });
-            }
+        if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal))
+        {
+            let name = self.expect_name("expected table field name")?;
+            self.advance(); // '='
+            let value = self.parse_expr(0, depth + 1)?;
+            return Ok(TableField::Named {
+                span: Span::new(name.span.start, value.span_end()),
+                name: name.text,
+                name_span: name.span,
+                value,
+            });
         }
 
         let value = self.parse_expr(0, depth + 1)?;
@@ -2224,11 +2502,19 @@ impl Parser {
         if ty.is_single_type() {
             Ok(ty)
         } else {
-            Err(ParseError {
-                unclosed_block: None,
-                span: ty.span(),
-                message: "expected a type, not a type pack".to_owned(),
-            })
+            if let Some(span) = ty.empty_pack_span() {
+                return Err(ParseError {
+                    unclosed_block: None,
+                    span,
+                    message:
+                        "Expected '->' after '()' when parsing function type; did you mean 'nil'?"
+                            .to_owned(),
+                });
+            }
+            Err(self.error_here(format!(
+                "Expected '->' when parsing function type, got {}",
+                self.describe_token()
+            )))
         }
     }
 
@@ -2275,21 +2561,16 @@ impl Parser {
         if self.at_type_pack_tail() {
             return self.parse_type_pack_tail(depth + 1).map(|_| ());
         }
-        self.expect_simple(SimpleToken::LParen, "expected type pack default")?;
-        if !self.at_simple(SimpleToken::RParen) {
-            loop {
-                if self.at_type_pack_tail() {
-                    self.parse_type_pack_tail(depth + 1)?;
-                    break;
-                }
-                self.parse_single_type(depth + 1)?;
-                if self.eat_simple(SimpleToken::Comma).is_none() {
-                    break;
-                }
-            }
+        let ty = self.parse_type(depth + 1)?;
+        if matches!(ty, TypeExpr::TypePack { .. }) {
+            Ok(())
+        } else {
+            Err(ParseError {
+                unclosed_block: None,
+                span: ty.span(),
+                message: "Expected type pack after '=', got type".to_owned(),
+            })
         }
-        self.expect_simple(SimpleToken::RParen, "expected ')' after type pack default")?;
-        Ok(())
     }
 
     fn parse_type(&mut self, depth: usize) -> Result<TypeExpr> {
@@ -2297,11 +2578,11 @@ impl Parser {
     }
 
     fn parse_type_inner(&mut self, depth: usize) -> Result<TypeExpr> {
-        if self.interpolations.contains_key(&self.peek().span.start) {
+        if let Some(s) = self.interpolations.get(&self.peek().span.start) {
             return Err(ParseError {
                 unclosed_block: None,
-                span: self.peek().span,
-                message: "interpolated strings are not valid in types".to_owned(),
+                span: s.sections.first().copied().unwrap_or(s.span),
+                message: "Interpolated string literals cannot be used as types".to_owned(),
             });
         }
         self.parse_type_union(depth)
@@ -2334,6 +2615,7 @@ impl Parser {
     ) -> Result<TypeExpr> {
         self.check_depth(depth)?;
         let mut types = vec![first];
+        let mut mixed = false;
         loop {
             let next = if self.at_simple(SimpleToken::Pipe) {
                 Some(SimpleToken::Pipe)
@@ -2346,25 +2628,24 @@ impl Parser {
             if separator.is_some_and(|previous| {
                 std::mem::discriminant(&previous) != std::mem::discriminant(&next)
             }) {
-                return Err(
-                    self.error_here("mixed union and intersection types require parentheses")
-                );
+                mixed = true;
             }
             separator = Some(next);
             self.advance();
             types.push(self.parse_type_postfix(depth + 1)?);
         }
-        if matches!(separator, Some(SimpleToken::Ampersand))
-            && types
-                .iter()
-                .any(|ty| matches!(ty, TypeExpr::Optional { .. }))
-        {
-            return Err(self.error_here("optional intersection members require parentheses"));
-        }
         let span = Span::new(
             start,
             types.last().expect("type list is nonempty").span_end(),
         );
+        if mixed
+            || (matches!(separator, Some(SimpleToken::Ampersand))
+                && types
+                    .iter()
+                    .any(|ty| matches!(ty, TypeExpr::Optional { .. })))
+        {
+            return Err(ParseError { unclosed_block: None, span, message: "Mixing union and intersection types is not allowed; consider wrapping in parentheses.".to_owned() });
+        }
         match separator {
             Some(SimpleToken::Pipe) => Ok(TypeExpr::Union { types, span }),
             Some(SimpleToken::Ampersand) => Ok(TypeExpr::Intersection { types, span }),
@@ -2390,12 +2671,16 @@ impl Parser {
                     inner: Box::new(ty),
                     span,
                 };
-            } else if let Some(ellipsis) = self.eat_simple(SimpleToken::Ellipsis) {
-                let span = Span::new(ty.span_start(), ellipsis.span.end);
-                ty = TypeExpr::Variadic {
-                    inner: Box::new(ty),
-                    span,
-                };
+            } else if self.at_simple(SimpleToken::Ellipsis) {
+                // Actual pack positions consume a bare T... before entering the
+                // single-type grammar. Only an unqualified name earns Luau's hint.
+                let bare_name = matches!(ty, TypeExpr::Named { .. })
+                    && self.tokens[self.cursor - 1].span.start == ty.span_start();
+                return Err(self.error_here(if bare_name {
+                    "Unexpected '...' after type name; type pack is not allowed in this context"
+                } else {
+                    "Unexpected '...' after type annotation"
+                }));
             } else {
                 break;
             }
@@ -2421,7 +2706,7 @@ impl Parser {
             if (self.at_ident("read") || self.at_ident("write")) && !self.at_named_type_entry() {
                 self.advance();
             }
-            if self.eat_simple(SimpleToken::LBracket).is_some() {
+            if let Some(bracket) = self.eat_simple(SimpleToken::LBracket) {
                 if self.interpolations.contains_key(&self.peek().span.start) {
                     return Err(self.error_here("interpolated strings are not valid in types"));
                 }
@@ -2434,29 +2719,43 @@ impl Parser {
                     let token = self.advance();
                     if let TokenKind::String(value) = &token.kind {
                         if value.contains(&0) {
-                            return Err(
-                                self.error_here("table type property cannot contain a null byte")
-                            );
+                            return Err(ParseError {
+                                unclosed_block: None,
+                                span: bracket.span,
+                                message: "String literal contains malformed escape sequence or \\0"
+                                    .to_owned(),
+                            });
                         }
                     }
                     has_property = true;
                 } else {
-                    if has_indexer {
-                        return Err(self.error_here("cannot have more than one table indexer"));
-                    }
                     self.parse_single_type(depth + 1)?;
-                    has_indexer = true;
                 }
                 self.expect_simple(SimpleToken::RBracket, "expected ']' after table type key")?;
                 self.expect_simple(SimpleToken::Colon, "expected ':' after table type key")?;
-                self.parse_single_type(depth + 1)?;
+                let value = self.parse_single_type(depth + 1)?;
+                if !string_property {
+                    if has_indexer {
+                        return Err(ParseError {
+                            unclosed_block: None,
+                            span: Span::new(bracket.span.start, value.span_end()),
+                            message: "Cannot have more than one table indexer".to_owned(),
+                        });
+                    }
+                    has_indexer = true;
+                }
             } else if !has_property && !has_indexer && !self.at_named_type_entry() {
                 // Array shorthand is the entire table type, not another field.
                 self.parse_single_type(depth + 1)?;
                 break;
             } else {
-                self.expect_name("expected table type property name")?;
-                self.expect_simple(SimpleToken::Colon, "expected ':' after table type property")?;
+                self.expect_name("Expected identifier when parsing table field")?;
+                self.eat_simple(SimpleToken::Colon).ok_or_else(|| {
+                    self.error_here(format!(
+                        "Expected ':' when parsing table field, got {}",
+                        self.describe_token()
+                    ))
+                })?;
                 self.parse_single_type(depth + 1)?;
                 has_property = true;
             }
@@ -2466,7 +2765,15 @@ impl Parser {
                 break;
             }
         }
-        let close = self.expect_simple(SimpleToken::RBrace, "expected '}' after table type")?;
+        let close = self.eat_simple(SimpleToken::RBrace).ok_or_else(|| {
+            self.expected_match(
+                &Token {
+                    kind: TokenKind::LBrace,
+                    span: open,
+                },
+                "}",
+            )
+        })?;
         Ok(TypeExpr::Table {
             span: Span::new(open.start, close.span.end),
         })
@@ -2481,6 +2788,9 @@ impl Parser {
         #[cfg(test)]
         {
             self.type_primary_visits += 1;
+        }
+        if self.at_attribute() {
+            return Err(self.error_here("attributes are not allowed in declaration context"));
         }
         if self.at_ident("typeof") {
             return self.parse_typeof_expression(depth);
@@ -2508,14 +2818,6 @@ impl Parser {
     }
 
     fn parse_non_typeof_primary(&mut self, depth: usize) -> Result<TypeExpr> {
-        if let Some(ellipsis) = self.eat_simple(SimpleToken::Ellipsis) {
-            let inner = self.parse_type_postfix(depth + 1)?;
-            return Ok(TypeExpr::Variadic {
-                span: Span::new(ellipsis.span.start, inner.span().end),
-                inner: Box::new(inner),
-            });
-        }
-
         // A generic binder forces function syntax, even for one parameter.
         // Bindings are erased, as they are on value-level function declarations.
         let generic_start = self
@@ -2533,9 +2835,6 @@ impl Parser {
                     if self.at_type_pack_tail() {
                         types.push(self.parse_type_pack_tail(depth + 1)?);
                         // A tail occupies the rest of the parameter/return pack.
-                        if self.at_simple(SimpleToken::Comma) {
-                            return Err(self.error_here("type pack tail must be last"));
-                        }
                         break;
                     }
                     if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Type)
@@ -2555,9 +2854,17 @@ impl Parser {
                     if self.eat_simple(SimpleToken::Comma).is_none() {
                         break;
                     }
+                    if self.at_simple(SimpleToken::RParen) {
+                        return Err(self.error_here("Expected type after ',' but got ')' instead"));
+                    }
                 }
             }
-            let close = self.expect_simple(SimpleToken::RParen, "expected ')' in type pack")?;
+            let close = self
+                .eat_simple(SimpleToken::RParen)
+                .ok_or_else(|| self.expected_match(&open, ")"))?;
+            if self.at_simple(SimpleToken::Colon) && !self.at_type_assertion() {
+                return Err(self.error_here("Return types in function type annotations are written after '->' instead of ':'"));
+            }
             if self.eat_simple(SimpleToken::Arrow).is_some() {
                 let result = self.parse_return_type(depth + 1)?;
                 let span = Span::new(start, result.span_end());
@@ -2568,25 +2875,40 @@ impl Parser {
                 });
             }
             if force_function {
-                return Err(self.error_here("expected '->' after function type parameters"));
+                return Err(self.error_here(format!(
+                    "Expected '->' when parsing function type, got {}",
+                    self.describe_token()
+                )));
             }
             let span = Span::new(start, close.span.end);
             return Ok(TypeExpr::TypePack { types, span });
         }
         if generic_start.is_some() {
-            return Err(self.error_here("expected '(' after function type generics"));
+            return Err(self.error_here(format!(
+                "Expected '(' when parsing function parameters, got {}",
+                self.describe_token()
+            )));
         }
 
         if let Some(open) = self.eat_simple(SimpleToken::LBrace) {
             return self.parse_table_type(open.span, depth + 1);
         }
 
+        let previous_end = self
+            .cursor
+            .checked_sub(1)
+            .map_or(self.peek().span.start, |i| self.tokens[i].span.end);
         let token = self.advance().clone();
         let kind = match token.kind {
             TokenKind::Type => TokenKind::Ident("type".to_owned()),
             kind => kind,
         };
         match kind {
+            TokenKind::Function => Err(ParseError {
+                unclosed_block: None,
+                span: token.span,
+                message: "Using 'function' as a type annotation is not supported, consider replacing with a function type annotation e.g. '(...any) -> ...any'".to_owned(),
+            }),
             TokenKind::Nil => Ok(TypeExpr::Nil(token.span)),
             TokenKind::True => Ok(TypeExpr::Boolean(true, token.span)),
             TokenKind::False => Ok(TypeExpr::Boolean(false, token.span)),
@@ -2594,34 +2916,26 @@ impl Parser {
             TokenKind::Ident(mut name) => {
                 let mut end = token.span.end;
                 if self.eat_simple(SimpleToken::Dot).is_some() {
-                    let member = self.expect_name("expected type name after '.'")?;
+                    let member = self.expect_name("Expected identifier when parsing field name")?;
                     name.push('.');
                     name.push_str(&member.text);
                     end = member.span.end;
                 }
-                let mut args = Vec::new();
-                if self.eat_simple(SimpleToken::Less).is_some() {
-                    loop {
-                        args.push(self.parse_type(depth + 1)?);
-                        if self.eat_simple(SimpleToken::Comma).is_none() {
-                            break;
-                        }
-                    }
-                    end = self
-                        .expect_simple(SimpleToken::Greater, "expected '>' after type arguments")?
-                        .span
-                        .end;
-                }
+                let (args, end) = if self.at_simple(SimpleToken::Less) {
+                    self.parse_type_arguments(depth + 1)?
+                } else {
+                    (Vec::new(), end)
+                };
                 Ok(TypeExpr::Named {
                     name,
                     args,
                     span: Span::new(token.span.start, end),
                 })
             }
-            _ => Err(ParseError {
+            kind => Err(ParseError {
                 unclosed_block: None,
-                span: token.span,
-                message: "expected type".to_owned(),
+                span: Span::new(previous_end, token.span.end),
+                message: format!("Expected type, got {}", self.describe_kind(&kind, token.span)),
             }),
         }
     }
@@ -2651,18 +2965,26 @@ impl Parser {
     fn expect_name(&mut self, message: &'static str) -> Result<IdentToken> {
         let token = self.advance().clone();
         match token.kind {
-            TokenKind::Ident(text) => Ok(IdentToken {
-                text,
-                span: token.span,
-            }),
+            TokenKind::Ident(text)
+                if token.span.start != token.span.end
+                    || !self.interpolations.contains_key(&token.span.start) =>
+            {
+                Ok(IdentToken {
+                    text,
+                    span: token.span,
+                })
+            }
             TokenKind::Type => Ok(IdentToken {
                 text: "type".to_owned(),
                 span: token.span,
             }),
             _ => Err(ParseError {
                 unclosed_block: None,
-                span: token.span,
-                message: message.to_owned(),
+                span: self.diagnostic_span(token.span),
+                message: format!(
+                    "{message}, got {}",
+                    self.describe_kind(&token.kind, token.span)
+                ),
             }),
         }
     }
@@ -2670,7 +2992,7 @@ impl Parser {
     fn expect_simple(&mut self, expected: SimpleToken, message: &'static str) -> Result<Token> {
         self.eat_simple(expected).ok_or_else(|| ParseError {
             unclosed_block: None,
-            span: self.peek().span,
+            span: self.diagnostic_span(self.peek().span),
             message: message.to_owned(),
         })
     }
@@ -2697,14 +3019,6 @@ impl Parser {
                 .is_some_and(|token| token_matches(&token.kind, SimpleToken::Less))
     }
 
-    fn at_explicit_type_instantiation_close(&self) -> bool {
-        self.at_simple(SimpleToken::Greater)
-            && self
-                .tokens
-                .get(self.peek_index().saturating_add(1))
-                .is_some_and(|token| token_matches(&token.kind, SimpleToken::Greater))
-    }
-
     fn at_any(&self, expected: &[SimpleToken]) -> bool {
         expected
             .iter()
@@ -2720,20 +3034,6 @@ impl Parser {
             SimpleToken::End,
             SimpleToken::Until,
         ])
-    }
-
-    fn next_starts_statement_boundary(&self) -> bool {
-        self.tokens.get(self.peek_index() + 1).is_some_and(|token| {
-            matches!(
-                token.kind,
-                TokenKind::Eof
-                    | TokenKind::Semicolon
-                    | TokenKind::Else
-                    | TokenKind::ElseIf
-                    | TokenKind::End
-                    | TokenKind::Until
-            )
-        })
     }
 
     fn eat_compound_assignment_op(&mut self) -> Option<AssignmentOp> {
@@ -2776,11 +3076,11 @@ impl Parser {
         self.cursor.min(self.tokens.len().saturating_sub(1))
     }
 
-    fn error_here(&self, message: &'static str) -> ParseError {
+    fn error_here(&self, message: impl Into<String>) -> ParseError {
         ParseError {
             unclosed_block: None,
-            span: self.peek().span,
-            message: message.to_owned(),
+            span: self.diagnostic_span(self.peek().span),
+            message: message.into(),
         }
     }
 
@@ -2791,7 +3091,7 @@ impl Parser {
             return Err(ParseError {
                 unclosed_block: None,
                 // Luau reports the current token after consuming the name.
-                span: self.peek().span,
+                span: self.diagnostic_span(self.peek().span),
                 message: format!("Type function cannot reference outer local '{name}'"),
             });
         }
@@ -2819,11 +3119,11 @@ impl Parser {
     fn parse_loop_body(
         &mut self,
         terminators: &[SimpleToken],
-        start: usize,
+        open: Token,
         expected: &'static str,
     ) -> Result<Vec<Stmt>> {
         self.loop_depth += 1;
-        let result = self.parse_delimited_block(terminators, start, expected);
+        let result = self.parse_delimited_block(terminators, open, expected);
         self.loop_depth -= 1;
         result
     }
@@ -2832,7 +3132,7 @@ impl Parser {
         if depth > MAX_PARSE_DEPTH {
             Err(ParseError {
                 unclosed_block: None,
-                span: self.peek().span,
+                span: self.diagnostic_span(self.peek().span),
                 message: "parser recursion limit exceeded".to_owned(),
             })
         } else {
@@ -2853,7 +3153,6 @@ enum SimpleToken {
     Local,
     Function,
     Return,
-    Type,
     If,
     Then,
     ElseIf,
@@ -2896,7 +3195,6 @@ fn token_matches(kind: &TokenKind, expected: SimpleToken) -> bool {
             | (TokenKind::Local, SimpleToken::Local)
             | (TokenKind::Function, SimpleToken::Function)
             | (TokenKind::Return, SimpleToken::Return)
-            | (TokenKind::Type, SimpleToken::Type)
             | (TokenKind::If, SimpleToken::If)
             | (TokenKind::Then, SimpleToken::Then)
             | (TokenKind::ElseIf, SimpleToken::ElseIf)
@@ -2959,7 +3257,7 @@ fn assignment_target_from_expr(expr: Expr) -> Result<AssignmentTarget> {
         other => Err(ParseError {
             unclosed_block: None,
             span: other.span(),
-            message: "unsupported assignment target".to_owned(),
+            message: "Assigned expression must be a variable or a field".to_owned(),
         }),
     }
 }
@@ -3000,6 +3298,7 @@ impl Expr {
             | Self::Table { span, .. }
             | Self::Function { span, .. }
             | Self::Paren { span, .. }
+            | Self::TypeInstantiation { span, .. }
             | Self::Call { span, .. }
             | Self::MethodCall { span, .. } => *span,
         }
@@ -3022,6 +3321,7 @@ impl Expr {
             | Self::Table { span, .. }
             | Self::Function { span, .. }
             | Self::Paren { span, .. }
+            | Self::TypeInstantiation { span, .. }
             | Self::Call { span, .. }
             | Self::MethodCall { span, .. } => span.start,
         }
@@ -3044,6 +3344,7 @@ impl Expr {
             | Self::Table { span, .. }
             | Self::Function { span, .. }
             | Self::Paren { span, .. }
+            | Self::TypeInstantiation { span, .. }
             | Self::Call { span, .. }
             | Self::MethodCall { span, .. } => span.end,
         }
@@ -3059,10 +3360,22 @@ fn expr_accepts_postfix(expr: &Expr) -> bool {
             | Expr::Call { .. }
             | Expr::MethodCall { .. }
             | Expr::Paren { .. }
+            | Expr::TypeInstantiation { .. }
     )
 }
 
 impl TypeExpr {
+    fn empty_pack_span(&self) -> Option<Span> {
+        match self {
+            Self::TypePack { types, span } if types.is_empty() => Some(*span),
+            Self::TypePack { types, .. }
+            | Self::Union { types, .. }
+            | Self::Intersection { types, .. } => types.iter().find_map(Self::empty_pack_span),
+            Self::Optional { inner, .. } => inner.empty_pack_span(),
+            _ => None,
+        }
+    }
+
     fn is_single_type(&self) -> bool {
         match self {
             Self::TypePack { types, .. } => types.len() == 1 && types[0].is_single_type(),
@@ -3133,8 +3446,27 @@ impl TypeExpr {
 mod tests {
     use super::{
         parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Parser,
-        SimpleToken, SourceError, Span, Stmt, TableField, TypeExpr, UnaryOp,
+        SimpleToken, SourceError, SourceParser, Span, Stmt, TableField, TypeExpr, UnaryOp,
     };
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn token_only_parser_describes_literal_values() {
+        for (source, message) in [
+            (
+                "local 0x10 = 1",
+                "Expected identifier when parsing variable name, got '16'",
+            ),
+            (
+                r"local '\x41' = 1",
+                r#"Expected identifier when parsing variable name, got "A""#,
+            ),
+        ] {
+            let tokens = rustia_lexer::lex(source).unwrap();
+            let parser: Parser = Parser::new(tokens);
+            assert_eq!(parser.parse_chunk().unwrap_err().message, message);
+        }
+    }
 
     #[test]
     fn parses_plain_exported_and_nested_type_function_declarations() {
@@ -3160,7 +3492,7 @@ mod tests {
         assert_eq!(other, "other");
         assert_eq!(
             &source[first_span.start..first_span.end],
-            "type function first() return types.number end"
+            "type function first() return types.number end;"
         );
         assert_eq!(export_span.start, source.find("export").unwrap());
         assert_eq!(export_span.end, source.len());
@@ -3470,12 +3802,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_interpolated_string_forms() {
-        let cases = [
-            "f`x`",
-            "return `{{}}`",
-            "return `\\q`",
-            "return `line\nbreak`",
-        ];
+        let cases = ["f`x`", "return `{{}}`", "return `line\nbreak`"];
         for source in cases {
             assert!(parse_source(source).is_err(), "{source}");
         }
@@ -3591,7 +3918,11 @@ mod tests {
             for _ in 0..depth {
                 source = format!("() -> ({source})");
             }
-            let mut parser = Parser::new(rustia_lexer::lex_bytes(source.as_bytes()).unwrap());
+            let mut parser = SourceParser::new(
+                rustia_lexer::lex_bytes(source.as_bytes()).unwrap(),
+                source.as_bytes(),
+                BTreeMap::new(),
+            );
             parser.parse_type(0).unwrap();
             assert!(parser.at_simple(SimpleToken::Eof));
             assert_eq!(parser.type_primary_visits, 2 * depth + 1);
@@ -3873,19 +4204,23 @@ mod tests {
     #[test]
     fn rejects_statements_after_return() {
         let error = parse_source("return 1\nlocal x = 2").unwrap_err();
-        assert!(error.to_string().contains("return must be the final"));
+        assert!(error.to_string().contains("Expected <eof>"));
     }
 
     #[test]
     fn rejects_empty_semicolon_statements() {
         let error = parse_source(";").unwrap_err();
-        assert!(error.to_string().contains("expected expression"));
+        assert!(error
+            .to_string()
+            .contains("Expected identifier when parsing expression"));
 
         let error = parse_source("local x = 1;;").unwrap_err();
-        assert!(error.to_string().contains("expected expression"));
+        assert!(error
+            .to_string()
+            .contains("Expected identifier when parsing expression"));
 
         let error = parse_source("return;;").unwrap_err();
-        assert!(error.to_string().contains("return must be the final"));
+        assert!(error.to_string().contains("Expected <eof>"));
     }
 
     #[test]
@@ -4190,10 +4525,14 @@ mod tests {
     #[test]
     fn rejects_postfix_suffixes_on_non_prefix_expressions() {
         let error = parse_source("1()").unwrap_err();
-        assert!(error.to_string().contains("expected statement"));
+        assert!(error
+            .to_string()
+            .contains("Expected identifier when parsing expression"));
 
         let error = parse_source("1:m()").unwrap_err();
-        assert!(error.to_string().contains("expected statement"));
+        assert!(error
+            .to_string()
+            .contains("Expected identifier when parsing expression"));
     }
 
     #[test]
@@ -4295,7 +4634,9 @@ mod tests {
         assert!(matches!(chunk.statements[0], Stmt::Expr { .. }));
 
         let error = parse_source("1 + 2").unwrap_err();
-        assert!(error.to_string().contains("expected statement"));
+        assert!(error
+            .to_string()
+            .contains("Expected identifier when parsing expression"));
     }
 
     #[test]
@@ -4449,7 +4790,7 @@ mod tests {
     #[test]
     fn return_is_final_inside_if_blocks() {
         let error = parse_source("if true then return 1 local x = 2 end").unwrap_err();
-        assert!(error.to_string().contains("return must be the final"));
+        assert!(error.to_string().contains("Expected 'end'"));
     }
 
     #[test]
@@ -4494,7 +4835,7 @@ mod tests {
     #[test]
     fn break_is_final_inside_blocks() {
         let error = parse_source("while true do break local x = 2 end").unwrap_err();
-        assert!(error.to_string().contains("break must be the final"));
+        assert!(error.to_string().contains("Expected 'end'"));
     }
 
     #[test]

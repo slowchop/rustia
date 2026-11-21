@@ -361,6 +361,9 @@ function checkErrorFuzz(text, mode = "private") {
     "      - name: Verify release diagnostic parity against pinned Luau",
     "        run: node tools/audit-release-errors.mjs",
   ].join("\n"), label + " diagnostic parity");
+  if (mode === "public") {
+    requireText(jobs.get("differential-smoke"), "run: cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser", label + " parser ports");
+  }
   const stepGuards = [...text.matchAll(/^        if:([^\n]*)$/gm)].map((match) => match[1].trim());
   if (JSON.stringify(stepGuards) !== JSON.stringify(["always()"])) reject(`${label} must retain only its evidence-upload step guard`);
   const campaign = jobs.get("campaign");

@@ -23,6 +23,8 @@
 - O2 is all-off by default. Rewrites must preserve evaluation/error order and logical schedule.
 - Do not treat the experimental option fields as a stable public compiler contract.
 
+- The interpreter compiler ignores validated function attributes. Explicit instantiation evaluates its operand once to a single result. As a method receiver or callee, that value is read before the arguments. A grouped local receiver still follows Luau’s late register read. Writes through instantiated globals still invalidate affected builtin fast paths.
+
 ## Side Effects
 
 Compilation is in-memory and does not execute the resulting program or perform host I/O.
