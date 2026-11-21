@@ -56,6 +56,8 @@ Explicit type arguments can also appear on values, including before indexing. Th
 previous coverage and exclusions for every upstream parser case. The
 [lexer inventory](../conformance/upstream/luau-0.709/README.md#lexer-tests) maps all 28 lexer cases
 to Rustia’s token, span and interpolation tests.
+The [compiler inventory](../conformance/upstream/luau-0.709/README.md#compiler-tests) covers all 200 upstream
+declarations. Hosted CI compares guest results and compile-time rejections with Luau 0.709.
 
 ## Issue #21 memory recovery
 

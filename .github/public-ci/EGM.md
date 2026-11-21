@@ -4,7 +4,7 @@ Parent: [repository map](../../EGM.md).
 
 - [ci.yml](ci.yml) and [error-fuzz.yml](error-fuzz.yml) mirror the hosted
   correctness inventory selected in the [source profile](../../design/public-source-profile.json).
-  The differential job also runs the shared Rustia parser cases against the pinned Luau compiler.
+  The differential job checks parser acceptance and compares compiler-case results against pinned Luau.
   GitHub executes the files in [workflows](../workflows/).
 - [README.md](README.md) describes the triggers and execution scope and links the verified launch results.
 - [SECURITY.md](SECURITY.md) points to the [active reporting policy](../../SECURITY.md).

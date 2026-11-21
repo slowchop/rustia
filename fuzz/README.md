@@ -3,6 +3,10 @@
 This independent Cargo workspace contains bounded `cargo-fuzz` targets for the lexer, parser,
 compiler, VM, stateful embedding, and differential execution.
 
+The [compiler case tests](tests/upstream_compiler.rs) also run as a fixed hosted CI suite.
+Run them locally with `cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_compiler`.
+The [case inventory](../conformance/upstream/luau-0.709/compiler-cases.tsv) links each upstream declaration to evidence.
+
 | target | input bound | additional bounds |
 | --- | ---: | --- |
 | `lexer` | 64 KiB | raw bytes through `lex_bytes` |

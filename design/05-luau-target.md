@@ -31,6 +31,10 @@
   maps each upstream parser test to executable evidence or a reason it is outside the standalone target.
   The [lexer inventory](../conformance/upstream/luau-0.709/lexer-cases.tsv) records which token boundaries,
   decoded values and first diagnostics Rustia exposes for each of the 28 upstream lexer cases.
+  The [compiler inventory](../conformance/upstream/luau-0.709/compiler-cases.tsv) maps all 200 declarations
+  to guest behavior or an explicit exclusion. Luau can reuse equivalent closures at optimization levels 1 and 2.
+  Rustia creates a fresh function on each evaluation. Using those functions as table keys can distinguish
+  the engines. Luau describes the reuse heuristic as optional in its [closure caching documentation](https://luau.org/performance/#closure-caching).
 
 ## Numbers are f64-only (verified, not assumed)
 At 0.709, **`f64` (IEEE-754 double) is the only script-level number type.** Oracle-proven:
