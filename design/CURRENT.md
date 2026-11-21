@@ -45,6 +45,11 @@ including exported declarations. A type function can use its own locals and glob
 Capturing a local from outside the declaration is a parse error. Its body never
 runs in the interpreter. Rustia does not provide a static type checker.
 
+Function and method calls follow Luau's newline rule. An opening argument parenthesis
+on a later line is ambiguous. String and table arguments can start on the next line.
+The [call syntax fixture](../conformance/fixtures/upstream-luau-0.709/newline_call_suffix_rejected.luau)
+covers both forms.
+
 ## Issue #21 memory recovery
 
 Failed-call traceback state is released at the public execution boundary; saved

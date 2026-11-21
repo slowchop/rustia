@@ -30,6 +30,10 @@
 - Value-function return annotations distinguish a single type from a return pack. Suffixes require exactly one fixed entry; the pinned Luau 0.709 one-fixed-plus-tail suffix quirk is retained. Bare tails cannot take suffixes and nested bare packs reject. Suffixes consume the already-parsed node without backtracking; a test-only visit counter enforces one primary visit per nested type node. Leading union/intersection operators are supported; mixed unparenthesized operators reject.
 
 - Recursive parser paths share a 512-frame budget across statements, types, expressions and function signatures, alongside local depth checks. Erased `typeof` expressions and type function declarations validate function-body loop/vararg context before erasure; signatures keep the enclosing context and ordinary invalid functions retain their compiler error phase.
+- Function and method calls reject an opening argument parenthesis on a later source line.
+  For explicit type arguments, regular calls compare the opening parenthesis to the closing
+  type delimiter. Method calls compare it to the method name. String and table arguments may
+  start on a later line.
 - AST source spans are byte offsets inherited from lexer tokens.
 - Type syntax is parsed and retained as syntax; this module does not type-check it.
 

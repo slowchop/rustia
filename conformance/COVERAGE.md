@@ -132,7 +132,8 @@ The declared behavior-topic catalog is `REFS.tsv`.
   literal and dynamic-source chunk compilation in conformance mode including cross-program calls back into root
   functions, invalid literal source returning nil plus an error message, and invalid dynamic source returning
   chunk-name-prefixed error messages, dynamic-source rejection of bare/repeated semicolon empty
-  statements and newline-separated call argument suffixes,
+  statements and newline-separated parenthesized calls, and acceptance of string and table
+  call arguments across a line break,
   `pcall` string-error source prefix objects including optimized `assert` failures, VM-raised arithmetic and
   numeric-for/function-target line attribution errors, exact arithmetic/comparison and numeric-for type-error text,
   missing-method/index diagnostics for colon calls, catchable recursive stack-overflow errors, `debug.traceback`

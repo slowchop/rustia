@@ -58,7 +58,8 @@
 >   and [four-profile tests](../crates/rustia/tests/type_grammar.rs) cover this behavior.
 > - Rustia accepts explicit type arguments at a call, such as `id<<number>>(1)`.
 >   The [upstream conformance harness](../conformance/upstream/luau-0.709/tests/Conformance.test.cpp)
->   enables `LuauExplicitTypeInstantiationSyntax` for this case. The default oracle rejects it.
+>   enables `LuauExplicitTypeInstantiationSyntax` for this case. The default oracle rejects it. With the flag enabled, a parenthesized call checks the line
+>   of the closing `>>` for a regular function and the method name for a colon call.
 > - All Rustia profiles schedule full automatic collections by instruction count. Standard
 >   scripts can pause the collector. The [collection schedule](30-architecture.md#collection-schedule)
 >   supersedes older descriptions of incremental Standard collection.
@@ -145,6 +146,7 @@ no portable contract outside its representable domain; see
 | Unary `+` | error | Does NOT exist; `+x` is a parse error | reject | both | Lua/Luau have no unary plus. |
 | `==` / `~=` equality tokens | specified | `~=` is not-equal (no `!=`) | identical | both | Match. |
 | Semicolons / empty statements | specified | `;` is an optional statement separator; bare `;` allowed; trailing `;` allowed | identical (allow optional/empty `;`) | both | Match. |
+| Function and method call arguments across a line break | specified | A later-line opening parenthesis is ambiguous. Quoted strings, long strings and table arguments can start on a later line. | Match the pinned lexer's LF-based line check and report the opening parenthesis. | both | Executable ref `syntax.no-newline-before-call-args`. |
 | Statement validity: expression statements must be call or assignment | specified | A bare expression like `a + b` as a statement is a parse error; only function calls / assignments allowed | enforce same restriction | both | This is what makes `f<a,b>(c)` a comparison error, not a call (see disambiguation row). |
 | `continue` statement | specified | Jumps to loop continuation; only valid inside a loop (else error); not a reserved word | parse as statement; error if outside loop | both | Match `loopDepth==0` check. |
 | Compound assignment `+= -= *= /= //= %= ^= ..=` | specified | Single-target compound assign; target evaluated once | replicate single-eval semantics | both | Watch: LHS sub-expressions evaluated once (e.g. `t[f()] += 1` calls `f` once); match. |
