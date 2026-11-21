@@ -1194,30 +1194,25 @@ impl<'source> SourceParser<'source> {
         opening: usize,
         interpolation_error: LexError,
     ) -> SourceError {
-        let bad_string = |t: &Token| {
-            matches!(
-                t.kind,
-                TokenKind::MalformedStringEscape(_) | TokenKind::UnfinishedString
-            )
-        };
-        if self.tokens.iter().any(bad_string) {
-            if let Err(error) = self.parse_source_chunk() {
-                let span = match &error {
-                    SourceError::Lex(error) => error.span,
-                    SourceError::Parse(error) => error.span,
-                };
-                // A missing token at the end of the partial buffer is not an
-                // earlier error. Require a real token in the original source.
-                if (self.peek().span.start < opening
-                    && span.start < span.end
-                    && span.end <= opening)
-                    || self
-                        .tokens
-                        .iter()
-                        .any(|token| token.span == span && bad_string(token))
-                {
-                    return error;
-                }
+        if let Err(error) = self.parse_source_chunk() {
+            let span = match &error {
+                SourceError::Lex(error) => error.span,
+                SourceError::Parse(error) => error.span,
+            };
+            // The parser either failed in the preceding real source, or identified a
+            // specific broken quote inside the interpolation. Missing tokens in the
+            // partial synthetic expression do not establish an earlier source error.
+            if self.peek().span.start < opening && span.start < span.end && span.end <= opening {
+                return error;
+            }
+            if self.tokens.iter().any(|token| {
+                token.span == span
+                    && matches!(
+                        token.kind,
+                        TokenKind::MalformedStringEscape(_) | TokenKind::UnfinishedString
+                    )
+            }) {
+                return error;
             }
         }
         SourceError::Lex(interpolation_error)
