@@ -28,3 +28,23 @@ also run through the pinned Luau compiler in hosted CI. That comparison checks w
 The Rust assertions check the values, tree shapes, source spans and diagnostics listed in the inventory.
 The reference compiler enables Luau's explicit type argument syntax to match Rustia. Run the comparison with
 `cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser`.
+
+## Lexer tests
+
+The [lexer inventory](lexer-cases.tsv) maps all 28 declarations in the pinned
+[Lexer.test.cpp](https://github.com/luau-lang/luau/blob/b968ef742741bb2b703afc3b3c53f06608c87481/tests/Lexer.test.cpp).
+Two names each appear twice upstream. Their line numbers distinguish string cases from comment cases.
+Twelve had coverage for their applicable behavior before this audit. Sixteen gained new or stronger checks.
+The tests use every upstream input, including the twelve with prior coverage.
+
+The [lexer tests](../../../crates/rustia-lexer/tests/luau_0709.rs) compare token order, decoded bytes,
+source spans and EOF. Rustia skips complete comments and returns a vector of tokens. Luau also exposes
+comment tokens, quote style, delimiter depth and a streaming lookahead cursor.
+The [interpolation tests](../../../crates/rustia-parser/tests/luau0709/lexer_interpolation.rs) check
+literal sections, embedded expressions and the first error. Luau's additional recovery tokens have
+no equivalent in Rustia.
+
+Run the direct ports with `cargo test --locked -p rustia-lexer --test luau_0709`. Interpolated strings
+are handled by the parser. Run those six ports with
+`cargo test --locked -p rustia-parser --test luau_0709 lexer_interpolation`. They also run in the
+shared pinned-compiler comparison described above.

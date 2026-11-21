@@ -138,7 +138,7 @@ impl SourceParser<'_> {
                 let span = Span::new(first.end, table.span_end());
                 (vec![table], span)
             }
-            TokenKind::String(_) => {
+            TokenKind::String(_) | TokenKind::MalformedStringEscape(_) => {
                 let expr = self.parse_primary(0)?;
                 (vec![expr], first)
             }

@@ -939,3 +939,275 @@ fn explicit_type_instantiation_errors() {
         "Expected '(', '{' or <string> when parsing function call, got <eof>",
     );
 }
+
+#[test]
+fn malformed_strings_report_the_first_error_in_context() {
+    // Luau 0.709 Lexer.test.cpp's broken_string_works and testBrokenEscapeTolerant,
+    // and their value, type, attribute, call and earlier-error contexts.
+    for (source, start, end, expected, lexical) in [
+        (
+            r#"type T = {["\xQ"]: typeof(0xZ)}"#,
+            26,
+            29,
+            "Malformed number",
+            true,
+        ),
+        (
+            r#"type T = {["\xQ"]: 0xZ }"#,
+            18,
+            22,
+            "Expected type, got '0xZ'",
+            false,
+        ),
+        (
+            r#"type T = {["\xQ"]: "\xR"}"#,
+            19,
+            24,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            r#"type T = {["\xQ"]: }"#,
+            18,
+            20,
+            "Expected type, got '}'",
+            false,
+        ),
+        (
+            r#"type T = {["\xQ"] number}"#,
+            18,
+            24,
+            "Expected ':' when parsing table field, got 'number'",
+            false,
+        ),
+        (
+            "'\\3729472897292378'",
+            0,
+            19,
+            "Expected identifier when parsing expression, got \"\\3729472897292378\"",
+            false,
+        ),
+        (
+            "[[",
+            0,
+            2,
+            "Expected identifier when parsing expression, got malformed string",
+            false,
+        ),
+        (
+            "local = '\\3729472897292378'",
+            6,
+            7,
+            "Expected identifier when parsing variable name, got '='",
+            false,
+        ),
+        (
+            "local = [[",
+            6,
+            7,
+            "Expected identifier when parsing variable name, got '='",
+            false,
+        ),
+        (
+            "local '\\399'",
+            6,
+            12,
+            "Expected identifier when parsing variable name, got \"\\399\"",
+            false,
+        ),
+        (
+            "if then return '\\399' end",
+            3,
+            7,
+            "Expected identifier when parsing expression, got 'then'",
+            false,
+        ),
+        (
+            "'\\399' ~ 0xZ 0xZ end",
+            0,
+            6,
+            "Expected identifier when parsing expression, got \"\\399\"",
+            false,
+        ),
+        (
+            "f:method [[",
+            0,
+            9,
+            "Expected '(', '{' or <string> when parsing function call, got malformed string",
+            false,
+        ),
+        (
+            "fn [[",
+            0,
+            2,
+            "Incomplete statement: expected assignment or a function call",
+            false,
+        ),
+        (
+            "return '\\3729472897292378'",
+            7,
+            26,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "return [[",
+            7,
+            9,
+            "Malformed string; did you forget to finish it?",
+            true,
+        ),
+        (
+            "return '\\399' 0xZ",
+            7,
+            13,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "f '\\399'",
+            2,
+            8,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "local x: '\\399'",
+            9,
+            15,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "local x: [[",
+            9,
+            11,
+            "Malformed string; did you forget to finish it?",
+            true,
+        ),
+        (
+            "local t = { ['\\399'] = 1 }",
+            13,
+            19,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "type T = {['\\399']: string}",
+            10,
+            11,
+            "String literal contains malformed escape sequence or \\0",
+            false,
+        ),
+        (
+            "@[deprecated '\\399'] function f() end",
+            13,
+            19,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+        (
+            "return `p {'\\399'} end`",
+            11,
+            17,
+            "String literal contains malformed escape sequence",
+            true,
+        ),
+    ] {
+        let (span, message, actual_lexical) = match parse_source(source).unwrap_err() {
+            SourceError::Lex(e) => (e.span, e.message, true),
+            SourceError::Parse(e) => (e.span, e.message, false),
+        };
+        assert_eq!(
+            (span.start, span.end, message.as_str(), actual_lexical),
+            (start, end, expected, lexical),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_strings_and_interpolation_report_the_first_error() {
+    for (source, start, end, message) in [
+        (
+            r#"return `ok`; "no end"#,
+            13,
+            20,
+            r#"Expected <eof>, got malformed string"#,
+        ),
+        (
+            r#"return 1; "no end -- `tick`"#,
+            10,
+            27,
+            r#"Expected <eof>, got malformed string"#,
+        ),
+        (
+            r#"return "\xQP", `\xQ`"#,
+            7,
+            13,
+            r#"String literal contains malformed escape sequence"#,
+        ),
+        (
+            r#"return `ok`; [[unterminated"#,
+            13,
+            27,
+            r#"Expected <eof>, got malformed string"#,
+        ),
+        (
+            r#"local x = `ok`; return "\xQP", `\xQ`"#,
+            23,
+            29,
+            r#"String literal contains malformed escape sequence"#,
+        ),
+        (
+            r#"local a = `ok`; "\xQP"; print(`\xQ`)"#,
+            16,
+            22,
+            r#"Expected identifier when parsing expression, got "\xQP""#,
+        ),
+        (
+            r#"type T = {["\xQ"]: `\xR`}"#,
+            19,
+            24,
+            r#"Interpolated string literal contains malformed escape sequence"#,
+        ),
+        (
+            r#"if x "unfinished"#,
+            5,
+            16,
+            r#"Expected 'then' when parsing if statement, got malformed string"#,
+        ),
+        (
+            r#"return `{"\xQP"} \xQ`"#,
+            9,
+            15,
+            r#"String literal contains malformed escape sequence"#,
+        ),
+        (
+            r#"return `foo {'\372'} {`\xQ`}`"#,
+            13,
+            19,
+            r#"String literal contains malformed escape sequence"#,
+        ),
+        (
+            r#"if x then elseif y "unfinished"#,
+            19,
+            30,
+            r#"Expected 'then' when parsing if statement, got malformed string"#,
+        ),
+        (
+            r#"if true end"#,
+            8,
+            11,
+            r#"Expected 'then' when parsing if statement, got 'end'"#,
+        ),
+        (
+            r#"local = "\xQ"; return `\xR`"#,
+            6,
+            7,
+            r#"Expected identifier when parsing variable name, got '='"#,
+        ),
+    ] {
+        diagnostic(source, start, end, message);
+    }
+}

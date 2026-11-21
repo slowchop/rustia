@@ -40,6 +40,7 @@
   For explicit type arguments, regular calls compare the opening parenthesis to the closing
   type delimiter. Method calls compare it to the method name. String and table arguments may
   start on a later line.
+- Unexpected bad string tokens produce grammar errors using the raw spelling or unfinished-string label. Reading a malformed literal in a value or type position preserves its lexical error phase. A quoted table-type property checks the colon and value type before reporting a bad property name. Interpolation lowering preserves the ordinary string tokens it has already read so an error in a later section can be diagnosed in order.
 - AST source spans are byte offsets inherited from lexer tokens. Statement spans include an optional trailing semicolon.
 - Type syntax is parsed and retained as syntax; this module does not type-check it.
 

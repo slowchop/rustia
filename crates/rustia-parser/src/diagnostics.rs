@@ -80,7 +80,11 @@ fn token_description(kind: &TokenKind) -> String {
         TokenKind::Invalid(description) => return description.clone(),
         TokenKind::Ident(name) | TokenKind::Attribute(name) => return format!("'{name}'"),
         TokenKind::Number(value) => return format!("'{value}'"),
-        TokenKind::String(value) => return format!("\"{}\"", String::from_utf8_lossy(value)),
+        TokenKind::MalformedNumber(raw) => return format!("'{raw}'"),
+        TokenKind::UnfinishedString => "malformed string",
+        TokenKind::String(value) | TokenKind::MalformedStringEscape(value) => {
+            return format!("\"{}\"", String::from_utf8_lossy(value))
+        }
         TokenKind::AttributeOpen => "'@['",
         TokenKind::Local => "'local'",
         TokenKind::Return => "'return'",

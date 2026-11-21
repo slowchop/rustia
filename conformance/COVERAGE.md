@@ -3,7 +3,7 @@
 This file tracks the shape of the coverage work. The executable source of truth is `MANIFEST.tsv`.
 The declared behavior-topic catalog is `REFS.tsv`.
 
-The [Luau parser inventory](upstream/luau-0.709/README.md#parser-tests) tracks the upstream C++ parser cases separately from the runtime fixture totals below.
+The [parser inventory](upstream/luau-0.709/README.md#parser-tests) and [lexer inventory](upstream/luau-0.709/README.md#lexer-tests) map the pinned upstream frontend tests. The runtime fixture totals below come from the manifest.
 
 ## Current Status
 
