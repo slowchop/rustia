@@ -94,7 +94,7 @@ syntax.long-string-first-newline-skip	parser-runtime	conformance/upstream/luau-0
 syntax.long-string-level-delimiter	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Long bracket strings use '=' levels so lower-level bracket pairs inside the content do not close the string.
 syntax.long-comment	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/literals.luau	luau-0.709	Long bracket comments use level-matched delimiters and produce no tokens.
 syntax.no-empty-semicolon-statement	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/errors.luau	luau-0.709	Bare and repeated semicolons are syntax errors, not empty statements.
-syntax.no-newline-before-call-args	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/errors.luau	luau-0.709	Call argument suffixes do not attach to a callee across a line break.
+syntax.no-newline-before-call-args	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/errors.luau	luau-0.709	Parenthesized call arguments must start on the callee's final line. String and table arguments may start on the next line.
 unary.not-false	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Unary not maps false to true.
 unary.not-nil	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Unary not maps nil to true.
 unary.not-true	parser-runtime	conformance/upstream/luau-0.709/tests/conformance/basic.luau	luau-0.709	Unary not maps true to false.

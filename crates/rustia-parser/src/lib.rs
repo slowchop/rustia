@@ -371,7 +371,6 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
     if let Some(mut lowered) = lowered {
         let mut tokens = lex_bytes(&lowered.source)
             .map_err(|error| SourceError::Lex(lowered.remap_lex_error(error)))?;
-        let newlines_before = token_newlines_before(&tokens, &lowered.source);
         for token in &mut tokens {
             token.span = lowered.remap_span(token.span);
         }
@@ -380,7 +379,7 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
             .into_iter()
             .map(|(offset, interpolation)| (lowered.remap_start(offset), interpolation))
             .collect();
-        Parser::new_with_newlines_and_interpolations(tokens, newlines_before, interpolations)
+        Parser::new_with_source_and_interpolations(tokens, source, interpolations)
             .parse_chunk()
             .map_err(SourceError::Parse)
     } else {
@@ -1028,7 +1027,7 @@ enum FunctionBinding<'a> {
 
 pub struct Parser {
     tokens: Vec<Token>,
-    newlines_before: Vec<bool>,
+    line_feeds: Vec<usize>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
     active_parse_frames: usize,
@@ -1041,9 +1040,10 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Parses an existing token stream as one line. Use [`parse_source_bytes`]
+    /// to preserve line breaks between tokens and check call syntax.
     pub fn new(tokens: Vec<Token>) -> Self {
-        let newlines_before = vec![false; tokens.len()];
-        Self::new_with_newlines_and_interpolations(tokens, newlines_before, BTreeMap::new())
+        Self::new_with_source_and_interpolations(tokens, &[], BTreeMap::new())
     }
 
     fn new_with_source_and_interpolations(
@@ -1051,19 +1051,17 @@ impl Parser {
         source: &[u8],
         interpolations: BTreeMap<usize, PendingInterpolatedString>,
     ) -> Self {
-        let newlines_before = token_newlines_before(&tokens, source);
-        Self::new_with_newlines_and_interpolations(tokens, newlines_before, interpolations)
-    }
-
-    fn new_with_newlines_and_interpolations(
-        tokens: Vec<Token>,
-        newlines_before: Vec<bool>,
-        interpolations: BTreeMap<usize, PendingInterpolatedString>,
-    ) -> Self {
+        // Only LF advances the pinned Luau lexer's source line. Keep original
+        // offsets so this also works across multiline type arguments and interpolation.
+        let line_feeds = source
+            .iter()
+            .enumerate()
+            .filter_map(|(offset, &byte)| (byte == b'\n').then_some(offset))
+            .collect();
         Self {
             type_function_locals: TypeFunctionLocals::new(&tokens),
             tokens,
-            newlines_before,
+            line_feeds,
             interpolations,
             cursor: 0,
             active_parse_frames: 0,
@@ -1730,7 +1728,7 @@ impl Parser {
             if self.at_type_assertion() || !expr_accepts_postfix(&expr) {
                 break;
             }
-            if let Some((args, end)) = self.parse_call_suffix(depth + 1)? {
+            if let Some((args, end)) = self.parse_call_suffix(depth + 1, None)? {
                 let span = Span::new(expr.span_start(), end);
                 expr = Expr::Call {
                     callee: Box::new(expr),
@@ -1740,7 +1738,7 @@ impl Parser {
             } else if self.eat_simple(SimpleToken::Colon).is_some() {
                 let method = self.expect_name("expected method name after ':'")?;
                 let (args, end) = self
-                    .parse_call_suffix(depth + 1)?
+                    .parse_call_suffix(depth + 1, Some(method.span.end))?
                     .ok_or_else(|| ParseError {
                         unclosed_block: None,
                         span: self.peek().span,
@@ -1780,10 +1778,14 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_call_suffix(&mut self, depth: usize) -> Result<Option<(Vec<Expr>, usize)>> {
+    fn parse_call_suffix(
+        &mut self,
+        depth: usize,
+        method_name_end: Option<usize>,
+    ) -> Result<Option<(Vec<Expr>, usize)>> {
         if self.at_explicit_type_instantiation_open() {
             self.parse_explicit_type_instantiation(depth + 1)?;
-            let Some(args) = self.parse_call_args_suffix(depth + 1)? else {
+            let Some(args) = self.parse_call_args_suffix(depth + 1, method_name_end)? else {
                 return Err(ParseError {
                     unclosed_block: None,
                     span: self.peek().span,
@@ -1792,14 +1794,32 @@ impl Parser {
             };
             return Ok(Some(args));
         }
-        self.parse_call_args_suffix(depth)
+        self.parse_call_args_suffix(depth, method_name_end)
     }
 
-    fn parse_call_args_suffix(&mut self, depth: usize) -> Result<Option<(Vec<Expr>, usize)>> {
-        if self.newline_before_current_token() {
-            return Ok(None);
-        }
+    fn parse_call_args_suffix(
+        &mut self,
+        depth: usize,
+        method_name_end: Option<usize>,
+    ) -> Result<Option<(Vec<Expr>, usize)>> {
         if self.at_simple(SimpleToken::LParen) {
+            // Luau measures from the method name even across explicit type arguments.
+            // For a regular call, the preceding token ends the callee (including any '>>').
+            let callee_end =
+                method_name_end.unwrap_or_else(|| self.tokens[self.cursor - 1].span.end);
+            let next_lf = self
+                .line_feeds
+                .partition_point(|&offset| offset < callee_end);
+            if self
+                .line_feeds
+                .get(next_lf)
+                .is_some_and(|&lf| lf < self.peek().span.start)
+            {
+                return Err(self.error_here(concat!(
+                    "Ambiguous syntax: this looks like an argument list for a function call, ",
+                    "but could also be a start of new statement; use ';' to separate statements"
+                )));
+            }
             self.advance();
             let mut args = Vec::new();
             if !self.at_simple(SimpleToken::RParen) {
@@ -2716,13 +2736,6 @@ impl Parser {
         })
     }
 
-    fn newline_before_current_token(&self) -> bool {
-        self.newlines_before
-            .get(self.peek_index())
-            .copied()
-            .unwrap_or(false)
-    }
-
     fn eat_compound_assignment_op(&mut self) -> Option<AssignmentOp> {
         let op = self.peek_compound_assignment_op()?;
         self.cursor += 1;
@@ -2874,28 +2887,6 @@ enum SimpleToken {
     Ampersand,
     Question,
     Arrow,
-}
-
-fn token_newlines_before(tokens: &[Token], source: &[u8]) -> Vec<bool> {
-    let mut newlines_before = Vec::with_capacity(tokens.len());
-    let mut previous_end = 0;
-    for token in tokens {
-        newlines_before.push(source_contains_newline(
-            source,
-            previous_end,
-            token.span.start,
-        ));
-        previous_end = token.span.end;
-    }
-    newlines_before
-}
-
-fn source_contains_newline(source: &[u8], start: usize, end: usize) -> bool {
-    let start = start.min(source.len());
-    let end = end.min(source.len());
-    source[start..end]
-        .iter()
-        .any(|byte| matches!(byte, b'\n' | b'\r'))
 }
 
 fn token_matches(kind: &TokenKind, expected: SimpleToken) -> bool {
@@ -3142,7 +3133,7 @@ impl TypeExpr {
 mod tests {
     use super::{
         parse_source, parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, Parser,
-        SimpleToken, Stmt, TableField, TypeExpr, UnaryOp,
+        SimpleToken, SourceError, Span, Stmt, TableField, TypeExpr, UnaryOp,
     };
 
     #[test]
@@ -3487,6 +3478,36 @@ mod tests {
         ];
         for source in cases {
             assert!(parse_source(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn interpolation_rejections_match_pinned_luau_parser_cases() {
+        // Luau 0.709, tests/Parser.test.cpp:960–1142 at b968ef742741bb2b703afc3b3c53f06608c87481.
+        // MIT: conformance/upstream/luau-0.709/LICENSE.txt. Run each invalid form separately
+        // so an earlier syntax error cannot mask a later case.
+        for source in [
+            "_ = `{{oops}}`",
+            "_ = `{nice} {{oops}}`",
+            "_ = `{a`",
+            "_ = `{abcdefg`",
+            "_ =       `{a`",
+            "_ = { `{a` }",
+            r#"_ = { `x {"y"} {z` }"#,
+            "local a: `what` = `???`",
+            r#"local b: `what {"the"}` = `???`"#,
+            r#"local c: `what {"the"} heck` = `???`"#,
+            "_ = print `{42}`",
+            "print(`{}`)",
+            "print(`{}{1}`)",
+            r"local a = `???\xQQ {1}`",
+            "local a = `??? {42 !!}`",
+        ] {
+            assert!(parse_source(source).is_err(), "accepted {source}");
+        }
+
+        for source in ["_ = print 'hi'", "_ = print(`{42}`)", "_ = `{ {1} }`"] {
+            parse_source(source).unwrap_or_else(|err| panic!("rejected {source}: {err}"));
         }
     }
 
@@ -3874,8 +3895,58 @@ mod tests {
 
     #[test]
     fn rejects_call_parentheses_after_newline() {
-        let error = parse_source("a = math.sin\n(3)").unwrap_err();
-        assert!(error.to_string().contains("expected statement"));
+        // parse_error_confusing_function_call, Luau 0.709 tests/Parser.test.cpp.
+        // The location is the opening parenthesis, including in assignment targets.
+        let expected = "Ambiguous syntax: this looks like an argument list for a function call, \
+                        but could also be a start of new statement; use ';' to separate statements";
+        for (before, args) in [
+            ("a = math.sin\n", "(3)"),
+            ("function add(x, y) return x + y end\nadd\n", "(4, 7)"),
+            (
+                "function add(x, y) return x + y end\nlocal f = add\n",
+                "(f :: any)['x'] = 2",
+            ),
+            (
+                "local x = {}\nfunction x:add(a, b) return a + b end\nx:add\n",
+                "(1, 2)",
+            ),
+            (
+                "local t = {}\nfunction f() return t end\nt.x, (f)\n",
+                "().y = 5, 6",
+            ),
+            ("f() -- a statement can end here\r\n", "(g)()"),
+            ("return f --[[a\nb]] ", "(1)"),
+            ("return `value {f\n", "(1)}`"),
+            // LuauExplicitTypeInstantiationSyntax enabled in the conformance harness.
+            ("return obj:method\n<<T>>", "(1)"),
+            ("return obj:method<<[[a\nb]]>>", "(1)"),
+        ] {
+            let source = format!("{before}{args}");
+            let SourceError::Parse(error) = parse_source(&source).unwrap_err() else {
+                panic!("expected parser error for {source}");
+            };
+            let open = before.len();
+            assert_eq!(error.message, expected, "{source}");
+            assert_eq!(error.span, Span::new(open, open + 1), "{source}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_call_and_assignment_statements_from_luau_0709() {
+        // Luau 0.709, tests/Parser.test.cpp:915–959, 1349–1385 and 1884–1901.
+        // parse_compound_assignment_error_{call,not_lvalue,multiple},
+        // parse_error_function_call{,_newline}, and parse_error_assignment_lvalue.
+        for source in [
+            "a() += 5",
+            "(a) += 5",
+            "a, b += 5",
+            "function stringifyTable(t)\n local foo = t:Parse 2\n return foo\nend",
+            "function stringifyTable(t)\n local foo = t:Parse\n return foo\nend",
+            "local a, b\n(2), b = b, a",
+            "local a, b\na, (3) = b, a",
+        ] {
+            assert!(parse_source(source).is_err(), "accepted {source}");
+        }
     }
 
     #[test]
@@ -3944,6 +4015,18 @@ mod tests {
                 ..
             } if matches!(args.as_slice(), [Expr::Table { .. }])
         ));
+    }
+
+    #[test]
+    fn accepts_multiline_explicit_type_arguments_at_calls() {
+        for source in [
+            "return f\n<<T>>(1)",
+            "return f<<[[a\nb]]>>(1)",
+            "return obj:m<<\nT>>\n{}",
+            "return obj:m\n<<T>>\n'hello'",
+        ] {
+            parse_source(source).unwrap_or_else(|err| panic!("rejected {source}: {err}"));
+        }
     }
 
     #[test]
