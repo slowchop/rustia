@@ -50,6 +50,11 @@ on a later line is ambiguous. String and table arguments can start on the next l
 The [call syntax fixture](../conformance/fixtures/upstream-luau-0.709/newline_call_suffix_rejected.luau)
 covers both forms.
 
+Rustia validates function attributes and preserves their source spans. The interpreter ignores the hints.
+Explicit type arguments can also appear on values, including before indexing. The
+[pinned parser inventory](../conformance/upstream/luau-0.709/README.md#parser-tests) records the tests,
+previous coverage and exclusions for every upstream parser case.
+
 ## Issue #21 memory recovery
 
 Failed-call traceback state is released at the public execution boundary; saved
@@ -158,8 +163,8 @@ records these gates. Wasm JIT/AOT spikes are research, not a shipped execution t
 
 ## Validation and benchmark scope
 
-The executable corpus has **735 fixtures**, **525 refs**, **0 pending-oracle**
-and **0 pending-impl**: 717 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
+The executable corpus has **736 fixtures**, **526 refs**, **0 pending-oracle**
+and **0 pending-impl**: 718 fixtures use Luau 0.709 and 18 use offline PUC Lua 5.1.5.
 This proves the named [coverage denominator](../conformance/COVERAGE.md), not the entire language.
 
 Retained-handle stateful fuzzing now checks replacement, rollback, collection and

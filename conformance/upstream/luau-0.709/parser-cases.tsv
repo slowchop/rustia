@@ -1,0 +1,236 @@
+# Upstream line	Test name	Coverage	Rustia evidence or reason
+82	allocator_can_be_moved	outside	C++ arena ownership, move or alignment. Rustia builds owned Rust AST values; crates/rustia-parser/src/lib.rs::Chunk.
+99	moved_out_Allocator_can_still_be_used	outside	C++ arena ownership, move or alignment. Rustia builds owned Rust AST values; crates/rustia-parser/src/lib.rs::Chunk.
+110	aligns_things	outside	C++ arena ownership, move or alignment. Rustia builds owned Rust AST values; crates/rustia-parser/src/lib.rs::Chunk.
+120	initial_double_is_aligned	outside	C++ arena ownership, move or alignment. Rustia builds owned Rust AST values; crates/rustia-parser/src/lib.rs::Chunk.
+132	basic_parse	existing	crates/rustia-parser/src/lib.rs::tests::parses_call_statements_but_rejects_bare_expression_statements
+138	can_haz_annotations	existing	crates/rustia-parser/src/lib.rs::tests::parses_local_annotation_without_typechecking
+144	local_with_annotation	ported	crates/rustia-parser/tests/luau0709/basics.rs::annotated_bindings_preserve_identifier_and_statement_spans
+169	type_names_can_contain_dots	ported	crates/rustia-parser/tests/luau0709/basics.rs::annotated_bindings_preserve_identifier_and_statement_spans
+178	functions_can_have_return_annotations	ported	crates/rustia-parser/tests/luau0709/basics.rs::functions_keep_their_bodies_after_return_annotations; Rustia erases declaration return annotations; tests retain function-body result arity. Local type annotations retain their tree.
+197	functions_can_have_a_function_type_annotation	ported	crates/rustia-parser/tests/luau0709/basics.rs::functions_keep_their_bodies_after_return_annotations; Rustia erases declaration return annotations; tests retain function-body result arity. Local type annotations retain their tree.
+220	function_return_type_should_disambiguate_from_function_type_and_multiple_returns	ported	crates/rustia-parser/tests/luau0709/basics.rs::functions_keep_their_bodies_after_return_annotations; Rustia erases declaration return annotations; tests retain function-body result arity. Local type annotations retain their tree.
+248	function_return_type_should_parse_as_function_type_annotation_with_no_args	ported	crates/rustia-parser/tests/luau0709/basics.rs::functions_keep_their_bodies_after_return_annotations; Rustia erases declaration return annotations; tests retain function-body result arity. Local type annotations retain their tree.
+281	annotations_can_be_tables	ported	crates/rustia-parser/tests/luau0709/basics.rs::table_annotations_allow_named_fields_indexers_and_both_separators; previous grammar coverage in crates/rustia-parser/src/lib.rs::tests::table_types_validate_fields_indexers_and_array_shorthand
+291	tables_should_have_an_indexer_and_keys	ported	crates/rustia-parser/tests/luau0709/basics.rs::table_annotations_allow_named_fields_indexers_and_both_separators; previous grammar coverage in crates/rustia-parser/src/lib.rs::tests::table_types_validate_fields_indexers_and_array_shorthand
+303	tables_can_have_trailing_separator	ported	crates/rustia-parser/tests/luau0709/basics.rs::table_annotations_allow_named_fields_indexers_and_both_separators; previous grammar coverage in crates/rustia-parser/src/lib.rs::tests::table_types_validate_fields_indexers_and_array_shorthand
+313	tables_can_use_semicolons	ported	crates/rustia-parser/tests/luau0709/basics.rs::table_annotations_allow_named_fields_indexers_and_both_separators; previous grammar coverage in crates/rustia-parser/src/lib.rs::tests::table_types_validate_fields_indexers_and_array_shorthand
+323	other_places_where_type_annotations_are_allowed	existing	crates/rustia-parser/src/lib.rs::tests::typed_for_bindings_validate_annotations_before_entering_scope
+333	nil_is_a_valid_type_name	ported	crates/rustia-parser/tests/luau0709/basics.rs::function_annotation_parameter_and_result_shapes
+342	function_type_annotation	ported	crates/rustia-parser/tests/luau0709/basics.rs::function_annotation_parameter_and_result_shapes
+351	functions_can_return_multiple_values	ported	crates/rustia-parser/tests/luau0709/basics.rs::function_annotation_parameter_and_result_shapes
+360	functions_can_have_0_arguments	ported	crates/rustia-parser/tests/luau0709/basics.rs::function_annotation_parameter_and_result_shapes
+369	functions_can_return_0_values	ported	crates/rustia-parser/tests/luau0709/basics.rs::function_annotation_parameter_and_result_shapes
+378	intersection_of_two_function_types_if_no_returns	ported	crates/rustia-parser/tests/luau0709/basics.rs::intersections_bind_outside_zero_or_multiple_results_and_inside_one_result; Rustia represents a parenthesized type as a one-entry TypePack.
+393	intersection_of_two_function_types_if_two_or_more_returns	ported	crates/rustia-parser/tests/luau0709/basics.rs::intersections_bind_outside_zero_or_multiple_results_and_inside_one_result; Rustia represents a parenthesized type as a one-entry TypePack.
+408	return_type_is_an_intersection_type_if_led_with_one_parenthesized_type	ported	crates/rustia-parser/tests/luau0709/basics.rs::intersections_bind_outside_zero_or_multiple_results_and_inside_one_result; Rustia represents a parenthesized type as a one-entry TypePack.
+428	type_alias_to_a_typeof	ported	crates/rustia-parser/tests/luau0709/basics.rs::alias_spans_include_keyword_and_entire_type
+442	type_alias_should_point_to_string	ported	crates/rustia-parser/tests/luau0709/basics.rs::contextual_type_continue_and_export_have_distinct_statement_forms
+453	type_alias_should_not_interfere_with_type_function_call_or_assignment	ported	crates/rustia-parser/tests/luau0709/basics.rs::contextual_type_continue_and_export_have_distinct_statement_forms
+470	type_alias_should_work_when_name_is_also_local	ported	crates/rustia-parser/tests/luau0709/basics.rs::contextual_type_continue_and_export_have_distinct_statement_forms
+483	type_alias_span_is_correct	ported	crates/rustia-parser/tests/luau0709/basics.rs::alias_spans_include_keyword_and_entire_type
+501	parse_error_messages	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_type_diagnostics
+561	mixed_intersection_and_union_not_allowed	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_type_diagnostics
+566	mixed_intersection_and_union_allowed_when_parenthesized	ported	crates/rustia-parser/tests/luau0709/basics.rs::parenthesized_intersection_can_be_a_union_member
+578	cannot_write_multiple_values_in_type_groups	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_type_diagnostics
+584	type_alias_error_messages	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_type_diagnostics
+592	type_assertion_expression	existing	crates/rustia/tests/issue_18_19.rs::generic_function_types_erase_in_assertions_and_alias_defaults
+601	last_line_does_not_have_to_be_blank	existing	crates/rustia-lexer/src/lib.rs::tests::skips_long_comments_and_falls_back_for_malformed_openers (comment ending at EOF)
+606	type_assertion_expression_binds_tightly	ported	crates/rustia-parser/tests/luau0709/basics.rs::assertions_bind_on_each_operand; Rustia erases assertions to a single-result Paren.
+629	mode_is_unset_if_no_hot_comment	outside	Upstream analyzer mode inferred from retained hot comments. Rustia has no analysis mode or ParseResult.hotcomments; crates/rustia-parser/src/lib.rs::Chunk and design/CURRENT.md.
+635	sense_hot_comment_on_first_line	outside	Upstream analyzer mode inferred from retained hot comments. Rustia has no analysis mode or ParseResult.hotcomments; crates/rustia-parser/src/lib.rs::Chunk and design/CURRENT.md.
+646	non_header_hot_comments	outside	Upstream analyzer mode inferred from retained hot comments. Rustia has no analysis mode or ParseResult.hotcomments; crates/rustia-parser/src/lib.rs::Chunk and design/CURRENT.md.
+656	stop_if_line_ends_with_hyphen	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics
+661	nonstrict_mode	outside	Upstream analyzer mode inferred from retained hot comments. Rustia has no analysis mode or ParseResult.hotcomments; crates/rustia-parser/src/lib.rs::Chunk and design/CURRENT.md.
+673	nocheck_mode	outside	Upstream analyzer mode inferred from retained hot comments. Rustia has no analysis mode or ParseResult.hotcomments; crates/rustia-parser/src/lib.rs::Chunk and design/CURRENT.md.
+685	vertical_space	ported	crates/rustia-parser/tests/luau0709/basics.rs::vertical_space_separates_calls
+691	parse_error_type_name	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_type_diagnostics
+701	parse_numbers_decimal	ported	crates/rustia-parser/tests/luau0709/basics.rs::numeric_values_match_decimal_hex_and_binary_literals
+716	parse_numbers_hexadecimal	ported	crates/rustia-parser/tests/luau0709/basics.rs::numeric_values_match_decimal_hex_and_binary_literals
+729	parse_numbers_binary	ported	crates/rustia-parser/tests/luau0709/basics.rs::numeric_values_match_decimal_hex_and_binary_literals
+742	parse_numbers_error	ported	crates/rustia-parser/tests/luau0709/basics.rs::malformed_number_diagnostics
+752	break_return_not_last_error	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics
+758	error_on_unicode	ported	crates/rustia-parser/tests/luau0709/basics.rs::unicode_diagnostics
+768	allow_unicode_in_string	ported	crates/rustia-parser/tests/luau0709/basics.rs::unicode_in_strings_and_invalid_tokens_have_byte_spans; compares UTF-8 byte spans and codepoint diagnostics
+774	error_on_confusable	ported	crates/rustia-parser/tests/luau0709/basics.rs::unicode_diagnostics
+784	error_on_non_utf8_sequence	ported	crates/rustia-parser/tests/luau0709/basics.rs::invalid_utf8_expression_diagnostics
+792	lex_broken_unicode	ported	crates/rustia-parser/tests/luau0709/basics.rs::unicode_in_strings_and_invalid_tokens_have_byte_spans; compares UTF-8 byte spans and codepoint diagnostics
+825	parse_continue	ported	crates/rustia-parser/tests/luau0709/basics.rs::contextual_type_continue_and_export_have_distinct_statement_forms
+855	continue_not_last_error	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics
+860	parse_export_type	ported	crates/rustia-parser/tests/luau0709/basics.rs::contextual_type_continue_and_export_have_distinct_statement_forms
+883	export_is_an_identifier_only_when_followed_by_type	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics
+898	incomplete_statement_error	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics
+903	parse_compound_assignment	existing	crates/rustia-parser/src/lib.rs::tests::parses_compound_assignment_statements
+915	parse_compound_assignment_error_call	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+930	parse_compound_assignment_error_not_lvalue	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+945	parse_compound_assignment_error_multiple	ported	crates/rustia-parser/tests/luau0709/basics.rs::statement_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+960	parse_interpolated_string_double_brace_begin	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+975	parse_interpolated_string_double_brace_mid	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+990	parse_interpolated_string_without_end_brace	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases; Rustia reports the first diagnostic, without upstream recovery or aggregate errors.
+1016	parse_interpolated_string_without_end_brace_in_table	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases; Rustia reports the first diagnostic, without upstream recovery or aggregate errors.
+1034	parse_interpolated_string_mid_without_end_brace_in_table	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases; Rustia reports the first diagnostic, without upstream recovery or aggregate errors.
+1052	parse_interpolated_string_as_type_fail	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases; Rustia reports the first diagnostic, without upstream recovery or aggregate errors.
+1072	parse_interpolated_string_call_without_parens	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+1087	parse_interpolated_string_without_expression	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+1114	parse_interpolated_string_malformed_escape	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+1129	parse_interpolated_string_weird_token	ported	crates/rustia-parser/tests/luau0709/basics.rs::interpolation_diagnostics; previous reject-only coverage in crates/rustia-parser/src/lib.rs::tests::interpolation_rejections_match_pinned_luau_parser_cases
+1144	parse_nesting_based_end_detection	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1177	parse_nesting_based_end_detection_single_line	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1207	parse_nesting_based_end_detection_local_repeat	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1230	parse_nesting_based_end_detection_local_function	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1263	parse_nesting_based_end_detection_failsafe_earlier	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1294	parse_nesting_based_end_detection_nested	ported	crates/rustia-parser/tests/luau0709/basics.rs::missing_block_terminator_hints
+1329	parse_error_table_literal	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics
+1349	parse_error_function_call	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+1368	parse_error_function_call_newline	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+1387	parse_error_with_too_many_nested_type_group	outside	Upstream internal parser resource limit. Rustia uses an independent shared frame budget, covered in crates/rustia-parser/src/lib.rs::tests::shared_recursion_budget_covers_type_expression_function_cycles.
+1413	can_parse_complex_unions_successfully	ported	crates/rustia-parser/tests/luau0709/types.rs::union_intersection_and_group_structure — Ordinary union, intersection and table-type composition. The C++ custom limit and stress input are outside Rustia's parser contract.
+1445	parse_error_with_too_many_nested_if_statements	outside	Upstream internal parser resource limit. Rustia uses its own shared frame budget, covered by crates/rustia-parser/src/lib.rs::tests::shared_recursion_budget_covers_nested_statement_blocks and tests::shared_recursion_budget_covers_type_expression_function_cycles.
+1456	parse_error_with_too_many_changed_elseif_statements	outside	Upstream internal parser resource limit. Rustia uses its own shared frame budget, covered by crates/rustia-parser/src/lib.rs::tests::shared_recursion_budget_covers_nested_statement_blocks and tests::shared_recursion_budget_covers_type_expression_function_cycles.
+1467	parse_error_with_too_many_nested_ifelse_expressions1	outside	Upstream internal parser resource limit. Rustia uses its own shared frame budget, covered by crates/rustia-parser/src/lib.rs::tests::shared_recursion_budget_covers_nested_statement_blocks and tests::shared_recursion_budget_covers_type_expression_function_cycles.
+1478	parse_error_with_too_many_nested_ifelse_expressions2	outside	Upstream internal parser resource limit. Rustia uses its own shared frame budget, covered by crates/rustia-parser/src/lib.rs::tests::shared_recursion_budget_covers_nested_statement_blocks and tests::shared_recursion_budget_covers_type_expression_function_cycles.
+1489	unparenthesized_function_return_type_list	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics — Both unparenthesized return diagnostics. The valid table method signatures are in table_and_short_array_annotations.
+1508	short_array_types	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_short_array_annotations — Rustia exposes the table annotation shape and source extent. It erases the inferred array indexer and its types.
+1526	short_array_types_must_be_alone	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics
+1534	short_array_types_do_not_break_field_names	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_short_array_annotations — Rustia erases the table property's structural type details.
+1551	short_array_types_are_not_field_names_when_complex	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics
+1556	nil_can_not_be_a_field_name	ported	crates/rustia-parser/tests/luau0709/types.rs::table_and_call_diagnostics
+1561	string_literal_call	ported	crates/rustia-parser/tests/luau0709/types.rs::string_literal_call_and_bytes
+1575	multiline_strings_newlines	ported	crates/rustia-parser/tests/luau0709/types.rs::string_literal_call_and_bytes
+1588	string_literals_escape	ported	crates/rustia-parser/tests/luau0709/types.rs::string_literal_call_and_bytes
+1628	string_literals_escape_newline	ported	crates/rustia-parser/tests/luau0709/types.rs::string_literal_call_and_bytes
+1653	string_literals_escapes	ported	crates/rustia-parser/tests/luau0709/types.rs::string_literal_call_and_bytes
+1698	parse_error_broken_comment	ported	crates/rustia-parser/tests/luau0709/types.rs::unfinished_comment_and_literal_diagnostics
+1707	string_literals_escapes_broken	ported	crates/rustia-parser/tests/luau0709/types.rs::unfinished_comment_and_literal_diagnostics
+1720	string_literals_broken	ported	crates/rustia-parser/tests/luau0709/types.rs::unfinished_comment_and_literal_diagnostics
+1727	number_literals	ported	crates/rustia-parser/tests/luau0709/types.rs::number_literal_values
+1772	end_extent_of_functions_unions_and_intersections	ported	crates/rustia-parser/tests/luau0709/types.rs::type_extents_stop_before_later_statements_and_comments
+1787	end_extent_doesnt_consume_comments	ported	crates/rustia-parser/tests/luau0709/types.rs::type_extents_stop_before_later_statements_and_comments
+1799	end_extent_doesnt_consume_comments_even_with_capture	ported	crates/rustia-parser/tests/luau0709/types.rs::type_extents_stop_before_later_statements_and_comments — Portable statement location. Rustia has no comment-capture mode.
+1818	parse_error_loop_control	ported	crates/rustia-compiler/src/lib.rs::tests::loop_control_outside_its_function_loop_is_a_compile_error — All four programs and keyword spans. Ordinary loop-control validation belongs to Rustia's compiler and uses its compile-error wording.
+1826	parse_error_confusing_function_call	existing	crates/rustia-parser/src/lib.rs::tests::rejects_call_parentheses_after_newline
+1879	parse_error_varargs	existing	crates/rustia-compiler/src/lib.rs::tests::compiles_vararg_functions_and_list_adjustment — Rustia checks ordinary function varargs in the compiler and reports its compile-error wording.
+1884	parse_error_assignment_lvalue	ported	crates/rustia-parser/tests/luau0709/types.rs::assignment_and_annotation_diagnostics Previous rejection coverage: crates/rustia-parser/src/lib.rs::tests::rejects_invalid_call_and_assignment_statements_from_luau_0709.
+1903	parse_error_type_annotation	ported	crates/rustia-parser/tests/luau0709/types.rs::assignment_and_annotation_diagnostics
+1908	parse_error_missing_type_annotation	ported	crates/rustia-parser/tests/luau0709/types.rs::assignment_and_annotation_diagnostics
+1948	parse_declarations	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+1988	parse_class_declarations	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2038	parse_extern_type_declarations	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2088	parse_extern_type_declarations_missing_with	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2143	parse_extern_type_declarations	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2193	parse_extern_type_declarations_missing_with	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2248	class_method_properties	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2286	class_indexer	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia parses executable source and has no declaration-file AST or class/extern declaration mode.
+2324	parse_variadics	ported	crates/rustia-parser/tests/luau0709/types.rs::variadic_functions_and_pack_aliases — The parser retains value-function vararg presence and the alias pack AST. It erases the value-function vararg annotation.
+2363	variadics_must_be_last	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_and_pack_diagnostics
+2369	variadic_definition_parsing	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia has no declaration-file AST or parser mode.
+2385	missing_declaration_prop	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia has no declaration-file AST or parser mode.
+2397	generic_pack_parsing	ported	crates/rustia-parser/tests/luau0709/types.rs::variadic_functions_and_pack_aliases — Alias argument/result pack names and value-function vararg presence. Value-function vararg annotations are erased.
+2431	generic_function_declaration_parsing	outside	C++ analyzer definition-file mode (allowDeclarationSyntax). Rustia has no declare-function AST.
+2446	function_type_named_arguments	ported	crates/rustia-parser/tests/luau0709/types.rs::named_function_type_parameters — The labels in function types are erased. generic_and_pack_diagnostics covers the two missing-arrow cases.
+2526	function_type_matching_parenthesis	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_and_pack_diagnostics
+2531	parse_type_alias_default_type	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_alias_defaults_and_pack_arguments
+2546	parse_type_alias_default_type_errors	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_and_pack_diagnostics
+2553	parse_type_pack_errors	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_and_pack_diagnostics
+2563	parse_if_else_expression	ported	crates/rustia-parser/tests/luau0709/types.rs::if_expression_nesting
+2618	parse_type_pack_type_parameters	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_alias_defaults_and_pack_arguments
+2630	invalid_type_forms	ported	crates/rustia-parser/tests/luau0709/types.rs::generic_and_pack_diagnostics
+2637	parse_user_defined_type_functions	existing	crates/rustia-parser/src/lib.rs::tests::parses_plain_exported_and_nested_type_function_declarations
+2655	parse_nested_type_function	existing	crates/rustia/tests/type_grammar.rs::type_function_declarations_erase_and_reject_outer_locals_before_execution runs conformance/fixtures/upstream-luau-0.709/type_function_declarations.luau, including the upstream nested capture and scope restoration example.
+2676	invalid_user_defined_type_functions	existing	crates/rustia-parser/src/lib.rs::tests::type_functions_reject_captures_across_their_lexical_boundary
+2682	leading_union_intersection_with_single_type_preserves_the_union_intersection_ast_node	ported	crates/rustia-parser/tests/luau0709/types.rs::union_intersection_and_group_structure
+2706	parse_simple_ast_type_group	ported	crates/rustia-parser/tests/luau0709/types.rs::union_intersection_and_group_structure — Rustia represents a grouped type as a one-entry TypePack. The group nesting, extents and innermost reference are observable.
+2722	parse_nested_ast_type_group	ported	crates/rustia-parser/tests/luau0709/types.rs::union_intersection_and_group_structure — Rustia represents a grouped type as a one-entry TypePack. The group nesting, extents and innermost reference are observable.
+2741	parse_return_type_ast_type_group	ported	crates/rustia-parser/tests/luau0709/types.rs::union_intersection_and_group_structure — Rustia represents a grouped type as a one-entry TypePack. The group nesting, extents and innermost reference are observable.
+2762	inner_and_outer_scope_of_functions_have_correct_end_position	ported	crates/rustia-parser/tests/luau0709/types.rs::function_block_and_for_extents — Outer declaration and body statement extents. Rustia stores a statement vector without a separate function-body block extent.
+2779	do_block_end_location_is_after_end_token	ported	crates/rustia-parser/tests/luau0709/types.rs::function_block_and_for_extents
+2794	function_start_locations_are_before_attributes	ported	crates/rustia-parser/tests/luau0709/types.rs::attributed_function_locations_include_the_attribute
+2826	for_loop_with_single_var_has_comma_positions_of_size_zero	ported	crates/rustia-parser/tests/luau0709/types.rs::function_block_and_for_extents — Single loop binding and iterator. Rustia has no CST comma-position array.
+2849	explicit_type_instantiation_expression_call	ported	crates/rustia-parser/tests/luau0709/types.rs::explicit_instantiation_postfix_and_call_shapes — Rustia retains the instantiated expression extent using its single-value erasure node. The type arguments themselves are erased.
+2875	explicit_type_instantiation_expression	ported	crates/rustia-parser/tests/luau0709/types.rs::explicit_instantiation_postfix_and_call_shapes
+2883	explicit_type_instantiation_statement	ported	crates/rustia-parser/tests/luau0709/types.rs::explicit_instantiation_postfix_and_call_shapes
+2891	explicit_type_instantiation_indexing	ported	crates/rustia-parser/tests/luau0709/types.rs::explicit_instantiation_postfix_and_call_shapes
+2903	explicit_type_instantiation_empty_list	ported	crates/rustia-parser/tests/luau0709/types.rs::explicit_instantiation_postfix_and_call_shapes
+2913	two_left_and_right_arrows_but_no_explicit_type_instantiation	ported	crates/rustia-parser/tests/luau0709/types.rs::angle_brackets_in_types_and_comparisons
+2921	basic_less_than_check_no_explicit_type_instantiaton	ported	crates/rustia-parser/tests/luau0709/types.rs::angle_brackets_in_types_and_comparisons
+2929	do_end_block_with_cst	ported	crates/rustia-parser/tests/luau0709/types.rs::function_block_and_for_extents — Nested statement and enclosing do/end extents. The C++ module/CST node map and delimiter positions are unexposed.
+2965	multiple_parse_errors	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::multiple_parse_errors. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+2982	statement_error_recovery_expected	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::statement_error_recovery_expected. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+2999	statement_error_recovery_unexpected	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::statement_error_recovery_unexpected. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3012	extra_token_in_consume	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::extra_token_in_consume. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3029	extra_token_in_consume_match	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::extra_token_in_consume_match. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3046	extra_token_in_consume_match_end	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::extra_token_in_consume_match_end. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3065	extra_table_indexer_recovery	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::extra_table_indexer_recovery. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3080	recovery_error_limit_1	outside	Configurable multi-error limit and C++ exception.what() text; Rustia returns one SourceError.
+3096	recovery_error_limit_2	outside	Configurable recovery limit, aggregate exception text and final recovered diagnostic; Rustia returns one SourceError.
+3126	recovery_of_parenthesized_expressions	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recovery_of_parenthesized_expressions. Checks all 12 malformed and corrected sources; recovered C++ AST node counts are unavailable.
+3196	incomplete_method_call	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::incomplete_method_call. Recovered nodes and subsequent diagnostics are unavailable.
+3221	incomplete_method_call_2	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::incomplete_method_call_2. Recovered nodes and subsequent diagnostics are unavailable.
+3248	incomplete_method_call_still_yields_an_AstExprIndexName	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::incomplete_method_call_still_yields_an_ast_expr_index_name. Recovered nodes and subsequent diagnostics are unavailable.
+3266	recover_confusables	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_confusables.
+3282	capture_comments	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::capture_comments. Checks the source result; comment capture and its list of comment locations are unavailable.
+3310	capture_broken_comment_at_the_start_of_the_file	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::capture_broken_comment_at_the_start_of_the_file. Checks the source result; comment capture and its list of comment locations are unavailable.
+3326	capture_broken_comment	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::capture_broken_comment. Checks the source result; comment capture and its list of comment locations are unavailable.
+3344	empty_function_type_error_recovery	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::empty_function_type_error_recovery. Recovered nodes and subsequent diagnostics are unavailable.
+3393	AstName_comparison	outside	C++ AstName pointer and comparison operators; Rustia owns identifier strings.
+3403	generic_type_list_recovery	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::generic_type_list_recovery. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3420	recover_index_name_keyword	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_index_name_keyword. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3436	recover_self_call_keyword	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_self_call_keyword. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3452	recover_type_index_name_keyword	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_type_index_name_keyword. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3468	recover_expected_type_pack	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_expected_type_pack. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3476	recover_unexpected_type_pack	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_unexpected_type_pack. Each malformed declaration is checked separately so its first error is observable. Rustia exposes one diagnostic; additional errors and counts are unavailable.
+3486	recover_function_return_type_annotations	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::recover_function_return_type_annotations. Each malformed declaration is checked separately so its first error is observable.
+3502	error_message_for_using_function_as_type_annotation	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::error_message_for_using_function_as_type_annotation.
+3514	get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_function_argument_list	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_function_argument_list. Recovered nodes and subsequent diagnostics are unavailable.
+3526	get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_function_parameter_list	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_function_parameter_list. Recovered nodes and subsequent diagnostics are unavailable.
+3541	get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_generic_parameter_list	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::get_a_nice_error_when_there_is_an_extra_comma_at_the_end_of_a_generic_parameter_list. Recovered nodes and subsequent diagnostics are unavailable.
+3563	get_a_nice_error_when_there_is_no_comma_between_table_members	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::get_a_nice_error_when_there_is_no_comma_between_table_members. Recovered nodes and subsequent diagnostics are unavailable.
+3586	get_a_nice_error_when_there_is_no_comma_after_last_table_member	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::get_a_nice_error_when_there_is_no_comma_after_last_table_member. Recovered nodes and subsequent diagnostics are unavailable.
+3608	missing_default_type_pack_argument_after_variadic_type_parameter	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::missing_default_type_pack_argument_after_variadic_type_parameter. Recovered nodes and subsequent diagnostics are unavailable.
+3623	table_type_keys_cant_contain_nul	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::table_type_keys_cant_contain_nul.
+3635	invalid_escape_literals_get_reported_but_parsing_continues	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::invalid_escape_literals_get_reported_but_parsing_continues. Recovered nodes and subsequent diagnostics are unavailable.
+3651	unfinished_string_literals_get_reported_but_parsing_continues	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::unfinished_string_literals_get_reported_but_parsing_continues. Recovered nodes and subsequent diagnostics are unavailable.
+3667	unfinished_string_literal_types_get_reported_but_parsing_continues	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::unfinished_string_literal_types_get_reported_but_parsing_continues. Recovered nodes and subsequent diagnostics are unavailable.
+3683	do_block_with_no_end	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::do_block_with_no_end. Recovered nodes and subsequent diagnostics are unavailable.
+3697	parse_interpolated_string_with_lookahead_involved	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_interpolated_string_with_lookahead_involved.
+3706	parse_interpolated_string_with_lookahead_involved2	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_interpolated_string_with_lookahead_involved2.
+3715	parse_top_level_checked_fn	outside	allowDeclarationSyntax and AstStatDeclareFunction checked metadata are declaration-file features.
+3734	parse_declared_table_checked_member	outside	allowDeclarationSyntax and AstStatDeclareGlobal checked function property metadata are declaration-file features.
+3761	parse_checked_outside_decl_fails	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_checked_outside_decl_fails. Checks ordinary parsing of the invalid attribute placement; declaration mode and recovery diagnostics are unavailable.
+3776	parse_checked_in_and_out_of_decl_fails	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_checked_in_and_out_of_decl_fails. Checks ordinary parsing of the invalid attribute placement; declaration mode and recovery diagnostics are unavailable.
+3793	parse_checked_as_function_name_fails	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_checked_as_function_name_fails. Checks ordinary parsing of the invalid attribute placement; declaration mode and recovery diagnostics are unavailable.
+3808	cannot_use_@_as_variable_name	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::cannot_use_at_as_variable_name. Checks ordinary parsing of the invalid attribute placement; declaration mode and recovery diagnostics are unavailable.
+3823	read_write_table_properties	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::read_write_table_properties. Checks all eleven named, singleton-key and indexer read/write property forms.
+3859	parse_attribute_on_function_stat	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attributes_on_global_and_local_functions
+3880	parse_parametrized_attribute_on_function_stat	ported	crates/rustia-parser/tests/luau0709/attributes.rs::deprecated_attribute_on_function
+3900	non_literal_attribute_arguments_is_not_allowed	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attribute_arguments_must_be_literals
+3913	unknown_arguments_for_depricated_is_not_allowed	ported	crates/rustia-parser/tests/luau0709/attributes.rs::deprecated_attribute_checks_argument_keys_and_values
+3953	do_not_hang_on_incomplete_attribute_list	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attribute_list_and_name_diagnostics. Checks list syntax and first errors using ordinary invalid lists.
+3983	parse_attribute_for_function_expression	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attributes_on_function_expressions
+4020	parse_attribute_on_local_function_stat	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attributes_on_global_and_local_functions
+4040	empty_attribute_name_is_not_allowed	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attribute_list_and_name_diagnostics
+4051	dont_parse_attributes_on_non_function_stat	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attributes_require_function_statements
+4151	dont_parse_attribute_on_argument_non_function	ported	crates/rustia-parser/tests/luau0709/attributes.rs::attributes_require_function_expressions
+4166	parse_attribute_on_function_type_declaration	outside	Definition-file declarations require allowDeclarationSyntax. Executable scripts use ordinary function attributes. See crates/rustia-parser/tests/luau0709/attributes.rs::type_attributes_require_definition_file_mode.
+4192	parse_attributes_on_function_type_declaration_in_table	outside	Definition-file declarations require allowDeclarationSyntax. Executable scripts use ordinary function attributes. See crates/rustia-parser/tests/luau0709/attributes.rs::type_attributes_require_definition_file_mode.
+4227	dont_parse_attributes_on_non_function_type_declarations	outside	Definition-file declarations require allowDeclarationSyntax. Executable scripts use ordinary function attributes. See crates/rustia-parser/tests/luau0709/attributes.rs::type_attributes_require_definition_file_mode.
+4269	attributes_cannot_be_duplicated	ported	crates/rustia-parser/tests/luau0709/attributes.rs::duplicate_and_unknown_attributes
+4281	unsupported_attributes_are_not_allowed	ported	crates/rustia-parser/tests/luau0709/attributes.rs::duplicate_and_unknown_attributes
+4293	can_parse_leading_bar_unions_successfully	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::can_parse_leading_bar_unions_successfully.
+4298	can_parse_leading_ampersand_intersections_successfully	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::can_parse_leading_ampersand_intersections_successfully.
+4303	mixed_leading_intersection_and_union_not_allowed	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::mixed_leading_intersection_and_union_not_allowed.
+4309	grouped_function_type	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::grouped_function_type.
+4337	complex_union_in_generic_ty	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::complex_union_in_generic_ty.
+4373	recover_from_bad_table_type	outside	Declaration-mode recovery of a malformed declare class table; Rustia has no declaration-file mode or recovered AST.
+4388	function_name_has_correct_start_location	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::function_name_has_correct_start_location.
+4409	stat_end_includes_semicolon_position	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::stat_end_includes_semicolon_position. Checks statement end offsets including optional semicolons. Rustia has no hasSemicolon flag.
+4435	parsing_type_suffix_for_return_type_with_variadic	existing	crates/rustia-parser/src/lib.rs::return_annotations_distinguish_single_types_and_packs checks the one-fixed-type variadic suffix quirk; upstream-only debug telemetry is unavailable.
+4449	parsing_string_union_indexers	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_string_union_indexers.
+4454	parsing_incomplete_string_interpolation_missing_curly_at_eof	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_curly_at_eof. Recovered nodes and subsequent diagnostics are unavailable.
+4474	parsing_incomplete_string_interpolation_missing_backtick_at_eof	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_backtick_at_eof. Recovered nodes and subsequent diagnostics are unavailable.
+4494	parsing_incomplete_string_interpolation_missing_curly_with_backtick_at_eof	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_curly_with_backtick_at_eof. Recovered nodes and subsequent diagnostics are unavailable.
+4514	parsing_incomplete_string_interpolation_missing_curly_broken_string	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_curly_broken_string. Recovered nodes and subsequent diagnostics are unavailable.
+4535	parsing_incomplete_string_interpolation_missing_backtick_broken_string	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_backtick_broken_string. Recovered nodes and subsequent diagnostics are unavailable.
+4556	parsing_incomplete_string_interpolation_missing_curly_with_backtick_broken_string	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parsing_incomplete_string_interpolation_missing_curly_with_backtick_broken_string. Recovered nodes and subsequent diagnostics are unavailable.
+4577	parse_type_name	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::parse_type_name. Checks three argument types and the result in an alias; no standalone parseType API or retained generic binder list on Rustia function types.
+4598	explicit_type_instantiation_errors	ported	crates/rustia-parser/tests/luau0709/diagnostics.rs::explicit_type_instantiation_errors.

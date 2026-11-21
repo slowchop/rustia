@@ -10,6 +10,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 - [`src/EGM.md`](./src/EGM.md) documents AST and parser entry points.
 - `parse_source(&str)` and `parse_source_bytes(&[u8])` return `Chunk` or `SourceError`.
+- Functions retain validated attribute kinds, literal arguments and byte spans. The compiler ignores attribute hints.
 - AST types include `Stmt`, `Expr`, `TypeExpr`, assignment operators/targets, function parameters, and table fields.
 
 ## Invariants

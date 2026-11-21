@@ -31,6 +31,8 @@ The benchmark workflows described in earlier entries ran in the private predeces
   including the restriction on capturing outer locals (#74).
 - Match Luau's call syntax across line breaks. Report ambiguous parentheses and
   accept string or table arguments on the next line (#35).
+- Accept Luau function attributes and explicit type arguments on values. Match the pinned parser on
+  literal decoding, contextual names, source spans and diagnostics covered by the [upstream case inventory](conformance/upstream/luau-0.709/README.md#parser-tests) (#35).
 
 - Match Luau method selection after arguments, including local receiver changes,
   expanded results and coroutine suspension. Preserve trailing varargs in

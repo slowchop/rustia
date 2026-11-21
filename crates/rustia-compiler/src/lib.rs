@@ -370,6 +370,7 @@ impl Compiler {
                 is_vararg,
                 body,
                 span,
+                ..
             } => {
                 self.compile_function_statement(target, *is_method, params, *is_vararg, body, *span)
             }
@@ -1533,7 +1534,9 @@ impl Compiler {
                 ));
                 Ok(())
             }
-            Expr::Paren { expr, .. } => self.compile_expr_to(expr, target),
+            Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => {
+                self.compile_expr_to(expr, target)
+            }
             Expr::Call { callee, args, .. } => {
                 self.compile_call_to(callee, args, target, expr.span())
             }
@@ -5366,13 +5369,17 @@ impl Compiler {
         }
         match argument {
             Expr::Name(name, _) => !self.name_is_lexically_bound(name),
-            Expr::Paren { expr, .. } => self.argument_may_run_guest_code(expr),
+            Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => {
+                self.argument_may_run_guest_code(expr)
+            }
             _ => true,
         }
     }
 
     fn method_receiver_register(&self, object: &Expr) -> Option<u8> {
         match object {
+            // Grouped locals retain their register. Explicit instantiation evaluates into
+            // a temporary before the arguments, even when its operand is a local.
             Expr::Paren { expr, .. } => self.method_receiver_register(expr),
             Expr::Name(name, _) => match self.locals.get(name) {
                 Some(Binding::Register(register) | Binding::CapturedLocal(register)) => {
@@ -5704,13 +5711,12 @@ impl Compiler {
     }
 
     fn mark_global_environment_escape_for_call(&mut self, callee: &Expr, args: &[Expr]) {
-        if matches!(callee, Expr::Name(name, _) if name == "rawset")
-            && self.builtin_global_is_unmodified("rawset")
-        {
+        let name = mutation_source_name(callee);
+        if name == Some("rawset") && self.builtin_global_is_unmodified("rawset") {
             self.mark_rawset_mutation(args);
             self.stdlib_tables_may_be_mutated = true;
         }
-        if matches!(callee, Expr::Name(name, _) if name == "getfenv" || name == "setfenv") {
+        if matches!(name, Some("getfenv" | "setfenv")) {
             self.global_environment_escaped = true;
         }
     }
@@ -5825,9 +5831,7 @@ impl Compiler {
     }
 
     fn global_table_field_assignment(&self, object: &Expr, field: &str) -> Option<String> {
-        if matches!(object, Expr::Name(name, _) if name == "_G")
-            && self.global_table_alias_is_unmodified()
-        {
+        if mutation_source_name(object) == Some("_G") && self.global_table_alias_is_unmodified() {
             Some(field.to_owned())
         } else {
             None
@@ -5835,9 +5839,7 @@ impl Compiler {
     }
 
     fn global_table_index_assignment(&self, object: &Expr, index: &Expr) -> Option<String> {
-        if !matches!(object, Expr::Name(name, _) if name == "_G")
-            || !self.global_table_alias_is_unmodified()
-        {
+        if mutation_source_name(object) != Some("_G") || !self.global_table_alias_is_unmodified() {
             return None;
         }
         let Some(Constant::String(name)) = const_eval(index) else {
@@ -5853,9 +5855,7 @@ impl Compiler {
         let Some(index) = args.get(1) else {
             return;
         };
-        if !matches!(object, Expr::Name(name, _) if name == "_G")
-            || !self.global_table_alias_is_unmodified()
-        {
+        if mutation_source_name(object) != Some("_G") || !self.global_table_alias_is_unmodified() {
             return;
         }
         let Some(Constant::String(name)) = const_eval(index) else {
@@ -6875,6 +6875,18 @@ impl GenericArrayIterator {
     }
 }
 
+/// These wrappers preserve a name's value, so writes through it must invalidate
+/// the same fast paths. This is separate from when a callee or receiver is read.
+fn mutation_source_name(mut expr: &Expr) -> Option<&str> {
+    while let Expr::Paren { expr: inner, .. } | Expr::TypeInstantiation { expr: inner, .. } = expr {
+        expr = inner;
+    }
+    match expr {
+        Expr::Name(name, _) => Some(name),
+        _ => None,
+    }
+}
+
 fn dotted_import_path(object: &Expr, field: &str) -> Option<Vec<String>> {
     fn collect(expr: &Expr, path: &mut Vec<String>) -> bool {
         match expr {
@@ -6939,7 +6951,7 @@ fn const_eval(expr: &Expr) -> Option<Constant> {
         } => None,
         Expr::Binary { op, lhs, rhs, .. } => const_eval_binary(*op, lhs, rhs),
         Expr::IfElse { .. } => None,
-        Expr::Paren { expr, .. } => const_eval(expr),
+        Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => const_eval(expr),
         Expr::Field { .. }
         | Expr::Index { .. }
         | Expr::Table { .. }
@@ -9932,6 +9944,14 @@ return `x {s}`"#,
                 "rawset(math, 'sqrt', function() return 99 end) return math.sqrt(4)",
                 99.0,
             ),
+            (
+                "rawset<<any>>(math, 'sqrt', function() return 99 end) return math.sqrt(4)",
+                99.0,
+            ),
+            (
+                "_G<<any>>.assert = function() return 37 end return assert(true)",
+                37.0,
+            ),
         ];
 
         for (source, expected) in number_cases {
@@ -10059,10 +10079,22 @@ return `x {s}`"#,
     }
 
     #[test]
-    fn break_outside_loop_is_a_compile_error() {
-        let chunk = parse_source("break").unwrap();
-        let error = compile(&chunk).unwrap_err();
-        assert!(error.to_string().contains("break outside loop"));
+    fn loop_control_outside_its_function_loop_is_a_compile_error() {
+        for keyword in ["break", "continue"] {
+            for source in [
+                keyword.to_owned(),
+                format!("repeat local function a() {keyword} end until false"),
+            ] {
+                let chunk = parse_source(&source).unwrap();
+                let error = compile(&chunk).unwrap_err();
+                let start = source.find(keyword).unwrap();
+                assert_eq!(
+                    error.span,
+                    Some(rustia_lexer::Span::new(start, start + keyword.len()))
+                );
+                assert_eq!(error.message, format!("{keyword} outside loop"));
+            }
+        }
     }
 
     #[test]

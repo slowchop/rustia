@@ -2,7 +2,9 @@
 
 ## Overview
 
-[lib.rs](./lib.rs) defines the AST, structured parse/source errors, and the recursive-descent parser used by the compiler.
+[lib.rs](./lib.rs) defines the AST, structured parse/source errors, and the recursive-descent parser used by the compiler. [diagnostics.rs](./diagnostics.rs) formats unexpected tokens and matched-delimiter locations. Source-based parsing borrows the original bytes so diagnostics preserve numeric spellings and raw string contents, including inside interpolation. The token-only `Parser::new` uses the decoded token values.
+
+[attributes.rs](attributes.rs) parses and validates function annotations. [diagnostics.rs](diagnostics.rs) formats Luau token and delimiter errors.
 
 ## Interface
 
@@ -30,11 +32,15 @@
 - Value-function return annotations distinguish a single type from a return pack. Suffixes require exactly one fixed entry; the pinned Luau 0.709 one-fixed-plus-tail suffix quirk is retained. Bare tails cannot take suffixes and nested bare packs reject. Suffixes consume the already-parsed node without backtracking; a test-only visit counter enforces one primary visit per nested type node. Leading union/intersection operators are supported; mixed unparenthesized operators reject.
 
 - Recursive parser paths share a 512-frame budget across statements, types, expressions and function signatures, alongside local depth checks. Erased `typeof` expressions and type function declarations validate function-body loop/vararg context before erasure; signatures keep the enclosing context and ordinary invalid functions retain their compiler error phase.
+- Explicit type instantiation uses the same type-or-pack argument grammar as named types,
+  including empty lists. An `Expr::TypeInstantiation` retains its operand and source extent and yields one
+  value. It can be indexed, called or used as a value. An instantiated method requires
+  call arguments.
 - Function and method calls reject an opening argument parenthesis on a later source line.
   For explicit type arguments, regular calls compare the opening parenthesis to the closing
   type delimiter. Method calls compare it to the method name. String and table arguments may
   start on a later line.
-- AST source spans are byte offsets inherited from lexer tokens.
+- AST source spans are byte offsets inherited from lexer tokens. Statement spans include an optional trailing semicolon.
 - Type syntax is parsed and retained as syntax; this module does not type-check it.
 
 ## Side Effects
@@ -43,4 +49,4 @@ The parser performs in-memory tokenization and AST construction and returns erro
 
 ## Verification
 
-From the repository root, run `cargo test --locked -p rustia-parser`.
+From the repository root, run `cargo test --locked -p rustia-parser`. The [upstream inventory](../../../conformance/upstream/luau-0.709/parser-cases.tsv) maps pinned tests to Rustia coverage.

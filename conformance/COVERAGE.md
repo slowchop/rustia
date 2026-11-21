@@ -3,9 +3,11 @@
 This file tracks the shape of the coverage work. The executable source of truth is `MANIFEST.tsv`.
 The declared behavior-topic catalog is `REFS.tsv`.
 
+The [Luau parser inventory](upstream/luau-0.709/README.md#parser-tests) tracks the upstream C++ parser cases separately from the runtime fixture totals below.
+
 ## Current Status
 
-- The current manifest contains 735 fixtures and 525 refs: 717 executable `luau-0.709` fixtures, 0
+- The current manifest contains 736 fixtures and 526 refs: 718 executable `luau-0.709` fixtures, 0
   `pending-oracle` P1 smoke fixtures, 18 `puc-lua-5.1.5` PUC 5.1.5 compat fixtures, and 0 whole upstream
   Luau 0.709 conformance scripts as `pending-impl` inventory.
 - The `puc-lua-5.1.5` rows are the `Puc51Compat` differential corpus: expectations were captured offline

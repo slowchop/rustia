@@ -786,8 +786,10 @@ fn compile_luau_loadstring(
 
 fn luau_loadstring_source_error(source_name: &str, error: SourceError) -> String {
     match error {
-        SourceError::Parse(error) if error.message == "expected statement" => {
-            format!("{source_name}:1: Incomplete statement: expected assignment or a function call")
+        SourceError::Parse(error)
+            if error.message == "Incomplete statement: expected assignment or a function call" =>
+        {
+            format!("{source_name}:1: {}", error.message)
         }
         error => format!("{source_name}:1: {error}"),
     }

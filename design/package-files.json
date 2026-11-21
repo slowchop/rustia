@@ -617,7 +617,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 760,
+      "file_count": 762,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -635,8 +635,8 @@
         "corpus/conformance/fixtures/p1-smoke/mod_negative_zero.luau",
         "corpus/conformance/fixtures/p1-smoke/numeric_arithmetic.luau",
         "corpus/conformance/fixtures/p1-smoke/numeric_literals.luau",
-        "corpus/conformance/fixtures/p1-smoke/string_literal_invalid_unknown_escape.luau",
         "corpus/conformance/fixtures/p1-smoke/string_literal_raw_newline_error.luau",
+        "corpus/conformance/fixtures/p1-smoke/string_literal_unknown_escape.luau",
         "corpus/conformance/fixtures/p1-smoke/types_erased.luau",
         "corpus/conformance/fixtures/p1-smoke/utf8_string.luau",
         "corpus/conformance/fixtures/puc51-compat/ctor_emission_order.luau",
@@ -749,6 +749,7 @@
         "corpus/conformance/fixtures/upstream-luau-0.709/function_anonymous_immediate_call.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/function_anonymous_local_nil_return.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/function_anonymous_missing_arg_nil.luau",
+        "corpus/conformance/fixtures/upstream-luau-0.709/function_attributes.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/function_closure_captures_parameters.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/function_extra_arg_discard.luau",
         "corpus/conformance/fixtures/upstream-luau-0.709/function_fixed_multi_return_assignment_expansion.luau",
@@ -1324,6 +1325,7 @@
         "corpus/conformance/upstream/luau-0.709/LICENSE.txt",
         "corpus/conformance/upstream/luau-0.709/PROVENANCE.tsv",
         "corpus/conformance/upstream/luau-0.709/README.md",
+        "corpus/conformance/upstream/luau-0.709/parser-cases.tsv",
         "corpus/conformance/upstream/luau-0.709/tests/Conformance.test.cpp",
         "corpus/conformance/upstream/luau-0.709/tests/conformance/apicalls.luau",
         "corpus/conformance/upstream/luau-0.709/tests/conformance/assert.luau",
@@ -1386,7 +1388,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-lexer/Cargo.toml",
       "publish": false,
-      "file_count": 10,
+      "file_count": 12,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1394,9 +1396,11 @@
         "Cargo.toml.orig",
         "EGM.md",
         "LICENSE-APACHE",
+        "LICENSE-LUAU",
         "LICENSE-MIT",
         "README.md",
         "src/EGM.md",
+        "src/confusables.rs",
         "src/lib.rs"
       ]
     },
@@ -1405,7 +1409,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-parser/Cargo.toml",
       "publish": false,
-      "file_count": 10,
+      "file_count": 19,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1413,10 +1417,19 @@
         "Cargo.toml.orig",
         "EGM.md",
         "LICENSE-APACHE",
+        "LICENSE-LUAU",
         "LICENSE-MIT",
         "README.md",
         "src/EGM.md",
-        "src/lib.rs"
+        "src/attributes.rs",
+        "src/diagnostics.rs",
+        "src/lib.rs",
+        "tests/luau0709/attributes.rs",
+        "tests/luau0709/basics.rs",
+        "tests/luau0709/diagnostics.rs",
+        "tests/luau0709/mod.rs",
+        "tests/luau0709/types.rs",
+        "tests/luau_0709.rs"
       ]
     },
     {

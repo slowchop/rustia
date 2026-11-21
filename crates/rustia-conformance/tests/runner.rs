@@ -1059,6 +1059,7 @@ fn assert_valid_oracle_command(command: &str, line_number: usize) {
     ) || command
         .starts_with("<build>/Luau.Repl conformance/fixtures/upstream-luau-0.709/")
         || command.starts_with("<build>/luau --fflags=false conformance/fixtures/upstream-luau-0.709/")
+        || command.starts_with("<build>/luau --fflags=false,LuauExplicitTypeInstantiationSyntax=true conformance/fixtures/upstream-luau-0.709/")
         || command.starts_with("source-inspection: ")
         || command.starts_with("fuzz/target/debug/error-oracle-worker luau < conformance/fixtures/upstream-luau-0.709/");
     assert!(
