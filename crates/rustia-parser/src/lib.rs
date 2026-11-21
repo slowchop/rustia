@@ -402,7 +402,7 @@ pub fn parse_source(source: &str) -> std::result::Result<Chunk, SourceError> {
 }
 
 pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceError> {
-    let lowered = lower_interpolated_strings(source).map_err(SourceError::Lex)?;
+    let lowered = lower_interpolated_strings(source);
     if let Some(mut lowered) = lowered {
         let mut tokens = lex_for_parser(&lowered.source)
             .map_err(|error| SourceError::Lex(lowered.remap_lex_error(error)))?;
@@ -414,19 +414,21 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
             .into_iter()
             .map(|(offset, interpolation)| (lowered.remap_start(offset), interpolation))
             .collect();
-        SourceParser::new(tokens, source, interpolations)
-            .parse_chunk()
-            .map_err(SourceError::Parse)
+        let mut parser = SourceParser::new(tokens, source, interpolations);
+        match lowered.failure {
+            Some((opening, error)) => Err(parser.error_before_failed_interpolation(opening, error)),
+            None => parser.parse_source_chunk(),
+        }
     } else {
         let tokens = lex_for_parser(source).map_err(SourceError::Lex)?;
-        SourceParser::new(tokens, source, BTreeMap::new())
-            .parse_chunk()
-            .map_err(SourceError::Parse)
+        SourceParser::new(tokens, source, BTreeMap::new()).parse_source_chunk()
     }
 }
 
 #[derive(Clone, Debug)]
 struct LoweredSource {
+    // The source offset of the opening backtick and the error found while lowering it.
+    failure: Option<(usize, LexError)>,
     source: Vec<u8>,
     origins: Vec<Span>,
     original_len: usize,
@@ -506,41 +508,53 @@ struct PendingInterpolatedString {
     span: Span,
 }
 
-fn lower_interpolated_strings(
-    source: &[u8],
-) -> std::result::Result<Option<LoweredSource>, LexError> {
+fn lower_interpolated_strings(source: &[u8]) -> Option<LoweredSource> {
     if !source.contains(&b'`') {
-        return Ok(None);
+        return None;
     }
+    let mut failure = None;
     let mut cursor = 0;
     let mut output = LoweredOutput::with_capacity(source.len());
     let mut interpolations = BTreeMap::new();
     let mut next_interpolation_id = 0usize;
     while cursor < source.len() {
         if source[cursor] == b'`' {
-            cursor = lower_interpolated_string(
+            match lower_interpolated_string(
                 source,
                 cursor,
                 &mut output,
                 &mut interpolations,
                 &mut next_interpolation_id,
-            )?;
+            ) {
+                Ok(end) => cursor = end,
+                Err(error) => {
+                    failure = Some((cursor, error));
+                    break;
+                }
+            }
         } else if matches!(source[cursor], b'\'' | b'"') {
-            copy_short_string(source, &mut cursor, &mut output)?;
-        } else if source[cursor] == b'[' && copy_long_bracket(source, &mut cursor, &mut output)? {
+            // The lexer preserves ordinary broken strings for grammar-context diagnostics.
+            copy_short_string(source, &mut cursor, &mut output);
+        } else if source[cursor] == b'['
+            && !matches!(
+                copy_long_bracket(source, &mut cursor, &mut output),
+                Ok(false)
+            )
+        {
         } else if source[cursor] == b'-' && source.get(cursor + 1) == Some(&b'-') {
-            copy_comment(source, &mut cursor, &mut output)?;
+            copy_comment(source, &mut cursor, &mut output);
         } else {
             output.push_original(source[cursor], cursor);
             cursor += 1;
         }
     }
-    Ok(Some(LoweredSource {
+    Some(LoweredSource {
+        failure,
         source: output.source,
         origins: output.origins,
         original_len: source.len(),
         interpolations,
-    }))
+    })
 }
 
 fn lower_interpolated_string(
@@ -751,11 +765,17 @@ fn lower_interpolated_expression(
                 })?;
             }
             b'\'' | b'"' => {
-                copy_short_string(source, &mut cursor, output)?;
+                let quote = cursor;
+                if !copy_short_string(source, &mut cursor, output) {
+                    return Err(LexError {
+                        span: Span::new(quote, cursor),
+                        message: "Malformed string; did you forget to finish it?".to_owned(),
+                    });
+                }
             }
             b'[' if copy_long_bracket(source, &mut cursor, output)? => {}
             b'-' if source.get(cursor + 1) == Some(&b'-') => {
-                copy_comment(source, &mut cursor, output)?;
+                copy_comment(source, &mut cursor, output);
             }
             b'{' => {
                 depth += 1;
@@ -937,11 +957,7 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-fn copy_short_string(
-    source: &[u8],
-    cursor: &mut usize,
-    output: &mut LoweredOutput,
-) -> std::result::Result<(), LexError> {
+fn copy_short_string(source: &[u8], cursor: &mut usize, output: &mut LoweredOutput) -> bool {
     let start = *cursor;
     let quote = source[start];
     *cursor += 1;
@@ -951,7 +967,7 @@ fn copy_short_string(
             b if b == quote => {
                 *cursor += 1;
                 output.extend_original(source, start, *cursor);
-                return Ok(());
+                return true;
             }
             b'\\' => {
                 *cursor += 1;
@@ -973,17 +989,11 @@ fn copy_short_string(
             _ => *cursor += 1,
         }
     }
-    Err(LexError {
-        span: Span::new(start, *cursor),
-        message: "Malformed string; did you forget to finish it?".to_owned(),
-    })
+    output.extend_original(source, start, *cursor);
+    false
 }
 
-fn copy_comment(
-    source: &[u8],
-    cursor: &mut usize,
-    output: &mut LoweredOutput,
-) -> std::result::Result<(), LexError> {
+fn copy_comment(source: &[u8], cursor: &mut usize, output: &mut LoweredOutput) {
     let start = *cursor;
     debug_assert_eq!(source.get(*cursor), Some(&b'-'));
     debug_assert_eq!(source.get(*cursor + 1), Some(&b'-'));
@@ -992,7 +1002,7 @@ fn copy_comment(
     // A broken long comment has already been copied through EOF. The lexer
     // supplies its token so the parser can report the surrounding context.
     if !matches!(copy_long_bracket(source, cursor, output), Ok(false)) {
-        return Ok(());
+        return;
     }
     while let Some(byte) = source.get(*cursor).copied() {
         if matches!(byte, b'\n' | b'\r') {
@@ -1002,7 +1012,6 @@ fn copy_comment(
         *cursor += 1;
     }
     debug_assert!(*cursor >= start + 2);
-    Ok(())
 }
 
 fn copy_long_bracket(
@@ -1135,6 +1144,7 @@ struct SourceParser<'source> {
     line_feeds: Vec<usize>,
     interpolations: BTreeMap<usize, PendingInterpolatedString>,
     cursor: usize,
+    literal_decode_failed: bool,
     active_parse_frames: usize,
     type_function_locals: TypeFunctionLocals,
     function_is_vararg: bool,
@@ -1165,6 +1175,7 @@ impl<'source> SourceParser<'source> {
             line_feeds,
             interpolations,
             cursor: 0,
+            literal_decode_failed: false,
             active_parse_frames: 0,
             function_is_vararg: true,
             loop_depth: 0,
@@ -1175,7 +1186,52 @@ impl<'source> SourceParser<'source> {
         }
     }
 
-    fn parse_chunk(mut self) -> Result<Chunk> {
+    // Lowering stops at the first malformed interpolation, keeping tokens already
+    // copied from ordinary source, including expressions inside this interpolation.
+    // An earlier broken quote may already decide the grammar or decoding error.
+    fn error_before_failed_interpolation(
+        &mut self,
+        opening: usize,
+        interpolation_error: LexError,
+    ) -> SourceError {
+        if let Err(error) = self.parse_source_chunk() {
+            let span = match &error {
+                SourceError::Lex(error) => error.span,
+                SourceError::Parse(error) => error.span,
+            };
+            // The parser either failed in the preceding real source, or identified a
+            // specific broken quote inside the interpolation. Missing tokens in the
+            // partial synthetic expression do not establish an earlier source error.
+            if self.peek().span.start < opening && span.start < span.end && span.end <= opening {
+                return error;
+            }
+            if self.tokens.iter().any(|token| {
+                token.span == span
+                    && matches!(
+                        token.kind,
+                        TokenKind::MalformedStringEscape(_) | TokenKind::UnfinishedString
+                    )
+            }) {
+                return error;
+            }
+        }
+        SourceError::Lex(interpolation_error)
+    }
+
+    fn parse_source_chunk(&mut self) -> std::result::Result<Chunk, SourceError> {
+        self.parse_chunk().map_err(|error| {
+            if self.literal_decode_failed {
+                SourceError::Lex(LexError {
+                    span: error.span,
+                    message: error.message,
+                })
+            } else {
+                SourceError::Parse(error)
+            }
+        })
+    }
+
+    fn parse_chunk(&mut self) -> Result<Chunk> {
         let statements = self.parse_block()?;
         if !self.at_simple(SimpleToken::Eof) {
             return Err(ParseError {
@@ -1568,7 +1624,12 @@ impl<'source> SourceParser<'source> {
 
     fn parse_if_chain_inner(&mut self, start: usize) -> Result<(Stmt, usize)> {
         let condition = self.parse_expr(0, 0)?;
-        let then = self.expect_simple(SimpleToken::Then, "expected 'then' after if condition")?;
+        let then = self.eat_simple(SimpleToken::Then).ok_or_else(|| {
+            self.error_here(format!(
+                "Expected 'then' when parsing if statement, got {}",
+                self.describe_token()
+            ))
+        })?;
         let then_body = self.with_local_scope(|parser| {
             parser.parse_delimited_block(
                 &[SimpleToken::ElseIf, SimpleToken::Else, SimpleToken::End],
@@ -2044,13 +2105,13 @@ impl<'source> SourceParser<'source> {
             let close = self.expect_simple(SimpleToken::RParen, "expected ')' after arguments")?;
             return Ok(Some((args, close.span.end)));
         }
-        if matches!(self.peek().kind, TokenKind::String(_)) {
-            let token = self.advance().clone();
-            let TokenKind::String(value) = token.kind else {
-                unreachable!("matched string token");
-            };
-            let end = token.span.end;
-            return Ok(Some((vec![Expr::String(value, token.span)], end)));
+        if matches!(
+            self.peek().kind,
+            TokenKind::String(_) | TokenKind::MalformedStringEscape(_)
+        ) {
+            let arg = self.parse_primary(depth + 1)?;
+            let end = arg.span_end();
+            return Ok(Some((vec![arg], end)));
         }
         if let Some(open) = self.eat_simple(SimpleToken::LBrace) {
             let table = self.parse_table_literal(open.span, depth + 1)?;
@@ -2103,6 +2164,23 @@ impl<'source> SourceParser<'source> {
         Ok((args, close.span.end))
     }
 
+    fn literal_decode_error(&mut self, token: &Token) -> ParseError {
+        self.literal_decode_failed = true;
+        let message = match token.kind {
+            TokenKind::MalformedNumber(_) => "Malformed number",
+            TokenKind::MalformedStringEscape(_) => {
+                "String literal contains malformed escape sequence"
+            }
+            TokenKind::UnfinishedString => "Malformed string; did you forget to finish it?",
+            _ => unreachable!("literal_decode_error called for a valid token"),
+        };
+        ParseError {
+            span: token.span,
+            message: message.to_owned(),
+            unclosed_block: None,
+        }
+    }
+
     fn parse_primary(&mut self, depth: usize) -> Result<Expr> {
         self.check_depth(depth)?;
         let token = self.advance().clone();
@@ -2112,6 +2190,9 @@ impl<'source> SourceParser<'source> {
             TokenKind::False => Ok(Expr::Bool(false, token.span)),
             TokenKind::Number(value) => Ok(Expr::Number(value, token.span)),
             TokenKind::String(value) => Ok(Expr::String(value, token.span)),
+            TokenKind::MalformedNumber(_)
+            | TokenKind::MalformedStringEscape(_)
+            | TokenKind::UnfinishedString => Err(self.literal_decode_error(&token)),
             TokenKind::Ident(name) => {
                 if let Some(interpolation) = self.interpolations.remove(&token.span.start) {
                     return self.parse_interpolated_string(interpolation, depth + 1);
@@ -2710,30 +2791,43 @@ impl<'source> SourceParser<'source> {
                 if self.interpolations.contains_key(&self.peek().span.start) {
                     return Err(self.error_here("interpolated strings are not valid in types"));
                 }
-                let string_property = matches!(self.peek().kind, TokenKind::String(_))
-                    && matches!(
-                        self.tokens.get(self.cursor + 1).map(|token| &token.kind),
-                        Some(TokenKind::RBracket)
-                    );
-                if string_property {
-                    let token = self.advance();
-                    if let TokenKind::String(value) = &token.kind {
-                        if value.contains(&0) {
-                            return Err(ParseError {
-                                unclosed_block: None,
-                                span: bracket.span,
-                                message: "String literal contains malformed escape sequence or \\0"
-                                    .to_owned(),
-                            });
-                        }
-                    }
+                let string_property = matches!(
+                    self.peek().kind,
+                    TokenKind::String(_) | TokenKind::MalformedStringEscape(_)
+                ) && matches!(
+                    self.tokens.get(self.cursor + 1).map(|token| &token.kind),
+                    Some(TokenKind::RBracket)
+                );
+                let invalid_property_key = if string_property {
                     has_property = true;
+                    let token = self.advance();
+                    matches!(&token.kind, TokenKind::MalformedStringEscape(_))
+                        || matches!(&token.kind, TokenKind::String(value) if value.contains(&0))
                 } else {
                     self.parse_single_type(depth + 1)?;
-                }
+                    false
+                };
                 self.expect_simple(SimpleToken::RBracket, "expected ']' after table type key")?;
-                self.expect_simple(SimpleToken::Colon, "expected ':' after table type key")?;
+                self.eat_simple(SimpleToken::Colon).ok_or_else(|| {
+                    let context = if string_property {
+                        "table field"
+                    } else {
+                        "table indexer"
+                    };
+                    self.error_here(format!(
+                        "Expected ':' when parsing {context}, got {}",
+                        self.describe_token()
+                    ))
+                })?;
                 let value = self.parse_single_type(depth + 1)?;
+                if invalid_property_key {
+                    return Err(ParseError {
+                        unclosed_block: None,
+                        span: bracket.span,
+                        message: "String literal contains malformed escape sequence or \\0"
+                            .to_owned(),
+                    });
+                }
                 if !string_property {
                     if has_indexer {
                         return Err(ParseError {
@@ -2899,6 +2993,12 @@ impl<'source> SourceParser<'source> {
             .checked_sub(1)
             .map_or(self.peek().span.start, |i| self.tokens[i].span.end);
         let token = self.advance().clone();
+        if matches!(
+            token.kind,
+            TokenKind::MalformedStringEscape(_) | TokenKind::UnfinishedString
+        ) {
+            return Err(self.literal_decode_error(&token));
+        }
         let kind = match token.kind {
             TokenKind::Type => TokenKind::Ident("type".to_owned()),
             kind => kind,

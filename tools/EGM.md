@@ -6,7 +6,7 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Interface
 
-- [Project status validation](check-project-status.js) checks the pinned list of 235 upstream parser tests and resolves every applicable entry to a Rust test.
+- [Project status validation](check-project-status.js) checks the pinned lists of 235 parser and 28 lexer tests and resolves each applicable entry to a Rust test.
 
 - [`check-public-source-candidate.js`](check-public-source-candidate.js) checks
   hosted workflow parity and negative fixtures for the selected source profile.

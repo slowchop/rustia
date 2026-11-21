@@ -23,6 +23,9 @@ The benchmark workflows described in earlier entries ran in the private predeces
 
 ### Fixed
 
+- The standalone lexer now identifies an unfinished long comment as a comment. Invalid string
+  literals retain their source spans so the parser can report the first syntax error in context.
+
 - Preserve operator and indexing caller locations for metamethod `error` levels
   and `debug.info` (#18).
 - Parse contextual `export type` declarations and single-result `::` type

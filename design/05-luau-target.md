@@ -29,6 +29,8 @@
   enables `LuauExplicitTypeInstantiationSyntax`. Rustia accepts this syntax on calls and value expressions by default. The shared parser comparison enables
   the same flag in the pinned compiler. The [case inventory](../conformance/upstream/luau-0.709/parser-cases.tsv)
   maps each upstream parser test to executable evidence or a reason it is outside the standalone target.
+  The [lexer inventory](../conformance/upstream/luau-0.709/lexer-cases.tsv) records which token boundaries,
+  decoded values and first diagnostics Rustia exposes for each of the 28 upstream lexer cases.
 
 ## Numbers are f64-only (verified, not assumed)
 At 0.709, **`f64` (IEEE-754 double) is the only script-level number type.** Oracle-proven:

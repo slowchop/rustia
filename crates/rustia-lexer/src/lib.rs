@@ -29,7 +29,13 @@ pub enum TokenKind {
     Attribute(String),
     AttributeOpen,
     Number(f64),
+    /// A later malformed numeral retained while resolving an earlier string error.
+    MalformedNumber(String),
     String(Vec<u8>),
+    /// Parser-facing token for a closed quote whose contents failed to decode.
+    MalformedStringEscape(Vec<u8>),
+    /// Parser-facing token for an unfinished quoted or long-bracket string.
+    UnfinishedString,
     Local,
     Return,
     Function,
@@ -121,8 +127,8 @@ pub fn lex_bytes(source: &[u8]) -> Result<Vec<Token>> {
     Lexer::new(source).lex_all(false)
 }
 
-/// Keeps unrecognized punctuation and Unicode tokens so parser errors can
-/// identify both the unexpected token and the grammatical context.
+/// Keeps malformed string, punctuation and Unicode tokens for contextual parser diagnostics.
+/// A malformed string retains its source extent and any following tokens through EOF.
 pub fn lex_for_parser(source: &[u8]) -> Result<Vec<Token>> {
     Lexer::new(source).lex_all(true)
 }
@@ -131,6 +137,7 @@ struct Lexer<'a> {
     bytes: &'a [u8],
     cursor: usize,
     tokens: Vec<Token>,
+    has_invalid_string: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -139,63 +146,28 @@ impl<'a> Lexer<'a> {
             bytes,
             cursor: 0,
             tokens: Vec::new(),
+            has_invalid_string: false,
         }
     }
 
     fn lex_all(mut self, keep_invalid: bool) -> Result<Vec<Token>> {
         while let Some(byte) = self.peek() {
-            match byte {
-                b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c => {
-                    self.cursor += 1;
+            if let Err(error) = self.lex_token(byte, keep_invalid) {
+                if !self.has_invalid_string {
+                    return Err(error);
                 }
-                b'0'..=b'9' => self.lex_number()?,
-                b'.' if self.peek_next().is_some_and(|b| b.is_ascii_digit()) => {
-                    self.lex_number()?
-                }
-                b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident_or_keyword(),
-                b'"' | b'\'' => {
-                    let start = self.cursor;
-                    if let Err(error) = self.lex_string(byte) {
-                        return Err(if keep_invalid {
-                            self.short_string_error(start, byte)
-                        } else {
-                            error
-                        });
-                    }
-                }
-                b'+' => self.single_or_equal(TokenKind::Plus, TokenKind::PlusEqual),
-                b'*' => self.single_or_equal(TokenKind::Star, TokenKind::StarEqual),
-                b'/' => self.lex_slash(),
-                b'%' => self.single_or_equal(TokenKind::Percent, TokenKind::PercentEqual),
-                b'^' => self.single_or_equal(TokenKind::Caret, TokenKind::CaretEqual),
-                b'=' => self.lex_equal(),
-                b'~' => self.lex_tilde_equal()?,
-                b',' => self.single(TokenKind::Comma),
-                b';' => self.single(TokenKind::Semicolon),
-                b':' => self.single(TokenKind::Colon),
-                b'.' => self.lex_dot(),
-                b'#' => self.single(TokenKind::Hash),
-                b'@' => self.lex_attribute(),
-                b'(' => self.single(TokenKind::LParen),
-                b')' => self.single(TokenKind::RParen),
-                b'{' => self.single(TokenKind::LBrace),
-                b'}' => self.single(TokenKind::RBrace),
-                b'[' => self.lex_left_bracket()?,
-                b']' => self.single(TokenKind::RBracket),
-                b'<' => self.lex_less(),
-                b'>' => self.lex_greater(),
-                b'|' => self.single(TokenKind::Pipe),
-                b'&' => self.single(TokenKind::Ampersand),
-                b'?' => self.single(TokenKind::Question),
-                b'-' => self.lex_minus_or_comment(keep_invalid)?,
-                _ if keep_invalid => self.lex_invalid(),
-                _ => {
-                    let span = Span::new(self.cursor, self.cursor + 1);
-                    return Err(LexError {
-                        span,
-                        message: format!("unexpected byte 0x{byte:02x}"),
-                    });
-                }
+                // A previous string failure is pending. Keep both tokens so the
+                // grammar can determine which error to report first.
+                let raw = &self.bytes[error.span.start..error.span.end];
+                let kind = if matches!(byte, b'0'..=b'9' | b'.') {
+                    TokenKind::MalformedNumber(String::from_utf8_lossy(raw).into_owned())
+                } else {
+                    TokenKind::Invalid(format!("'{}'", String::from_utf8_lossy(raw)))
+                };
+                self.tokens.push(Token {
+                    kind,
+                    span: error.span,
+                });
             }
         }
         self.tokens.push(Token {
@@ -203,6 +175,74 @@ impl<'a> Lexer<'a> {
             span: Span::new(self.cursor, self.cursor),
         });
         Ok(self.tokens)
+    }
+
+    fn lex_token(&mut self, byte: u8, keep_invalid: bool) -> Result<()> {
+        match byte {
+            b' ' | b'\t' | b'\r' | b'\n' | 0x0b | 0x0c => {
+                self.cursor += 1;
+            }
+            b'0'..=b'9' => self.lex_number()?,
+            b'.' if self.peek_next().is_some_and(|b| b.is_ascii_digit()) => self.lex_number()?,
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident_or_keyword(),
+            b'"' | b'\'' => {
+                let start = self.cursor;
+                if let Err(error) = self.lex_string(byte) {
+                    if !keep_invalid {
+                        return Err(error);
+                    }
+                    let token = self.recover_short_string(start, byte);
+                    self.cursor = token.span.end;
+                    self.has_invalid_string = true;
+                    self.tokens.push(token);
+                }
+            }
+            b'+' => self.single_or_equal(TokenKind::Plus, TokenKind::PlusEqual),
+            b'*' => self.single_or_equal(TokenKind::Star, TokenKind::StarEqual),
+            b'/' => self.lex_slash(),
+            b'%' => self.single_or_equal(TokenKind::Percent, TokenKind::PercentEqual),
+            b'^' => self.single_or_equal(TokenKind::Caret, TokenKind::CaretEqual),
+            b'=' => self.lex_equal(),
+            b'~' => self.lex_tilde_equal()?,
+            b',' => self.single(TokenKind::Comma),
+            b';' => self.single(TokenKind::Semicolon),
+            b':' => self.single(TokenKind::Colon),
+            b'.' => self.lex_dot(),
+            b'#' => self.single(TokenKind::Hash),
+            b'@' => self.lex_attribute(),
+            b'(' => self.single(TokenKind::LParen),
+            b')' => self.single(TokenKind::RParen),
+            b'{' => self.single(TokenKind::LBrace),
+            b'}' => self.single(TokenKind::RBrace),
+            b'[' => {
+                if let Err(error) = self.lex_left_bracket() {
+                    if !keep_invalid {
+                        return Err(error);
+                    }
+                    self.has_invalid_string = true;
+                    self.tokens.push(Token {
+                        kind: TokenKind::UnfinishedString,
+                        span: error.span,
+                    });
+                }
+            }
+            b']' => self.single(TokenKind::RBracket),
+            b'<' => self.lex_less(),
+            b'>' => self.lex_greater(),
+            b'|' => self.single(TokenKind::Pipe),
+            b'&' => self.single(TokenKind::Ampersand),
+            b'?' => self.single(TokenKind::Question),
+            b'-' => self.lex_minus_or_comment(keep_invalid)?,
+            _ if keep_invalid => self.lex_invalid(),
+            _ => {
+                let span = Span::new(self.cursor, self.cursor + 1);
+                return Err(LexError {
+                    span,
+                    message: format!("unexpected byte 0x{byte:02x}"),
+                });
+            }
+        }
+        Ok(())
     }
 
     fn lex_invalid(&mut self) {
@@ -314,15 +354,16 @@ impl<'a> Lexer<'a> {
 
     /// Recover the complete raw token only when decoding has failed. A
     /// closing quote distinguishes a bad escape from an unfinished literal.
-    fn short_string_error(&self, start: usize, quote: u8) -> LexError {
+    fn recover_short_string(&self, start: usize, quote: u8) -> Token {
         let mut end = start + 1;
-        let mut message = "Malformed string; did you forget to finish it?";
+        let mut kind = TokenKind::UnfinishedString;
         while let Some(&byte) = self.bytes.get(end) {
             match byte {
                 b'\r' | b'\n' => break,
                 b if b == quote => {
                     end += 1;
-                    message = "String literal contains malformed escape sequence";
+                    kind =
+                        TokenKind::MalformedStringEscape(self.bytes[start + 1..end - 1].to_vec());
                     break;
                 }
                 b'\\' => {
@@ -346,9 +387,9 @@ impl<'a> Lexer<'a> {
                 _ => end += 1,
             }
         }
-        LexError {
+        Token {
             span: Span::new(start, end),
-            message: message.to_owned(),
+            kind,
         }
     }
 
@@ -559,7 +600,12 @@ impl<'a> Lexer<'a> {
     fn lex_left_bracket(&mut self) -> Result<()> {
         let start = self.cursor;
         if let Some((level, content_start)) = self.long_bracket_opener_at(start) {
-            let range = self.read_long_bracket(start, level, content_start)?;
+            let range = self.read_long_bracket(
+                start,
+                level,
+                content_start,
+                "Malformed string; did you forget to finish it?",
+            )?;
             let raw = &self.bytes[range];
             // 0.709 ignores one initial LF or CRLF, and converts later CRLF pairs to LF.
             let raw = raw
@@ -587,6 +633,7 @@ impl<'a> Lexer<'a> {
         opener_start: usize,
         level: usize,
         content_start: usize,
+        unfinished: &'static str,
     ) -> Result<std::ops::Range<usize>> {
         self.cursor = content_start;
         while self.cursor < self.bytes.len() {
@@ -599,7 +646,7 @@ impl<'a> Lexer<'a> {
         }
         Err(LexError {
             span: Span::new(opener_start, self.cursor),
-            message: "Malformed string; did you forget to finish it?".to_owned(),
+            message: unfinished.to_owned(),
         })
     }
 
@@ -751,10 +798,12 @@ impl<'a> Lexer<'a> {
         if self.peek() == Some(b'-') {
             self.cursor += 1;
             if let Some((level, content_start)) = self.long_bracket_opener_at(self.cursor) {
-                if let Err(error) = self.read_long_bracket(start, level, content_start) {
+                if let Err(error) =
+                    self.read_long_bracket(start, level, content_start, "unfinished comment")
+                {
                     if keep_invalid {
                         self.tokens.push(Token {
-                            kind: TokenKind::Invalid("unfinished comment".to_owned()),
+                            kind: TokenKind::Invalid(error.message),
                             span: error.span,
                         });
                     } else {

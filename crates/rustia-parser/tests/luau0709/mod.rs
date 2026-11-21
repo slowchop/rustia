@@ -2,4 +2,5 @@
 mod attributes;
 mod basics;
 mod diagnostics;
+mod lexer_interpolation;
 mod types;

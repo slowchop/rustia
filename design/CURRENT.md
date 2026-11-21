@@ -53,7 +53,9 @@ covers both forms.
 Rustia validates function attributes and preserves their source spans. The interpreter ignores the hints.
 Explicit type arguments can also appear on values, including before indexing. The
 [pinned parser inventory](../conformance/upstream/luau-0.709/README.md#parser-tests) records the tests,
-previous coverage and exclusions for every upstream parser case.
+previous coverage and exclusions for every upstream parser case. The
+[lexer inventory](../conformance/upstream/luau-0.709/README.md#lexer-tests) maps all 28 lexer cases
+to Rustia’s token, span and interpolation tests.
 
 ## Issue #21 memory recovery
 
