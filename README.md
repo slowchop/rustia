@@ -11,6 +11,10 @@ from Mint to Iris. [Record the race](https://github.com/slowchop/rustia/blob/mai
 
 ![Native and WebAssembly replays side by side. Mint wins with seed 7 and Iris wins with seed 11 on both.](https://github.com/slowchop/rustia/raw/fdcb4bae6d376bc6f323cc47b70521479008133a/demos/web-live/race.gif)
 
+A script can queue moves during a game turn. Rust receives them when the turn
+succeeds. If the turn fails, Rustia discards the queued moves.
+[Game-turn example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+
 ## Try it
 
 Install this interpreter from Git until its first crates.io release. Use the pinned revision below.
@@ -78,6 +82,9 @@ error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick.
 
 ![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
 
+If a script hits its memory limit, the game can run the next script in the same
+interpreter. [Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
+
 ## Choose an environment
 
 Start with `Rustia::builder()`. It uses a fixed random seed and repeatable clocks.
@@ -143,15 +150,15 @@ Rustia targets standalone Luau 0.709, including its vector and buffer libraries.
 
 All seven compile Luau to bytecode. ulua, mlua and Lune also offer a native JIT. For source-to-source transpilation or bundling, see [darklua](https://darklua.com/).
 
-| Project | Desktop | Browser&nbsp;Wasm | Hot&nbsp;reload | Replay |
-| --- | --- | --- | --- | --- |
-| **Rustia** | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[1\]](#luau-note-1) | [Demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md) | Rollback | [✓&nbsp;Tested](#luau-note-1) |
-| luaur | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[2\]](#luau-note-2) | [Playground](https://pjankiewicz.github.io/luaur/) | Run&nbsp;code | — |
-| ulua | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[3\]](#luau-note-3) | [Playground](https://webc-site.github.io/ulua/) | Run&nbsp;code | — |
-| ruau | ![Linux][rustia-linux]&nbsp;[\[4\]](#luau-note-4) | — | Reload&nbsp;module | [◐&nbsp;Controls](#luau-note-4) |
-| luau-rs/luau | ![Linux][rustia-linux]&nbsp;[\[5\]](#luau-note-5) | [CI&nbsp;tests](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml) | Run&nbsp;code | — |
-| mlua | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[6\]](#luau-note-6) | [Build](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) | Replace&nbsp;module | — |
-| Lune | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[7\]](#luau-note-7) | — | Load&nbsp;script | — |
+| Project | Engine | Desktop | Browser&nbsp;Wasm | Hot&nbsp;reload | Replay |
+| --- | --- | --- | --- | --- | --- |
+| **Rustia** | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[1\]](#luau-note-1) | [Demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md) | Rollback | [✓&nbsp;Tested](#luau-note-1) |
+| luaur | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[2\]](#luau-note-2) | [Playground](https://pjankiewicz.github.io/luaur/) | Run&nbsp;code | — |
+| ulua | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[3\]](#luau-note-3) | [Playground](https://webc-site.github.io/ulua/) | Run&nbsp;code | — |
+| ruau | Rust | ![Linux][rustia-linux]&nbsp;[\[4\]](#luau-note-4) | — | Reload&nbsp;module | [◐&nbsp;Controls](#luau-note-4) |
+| luau-rs/luau | Rust | ![Linux][rustia-linux]&nbsp;[\[5\]](#luau-note-5) | [CI&nbsp;tests](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml) | Run&nbsp;code | — |
+| mlua | Upstream Luau (C++) | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[6\]](#luau-note-6) | [Build](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) | Replace&nbsp;module | — |
+| Lune | Upstream Luau (C++) | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[7\]](#luau-note-7) | — | Load&nbsp;script | — |
 
 **Desktop** shows platforms listed in CI, release builds or recorded runs. ![Linux][rustia-linux] Linux · ![macOS][rustia-macos] macOS · ![Windows][rustia-windows] Windows. Rustia also runs on ARM64 iOS and Android. [\[1\]](#luau-note-1)
 
