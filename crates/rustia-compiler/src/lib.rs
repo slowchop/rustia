@@ -60,6 +60,7 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 
 mod builtins;
 mod o2;
+mod repeat_condition;
 
 pub use o2::{ExperimentalO2Options, ProgramReceipts};
 
@@ -86,9 +87,12 @@ pub fn compile_with_options_and_receipts(
     // sets and therefore emits cell write-throughs at every assignment site. This pass also finds
     // syntactic global writes: Luau disables builtin recognition even for a source-later write.
     let experimental_o2 = options.experimental_o2;
-    let (capture_hints, written_globals) =
+    let (capture_hints, written_globals, needs_repeat_check) =
         Compiler::new(options.clone()).discover_capture_hints(chunk)?;
     let mut compiler = Compiler::with_capture_hints(options, capture_hints);
+    if needs_repeat_check {
+        compiler.repeat_constants = repeat_condition::check(chunk, &compiler.options)?;
+    }
     compiler.written_globals = written_globals;
     let program = compiler.compile_chunk(chunk)?;
     if experimental_o2.any_enabled() {
@@ -151,6 +155,17 @@ pub enum BuiltinEnvironment {
     #[default]
     Public,
     LuauConformance,
+}
+
+// Luau attributes a call to the end of its callee, and a namecall to the
+// method name. Keep the outer expression available as the host diagnostic span.
+fn call_site_span(expr: &Expr) -> Span {
+    let start = match expr {
+        Expr::Call { callee, .. } => callee.span().end,
+        Expr::MethodCall { method_span, .. } => method_span.start,
+        _ => return expr.span(),
+    };
+    Span::new(start, expr.span().end)
 }
 
 fn statement_span(statement: &Stmt) -> Span {
@@ -235,6 +250,8 @@ struct Compiler {
     current_function_is_vararg: bool,
     next_register: u16,
     max_registers: u16,
+    needs_repeat_check: bool,
+    repeat_constants: repeat_condition::CapturedConstants,
     loop_breaks: Vec<Vec<usize>>,
     loop_continues: Vec<Vec<usize>>,
     loop_scope_depths: Vec<usize>,
@@ -276,6 +293,8 @@ impl Compiler {
             current_function_is_vararg: true,
             next_register: 0,
             max_registers: 0,
+            needs_repeat_check: false,
+            repeat_constants: BTreeMap::new(),
             loop_breaks: Vec::new(),
             loop_continues: Vec::new(),
             loop_scope_depths: Vec::new(),
@@ -283,7 +302,10 @@ impl Compiler {
         }
     }
 
-    fn discover_capture_hints(mut self, chunk: &Chunk) -> Result<(Vec<Vec<u8>>, BTreeSet<String>)> {
+    fn discover_capture_hints(
+        mut self,
+        chunk: &Chunk,
+    ) -> Result<(Vec<Vec<u8>>, BTreeSet<String>, bool)> {
         // Compile every statement and nested prototype so the normal lexical
         // resolver—not a second shadow implementation—discovers captures.
         // Final bytecode packaging and immutable-origin rewriting are skipped.
@@ -291,6 +313,7 @@ impl Compiler {
         Ok((
             collect_capture_hints(&self.captured_registers, &self.functions),
             self.written_globals,
+            self.needs_repeat_check,
         ))
     }
 
@@ -459,7 +482,12 @@ impl Compiler {
                 }
                 prefix_first
             };
-            self.compile_return_expand(last_expr, prefix_first, prefix_count, span)?;
+            self.compile_return_expand(
+                last_expr,
+                prefix_first,
+                prefix_count,
+                call_site_span(last_expr),
+            )?;
             return Ok(());
         }
         let first_register = self.alloc_register_window_at(result_count, span)?;
@@ -509,7 +537,6 @@ impl Compiler {
                     &init[last_index],
                     registers[last_index],
                     result_count,
-                    span,
                 )?;
                 debug_assert!(expanded);
                 handled_init = true;
@@ -704,6 +731,7 @@ impl Compiler {
                 key,
                 global_field,
                 stdlib_field,
+                ..
             } => {
                 let function_register = self.alloc_register_at(span)?;
                 self.emit_instruction(Instruction::with_aux(
@@ -817,7 +845,12 @@ impl Compiler {
                         i32::from(*index),
                     ));
                 }
-                CompiledAssignmentTarget::Table { table, key, .. } => {
+                CompiledAssignmentTarget::Table {
+                    table,
+                    key,
+                    key_span,
+                    ..
+                } => {
                     let instruction = match (*key, reusable_string_key) {
                         (
                             CompiledTableKey::StringConstant { index: key, .. },
@@ -835,7 +868,7 @@ impl Compiler {
                         }
                         _ => table_get_instruction(result, *table, *key),
                     };
-                    self.code.push(instruction);
+                    self.emit_source_mapped_instruction(instruction, *key_span);
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -882,17 +915,18 @@ impl Compiler {
                         i32::from(*index),
                     ));
                 }
-                CompiledAssignmentTarget::Table { table, key, .. } => {
-                    if let Some(key_register) = reusable_string_key {
-                        self.emit_instruction(Instruction::new(
-                            Opcode::SetIndex,
-                            *table,
-                            key_register,
-                            result,
-                        ));
+                CompiledAssignmentTarget::Table {
+                    table,
+                    key,
+                    key_span,
+                    ..
+                } => {
+                    let instruction = if let Some(key_register) = reusable_string_key {
+                        Instruction::new(Opcode::SetIndex, *table, key_register, result)
                     } else {
-                        self.emit_instruction(table_set_instruction(*table, *key, result));
-                    }
+                        table_set_instruction(*table, *key, result)
+                    };
+                    self.emit_source_mapped_instruction(instruction, *key_span);
                 }
                 CompiledAssignmentTarget::Global { key, .. } => {
                     self.code
@@ -936,12 +970,8 @@ impl Compiler {
                 }
                 let result_count = compiled_targets.len() - last_index;
                 let first_result = self.alloc_register_window_at(result_count, span)?;
-                let expanded = self.compile_expand_multi_to(
-                    &values[last_index],
-                    first_result,
-                    result_count,
-                    span,
-                )?;
+                let expanded =
+                    self.compile_expand_multi_to(&values[last_index], first_result, result_count)?;
                 debug_assert!(expanded);
 
                 for (target, source) in compiled_targets.iter().zip(value_registers.iter().copied())
@@ -1034,7 +1064,7 @@ impl Compiler {
                 object,
                 field,
                 field_span,
-                ..
+                span,
             } => {
                 let global_field = self.global_table_field_assignment(object, field);
                 let table = self.compile_expr(object)?;
@@ -1046,6 +1076,7 @@ impl Compiler {
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
+                    key_span: *span,
                     global_field,
                     stdlib_field: self.stdlib_table_field_assignment(object, field),
                 })
@@ -1062,6 +1093,7 @@ impl Compiler {
                 Ok(CompiledAssignmentTarget::Table {
                     table,
                     key,
+                    key_span: index.span(),
                     global_field,
                     stdlib_field,
                 })
@@ -1221,8 +1253,27 @@ impl Compiler {
         self.loop_scope_depths
             .push(self.scope_register_starts.len());
         self.compile_block(body)?;
+        if self
+            .loop_continues
+            .last()
+            .is_some_and(|jumps| !jumps.is_empty())
+        {
+            self.needs_repeat_check |= body
+                .iter()
+                .any(|s| matches!(s, Stmt::Local { .. } | Stmt::LocalFunction { .. }));
+        }
         let condition_start = self.code.len();
         self.patch_loop_continues_to(condition_start, span)?;
+        if let Some(constants) = self.repeat_constants.remove(&condition.span().start) {
+            for (name, value) in constants {
+                if let Some(Binding::Register(register) | Binding::CapturedLocal(register)) =
+                    self.locals.get(&name).copied()
+                {
+                    self.clear_local_cell(register);
+                    self.load_constant_to(register, value)?;
+                }
+            }
+        }
         let condition_register = self.compile_expr(condition)?;
         let loop_start = self.jump_target(loop_start, span)?;
         self.emit_instruction(Instruction::with_aux(
@@ -1538,17 +1589,14 @@ impl Compiler {
                 self.compile_expr_to(expr, target)
             }
             Expr::Call { callee, args, .. } => {
-                self.compile_call_to(callee, args, target, expr.span())
+                self.compile_call_to(callee, args, target, call_site_span(expr))
             }
             Expr::MethodCall {
                 object,
                 method,
-                method_span,
                 args,
                 ..
-            } => {
-                self.compile_method_call_to(object, method, *method_span, args, target, expr.span())
-            }
+            } => self.compile_method_call_to(object, method, args, target, call_site_span(expr)),
         }
     }
 
@@ -2091,12 +2139,13 @@ impl Compiler {
                 expr.span(),
             ));
         }
+        let span = call_site_span(expr);
         match expr {
             Expr::Call { callee, args, .. } => {
                 if args.len() > u8::MAX as usize {
                     return Err(CompileError::at(
                         "function call has too many arguments",
-                        expr.span(),
+                        span,
                     ));
                 }
                 let original_next_register = self.next_register;
@@ -2107,16 +2156,13 @@ impl Compiler {
                         callee,
                         args,
                         original_next_register,
-                        expr.span(),
+                        span,
                     );
                 }
                 let mut argc = args.len();
                 if self.value_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
-                        CompileError::at(
-                            "expanded table call needs a trailing argument",
-                            expr.span(),
-                        )
+                        CompileError::at("expanded table call needs a trailing argument", span)
                     })?;
                     let trailing = &args[trailing_index];
                     let Some(result_count) = self.fixed_expansion_result_count(trailing) else {
@@ -2126,24 +2172,24 @@ impl Compiler {
                             callee,
                             args,
                             original_next_register,
-                            expr.span(),
+                            span,
                         );
                     };
                     argc = trailing_index.checked_add(result_count).ok_or_else(|| {
-                        CompileError::at("function call has too many arguments", expr.span())
+                        CompileError::at("function call has too many arguments", span)
                     })?;
                 }
                 if argc > u8::MAX as usize {
                     return Err(CompileError::at(
                         "function call has too many arguments",
-                        expr.span(),
+                        span,
                     ));
                 }
                 let callee_register = self.alloc_register_window_at(
                     1usize.checked_add(argc).ok_or_else(|| {
-                        CompileError::at("function call register window overflow", expr.span())
+                        CompileError::at("function call register window overflow", span)
                     })?,
-                    expr.span(),
+                    span,
                 )?;
                 let deferred = self.deferred_builtin_import(callee, args)?.is_some();
                 if !deferred {
@@ -2151,29 +2197,23 @@ impl Compiler {
                 }
                 if self.value_call_has_expandable_trailing_arg(args) {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
-                        CompileError::at(
-                            "expanded table call needs a trailing argument",
-                            expr.span(),
-                        )
+                        CompileError::at("expanded table call needs a trailing argument", span)
                     })?;
                     for (index, arg) in args[..trailing_index].iter().enumerate() {
-                        let register =
-                            checked_register_offset(callee_register, index + 1, expr.span())?;
+                        let register = checked_register_offset(callee_register, index + 1, span)?;
                         self.compile_expr_to(arg, register)?;
                     }
                     let trailing_register =
-                        checked_register_offset(callee_register, trailing_index + 1, expr.span())?;
+                        checked_register_offset(callee_register, trailing_index + 1, span)?;
                     let result_count = argc - trailing_index;
                     self.compile_expand_multi_to(
                         &args[trailing_index],
                         trailing_register,
                         result_count,
-                        expr.span(),
                     )?;
                 } else {
                     for (index, arg) in args.iter().enumerate() {
-                        let register =
-                            checked_register_offset(callee_register, index + 1, expr.span())?;
+                        let register = checked_register_offset(callee_register, index + 1, span)?;
                         self.compile_expr_to(arg, register)?;
                     }
                 }
@@ -2186,11 +2226,11 @@ impl Compiler {
                         table_register,
                         callee_register,
                         u8::try_from(argc).map_err(|_| {
-                            CompileError::at("function call has too many arguments", expr.span())
+                            CompileError::at("function call has too many arguments", span)
                         })?,
                         array_index as i32,
                     ),
-                    expr.span(),
+                    span,
                 );
                 self.free_registers_back_to(original_next_register);
                 Ok(())
@@ -2203,12 +2243,12 @@ impl Compiler {
                 ..
             } => {
                 let argc = args.len().checked_add(1).ok_or_else(|| {
-                    CompileError::at("function call has too many arguments", expr.span())
+                    CompileError::at("function call has too many arguments", span)
                 })?;
                 if argc > u8::MAX as usize {
                     return Err(CompileError::at(
                         "function call has too many arguments",
-                        expr.span(),
+                        span,
                     ));
                 }
                 let original_next_register = self.next_register;
@@ -2220,7 +2260,7 @@ impl Compiler {
                             table: table_register,
                             index: array_index,
                         },
-                        expr.span(),
+                        span,
                     )?;
                     self.free_registers_back_to(original_next_register);
                     return Ok(());
@@ -2230,7 +2270,7 @@ impl Compiler {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
                             "expanded table method call needs a trailing argument",
-                            expr.span(),
+                            span,
                         )
                     })?;
                     let trailing = &args[trailing_index];
@@ -2246,22 +2286,22 @@ impl Compiler {
                         .checked_add(1)
                         .and_then(|count| count.checked_add(result_count))
                         .ok_or_else(|| {
-                            CompileError::at("function call has too many arguments", expr.span())
+                            CompileError::at("function call has too many arguments", span)
                         })?;
                 }
                 if argc > u8::MAX as usize {
                     return Err(CompileError::at(
                         "function call has too many arguments",
-                        expr.span(),
+                        span,
                     ));
                 }
                 let callee_register = self.alloc_register_window_at(
                     1usize.checked_add(argc).ok_or_else(|| {
-                        CompileError::at("function call register window overflow", expr.span())
+                        CompileError::at("function call register window overflow", span)
                     })?,
-                    expr.span(),
+                    span,
                 )?;
-                let self_register = checked_register_offset(callee_register, 1, expr.span())?;
+                let self_register = checked_register_offset(callee_register, 1, span)?;
                 if self.method_receiver_register(object).is_none() {
                     self.compile_expr_to(object, self_register)?;
                 }
@@ -2270,51 +2310,42 @@ impl Compiler {
                     let trailing_index = args.len().checked_sub(1).ok_or_else(|| {
                         CompileError::at(
                             "expanded table method call needs a trailing argument",
-                            expr.span(),
+                            span,
                         )
                     })?;
                     for (index, arg) in args[..trailing_index].iter().enumerate() {
-                        let register =
-                            checked_register_offset(callee_register, index + 2, expr.span())?;
+                        let register = checked_register_offset(callee_register, index + 2, span)?;
                         self.compile_expr_to(arg, register)?;
                     }
                     let trailing_register =
-                        checked_register_offset(callee_register, trailing_index + 2, expr.span())?;
+                        checked_register_offset(callee_register, trailing_index + 2, span)?;
                     let result_count = argc - trailing_index - 1;
                     self.compile_expand_multi_to(
                         &args[trailing_index],
                         trailing_register,
                         result_count,
-                        expr.span(),
                     )?;
                 } else {
                     for (index, arg) in args.iter().enumerate() {
-                        let register =
-                            checked_register_offset(callee_register, index + 2, expr.span())?;
+                        let register = checked_register_offset(callee_register, index + 2, span)?;
                         self.compile_expr_to(arg, register)?;
                     }
                 }
                 if self.method_receiver_register(object).is_some() {
                     self.compile_expr_to(object, self_register)?;
                 }
-                self.emit_namecall_lookup(
-                    callee_register,
-                    self_register,
-                    method,
-                    true,
-                    expr.span(),
-                )?;
+                self.emit_namecall_lookup(callee_register, self_register, method, true, span)?;
                 self.emit_source_mapped_instruction(
                     Instruction::with_aux(
                         Opcode::AppendCall,
                         table_register,
                         callee_register,
                         u8::try_from(argc).map_err(|_| {
-                            CompileError::at("function call has too many arguments", expr.span())
+                            CompileError::at("function call has too many arguments", span)
                         })?,
                         array_index as i32,
                     ),
-                    expr.span(),
+                    span,
                 );
                 self.free_registers_back_to(original_next_register);
                 Ok(())
@@ -2612,9 +2643,9 @@ impl Compiler {
         body: &[Stmt],
         span: Span,
     ) -> Result<()> {
-        if iter.is_empty() {
+        let Some(last_iter) = iter.last() else {
             return Err(CompileError::at("unsupported generic for iterator", span));
-        }
+        };
         if variables.len() > u8::MAX as usize {
             return Err(CompileError::at(
                 "generic for has too many visible variables",
@@ -2649,13 +2680,16 @@ impl Compiler {
             0
         };
         let prep_jump = self.code.len();
-        self.emit_instruction(Instruction::with_aux(
-            Opcode::GenericCallPrep,
-            iterator_register,
-            caller_cell_mode,
-            visible_count,
-            0,
-        ));
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GenericCallPrep,
+                iterator_register,
+                caller_cell_mode,
+                visible_count,
+                0,
+            ),
+            call_site_span(last_iter),
+        );
         let body_start = self.code.len();
         self.loop_breaks.push(Vec::new());
         self.loop_continues.push(Vec::new());
@@ -2665,13 +2699,16 @@ impl Compiler {
         let continue_target = self.code.len();
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
-        self.emit_instruction(Instruction::with_aux(
-            Opcode::GenericCallLoop,
-            iterator_register,
-            caller_cell_mode,
-            visible_count,
-            body_start,
-        ));
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GenericCallLoop,
+                iterator_register,
+                caller_cell_mode,
+                visible_count,
+                body_start,
+            ),
+            span,
+        );
 
         let clear_start = self.code.len();
         self.clear_local_cells_from(next_register)?;
@@ -2724,13 +2761,16 @@ impl Compiler {
             0
         };
         let prep_jump = self.code.len();
-        self.emit_instruction(Instruction::with_aux(
-            Opcode::GeneralizedIterPrep,
-            iterator_register,
-            caller_cell_mode,
-            visible_count,
-            0,
-        ));
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GeneralizedIterPrep,
+                iterator_register,
+                caller_cell_mode,
+                visible_count,
+                0,
+            ),
+            call_site_span(expr),
+        );
         let body_start = self.code.len();
         self.loop_breaks.push(Vec::new());
         self.loop_continues.push(Vec::new());
@@ -2740,13 +2780,16 @@ impl Compiler {
         let continue_target = self.code.len();
         self.patch_loop_continues_to(continue_target, span)?;
         let body_start = self.jump_target(body_start, span)?;
-        self.emit_instruction(Instruction::with_aux(
-            Opcode::GeneralizedIterLoop,
-            iterator_register,
-            caller_cell_mode,
-            visible_count,
-            body_start,
-        ));
+        self.emit_source_mapped_instruction(
+            Instruction::with_aux(
+                Opcode::GeneralizedIterLoop,
+                iterator_register,
+                caller_cell_mode,
+                visible_count,
+                body_start,
+            ),
+            span,
+        );
 
         let clear_start = self.code.len();
         self.clear_local_cells_from(next_register)?;
@@ -2778,7 +2821,7 @@ impl Compiler {
             let first_result = checked_register_offset(first_register, last_index, span)?;
             let result_count = ITERATOR_SLOT_COUNT - last_index;
             let expanded =
-                self.compile_expand_multi_to(&iter[last_index], first_result, result_count, span)?;
+                self.compile_expand_multi_to(&iter[last_index], first_result, result_count)?;
             debug_assert!(expanded);
             return Ok(());
         }
@@ -3494,7 +3537,13 @@ impl Compiler {
         let Ok(chunk) = parse_source_bytes(source) else {
             return self.compile_value_call_to(callee, args, target, span);
         };
+        let options = CompileOptions::default().with_source_bytes("loadstring", source);
+        let Ok(constants) = repeat_condition::check(&chunk, &options) else {
+            return self.compile_value_call_to(callee, args, target, span);
+        };
+        let parent = std::mem::replace(&mut self.repeat_constants, constants);
         let prototype = self.compile_detached_chunk_prototype(&chunk, span)?;
+        self.repeat_constants = parent;
         self.emit_instruction(Instruction::with_aux(
             Opcode::LoadFunction,
             target,
@@ -4118,8 +4167,8 @@ impl Compiler {
         expr: &Expr,
         first_register: u8,
         result_count: usize,
-        span: Span,
     ) -> Result<bool> {
+        let span = call_site_span(expr);
         match expr {
             Expr::Call { callee, args, .. } => {
                 self.compile_value_call_multi_to(callee, args, first_register, result_count, span)?;
@@ -4643,7 +4692,6 @@ impl Compiler {
         &mut self,
         object: &Expr,
         method: &str,
-        _method_span: Span,
         args: &[Expr],
         target: u8,
         span: Span,
@@ -5980,8 +6028,16 @@ impl Compiler {
                     i32::from(*index),
                 ));
             }
-            CompiledAssignmentTarget::Table { table, key, .. } => {
-                self.emit_instruction(table_set_instruction(*table, *key, source));
+            CompiledAssignmentTarget::Table {
+                table,
+                key,
+                key_span,
+                ..
+            } => {
+                self.emit_source_mapped_instruction(
+                    table_set_instruction(*table, *key, source),
+                    *key_span,
+                );
             }
             CompiledAssignmentTarget::Global { key, .. } => {
                 self.code
@@ -6778,6 +6834,7 @@ enum CompiledAssignmentTarget {
     Table {
         table: u8,
         key: CompiledTableKey,
+        key_span: Span,
         global_field: Option<String>,
         stdlib_field: Option<(String, String)>,
     },
@@ -6989,6 +7046,10 @@ fn math_specialized_min_arity(field: &str) -> Option<usize> {
 fn const_eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Option<Constant> {
     let lhs = const_eval(lhs)?;
     let rhs = const_eval(rhs)?;
+    fold_binary_constants(op, lhs, rhs)
+}
+
+fn fold_binary_constants(op: BinaryOp, lhs: Constant, rhs: Constant) -> Option<Constant> {
     match op {
         BinaryOp::Eq => Some(Constant::Boolean(constant_luau_equals(&lhs, &rhs))),
         BinaryOp::Ne => Some(Constant::Boolean(!constant_luau_equals(&lhs, &rhs))),

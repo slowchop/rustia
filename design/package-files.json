@@ -583,7 +583,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 25,
+      "file_count": 27,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -597,6 +597,7 @@
         "src/builtins.rs",
         "src/lib.rs",
         "src/o2.rs",
+        "src/repeat_condition.rs",
         "tests/array_slot_write_coverage.rs",
         "tests/capture_metadata.rs",
         "tests/executor_ownership.rs",
@@ -609,7 +610,8 @@
         "tests/o2_workload_preview.rs",
         "tests/opcode_census.rs",
         "tests/performance_fastpaths.rs",
-        "tests/performance_gc_audit.rs"
+        "tests/performance_gc_audit.rs",
+        "tests/repeat_condition.rs"
       ]
     },
     {
@@ -617,7 +619,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "file_count": 763,
+      "file_count": 764,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1325,6 +1327,7 @@
         "corpus/conformance/upstream/luau-0.709/LICENSE.txt",
         "corpus/conformance/upstream/luau-0.709/PROVENANCE.tsv",
         "corpus/conformance/upstream/luau-0.709/README.md",
+        "corpus/conformance/upstream/luau-0.709/compiler-cases.tsv",
         "corpus/conformance/upstream/luau-0.709/lexer-cases.tsv",
         "corpus/conformance/upstream/luau-0.709/parser-cases.tsv",
         "corpus/conformance/upstream/luau-0.709/tests/Conformance.test.cpp",

@@ -48,3 +48,22 @@ Run the direct ports with `cargo test --locked -p rustia-lexer --test luau_0709`
 are handled by the parser. Run those six ports with
 `cargo test --locked -p rustia-parser --test luau_0709 lexer_interpolation`. They also run in the
 shared pinned-compiler comparison described above.
+
+## Compiler tests
+
+The [compiler inventory](compiler-cases.tsv) lists all 200 declarations in the pinned
+[Compiler.test.cpp](https://github.com/luau-lang/luau/blob/b968ef742741bb2b703afc3b3c53f06608c87481/tests/Compiler.test.cpp).
+At this audit, 19 already had coverage, 138 gained tests, and 43 are outside this comparison. Examples include serialized instruction numbers, configurable recursion
+limits, and four-component vectors. Each row explains what its evidence covers.
+
+Many upstream cases inspect bytecode for a script that never runs in the C++ test. Rustia uses its own
+bytecode. The [executable adaptations](../../../fuzz/tests/compiler0709) supply concrete inputs, replace
+host-only objects with small guest fixtures, and return what a script can observe. Examples check which
+calls run, what a closure captures, which line a callback reports, and how many values a call returns.
+
+Hosted CI executes each adapted chunk in Rustia and Luau 0.709 with the reference compiler at optimization
+levels 1 and 2 (scripts with an explicit optimization directive retain it). The harness compares the full sequence of primitive results, including nils and binary
+strings. Compile-time errors are checked separately. One test records an allowed identity difference
+when Luau reuses a function object and Rustia creates a fresh one.
+
+Run `cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_compiler`.

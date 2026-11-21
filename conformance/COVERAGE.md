@@ -3,7 +3,7 @@
 This file tracks the shape of the coverage work. The executable source of truth is `MANIFEST.tsv`.
 The declared behavior-topic catalog is `REFS.tsv`.
 
-The [parser inventory](upstream/luau-0.709/README.md#parser-tests) and [lexer inventory](upstream/luau-0.709/README.md#lexer-tests) map the pinned upstream frontend tests. The runtime fixture totals below come from the manifest.
+The [parser inventory](upstream/luau-0.709/README.md#parser-tests), [compiler inventory](upstream/luau-0.709/README.md#compiler-tests) and [lexer inventory](upstream/luau-0.709/README.md#lexer-tests) map the pinned upstream frontend tests. The runtime fixture totals below come from the manifest.
 
 ## Current Status
 
@@ -40,7 +40,7 @@ The [parser inventory](upstream/luau-0.709/README.md#parser-tests) and [lexer in
   `rawget`/`rawset`/`rawlen`, string length including embedded NUL decimal
   escapes, direct `string.find` first-result searches including anchored control-byte class patterns, direct `string.len`, direct single-result
   `string.byte`, direct ASCII `string.upper`/`string.lower`, direct `string.rep`, direct `string.gmatch`
-  iterator closures over plain byte matches, line scans, ASCII word runs, and UTF-8 charpattern slices,
+  iterator closures over plain byte matches, line scans, ASCII letter and alphanumeric runs, and UTF-8 charpattern slices,
   direct `string.split`,
   direct `string.reverse`, direct `string.sub`
   clamping/negative-index ranges, direct `string.format` for `%s`, `%%`, `%q`, `%c`, integer, and

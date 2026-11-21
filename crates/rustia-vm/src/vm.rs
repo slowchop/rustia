@@ -10493,15 +10493,38 @@ impl Vm {
             .map(Some)
     }
 
+    fn current_instruction<'p>(&self, program: &'p Program) -> Option<(&'p Function, usize)> {
+        let (prototype, pc) = self.call_stack.last()?.instruction?;
+        let function = match prototype {
+            Some(index) => program.functions.get(index as usize)?,
+            None => &program.main,
+        };
+        Some((function, pc))
+    }
+
     fn current_call_site(&self, program: &Program) -> Option<ErrorLocation> {
-        self.call_stack.last().and_then(|frame| {
-            let (prototype, pc) = frame.instruction?;
-            let function = match prototype {
-                Some(index) => program.functions.get(index as usize)?,
-                None => &program.main,
-            };
-            instruction_source_location(program, function, pc)
-        })
+        let (function, pc) = self.current_instruction(program)?;
+        instruction_source_location(program, function, pc)
+    }
+
+    fn iterator_call_site(&self, program: &Program) -> Option<ErrorLocation> {
+        let (function, pc) = self.current_instruction(program)?;
+        let instruction = function.code.get(pc)?;
+        // Prep performs both setup (including __iter) and the first step.
+        // The paired loop instruction carries the source line for every step.
+        let loop_op = match instruction.op {
+            Opcode::GenericCallPrep => Some(Opcode::GenericCallLoop),
+            Opcode::GeneralizedIterPrep => Some(Opcode::GeneralizedIterLoop),
+            _ => None,
+        };
+        let pc = loop_op
+            .and_then(|op| {
+                let end = usize::try_from(instruction.aux).ok()?;
+                let index = end.checked_sub(1)?;
+                (function.code.get(index)?.op == op).then_some(index)
+            })
+            .unwrap_or(pc);
+        instruction_source_location(program, function, pc)
     }
 
     fn call_value(
@@ -19992,7 +20015,7 @@ impl Vm {
                     bytecode_data,
                     &[state, control],
                     depth,
-                    None,
+                    self.iterator_call_site(program),
                     fuel,
                 )?
             }
@@ -20002,7 +20025,7 @@ impl Vm {
                 iterator,
                 &[state, control],
                 depth,
-                None,
+                self.iterator_call_site(program),
                 fuel,
             )?
         };
@@ -27123,7 +27146,14 @@ fn luau_gmatch_next(text: &[u8], pattern: &[u8], cursor: usize) -> Result<Option
             }
         })),
         GMatchPatternKind::LineExceptNewlineStar => Ok(next_non_newline_run(text, cursor)),
-        GMatchPatternKind::AsciiWordPlus => Ok(next_ascii_word_run(text, cursor)),
+        GMatchPatternKind::AsciiAlphaPlus => {
+            Ok(next_ascii_class_run(text, cursor, u8::is_ascii_alphabetic))
+        }
+        GMatchPatternKind::AsciiWordPlus => Ok(next_ascii_class_run(
+            text,
+            cursor,
+            u8::is_ascii_alphanumeric,
+        )),
         GMatchPatternKind::Utf8CharPattern => Ok(next_utf8_charpattern(text, cursor).map(
             |(start, end)| GMatchResult {
                 next_cursor: end,
@@ -27149,6 +27179,9 @@ fn luau_gmatch_next(text: &[u8], pattern: &[u8], cursor: usize) -> Result<Option
 fn luau_gmatch_pattern_kind(pattern: &[u8]) -> Result<GMatchPatternKind> {
     if pattern == b"[^\n]*" {
         return Ok(GMatchPatternKind::LineExceptNewlineStar);
+    }
+    if pattern == b"%a+" {
+        return Ok(GMatchPatternKind::AsciiAlphaPlus);
     }
     if pattern == b"%w+" {
         return Ok(GMatchPatternKind::AsciiWordPlus);
@@ -27197,16 +27230,20 @@ fn next_non_newline_run(text: &[u8], cursor: usize) -> Option<GMatchResult> {
     })
 }
 
-fn next_ascii_word_run(text: &[u8], cursor: usize) -> Option<GMatchResult> {
+fn next_ascii_class_run(
+    text: &[u8],
+    cursor: usize,
+    matches: impl Fn(&u8) -> bool,
+) -> Option<GMatchResult> {
     let mut start = cursor;
-    while start < text.len() && !text[start].is_ascii_alphanumeric() {
+    while start < text.len() && !matches(&text[start]) {
         start += 1;
     }
     if start >= text.len() {
         return None;
     }
     let mut end = start + 1;
-    while end < text.len() && text[end].is_ascii_alphanumeric() {
+    while end < text.len() && matches(&text[end]) {
         end += 1;
     }
     Some(GMatchResult {
@@ -27289,6 +27326,7 @@ enum GMatchCapture {
 enum GMatchPatternKind {
     Plain,
     LineExceptNewlineStar,
+    AsciiAlphaPlus,
     AsciiWordPlus,
     Utf8CharPattern,
     Utf8PositionCapture,

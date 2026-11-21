@@ -362,6 +362,7 @@ function checkErrorFuzz(text, mode = "private") {
     "        run: node tools/audit-release-errors.mjs",
   ].join("\n"), label + " diagnostic parity");
   if (mode === "public") {
+    requireText(jobs.get("differential-smoke"), "run: cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_compiler", label + " compiler ports");
     requireText(jobs.get("differential-smoke"), "run: cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser", label + " parser ports");
   }
   const stepGuards = [...text.matchAll(/^        if:([^\n]*)$/gm)].map((match) => match[1].trim());
