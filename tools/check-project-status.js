@@ -74,7 +74,7 @@ function checkFrontendInventory(suite, expectedDigest) {
     }
     upstream.push(`${line}\t${name}\n`);
     if (status === "outside") continue;
-    const match = evidence.match(/^(crates\/[\w./-]+\.rs)::(?:tests::)?(\w+)/);
+    const match = evidence.match(/^((?:crates|fuzz\/tests)\/[\w./-]+\.rs)::(?:tests::)?(\w+)/);
     if (!match || !readText(match[1]).includes(`fn ${match[2]}(`)) {
       fail(`missing Rust test for upstream ${suite} case ${name} at line ${line}`);
     }
@@ -326,6 +326,7 @@ const current = readText("design/CURRENT.md");
 
 checkProgressMetadata(progress);
 checkFrontendInventory("parser", "cf23db794dfe83b38dd729714d647677f8e56941f89301e6d8b8b05f11cfcf6d");
+checkFrontendInventory("compiler", "b946b015af8e7f0776401a6238e9521c5f11b656fde1e4e5c44ee645dd94ad46");
 checkFrontendInventory("lexer", "afcdf740f85c1e8cba8c8388415038cdf5bb02b5064d56cd3eb566946c88c6bc");
 checkConformance(progress, current, readme);
 checkBenchmark(progress, current);

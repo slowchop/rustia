@@ -25,13 +25,14 @@
 
 - Public execution returns release internal error tracebacks. Debug snapshots preserve function/environment metadata without saved register roots, so failed allocation graphs can be reclaimed before VM reuse. OOM host diagnostics record the stopped instruction while keeping bare guest error text.
 
-- Call frames retain prototype/PC coordinates for the active instruction, including expanded-call dispatch and restored continuations; implicit calls resolve those coordinates lazily for error levels and debug caller locations.
+- Call frames retain prototype/PC coordinates for the active instruction, including expanded-call dispatch and restored continuations; implicit calls resolve those coordinates lazily for error levels and debug caller locations. Generic iterator callbacks also receive the active loop call site.
 - `setfenv` keeps logical call headers and transferred bytecode frames coherent. Level zero updates only the current coroutine's recorded call/active-frame bases, so nested resumers retain their own thread environment across child yield and return.
 
 - Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Completed tape runs fall directly into canonical admission at the returned PC, without retrying tape eligibility. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
 
 - Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations.
+- The native `string.gmatch` iterator matches `%a+` over ASCII letters and `%w+` over ASCII letters and digits. It advances by byte offsets.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.
 - Successful scalar leaf calls skip caller-register synchronization only when loader analysis of actual bytecode proves the caller cannot attach local capture cells. `GetLocalCell`, `SetLocalCell`, or `LoadFunction` keeps the scan; unknown frames fall back conservatively. The proof is read with the existing caller-site cache lookup on eligible scalar calls, rather than at every frame entry. Optional capture hints do not establish this proof ([VM design](../../../design/58-vm-core2.md)).
 - Under `cfg(test)` or the default-off `executor-diagnostics` feature, `ExecutorCensus` partitions root refresh attempts into clean-accounted, dirty-skip, and no-frame counts. The partition records the accounting state at the refresh call; it does not infer refreshes from opcode classifications or count optimized calls that return before root refresh.
