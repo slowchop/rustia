@@ -416,7 +416,7 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
             .collect();
         let mut parser = SourceParser::new(tokens, source, interpolations);
         match lowered.failure {
-            Some(error) => Err(parser.error_before_failed_interpolation(error)),
+            Some((opening, error)) => Err(parser.error_before_failed_interpolation(opening, error)),
             None => parser.parse_source_chunk(),
         }
     } else {
@@ -427,7 +427,8 @@ pub fn parse_source_bytes(source: &[u8]) -> std::result::Result<Chunk, SourceErr
 
 #[derive(Clone, Debug)]
 struct LoweredSource {
-    failure: Option<LexError>,
+    // The source offset of the opening backtick and the error found while lowering it.
+    failure: Option<(usize, LexError)>,
     source: Vec<u8>,
     origins: Vec<Span>,
     original_len: usize,
@@ -527,7 +528,7 @@ fn lower_interpolated_strings(source: &[u8]) -> Option<LoweredSource> {
             ) {
                 Ok(end) => cursor = end,
                 Err(error) => {
-                    failure = Some(error);
+                    failure = Some((cursor, error));
                     break;
                 }
             }
@@ -1188,14 +1189,18 @@ impl<'source> SourceParser<'source> {
     // Lowering stops at the first malformed interpolation, keeping tokens already
     // copied from ordinary source, including expressions inside this interpolation.
     // An earlier broken quote may already decide the grammar or decoding error.
-    fn error_before_failed_interpolation(&mut self, interpolation_error: LexError) -> SourceError {
+    fn error_before_failed_interpolation(
+        &mut self,
+        opening: usize,
+        interpolation_error: LexError,
+    ) -> SourceError {
         let bad_string = |t: &Token| {
             matches!(
                 t.kind,
                 TokenKind::MalformedStringEscape(_) | TokenKind::UnfinishedString
             )
         };
-        if let Some(first) = self.tokens.iter().position(bad_string) {
+        if self.tokens.iter().any(bad_string) {
             if let Err(error) = self.parse_source_chunk() {
                 let span = match &error {
                     SourceError::Lex(error) => error.span,
@@ -1203,9 +1208,9 @@ impl<'source> SourceParser<'source> {
                 };
                 // A missing token at the end of the partial buffer is not an
                 // earlier error. Require a real token in the original source.
-                if (self.cursor <= first
+                if (self.peek().span.start < opening
                     && span.start < span.end
-                    && span.end <= self.tokens[first].span.start)
+                    && span.end <= opening)
                     || self
                         .tokens
                         .iter()

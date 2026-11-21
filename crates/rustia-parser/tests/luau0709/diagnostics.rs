@@ -1130,6 +1130,12 @@ fn malformed_strings_report_the_first_error_in_context() {
 fn ordinary_strings_and_interpolation_report_the_first_error() {
     for (source, start, end, message) in [
         (
+            r#"type T = {["\xQ"]: string}; local s = `\xR`"#,
+            10,
+            11,
+            r"String literal contains malformed escape sequence or \0",
+        ),
+        (
             r#"return `ok`; "no end"#,
             13,
             20,
