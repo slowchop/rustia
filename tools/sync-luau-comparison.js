@@ -19,7 +19,7 @@ function readText(file) {
   return fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
 }
 
-// Rustdoc renders the same Markdown as a crate guide and as a standalone web page.
+// Rustdoc renders the standalone browser page from the shared comparison.
 function syncComparison(write = false) {
   const original = readText(path.join(root, source));
   const guide = original.split(iconMarker)[0].trimEnd();
@@ -34,7 +34,7 @@ function syncComparison(write = false) {
     embedded.push(ref + "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64"));
     hosted.push(ref + `https://github.com/slowchop/rustia/raw/${iconRevision}/${file}`);
   }
-  // Local cargo docs and the browser guide also work offline.
+  // The standalone browser comparison also works offline.
   const markdown = guide + "\n\n" + iconMarker + "\n\n" + embedded.join("\n") + "\n";
   const readme = readText(path.join(root, "README.md"));
   const first = readme.indexOf(start);

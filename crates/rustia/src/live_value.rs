@@ -385,7 +385,8 @@ impl Table {
             .map_err(Error::from_engine)
     }
 
-    /// Returns the current entries in insertion order as live key/value handles.
+    /// Returns the current entries as live key/value handles. Array slots come
+    /// first, in index order. Other keys follow the interpreter’s table iteration order.
     ///
     /// Mutating the table later does not change which key/value handles this
     /// returned vector contains, though those handles still refer to their

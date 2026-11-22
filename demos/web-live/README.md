@@ -42,6 +42,16 @@ Generated files live in `pkg/` and `target/`; they are not source files. Serve
 the directory rather than opening `index.html` through a `file:` URL, so the
 module loader can fetch the Wasm artifact.
 
+## Edit a running race
+
+After the browser build and serve steps above, open
+[the local race editor](http://127.0.0.1:8788/hot-reload.html).
+Place the caret after the `2` in `return x + 2` while the racer is moving.
+Press Backspace and type `2` again. After a few ticks, press Backspace again
+and pause. The editor shows Luau's error while the last good rule keeps the racer
+moving two metres per tick. Type `4` to change its speed to four metres per
+tick from its current position.
+
 ## How the application connects
 
 [Cargo.toml](./Cargo.toml) leaves Rustia's default features enabled and pins
@@ -119,15 +129,7 @@ The WebKit CI job records both clips automatically and retains them in the
 `rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
 execution has its own [platform evidence](../../design/96-browser-platform-acceptance.md).
 
-## Edit a running race
-
-After the browser build and serve steps above, open
-[the local race editor](http://127.0.0.1:8788/hot-reload.html).
-Place the caret after the `2` in `return x + 2` while the racer is moving.
-Press Backspace and type `2` again. After a few ticks, press Backspace again
-and pause. The editor shows Luau's error while the last good rule keeps the racer
-moving two metres per tick. Type `4` to change its speed to four metres per
-tick from its current position.
+### Record a hot edit
 
 Run `just record-hot-reload` to record the same sequence in headless WebKit.
 The caret blinks at the insertion point, and a keycap at the bottom shows each

@@ -1,4 +1,4 @@
-//! Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
+//! Rustia is a pure-Rust interpreter for standalone Luau 0.709. Use it to script a Rust
 //! application or replay a simulation on native and WebAssembly targets.
 //!
 //! Rustia grew out of a game that needed to script character decisions and replay
@@ -38,6 +38,7 @@
 //! | Run a script or get a result back | [`Chunk::exec`] runs it. [`Chunk::eval`] returns a Rust value. |
 //! | Pass data from Rust to Luau | [`Rustia::insert_global`] sets a named value. [`Rustia::insert_serde`] passes a struct or collection. |
 //! | Call a Luau function from Rust | [`Chunk::install`] loads its module. [`Exports::function`] looks up the function for [`Function::call`]. |
+//! | Load a module with `require` | Provide a [`RustiaBuilder::module_resolver`] so Rustia can find your modules. See the [module resolver example]. |
 //! | Change a script while the app runs | Keep the old functions until the edit installs successfully. See the [hot reload example]. |
 //! | Show where a script failed | Give the script a name with [`Chunk::source_name`] and display [`Error::report`]. |
 //! | Run Luau in a browser | Follow the [browser setup] or build the [bare WebAssembly example]. |
@@ -45,22 +46,6 @@
 //! Start with [`Rustia::builder`] for everyday scripting. Use [`RustiaBuilder::live`]
 //! when a script needs the current time or a fresh random seed. To limit a script’s
 //! work or memory, set [`RustiaBuilder::fuel`] or [`RustiaBuilder::memory_limit_bytes`].
-//!
-// Keep comparison rows together in Rustdoc's horizontally scrollable table.
-#![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
-#![doc = include_str!("../compare.md")]
-//!
-//! # Performance
-//!
-//! The chart compares five workloads on Linux x86-64. Each language has its own
-//! version. For example, Roto uses a list for sparse lookups and an ordinary
-//! function for the closure test. Compare times within a column. Lower is better.
-//! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
-//!
-#![doc = include_str!("../performance.svg")]
-//!
-//! These October 2026 measurements cover scripts already running. Small timing
-//! differences may vary between runs. [Full results] · [Benchmark limitations]
 //!
 //! # More about embedding
 //!
@@ -116,14 +101,16 @@
 //! </details>
 //!
 //! For more, [browse the Rust examples] or read about [moving an idle interpreter
-//! to another thread](struct.Rustia.html#threads).
+//! to another thread](struct.Rustia.html#threads). For platform support and benchmarks,
+//! see the [Luau comparison] and [performance chart].
 //!
 //! [new Cargo app]: https://github.com/slowchop/rustia#try-it
 //! [hot reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
 //! [browser setup]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
 //! [bare WebAssembly example]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
-//! [full results]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md
-//! [benchmark limitations]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md
+//! [module resolver example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs
+//! [Luau comparison]: https://github.com/slowchop/rustia#compare-luau-projects
+//! [performance chart]: https://github.com/slowchop/rustia#speed-a-measured-snapshot
 //! [live values example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs
 //! [mutable object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs
 //! [typed invocation example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs
