@@ -122,8 +122,7 @@ Set `CARGO_TARGET_DIR` to choose the build volume. To change the race, edit
 `race.luau` and record again. The existing MP4 is replaced after the new
 recording passes its trace and frame checks.
 
-Run `just readme-race` to record both races and export the [README animation](./race.gif).
-After committing a new GIF, use its commit SHA in the race image URL in the project README.
+Run `just readme-race` to export the [native and browser race as a GIF](./race.gif).
 
 The WebKit CI job records both clips automatically and retains them in the
 `rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
@@ -137,8 +136,6 @@ keypress. The recorder checks the racer's position at every tick and saves a
 12-second, 1280×720 clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
 `node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.
 
-Run `just readme-hot-reload` to record the demo and refresh the [README animation](./hot-reload.gif).
+Run `just readme-hot-reload` to record the demo and refresh the [hot-reload GIF](./hot-reload.gif).
 To use an existing recording, run `sh tools/browser/render-hot-reload-gif.sh path/to/edits.mp4`
 from the repository root.
-After committing a new GIF, update the image URL in the project README to use
-that commit's full SHA. This keeps each README linked to its own recording.

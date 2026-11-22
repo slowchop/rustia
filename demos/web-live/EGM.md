@@ -12,7 +12,7 @@ feature, the explicit `live()` preset, and wasm-bindgen's generated JavaScript g
 - [index.html](./index.html) initializes the generated module and displays the result.
 - [compare.html](./compare.html) is the standalone feature comparison and performance chart. The shared Markdown and SVG are rendered by [sync-luau-comparison.js](../../tools/sync-luau-comparison.js) and styled with [compare.css](./compare.css). The [platform icons](./icons/) identify desktop platforms, with numbered notes for the evidence.
 - [hot-reload.html](./hot-reload.html) keeps one Wasm session while the user edits its movement rule. Capture mode advances the same session by explicit ticks.
-- [race.gif](./race.gif) and [hot-reload.gif](./hot-reload.gif) are the two recordings embedded in the project README.
+- [race.gif](./race.gif) and [hot-reload.gif](./hot-reload.gif) show the native/browser replay and a live edit.
 - [race.luau](./race.luau) defines three racers' progress; [race-native.rs](./race-native.rs) emits distances for the native half of the recording.
 - [README.md](./README.md) contains the build, serve, and verification recipe.
 

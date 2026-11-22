@@ -9,15 +9,6 @@ Rustia is an experimental, pure-Rust interpreter for standalone Luau 0.709.
 - **Two-way calls.** Call Rust functions from Luau and Luau functions from Rust.
 - **Script budgets.** Limit instructions and the memory Rustia tracks for a script.
 
-The same race runs natively on the left and in WebAssembly on the right.
-Both runs pick Mint with seed 7 and Iris with seed 11. [Record the race](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race)
-
-![Native and WebAssembly replays side by side. Mint wins with seed 7 and Iris wins with seed 11 on both.](https://github.com/slowchop/rustia/raw/fdcb4bae6d376bc6f323cc47b70521479008133a/demos/web-live/race.gif)
-
-A script can queue moves during a game turn. Rust receives them when the turn
-succeeds. If the turn fails, Rustia discards the queued moves.
-[Game-turn example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
-
 ## Try it
 
 Install the interpreter from Git. The existing `rustia 0.1.0` crate is the original game engine.
@@ -89,14 +80,6 @@ To hot reload, switch to the new function after the edit installs and you’ve f
 If installation fails, the old function still works.
 [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
 
-**Hot reload in the browser.** The racer keeps moving when an edit introduces a syntax
-error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick. [Build the browser demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#edit-a-running-race).
-
-![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
-
-If a script hits its memory limit, the game can run the next script in the same
-interpreter. [Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
-
 ## Choose an environment
 
 Start with `Rustia::builder()`. It uses a fixed random seed and repeatable clocks.
@@ -108,6 +91,8 @@ By default, scripts have no instruction or memory budget. To set one, call
 `.fuel(100_000)` or `.memory_limit_bytes(2 * 1024 * 1024)` on the builder.
 Fuel counts work done by the interpreter. The memory limit covers allocations
 Rustia tracks for the script.
+If a script hits its memory limit, the same interpreter can run the next script.
+[Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
 
 ## Examples and API reference
 
@@ -120,6 +105,7 @@ cargo run --locked -p rustia --example embedding
 cargo doc --locked -p rustia --no-deps --open
 ```
 
+- [Apply queued moves only when a game turn succeeds](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 - [Read a Luau table into a Rust struct with Serde](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/embedding.rs)
 - [Call methods on a Rust object from Luau](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs)
 - [Show the line that caused a script error](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs)

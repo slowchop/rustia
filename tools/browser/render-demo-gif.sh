@@ -1,5 +1,5 @@
 #!/bin/sh
-# Convert a verified headless recording into an animation embedded in the README.
+# Convert a verified headless recording into a looping GIF.
 set -eu
 
 input=${1:?expected an input MP4 and an output GIF}
