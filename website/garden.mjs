@@ -11,7 +11,7 @@ const $ = s => document.querySelector(s);
 const mount = $('[data-garden]');
 try {
   const [fragment, palette] = await Promise.all([
-    read('garden-fragment.html?v=sprites'), read('sprite-defs.html'),
+    read('garden-fragment.html?v=mobile-garden'), read('sprite-defs.html'),
   ]);
   mount.innerHTML = fragment;
   mount.querySelector('#bed').insertAdjacentHTML('afterbegin', palette);
@@ -212,6 +212,14 @@ const openArea = $('.garden-origin-area');
 const trackEditor = $('#track-editor');
 const trackingKey = 'rustia.garden.trackEditor';
 const editorPane = mount.querySelector('.editor');
+if (mount.hasAttribute('data-mobile-editor')) {
+  const toggle = mount.querySelector('.garden-editor-toggle');
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'false';
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.textContent = expanded ? 'Hide editor' : 'Edit the garden';
+  });
+}
 trackEditor.checked = readLocal(trackingKey) !== 'false';
 trackEditor.onchange = () => {
   writeLocal(trackingKey, String(trackEditor.checked));
