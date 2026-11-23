@@ -27,7 +27,8 @@ cargo +"$toolchain" build --locked --target "$target" --release
 mkdir -p dist/pkg dist/analysis dist/playground/race dist/examples/garden dist/examples/garden-studies
 wasm-bindgen --target web --no-typescript --out-dir dist/pkg \
   "$CARGO_TARGET_DIR/$target/release/rustia_garden.wasm"
-cp index.html _headers LICENSE-* garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
+python3 render-home-comparisons.py > dist/index.html
+cp _headers LICENSE-* garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
   sprite-defs.html garden-fragment.html *.luau dist/
 for script in *.mjs; do
   case "$script" in
