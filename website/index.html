@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=feature-comparison">
+<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=runtime-speed-chart">
 <body class="home">
 <header><a class="mark" href="./">-- Rustia</a><nav><a href="playground/">Playground</a><a href="https://github.com/slowchop/rustia"><span aria-hidden="true">⭐</span> Star on GitHub</a></nav></header>
 <main><section class="hero" aria-labelledby="title">
@@ -22,28 +22,28 @@
     <h2 id="features-title">Rustia features</h2>
     <dl class="home-features">
       <div>
-        <dt>Hot reload</dt>
-        <dd>Try script edits while your Rust app keeps running. If a module fails to install, the app can keep using the previous version.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">↻</span>Hot reload</dt>
+        <dd><strong>Keep testing while your app runs.</strong> Try Luau changes live. If a module fails to install, the app can keep using the previous version.</dd>
       </div>
       <div>
-        <dt>Deterministic execution</dt>
-        <dd>Replay recorded inputs or reproduce a bug in the browser. In deterministic mode, the same script, seed, and inputs give the same results on native and WebAssembly.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">≡</span>Deterministic execution</dt>
+        <dd><strong>Replay a session or reproduce a bug.</strong> In deterministic mode, the same script, seed, and inputs give the same results on native and WebAssembly.</dd>
       </div>
       <div>
-        <dt>Pure Rust runtime</dt>
-        <dd>Embed the same Luau interpreter on desktop and in the browser. Building the runtime requires no C++ toolchain.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">⚙︎</span>Pure Rust runtime</dt>
+        <dd><strong>Simplify embedding.</strong> Use the same interpreter on desktop and in the browser. Building the runtime requires no C++ toolchain.</dd>
       </div>
       <div>
-        <dt>Rust functions and objects</dt>
-        <dd>Expose the functions and objects your scripts need. Use Serde to read Luau tables into Rust structs.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">↔</span>Rust functions and objects</dt>
+        <dd><strong>Let scripts work with your app.</strong> Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
       </div>
       <div>
-        <dt>Script execution limits</dt>
-        <dd>Set a budget for instructions and VM memory so a runaway script returns an error to your app.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>
+        <dd><strong>Keep runaway scripts under control.</strong> Set instruction and VM memory budgets so your app can handle a script that exceeds them.</dd>
       </div>
       <div>
-        <dt>Experimental LLVM compilation</dt>
-        <dd>We’re exploring compiling Luau to native code ahead of time to reduce the cost of running scripts.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">»</span>Experimental LLVM compilation</dt>
+        <dd><strong>Explore faster execution for hot code.</strong> We’re experimenting with compiling Luau to native code ahead of time.</dd>
       </div>
     </dl>
   </div>

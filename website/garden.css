@@ -51,7 +51,8 @@ main { width:100% }
 .home-next { padding:22px 0 36px; background:#fff9ef; border-top:1px solid #d5c6a6 }
 .home-next h2 { font:normal clamp(26px,3vw,36px)/1.15 Georgia,serif }
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
-.home-features dt { font-weight:650 }
+.home-features dt { display:flex; align-items:center; gap:8px; font-weight:650 }
+.feature-icon { display:inline-grid; flex:none; place-items:center; width:1.75rem; height:1.75rem; color:#254735; background:#eee2c5; border-radius:5px; font:650 1.05rem/1 system-ui,sans-serif }
 .home-features dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
 .home-comparison p { margin:8px 0; line-height:1.5; max-width:75ch }
 .home-comparison h3 { margin:24px 0 8px; font-size:1.13rem }
@@ -63,6 +64,20 @@ main { width:100% }
 .home-table tbody tr + tr { border-top:1px solid #e5d8be }
 .home-table .numeric td, .home-table .numeric thead th:not(:first-child) { text-align:right; font-variant-numeric:tabular-nums }
 .home-table .numeric td { white-space:nowrap }
+.speed-chart { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr)); gap:12px; max-width:65rem; margin-block:16px }
+.speed-chart > div { min-width:0; padding:12px 14px; border:1px solid #d5c6a6; border-radius:5px; background:#fffdf4 }
+.speed-chart h4 { margin:0 0 8px; font-size:.96rem }
+.speed-chart ul { display:grid; gap:5px; list-style:none; padding:0; margin:0 }
+.speed-chart li { display:grid; grid-template-columns:6.3em minmax(0,1fr) 4em; align-items:center; gap:8px; font-size:.85rem }
+.speed-chart li > :last-child { text-align:right; font-variant-numeric:tabular-nums }
+.speed-chart meter { --speed-bar:#718b79; width:100%; height:.8rem }
+.speed-chart meter::-webkit-meter-bar { background:#eee5d2; border:0 }
+.speed-chart meter::-webkit-meter-optimum-value { background:var(--speed-bar) }
+.speed-chart meter::-moz-meter-bar { background:var(--speed-bar) }
+.speed-chart .speed-baseline { font-weight:700 }
+.speed-chart .speed-baseline meter { --speed-bar:#315640 }
+.speed-details { margin-block:12px }
+.speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
 .home .hero-copy { margin-bottom:clamp(16px, 3svh, 30px) }
 .home .bench { grid-template-columns:var(--home-columns) }

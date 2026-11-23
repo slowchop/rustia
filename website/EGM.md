@@ -19,7 +19,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   analysis/ contains the pinned, licensed Luau browser analyzer.
 - build.sh prepares the pinned Rust and Wasm tools and stages the static
   site in dist/. render-home-comparisons.py renders the README comparison
-  tables into the static homepage. _headers defines the deployed policy.
+  tables and a chart of relative runtime into the static homepage. _headers
+  defines the deployed policy.
 
 ## Invariants
 
