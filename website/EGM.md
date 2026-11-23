@@ -8,6 +8,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 ## Interface
 
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
+  The narrow homepage starts with the garden playing and the editor collapsed.
+- garden-source.html documents the files that run and draw the garden. The
+  build publishes it at /garden-source/.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
 - bridge.rs, garden.rs and playground.rs connect browser workers to the Rustia
   facade. Sprite output contains coordinates and a shape ID. Console input
@@ -15,7 +18,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 - source-editor.mjs and editor.mjs supply shared editing and file selection.
   analysis/ contains the pinned, licensed Luau browser analyzer.
 - build.sh prepares the pinned Rust and Wasm tools and stages the static
-  site in dist/. _headers defines the deployed policy.
+  site in dist/. render-home-comparisons.py renders the README comparison
+  tables into the static homepage. _headers defines the deployed policy.
 
 ## Invariants
 

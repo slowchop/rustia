@@ -5,6 +5,13 @@ in browser workers. Drafts stay in browser storage. Console projects only
 resolve modules from their own files. Sprite projects expose drawing and
 plain-text output to the page.
 
+## Garden source
+
+- [wandering-flowers.luau](examples/garden-studies/wandering-flowers.luau) is the script in the homepage editor.
+- [flowerbed.luau](flowerbed.luau) keeps the flowers across edits, and [drawing.luau](drawing.luau) defines the script's drawing API.
+- [garden.rs](garden.rs), [worker.mjs](worker.mjs), and [garden-player.mjs](garden-player.mjs) connect the script to the browser animation.
+- [draw-garden.mjs](draw-garden.mjs) draws the sprites into the page.
+
 ## Build and check
 
 From the repository root:

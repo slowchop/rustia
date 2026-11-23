@@ -11,10 +11,12 @@ const $ = s => document.querySelector(s);
 const mount = $('[data-garden]');
 try {
   const [fragment, palette] = await Promise.all([
-    read('garden-fragment.html?v=sprites'), read('sprite-defs.html'),
+    read('garden-fragment.html?v=mobile-garden'), read('sprite-defs.html'),
   ]);
   mount.innerHTML = fragment;
   mount.querySelector('#bed').insertAdjacentHTML('afterbegin', palette);
+  const links = $('#garden-home-links');
+  if (links) mount.querySelector('.garden-caption').append(links.content.cloneNode(true));
 } catch (err) {
   mount.textContent = 'Could not load the garden. Refresh to try again.';
   throw err;
@@ -212,6 +214,14 @@ const openArea = $('.garden-origin-area');
 const trackEditor = $('#track-editor');
 const trackingKey = 'rustia.garden.trackEditor';
 const editorPane = mount.querySelector('.editor');
+if (mount.hasAttribute('data-mobile-editor')) {
+  const toggle = mount.querySelector('.garden-editor-toggle');
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'false';
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.textContent = expanded ? 'Hide editor' : 'Edit the garden';
+  });
+}
 trackEditor.checked = readLocal(trackingKey) !== 'false';
 trackEditor.onchange = () => {
   writeLocal(trackingKey, String(trackEditor.checked));
@@ -294,7 +304,6 @@ try {
   }
   draftStatus.textContent = !storageAvailable ? 'Browser storage unavailable'
     : resumed ? 'Draft restored' : 'Autosaves in this browser';
-  if ($('#rust')) $('#rust').textContent = await read('garden.rs');
   editor = new BrowserEditor({
     source:$('#source'), list:$('#files'), restore:$('#restore'),
     onSelect(file) { surface.select(file); surface.sync(); lesson?.refresh(); },
