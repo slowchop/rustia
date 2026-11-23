@@ -304,7 +304,6 @@ try {
   }
   draftStatus.textContent = !storageAvailable ? 'Browser storage unavailable'
     : resumed ? 'Draft restored' : 'Autosaves in this browser';
-  if ($('#rust')) $('#rust').textContent = await read('garden.rs');
   editor = new BrowserEditor({
     source:$('#source'), list:$('#files'), restore:$('#restore'),
     onSelect(file) { surface.select(file); surface.sync(); lesson?.refresh(); },

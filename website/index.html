@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=compact-hero">
+<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=aligned-home">
+<body class="home">
 <header><a class="mark" href="./">-- Rustia</a><nav><a href="playground/">Playground</a><a href="https://github.com/slowchop/rustia"><span aria-hidden="true">⭐</span> Star on GitHub</a></nav></header>
 <main><section class="hero" aria-labelledby="title">
   <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
@@ -9,15 +10,8 @@
   <template id="garden-home-links">
     <div class="garden-links">
       <a href="playground/?project=garden">Edit the garden in the playground ↗</a>
-      <details class="host-details">
-        <summary>How Rust hosts the garden</summary>
-        <p>Rustia runs the Luau in a browser worker. Each frame, Rust calls <code>update(time, mouse, radius)</code>. The script calls <code>sprite()</code> to send positions and sprite types back to the page for drawing.</p>
-        <nav aria-label="Explore Rustia">
-          <a href="https://github.com/slowchop/rustia#examples-and-api-reference">Rust embedding examples</a>
-          <a href="https://github.com/slowchop/rustia/blob/main/design/75-embedded-api.md">Rust API guide</a>
-        </nav>
-        <div id="host" class="listing"><div class="bar"><span>garden.rs</span><a href="bridge.rs">Wasm bridge</a></div><pre id="rust">Loading Rust source…</pre></div>
-      </details>
+      <p>Rustia runs the Luau in a browser worker. Each frame, Rust calls <code>update(time, mouse, radius)</code>. The script calls <code>sprite()</code> to send positions and sprite types back to the page for drawing.</p>
+      <a href="https://github.com/slowchop/rustia/blob/main/website/garden.rs">View garden.rs on GitHub ↗</a>
     </div>
   </template>
 </section>
@@ -44,4 +38,4 @@
     </dl>
   </div>
 </section>
-</main><script type="module" src="garden.mjs?v=compact-hero"></script></html>
+</main><script type="module" src="garden.mjs?v=aligned-home"></script></body></html>
