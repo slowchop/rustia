@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=homepage-links">
+<header><a class="mark" href="./">-- Rustia</a><nav><a href="playground/">Playground</a><a href="https://github.com/slowchop/rustia"><span aria-hidden="true">⭐</span> Star on GitHub</a></nav></header>
+<main><section class="hero" aria-labelledby="title">
+  <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
+    <p>Rustia runs Luau scripts in Rust applications. Edit the Luau below to change what the garden draws.</p></div>
+  <div data-garden data-tutorial="off" data-starter="examples/garden-studies/wandering-flowers.luau"></div>
+  <a class="garden-open" href="playground/?project=garden">Edit the garden in the playground ↗</a>
+</section>
+<section class="home-next" aria-labelledby="host-title">
+  <h2 id="host-title">How Rust hosts the garden</h2>
+  <p>Rustia runs the Luau in a browser worker. Each frame, Rust calls <code>update(time, mouse, radius)</code>. The script calls <code>sprite()</code> to send positions and sprite types back to the page for drawing.</p>
+  <nav aria-label="Explore Rustia">
+    <a href="playground/">Try the playground</a>
+    <a href="https://github.com/slowchop/rustia#examples-and-api-reference">Rust embedding examples</a>
+    <a href="https://github.com/slowchop/rustia/blob/main/design/75-embedded-api.md">Rust API guide</a>
+  </nav>
+  <details class="host-details">
+    <summary>View the garden’s Rust code</summary>
+    <div id="host" class="listing"><div class="bar"><span>garden.rs</span><a href="bridge.rs">Wasm bridge</a></div><pre id="rust">Loading Rust source…</pre></div>
+  </details>
+</section>
+</main><script type="module" src="garden.mjs?v=garden-project"></script></html>

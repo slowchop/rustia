@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Console race · Rustia Playground</title><link rel="stylesheet" href="../../garden.css?v=error-slide">
+<header><a class="mark" href="../../">-- Rustia</a><nav><a href="../">Playground</a><a href="#try-locally">Try locally</a></nav></header>
+<main><section id="console-race" aria-labelledby="race-heading">
+  <h1 id="race-heading">Console race</h1>
+  <p>Watch the standings in <button type="button" class="file-link" data-open-race-file="standings.luau" disabled>standings.luau</button> or open <button type="button" class="file-link" data-open-race-file="race.luau" disabled>race.luau</button> to change the rules.</p>
+  <div class="race-pair" data-lesson="Race tutorial">
+    <section class="editor race-editor" aria-label="Race editor">
+      <div class="bar"><div id="race-files"></div><button id="race-restore">Restore file</button></div>
+      <textarea id="race-source" aria-label="Edit race script" disabled spellcheck="false" autocapitalize="off" wrap="off"></textarea>
+      <div id="race-error" class="source-error" role="alert" hidden><button hidden></button><pre></pre></div>
+    </section>
+    <section class="race-output" aria-label="Race console"><div class="bar"><h3>Console output</h3><span id="race-status" role="status">Loading…</span></div>
+      <pre id="race-stdout"></pre>
+    </section>
+  </div>
+</section>
+<section class="quickstart" id="try-locally" aria-labelledby="local-title">
+  <div><h2 id="local-title">Run the same race locally</h2>
+  <p>Use Rustia’s command-line interpreter to print the final standings in your terminal.</p>
+  <p>With Git and <a href="https://rustup.rs/">Rust</a> installed, clone the interpreter. Already in the repo? Start at step 2.</p>
+  <a href="https://github.com/slowchop/rustia/blob/main/demos/web-live/race.luau">Read the Luau race rules</a>
+  <a class="star" href="https://github.com/slowchop/rustia"><span aria-hidden="true">⭐</span> Star Rustia on GitHub</a></div>
+  <div class="race-steps">
+    <div class="terminal"><div class="terminal-bar"><label for="clone-rustia">1. Clone the interpreter</label><button data-copy="clone-rustia" type="button" aria-live="polite">Copy</button></div>
+    <textarea id="clone-rustia" class="commands" readonly spellcheck="false" rows="2">git clone https://github.com/slowchop/rustia.git
+cd rustia</textarea></div>
+    <div class="terminal"><div class="terminal-bar"><label for="run-race">2. Run the terminal race</label><button data-copy="run-race" type="button" aria-live="polite">Copy</button></div>
+    <textarea id="run-race" class="commands" readonly spellcheck="false" rows="14">cargo run --quiet --locked -p rustia-cli -- --eval 'seed = 7
+local race = require("./demos/web-live/race")
+local names = {"Ember", "Mint", "Iris"}
+for i = 1, #race, 3 do
+    if math.max(race[i], race[i+1], race[i+2]) == 100 then
+        for lane, name in names do
+            local meters = race[i + lane - 1]
+            print(string.format("%-5s |%-25s| %3dm", name, string.rep("=", meters // 4), meters))
+        end
+        break
+    end
+end'</textarea></div>
+    <p>Mint wins with seed <code>7</code>. Change it to <code>11</code> and rerun: Iris wins. To change how the racers move, edit <code>demos/web-live/race.luau</code> in your clone.</p>
+  </div>
+</section></main>
+<script type="module" src="../../race.mjs?v=error-slide"></script><script type="module" src="../../copy-commands.mjs"></script></html>
