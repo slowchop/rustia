@@ -44,6 +44,9 @@ main { width:100% }
 .home-next h2 { font:normal clamp(26px,3vw,36px)/1.15 Georgia,serif }
 .home-next p { max-width:65ch; line-height:1.55; margin:10px 0 14px }
 .home-next nav { flex-wrap:wrap; gap:8px 20px }
+.home-features { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,23rem),1fr)); gap:18px 36px; max-width:64rem; margin:14px 0 0 }
+.home-features dt { font-weight:650 }
+.home-features dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
 .host-details { margin-top:18px }
 .host-details summary { cursor:pointer; width:fit-content }
 .host-details #host { display:block; margin-top:12px; max-width:84ch; padding:0 }

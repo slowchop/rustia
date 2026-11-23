@@ -1,12 +1,33 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=homepage-links">
+<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=homepage-features">
 <header><a class="mark" href="./">-- Rustia</a><nav><a href="playground/">Playground</a><a href="https://github.com/slowchop/rustia"><span aria-hidden="true">⭐</span> Star on GitHub</a></nav></header>
 <main><section class="hero" aria-labelledby="title">
   <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
     <p>Rustia runs Luau scripts in Rust applications. Edit the Luau below to change what the garden draws.</p></div>
   <div data-garden data-tutorial="off" data-starter="examples/garden-studies/wandering-flowers.luau"></div>
   <a class="garden-open" href="playground/?project=garden">Edit the garden in the playground ↗</a>
+</section>
+<section class="home-next" aria-labelledby="features-title">
+  <h2 id="features-title">Rustia features</h2>
+  <dl class="home-features">
+    <div>
+      <dt>Hot reload</dt>
+      <dd>Change Luau while your Rust app keeps running. The garden applies edits as you type.</dd>
+    </div>
+    <div>
+      <dt>Deterministic execution</dt>
+      <dd>In deterministic mode, the same script, seed, and inputs give the same results on native and WebAssembly.</dd>
+    </div>
+    <div>
+      <dt>Pure Rust runtime</dt>
+      <dd>The Luau interpreter is written in Rust. The same engine runs on desktop and in the browser.</dd>
+    </div>
+    <div>
+      <dt>Experimental LLVM compilation</dt>
+      <dd>We’re exploring compiling Luau to native code ahead of time.</dd>
+    </div>
+  </dl>
 </section>
 <section class="home-next" aria-labelledby="host-title">
   <h2 id="host-title">How Rust hosts the garden</h2>
