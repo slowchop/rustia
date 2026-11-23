@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garden source · Rustia</title>
+<link rel="stylesheet" href="../garden.css?v=garden-source">
+<body class="home">
+<header>
+  <a class="mark" href="../">-- Rustia</a>
+  <nav aria-label="Site"><a href="../">Live garden</a><a href="../playground/?project=garden">Playground</a></nav>
+</header>
+<main class="home-next-inner garden-source">
+  <h1>Garden source</h1>
+  <p>Follow a frame from the browser’s animation loop through Rust and Luau, then back to the page as SVG sprites. Each filename opens the source on GitHub.</p>
+
+  <section aria-labelledby="script-files">
+    <h2 id="script-files">The Luau you can edit</h2>
+    <dl>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/examples/garden-studies/wandering-flowers.luau"><code>wandering-flowers.luau</code></a></dt>
+        <dd>The script shown in the homepage editor. It chooses where each flower moves and calls <code>sprite()</code> to draw it.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/flowerbed.luau"><code>flowerbed.luau</code></a></dt>
+        <dd>Keeps existing flowers across edits. Changing the flower count adds or removes only the difference.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/drawing.luau"><code>drawing.luau</code></a></dt>
+        <dd>Checks the arguments to <code>sprite()</code>, fills in defaults, and passes the drawing request to Rust.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/garden-api.luau"><code>garden-api.luau</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/sprite-names.txt"><code>sprite-names.txt</code></a></dt>
+        <dd>Defines the garden’s script helpers and the named sprite kinds.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="frame-files">
+    <h2 id="frame-files">How a frame runs</h2>
+    <dl>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/garden-player.mjs"><code>garden-player.mjs</code></a></dt>
+        <dd>Schedules frames in the browser, sends time and pointer input to the worker, and switches to an edited script after it renders successfully.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/worker.mjs"><code>worker.mjs</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/bridge.rs"><code>bridge.rs</code></a></dt>
+        <dd>The worker loads the Rust WebAssembly module. The bridge exposes the Rust session to JavaScript and passes its sprite requests back to the worker.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/garden.rs"><code>garden.rs</code></a></dt>
+        <dd>Embeds Rustia, loads the Luau files, and calls the script’s <code>setup()</code> and <code>update()</code> callbacks.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/draw-garden.mjs"><code>draw-garden.mjs</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/sprite-defs.html"><code>sprite-defs.html</code></a></dt>
+        <dd>The browser places SVG sprites using the positions returned by the worker. The HTML file supplies the shapes and colours.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="page-files">
+    <h2 id="page-files">The page and editor</h2>
+    <dl>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/index.html"><code>index.html</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/garden-fragment.html"><code>garden-fragment.html</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/garden.css"><code>garden.css</code></a></dt>
+        <dd>The homepage, the markup for the animation and its controls, and the layout and styles.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/garden.mjs"><code>garden.mjs</code></a></dt>
+        <dd>Connects the page controls to the player, maps pointer input to garden coordinates, and remembers drafts locally.</dd>
+      </div>
+      <div>
+        <dt><a href="https://github.com/slowchop/rustia/blob/main/website/source-editor.mjs"><code>source-editor.mjs</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/editor.mjs"><code>editor.mjs</code></a> · <a href="https://github.com/slowchop/rustia/blob/main/website/garden.d.luau"><code>garden.d.luau</code></a></dt>
+        <dd>The shared editor view and file handling, plus the garden API definitions used for autocomplete and hover help.</dd>
+      </div>
+    </dl>
+  </section>
+  <p><a href="https://github.com/slowchop/rustia/tree/main/website">Browse the full website source on GitHub ↗</a></p>
+</main>
+</body>
+</html>

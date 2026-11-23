@@ -9,6 +9,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
   The narrow homepage starts with the garden playing and the editor collapsed.
+- garden-source.html documents the files that run and draw the garden. The
+  build publishes it at /garden-source/.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
 - bridge.rs, garden.rs and playground.rs connect browser workers to the Rustia
   facade. Sprite output contains coordinates and a shape ID. Console input

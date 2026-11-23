@@ -66,6 +66,11 @@ main { width:100% }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
 .home .hero-copy { margin-bottom:clamp(16px, 3svh, 30px) }
 .home .bench { grid-template-columns:var(--home-columns) }
+.home .garden-source { padding-bottom:36px }
+.garden-source > p, .garden-source dl { max-width:75ch; line-height:1.55 }
+.garden-source section { margin:26px 0 }
+.garden-source dd { margin:3px 0 12px }
+.garden-source dt { overflow-wrap:anywhere }
 @media(max-width:820px){
   .home { --home-columns:minmax(0,1fr) }
   .home .garden-origin-area { height:clamp(140px,38vw,220px) }

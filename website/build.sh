@@ -24,10 +24,11 @@ if ! command -v wasm-bindgen >/dev/null || [[ "$(wasm-bindgen --version)" != "wa
 fi
 cargo +"$toolchain" build --locked --target "$target" --release
 
-mkdir -p dist/pkg dist/analysis dist/playground/race dist/examples/garden dist/examples/garden-studies
+mkdir -p dist/garden-source dist/pkg dist/analysis dist/playground/race dist/examples/garden dist/examples/garden-studies
 wasm-bindgen --target web --no-typescript --out-dir dist/pkg \
   "$CARGO_TARGET_DIR/$target/release/rustia_garden.wasm"
 python3 render-home-comparisons.py > dist/index.html
+cp garden-source.html dist/garden-source/index.html
 cp _headers LICENSE-* garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
   sprite-defs.html garden-fragment.html *.luau dist/
 for script in *.mjs; do
