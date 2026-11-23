@@ -15,6 +15,8 @@ try {
   ]);
   mount.innerHTML = fragment;
   mount.querySelector('#bed').insertAdjacentHTML('afterbegin', palette);
+  const links = $('#garden-home-links');
+  if (links) mount.querySelector('.garden-caption').append(links.content.cloneNode(true));
 } catch (err) {
   mount.textContent = 'Could not load the garden. Refresh to try again.';
   throw err;
