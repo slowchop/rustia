@@ -1,0 +1,84 @@
+.playground { width:auto; margin:14px clamp(12px, 2vw, 32px) 18px }
+.workspace-toolbar { display:flex; align-items:center; gap:10px 24px; flex-wrap:wrap; margin-bottom:12px }
+.playground h1 { font:700 1.5rem/1.15 system-ui,sans-serif; letter-spacing:-.035em; margin:0 }
+.starters { display:flex; flex-wrap:wrap; gap:8px }
+.starters a { padding:7px 12px; border:1px solid #87977f; border-radius:5px; background:#fff9ea; text-decoration:none }
+.starters a[aria-current=page], .files .file-button[aria-current=true] { background:#304f3e; color:#fffaf0 }
+.workspace { display:grid; grid-template-columns:minmax(0,1fr); gap:10px }
+.files { min-width:0; padding:12px; background:#f4edd9; border:1px solid #a9b49d; border-radius:5px }
+.files h2,.race-output h2 { font:600 1rem/1.4 system-ui,sans-serif }
+.files .file-group { display:grid; margin:10px 0; gap:3px }
+.files .file-button { padding:7px; text-align:left; overflow-wrap:anywhere; border-radius:3px; background:transparent }
+.files form { margin-top:10px }
+.files form label,.files small { display:block; font-size:.85rem }
+.files input { width:100%; box-sizing:border-box; font:inherit; margin:5px 0; padding:5px }
+.files small { color:#953a25; margin-bottom:5px }
+.workspace .editor { align-self:stretch }
+.workspace .editor .bar strong { font:600 1rem ui-monospace,monospace }
+.workspace .race-output { align-self:stretch; overflow:hidden }
+.workspace .race-output pre { white-space:pre-wrap; overflow-wrap:anywhere; min-height:8em; max-height:65vh }
+.workspace .source-views .cm-editor { min-height:20em }
+.pane-divider { display:none }
+@media(max-width:850px) {
+  .files .file-group { display:flex; flex-wrap:wrap }
+  .workspace .source-views .cm-editor { min-height:12em }
+}
+
+#sprite-preview[hidden] { display:none }
+#sprite-preview:not([hidden]) { display:block; width:100%; aspect-ratio:16 / 9; background:#fff8e8; touch-action:pan-y }
+#preview-mode, #sprite-layout { font:inherit; color:#253e32; background:#fff8e8; border:1px solid #a9b49d; border-radius:4px; padding:4px }
+
+#program-input:not([hidden]) { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 14px; border-top:1px solid #5b705e }
+#input-line { min-width:0; flex:1 1 8em; font:inherit; padding:5px 7px; border-radius:4px; border:1px solid #a9b49d; background:#fffdf5 }
+
+.workspace .race-output .console-tabs { justify-content:flex-start }
+.console-tabs [aria-pressed=true] { background:#e5eddb; border-color:#e5eddb; font-weight:700 }
+#repl-form { display:grid; gap:8px; padding:10px 14px; border-top:1px solid #5b705e }
+#repl-command { width:100%; font:14px/1.5 ui-monospace,monospace; padding:6px; background:#fffdf5; color:#253e32; resize:vertical }
+
+@media (min-width:851px) {
+  .playground-page { display:flex; flex-direction:column; height:100dvh }
+  .playground-page header { width:auto; align-self:stretch; flex:none; height:52px; margin:0 clamp(12px, 2vw, 32px) }
+  .playground { display:flex; flex-direction:column; flex:1; min-height:0 }
+  .workspace {
+    flex:1; min-height:340px; gap:0;
+    grid-template-columns:var(--files-width, 170px) 12px minmax(0,1fr) 12px var(--output-width, 34%);
+  }
+  .pane-divider { display:grid; place-items:center; cursor:col-resize; touch-action:none; }
+  .pane-divider::before { content:''; width:3px; height:38px; border-radius:2px; background:#829079 }
+  .pane-divider:is(:hover, :focus-visible, [data-dragging])::before { background:#304f3e; }
+  .workspace .files { overflow:auto }
+  .workspace .source-views { min-height:0 }
+  .workspace .source-views .cm-editor { min-height:0 }
+  .workspace .bar, .workspace .foot, .workspace .garden-options { flex:none }
+  .workspace .race-output { display:flex; flex-direction:column; min-height:0 }
+  #sprite-stage:not([hidden]) { flex:none; }
+  #program-panel:not([hidden]), #repl-panel:not([hidden]) { flex:1; min-height:0; display:flex; flex-direction:column }
+  .workspace .race-output pre { flex:1; min-height:0; max-height:none }
+  #program-input, #repl-form { flex:none }
+}
+
+#sprite-layout-controls[hidden], #sprite-stage[hidden] { display:none }
+.workspace.garden-backdrop { position:relative; isolation:isolate }
+.garden-backdrop #sprite-preview:not([hidden]) {
+  position:absolute; z-index:-1; inset:0; width:100%; height:100%; aspect-ratio:auto;
+  background:#f6e7c7; pointer-events:none;
+}
+.garden-backdrop #sprite-stage { min-height:240px }
+.garden-backdrop .race-output { background:transparent }
+.garden-backdrop .race-output > :not(#sprite-stage) { background:#233a2d }
+.garden-backdrop .editor { background:rgb(255 248 232 / 85%) }
+@media (min-width:851px) {
+  .garden-backdrop #sprite-stage:not([hidden]) { flex:3; min-height:140px }
+}
+@media (max-width:850px) {
+  .garden-backdrop #output-pane { grid-row:2 }
+  .garden-backdrop .editor { grid-row:3 }
+  .garden-backdrop #sprite-stage { min-height:clamp(220px, 63vw, 380px) }
+}
+@media (prefers-reduced-transparency:reduce), (prefers-contrast:more), (forced-colors:active) {
+  .garden-backdrop .editor { background:#fff8e8 }
+}
+
+.garden-options label[hidden] { display:none }
+.garden-backdrop.solid-editor .editor { background:#fff8e8 }

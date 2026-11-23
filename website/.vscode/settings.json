@@ -1,0 +1,7 @@
+{
+  "luau-lsp.platform.type": "standard",
+  "luau-lsp.types.roblox": false,
+  "luau-lsp.sourcemap.enabled": false,
+  "luau-lsp.fflags.override": { "LuauSolverV2": "true" },
+  "luau-lsp.types.definitionFiles": { "@garden": "garden.d.luau" }
+}
