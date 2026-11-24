@@ -33,10 +33,10 @@ python3 render-home-comparisons.py > dist/index.html
 cp -R ../demos/web-live/icons dist/
 cp -R "$rustdoc_target/doc/." dist/docs/api/
 rm -f dist/docs/api/.lock
-cp doc-index.html dist/docs/index.html
+python3 render-home-comparisons.py doc-index.html > dist/docs/index.html
 cp api-index.html dist/docs/api/index.html
-cp garden-source.html dist/docs/examples/garden/index.html
-cp garden-source.html dist/garden-source/index.html
+python3 render-home-comparisons.py garden-source.html > dist/docs/examples/garden/index.html
+cp dist/docs/examples/garden/index.html dist/garden-source/index.html
 cp _headers LICENSE-* garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
   sprite-defs.html garden-fragment.html *.luau dist/
 for script in *.mjs; do

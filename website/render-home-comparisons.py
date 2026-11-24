@@ -1,5 +1,6 @@
-"""Render the capability comparison and dated benchmark charts for the homepage."""
+"""Render the shared site header and the homepage comparison charts."""
 
+from argparse import ArgumentParser
 from datetime import datetime, timezone
 from html import escape, unescape
 import json
@@ -220,9 +221,8 @@ def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
     return '<div class="speed-chart">' + "\n".join(panels) + '</div>'
 
 
-def main() -> None:
+def render_homepage(homepage: str) -> str:
     readme = (SITE.parent / "README.md").read_text(encoding="utf-8")
-    homepage = (SITE / "index.html").read_text(encoding="utf-8")
     if homepage.count(MARKER) != 1:
         raise ValueError("Expected exactly one homepage comparison marker")
     snapshot = json.loads(readme.split("<!-- rustia-benchmark-snapshot", 1)[1].split("-->", 1)[0])
@@ -253,7 +253,30 @@ def main() -> None:
     {chart}
     <p>Snapshot from {benchmark_date} UTC on Linux x86-64. These are best observed times after startup, including interpreter, JIT and native results. Each engine uses its own version of each task. Roto JIT-compiles scripts to machine code with Cranelift before running them. Its sparse lookup uses a list, and its state update uses a regular function.</p>
     <p><a href="{BENCHMARK_URL}/RESULTS.md">Exact benchmark timings on GitHub</a> · <a href="{BENCHMARK_URL}/CLAIMS.md">Benchmark methodology and limitations</a></p>'''
-    sys.stdout.write(homepage.replace(MARKER, section))
+    return homepage.replace(MARKER, section)
+
+
+def main() -> None:
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "page", nargs="?", default="index.html",
+        choices=("index.html", "doc-index.html", "garden-source.html"),
+    )
+    args = parser.parse_args()
+    page = (SITE / args.page).read_text(encoding="utf-8")
+    marker = "<!-- site-header -->"
+    if page.count(marker) != 1:
+        raise ValueError(f"Expected exactly one site header marker in {args.page}")
+    header = (SITE / "site-header.html").read_text(encoding="utf-8").rstrip()
+    current = {
+        "index.html": "",
+        "doc-index.html": ' aria-current="page"',
+        "garden-source.html": ' aria-current="location"',
+    }
+    page = page.replace(marker, header.replace("{docs_current}", current[args.page]))
+    if args.page == "index.html":
+        page = render_homepage(page)
+    sys.stdout.write(page)
 
 
 if __name__ == "__main__":

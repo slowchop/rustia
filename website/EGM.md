@@ -10,6 +10,7 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
   The homepage includes the roadmap and starts on narrow screens with the
   garden playing and the editor collapsed.
+- site-header.html supplies the shared homepage and documentation navigation.
 - doc-index.html links readers to the generated API reference and the garden
   walkthrough. The build publishes it at /docs/.
 - garden-source.html documents the files that run and draw the garden. The
