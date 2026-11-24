@@ -46,6 +46,16 @@
 //! when a script needs the current time or a fresh random seed. To limit a script’s
 //! work or memory, set [`RustiaBuilder::fuel`] or [`RustiaBuilder::memory_limit_bytes`].
 //!
+//! # Keeping state across script edits
+//!
+//! Keep the running app's state in Rust, or save the Luau values you want to
+//! carry forward and pass them to the replacement script. The embedder decides
+//! which values to keep. A newly created script local starts with its initializer.
+//!
+//! Use [`Chunk::install`] to try the replacement, then switch to the new exports
+//! after it succeeds. If installation fails, Rustia rolls back guest changes and
+//! the app can keep using the previous functions. See the [hot reload example].
+//!
 // Keep comparison rows together in Rustdoc's horizontally scrollable table.
 #![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
 #![doc = include_str!("../compare.md")]
@@ -53,8 +63,9 @@
 //! # Performance
 //!
 //! The chart compares five workloads on Linux x86-64. Each language has its own
-//! version. For example, Roto uses a list for sparse lookups and an ordinary
-//! function for the closure test. Compare times within a column. Lower is better.
+//! version. Roto's array workload uses a handwritten quadratic sort. It uses a
+//! list for sparse lookups and an ordinary function for the closure test.
+//! Compare times within a column. Lower is better.
 //! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
 //!
 #![doc = include_str!("../performance.svg")]

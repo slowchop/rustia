@@ -24,7 +24,9 @@ python3 -m http.server --directory website/dist 8080
 ```
 
 The build uses this checkout of Rustia, the pinned Rust toolchain, and the
-version of wasm-bindgen in Cargo.lock. Set an absolute CARGO_TARGET_DIR to place
+version of wasm-bindgen in Cargo.lock. It also generates the facade API docs at
+`/docs/api/`, linked from `/docs/`. The garden walkthrough is at
+`/docs/examples/garden/`. Set an absolute CARGO_TARGET_DIR to place
 compiler output on another volume. The browser analyzer and editor bundle are
 vendored with their license notices. The generated runtime and publish directory
 are ignored by Git.

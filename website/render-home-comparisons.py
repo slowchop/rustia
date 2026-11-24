@@ -1,4 +1,4 @@
-"""Render the maintained README comparisons for the static homepage."""
+"""Render the capability comparison and dated benchmark charts for the homepage."""
 
 from datetime import date, datetime, timezone
 from html import escape, unescape
@@ -56,7 +56,7 @@ def read_table(readme: str, header: str) -> list[list[str]]:
     lines = readme[readme.index(header):].split("\n\n", 1)[0].splitlines()
     rows = [[cell.strip() for cell in line.strip("|").split("|")] for line in lines]
     if len(rows) < 3 or any(len(row) != len(rows[0]) for row in rows):
-        raise ValueError(f"Invalid README comparison table: {header}")
+        raise ValueError(f"Invalid comparison table: {header}")
     return [rows[0], *rows[2:]]
 
 
@@ -85,59 +85,85 @@ def render_release(name: str) -> str:
     )
 
 
-def render_platform_link(url: str, icons: list[tuple[str, str]], label: str) -> str:
+def render_platform_group(icons: list[tuple[str, str]], label: str, url: str = "") -> str:
     images = "".join(
         f'<img class="platform-icon" src="/icons/{icon}.svg" alt="{escape(name)}">'
         for name, icon in icons
     )
-    return f'<a class="platform-link" href="{escape(url)}" title="{escape(label)}" aria-label="{escape(label)}">{images}</a>'
+    if url:
+        return f'<a class="platform-link" href="{escape(url)}" title="{escape(label)}" aria-label="{escape(label)}">{images}</a>'
+    return f'<span class="platform-link" title="{escape(label)}">{images}</span>'
+
+
+def note_link(note: str, label: str) -> str:
+    return re.search(rf"\[{re.escape(label)}\]\(([^)]+)\)", note)[1]
 
 
 def render_platform_links(project: str, platforms: str, browser: str, note: str) -> str:
     evidence_labels = {
-        "Rustia": "Desktop",
         "luaur": "Desktop CI",
         "ulua": "Desktop CI",
-        "ruau": "Linux run",
         "mlua": "Emscripten",
         "Lune": "Desktop releases",
     }
-    if project == "luau-rs/luau":
-        native_url = "https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/ci.yml"
-    else:
-        native_url = re.search(rf"\[{evidence_labels[project]}\]\(([^)]+)\)", note)[1].split("#")[0]
     names = re.findall(r"!\[([^\]]+)\]\[rustia-[a-z]+\]", platforms)
-    links = [render_platform_link(native_url, [(name, PLATFORMS[name]) for name in names], ", ".join(names) + " evidence")]
-
+    icons = [(name, PLATFORMS[name]) for name in names]
     if project == "Rustia":
-        mobile_url = re.search(r"\[Mobile\]\(([^)]+)\)", note)[1]
-        links.append(render_platform_link(mobile_url, [("iOS", "ios"), ("Android", "android")],
-                                          "iOS and Android evidence"))
+        links = [
+            render_platform_group(icons, ", ".join(names)),
+            render_platform_group([("iOS", "ios")], "iOS · Tested on a physical iPad"),
+            render_platform_group([("Android", "android")], "Android · Tested on an Android 15 emulator"),
+        ]
+    elif project == "ruau":
+        links = [render_platform_group(icons, "Linux · Recorded benchmark run")]
+    else:
+        if project == "luau-rs/luau":
+            native_url = "https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/ci.yml"
+        else:
+            native_url = note_link(note, evidence_labels[project]).split("#")[0]
+        links = [render_platform_group(icons, ", ".join(names) + " evidence", native_url)]
+
     if browser != "—":
         kind, url = re.fullmatch(r"\[([^\]]+)\]\(([^)]+)\)", unescape(browser)).groups()
         kind = " ".join(kind.split())
         label = f"Browser Wasm · {kind}"
-        links.append(render_platform_link(url, [("Browser Wasm", "browser")], label))
+        links.append(render_platform_group([("Browser Wasm", "browser")], label, url))
     return '<span class="platform-links">' + "".join(links) + "</span>"
 
 
-def render_luau_comparison(rows: list[list[str]], readme: str) -> str:
+def render_reload_state(edits: str, note: str) -> str:
+    edits = edits.replace("&nbsp;", " ")
+    if edits == "Rollback":
+        return '<a href="/docs/api/rustia/#keeping-state-across-script-edits">Keeps chosen state</a>'
+    if edits == "Reload module":
+        return render_cell(f"[Fresh module]({note_link(note, 'Module API')})")
+    if edits == "Replace module":
+        return render_cell(f"[Host-managed state]({note_link(note, 'Module API')})")
+    return "Unverified"
+
+
+def render_replay(project: str, note: str) -> str:
+    if project == "Rustia":
+        return render_cell(f"[✓ Tested]({note_link(note, 'Native/Wasm replay')})")
+    if project == "ruau":
+        return render_cell(f"[◐ Controls]({note_link(note, 'Seed controls')}#L54-L77)")
+    return "Unverified"
+
+
+def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
     headings = ["Project", "Runtime", "Platforms", "Hot Reload", "Replay", "Latest release"]
-    reload_support = {"Rollback", "Reload module", "Replace module"}
     projects = []
     cards = []
-    for name, engine_cell, platforms, browser_cell, edits, replay_cell in rows[1:]:
+    for name, engine_cell, platforms, browser_cell, edits, _ in rows[1:]:
         project = render_cell(name)
         source = re.search(r"#luau-note-\d+", platforms)[0]
-        note = re.search(rf'<a id="{source[1:]}"></a>([^\n]+)', readme)[1]
-        status = "Yes" if edits.replace("&nbsp;", " ") in reload_support else "Unverified"
+        note = re.search(rf'<a id="{source[1:]}"></a>([^\n]+)', comparison)[1]
         runtime = engine_cell.replace("Upstream Luau (C++)", "Luau C++")
-        replay = "Unverified" if replay_cell == "—" else replay_cell
         values = [
             render_cell(runtime),
             render_platform_links(project, platforms, browser_cell, note),
-            render_cell(f"[{status}]({source})"),
-            render_cell(replay),
+            render_reload_state(edits, note),
+            render_replay(project, note),
             render_release(project),
         ]
         projects.append([project, *values])
@@ -154,7 +180,7 @@ def render_luau_comparison(rows: list[list[str]], readme: str) -> str:
     )
 
 
-def read_speed_snapshot(snapshot: dict, labels: list[str]) -> list[tuple[str, list[float]]]:
+def read_speed_snapshot(snapshot: dict, labels: list[str]) -> list[tuple[str, str, list[float]]]:
     history = SITE.parent / "bench/history/runs.jsonl"
     engines = CHART_ENGINES
     times = {}
@@ -173,12 +199,12 @@ def read_speed_snapshot(snapshot: dict, labels: list[str]) -> list[tuple[str, li
     if len(labels) != len(snapshot["workloads"]):
         raise ValueError("Benchmark workload labels do not match the snapshot")
     return [
-        (label, [times[workload, engine] for engine in engines])
+        (workload, label, [times[workload, engine] for engine in engines])
         for label, workload in zip(labels, snapshot["workloads"])
     ]
 
 
-def render_speed_chart(rows: list[tuple[str, list[float]]]) -> str:
+def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
     engines = list(CHART_ENGINES.values())
     baseline = engines.index("Rustia")
     short_labels = {
@@ -189,13 +215,17 @@ def render_speed_chart(rows: list[tuple[str, list[float]]]) -> str:
         "Math library calls and buffered appends": "Math and table appends",
     }
     panels = []
-    for name, values in rows:
+    for workload, name, values in rows:
         baseline_time = values[baseline]
-        times = [value / baseline_time for value in values]
-        scale = ceil(max(times))
+        results = [
+            (engine, value / baseline_time, value)
+            for engine, value in zip(engines, values)
+            if (workload, engine) != ("dense_tables", "Roto")
+        ]
+        ranked = sorted(results, key=lambda result: result[1])
+        scale = ceil(ranked[-1][1])
         label = short_labels.get(name, name)
         bars = []
-        ranked = sorted(zip(engines, times, values), key=lambda result: result[1])
         for engine, time, value in ranked:
             engine_class = ' class="speed-baseline"' if engine == "Rustia" else ""
             ratio = "1" if engine == "Rustia" else f"{time:.2f}"
@@ -205,7 +235,11 @@ def render_speed_chart(rows: list[tuple[str, list[float]]]) -> str:
                 f'<meter min="0" max="{scale}" value="{time:.6f}" aria-hidden="true"></meter>'
                 f'<span>{ratio}×</span></li>'
             )
-        panels.append(f'<div><h4>{escape(label)}</h4><ul>{"".join(bars)}</ul></div>')
+        sort_note = ""
+        if workload == "dense_tables":
+            sort_note = (f'<p>Roto uses a hand-written quadratic sort for this task. '
+                         f'<a href="{BENCHMARK_URL}/RESULTS.md">See its timing in the full results</a>.</p>')
+        panels.append(f'<div><h4>{escape(label)}</h4><ul>{"".join(bars)}</ul>{sort_note}</div>')
     return '<div class="speed-chart">' + "\n".join(panels) + '</div>'
 
 
@@ -216,11 +250,12 @@ def main() -> None:
         raise ValueError("Expected exactly one homepage comparison marker")
     snapshot = json.loads(readme.split("<!-- rustia-benchmark-snapshot", 1)[1].split("-->", 1)[0])
     benchmark_date = datetime.fromtimestamp(snapshot["start"], timezone.utc).date().isoformat()
-    checked = re.search(r"\*\*Sources and details\*\* · Checked ([\w ]+)\.", readme)[1]
-    luau_rows = read_table(readme, "| Project | Engine | Desktop |")
+    comparison = (SITE.parent / "crates/rustia/compare.md").read_text(encoding="utf-8")
+    checked = re.search(r"\*\*Sources and details\*\* · Checked ([\w ]+)\.", comparison)[1]
+    luau_rows = read_table(comparison, "| Project | Engine | Desktop |")
     labels = [row[0] for row in read_table(readme, "| Work unit | Rustia |")[1:]]
     speed_rows = read_speed_snapshot(snapshot, labels)
-    luau = render_luau_comparison(luau_rows, readme)
+    luau = render_luau_comparison(luau_rows, comparison)
     chart = render_speed_chart(speed_rows)
     section = f'''<h3 id="luau-comparison">Luau runtimes + Rust scripting crates</h3>
     <p>Capabilities are based on the linked source, CI and demos checked {escape(checked)}. Release versions were checked {RELEASES_CHECKED} and may be newer than the versions reviewed.</p>
@@ -229,18 +264,18 @@ def main() -> None:
       <summary>What we checked</summary>
       <dl class="comparison-evidence">
         <dt>Runtime</dt><dd>The implementation that executes Luau. Luau C++ refers to the upstream Luau runtime.</dd>
-        <dt>Platforms</dt><dd>Icons link to CI, release builds or recorded runs. The globe links to a Browser Wasm demo, test or build. Rustia’s ARM64 mobile checks ran on a physical iPad and an Android 15 emulator.</dd>
-        <dt>Hot Reload</dt><dd>Yes means the host can reload or replace part of the script while the app keeps running. Unverified means the sources show how to run edited code but leave in-place replacement unverified. Rustia can keep the previous code and script state if a reload fails.</dd>
-        <dt>Replay</dt><dd>Rustia’s recorded native and browser runs matched. ruau documents controls for seeds and the clock. Unverified means the reviewed sources did not establish replay support or provide a matching run.</dd>
+        <dt>Platforms</dt><dd>Platform evidence comes from CI, release builds or recorded runs. The globe links to a browser demo, test or build. A build confirms compilation. Rustia’s ARM64 mobile checks ran on a physical iPad and an Android 15 emulator.</dd>
+        <dt>Hot Reload</dt><dd>The app keeps running in each documented reload path. <strong>Keeps chosen state</strong> means the embedder can carry selected script state across edits, as the Rustia garden does. <strong>Fresh module</strong> means the replacement starts with new module-local variables. <strong>Host-managed state</strong> means the host supplies the replacement and decides what to carry forward. <strong>Unverified</strong> means the sources showed how to run edited code without establishing a reload path.</dd>
+        <dt>Replay</dt><dd>Rustia’s recorded deterministic race matched on native and browser Wasm. ruau documents controls for seeds and the clock. Unverified means the reviewed sources did not establish replay support or provide a matching run.</dd>
         <dt>Latest release</dt><dd>The latest stable version found in the project’s package registry or on GitHub. Dates are in UTC.</dd>
       </dl>
     </details>
-    <p><a href="{README_URL}#compare-luau-projects">Luau comparison sources and notes</a></p>
+    <p><a href="/docs/api/rustia/#compare-luau-projects">Luau comparison sources and notes</a></p>
     <h3 id="speed-comparison">Runtime speed</h3>
     <p>Correctness comes first. We test Luau behaviour and deterministic replay while working to make Rustia faster.</p>
     <p><strong>Lower is better.</strong> 1× is Rustia’s time for that task. Each chart has its own scale.</p>
     {chart}
-    <p class="benchmark-note">Snapshot from {benchmark_date} UTC on Linux x86-64. These are best observed times after startup, including interpreter, JIT and native results. Each engine uses its own version of each task. Roto compiles to machine code with Cranelift. Its sparse lookup uses a list, and its state update uses a regular function.</p>
+    <p>Snapshot from {benchmark_date} UTC on Linux x86-64. These are best observed times after startup, including interpreter, JIT and native results. Each engine uses its own version of each task. Roto JIT-compiles scripts to machine code with Cranelift before running them. Its sparse lookup uses a list, and its state update uses a regular function.</p>
     <p><a href="{BENCHMARK_URL}/RESULTS.md">Exact benchmark timings on GitHub</a> · <a href="{BENCHMARK_URL}/CLAIMS.md">Benchmark methodology and limitations</a></p>'''
     sys.stdout.write(homepage.replace(MARKER, section))
 

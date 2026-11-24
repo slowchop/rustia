@@ -129,56 +129,11 @@ Type `=40 + 2` to see the result and `:quit` to exit.
 
 <a id="how-does-it-compare"></a>
 
-<!-- rustia-luau-comparison -->
-
 ## Rustia and other Luau projects
 
-### Lua and Luau
+<a id="compare-luau-projects"></a>
 
-- **Lua provides** functions, tables for storing data, and coroutines that can pause and resume.
-- **Luau adds** shortcuts like `score += 1`, `continue` in loops, and optional type annotations. Rustia runs annotated scripts without a static type check.
-
-Rustia targets standalone Luau 0.709, including its vector and buffer libraries. Roblox services are outside that scope. [Tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md)
-
-### What Rustia adds
-
-- **Replay on desktop and in a browser.** In deterministic mode, the same script, seed, and inputs produce the same decisions. [Watch the native and Wasm race](https://github.com/slowchop/rustia#readme)
-- **Keep running through a bad edit.** Try a new module while the app runs. If installation fails, Rustia restores the previous script state and your app can keep calling the old functions. [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
-- **Give each decision a budget.** Limit the work a script can do and the memory Rustia tracks for it. A script can queue changes for Rust and deliver them only when the call succeeds. [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
-
-### Compare Luau projects
-
-All seven compile Luau to bytecode. ulua, mlua and Lune also offer a native JIT. For source-to-source transpilation or bundling, see [darklua](https://darklua.com/).
-
-| Project | Engine | Desktop | Browser&nbsp;Wasm | Hot&nbsp;reload | Replay |
-| --- | --- | --- | --- | --- | --- |
-| **Rustia** | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[1\]](#luau-note-1) | [Demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md) | Rollback | [✓&nbsp;Tested](#luau-note-1) |
-| luaur | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[2\]](#luau-note-2) | [Playground](https://pjankiewicz.github.io/luaur/) | Run&nbsp;code | — |
-| ulua | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[3\]](#luau-note-3) | [Playground](https://webc-site.github.io/ulua/) | Run&nbsp;code | — |
-| ruau | Rust | ![Linux][rustia-linux]&nbsp;[\[4\]](#luau-note-4) | — | Reload&nbsp;module | [◐&nbsp;Controls](#luau-note-4) |
-| luau-rs/luau | Rust | ![Linux][rustia-linux]&nbsp;[\[5\]](#luau-note-5) | [CI&nbsp;tests](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml) | Run&nbsp;code | — |
-| mlua | Upstream Luau (C++) | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[6\]](#luau-note-6) | [Build](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) | Replace&nbsp;module | — |
-| Lune | Upstream Luau (C++) | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[7\]](#luau-note-7) | — | Load&nbsp;script | — |
-
-**Desktop** shows platforms listed in CI, release builds or recorded runs. ![Linux][rustia-linux] Linux · ![macOS][rustia-macos] macOS · ![Windows][rustia-windows] Windows. Rustia also runs on ARM64 iOS and Android. [\[1\]](#luau-note-1)
-
-**Replay** means the same script and inputs produce the same result across targets in a reproducible configuration. ✓ Tested means matching native and browser results. ◐ Controls means the host can fix the seeds and clock. A dash means the sources below did not establish that capability.
-
-**Sources and details** · Checked 20 November 2026.
-
-1. <a id="luau-note-1"></a>Rustia restores the previous script state when a module install fails. Its deterministic mode reproduces the native run in a browser. ARM64 mobile tests passed on a physical iPad and an Android 15 emulator, with a browser run in iPad Safari. [Compiler](https://github.com/slowchop/rustia/blob/main/crates/rustia-compiler/src/lib.rs) · [Hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs) · [Native/Wasm replay](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race) · [Desktop](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md) · [Mobile](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md#type-grammar-candidate-execution--2026-11-13) · [Safari](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md#physical-ipad-safari-execution--2026-11-14)
-2. <a id="luau-note-2"></a>luaur 0.1.8 is a Rust port. It can run new code in the same VM. Native JIT execution is outside this version’s scope. [Project](https://github.com/pjankiewicz/luaur/tree/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739) · [Code generation](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/crates/luaur-code-gen/src/functions/compile_code_gen_context.rs) · [Desktop CI](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/.github/workflows/ci.yml)
-3. <a id="luau-note-3"></a>ulua 0.1.7 forks luaur and adds an opt-in native JIT. It can run new code in the same VM. [Project](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md) · [JIT](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md#jit-native-acceleration--switching) · [Desktop CI](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/.github/workflows/ci.yml)
-4. <a id="luau-note-4"></a>ruau 0.3.0 lets the host unload modules and fix the clock, hash seed and random seed. Its docs describe a Wasm clock. Cross-target replay and browser execution are unverified. [Project](https://github.com/cortesi/ruau/tree/aab5052e1a3d6ed91c3e8860f950ecfea972030d) · [Linux run](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md) · [Wasm clock](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/limits.rs#L29-L77) · [Module API](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/lib.rs#L1522-L1602) · [Seed controls](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/limits.rs)
-5. <a id="luau-note-5"></a>luau-rs/luau runs new chunks in the same VM and tests browser execution. Native code generation is in development. [Project](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/README.md) · [Embedding API](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/packages/luau/README.md) · [Browser CI](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml)
-6. <a id="luau-note-6"></a>mlua binds Rust to upstream C++ Luau and also supports Lua. The host can replace a registered module. CI builds for Emscripten. Bare Wasm needs WASI imports and Wasm exceptions. [Project](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/README.md) · [JIT](https://luau.org/performance/) · [Emscripten](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) · [Bare Wasm](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/docs/wasm32.md) · [Module API](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/src/state.rs#L538-L560)
-7. <a id="luau-note-7"></a>Lune 0.11.1 uses mlua. It can load an edited script or bundle its VM and bytecode into a standalone executable. [Project](https://github.com/lune-org/lune/tree/v0.11.1) · [Executable](https://github.com/lune-org/lune/blob/v0.11.1/crates/lune/src/standalone/mod.rs) · [Desktop releases](https://github.com/lune-org/lune/blob/v0.11.1/.github/workflows/release.yaml) · [Script loading](https://github.com/lune-org/lune/blob/v0.11.1/crates/lune-std-luau/src/lib.rs)
-
-[rustia-linux]: https://github.com/slowchop/rustia/raw/6a212ab9742cb1b1c03b26bdd27c720eadcba492/demos/web-live/icons/linux.svg
-[rustia-macos]: https://github.com/slowchop/rustia/raw/6a212ab9742cb1b1c03b26bdd27c720eadcba492/demos/web-live/icons/macos.svg
-[rustia-windows]: https://github.com/slowchop/rustia/raw/6a212ab9742cb1b1c03b26bdd27c720eadcba492/demos/web-live/icons/windows.svg
-
-<!-- /rustia-luau-comparison -->
+[Compare Luau projects](https://rustia.dev/#luau-comparison) for platform support, hot reload, and replay. The [comparison notes](https://rustia.dev/docs/api/rustia/#compare-luau-projects) include the sources. See [tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md) for Rustia’s Luau compatibility.
 
 Koto and Rhai each have their own scripting language. The timings below include both, along with Roto.
 
@@ -189,8 +144,8 @@ The chart includes upstream C++ Luau in interpreter and JIT modes alongside the 
 
 ![Time per workload for Rustia, luaur, ruau, C++ Luau in two modes, Koto, Rhai, and Roto. Lower is better.](https://github.com/slowchop/rustia/raw/6c1decf946af1a43e104d76fb8fb9ca9dfd11b30/crates/rustia/performance.svg)
 
-Each language has its own version of each workload. Roto uses a list for sparse
-lookups and a regular function for the closure test. The timings cover scripts already running. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md)
+Each language has its own version of each workload. Roto's array workload uses a handwritten quadratic sort. It also uses a list
+for sparse lookups and a regular function for the closure test. The timings cover scripts already running. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md)
 also show how long each engine took to get started.
 
 <details>
