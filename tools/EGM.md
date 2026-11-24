@@ -28,7 +28,8 @@ This directory contains internal Node and shell tools for benchmark validation, 
   standard hosted runners, read-only permissions, pinned dependencies and required
   execution blocks. It also locks the dispatch-only bulk trust fixture's four
   inputs, run title, hosted job inventory and checkout-verification order, with
-  negative mutation fixtures. [`check-workflows.js`](check-workflows.js) selects it when
+  exact step inventories, protected checker provenance, token/permission guards
+  and negative mutation fixtures. [`check-workflows.js`](check-workflows.js) selects it when
   the explicit source profile marker exists. The original private profile has
   separate runner and workflow checks.
 

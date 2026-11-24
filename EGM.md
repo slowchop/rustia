@@ -57,7 +57,8 @@ entry point. The ignored private sibling is a separate repository.
 The dispatch-only [bulk trust fixture](./.github/workflows/bulk.yml) is loaded
 from protected `main`, projects its four controller inputs into the GitHub run
 title, and verifies the exact candidate checkout before any candidate command.
-It is an inactive controller prerequisite, not the staged production Bulk suite.
+Its policy checker comes from a separate protected-`main` checkout. It is an
+inactive controller prerequisite, not the staged production Bulk suite.
 
 The hosted Linux workspace job additionally runs the default-off executor accounting
 diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.

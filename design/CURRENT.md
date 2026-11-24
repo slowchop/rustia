@@ -29,8 +29,9 @@ The dispatch-only `bulk.yml` trust fixture is the public half of a future
 controller handshake. It accepts a repository ID, attempt ID, exact checkout
 SHA and manifest digest on protected `main`, binds them into the GitHub run
 title, and verifies the checked-out commit in a pinned `integrity` step. Its
-second job exercises the protected workflow policy only. The controller,
-staged Bulk suite and repository settings remain inactive.
+second job exercises the policy checker from a separate protected-`main`
+checkout; candidate code cannot replace that checker. The controller, staged
+Bulk suite and repository settings remain inactive.
 
 ## Website
 

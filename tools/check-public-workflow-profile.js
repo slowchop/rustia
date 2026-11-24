@@ -135,8 +135,14 @@ function checkPermissions(text, label) {
   const blocks = text.match(/^permissions:\s*$/gm) ?? [];
   const declarations = text.match(/^permissions:\s*\n  contents: read\s*$/gm) ?? [];
   if (blocks.length !== 1 || declarations.length !== 1) reject(`${label} must grant only top-level contents: read`);
+  if (/^\s{2,}(?:permissions|"permissions"|'permissions')\s*:/m.test(text)) {
+    reject(`${label} must not override permissions inside a job`);
+  }
   if (/^\s{2,}[A-Za-z0-9_-]+:\s*(?:write|write-all)\s*$/m.test(text)) {
     reject(`${label} must not grant any write permission`);
+  }
+  if (/github\s*(?:\.\s*token|\[\s*['"]token['"]\s*\])|GITHUB_TOKEN|tojson\s*\(\s*github\s*\)/i.test(text)) {
+    reject(`${label} must not expose the GitHub token to workflow steps`);
   }
 }
 
@@ -188,12 +194,68 @@ function checkNoForbidden(text, label) {
   if (/^\s*(?:-\s+)?uses:\s*\.\//m.test(text)) reject(`${label} must not call a reusable workflow or local action`);
 }
 
+function exactStepBlocks(block, expected, label) {
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === "    steps:");
+  if (start < 0) reject(`${label} must declare steps`);
+  const starts = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (!/^      - /.test(lines[index])) continue;
+    const match = lines[index].match(/^      - name: (.+)$/);
+    if (!match) reject(`${label} must name every step`);
+    starts.push({ name: match[1], index });
+  }
+  const names = starts.map(({ name }) => name);
+  if (JSON.stringify(names) !== JSON.stringify(expected)) {
+    reject(`${label} steps must be exactly ${expected.join(", ")}; found ${names.join(", ")}`);
+  }
+  return new Map(starts.map(({ name, index }, at) => [
+    name,
+    lines.slice(index, starts[at + 1]?.index ?? lines.length).join("\n").trimEnd(),
+  ]));
+}
+
+function requireExactStep(steps, name, expected, label) {
+  if (steps.get(name) !== expected.trimEnd()) {
+    reject(`${label} must match the reviewed ${name} step`);
+  }
+}
+
+function requireExactJobHeader(block, expected, label) {
+  const lines = block.split(/\r?\n/);
+  const steps = lines.findIndex((line) => line === "    steps:");
+  if (steps < 0 || lines.slice(0, steps + 1).join("\n") !== expected.trimEnd()) {
+    reject(`${label} must match the reviewed job header`);
+  }
+}
+
 function checkBulk(text) {
   const label = ".github/workflows/bulk.yml";
+  const expectedPrefix = [
+    "name: Rustia Bulk trust fixture",
+    "run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}",
+    "",
+    BULK_TRIGGERS.trimEnd(),
+    "",
+    "permissions:",
+    "  contents: read",
+    "",
+    "jobs:",
+    "",
+  ].join("\n");
+  if (!text.startsWith(expectedPrefix)) {
+    reject(`${label} must retain the exact reviewed top-level configuration before jobs`);
+  }
   checkTriggers(text, BULK_TRIGGERS, label);
   checkPermissions(text, label);
   checkActionPins(text, label);
   checkNoForbidden(text, label);
+  const permissionsStart = text.indexOf("permissions:\n");
+  const jobsStart = text.indexOf("jobs:\n", permissionsStart);
+  if (permissionsStart < 0 || jobsStart < 0
+      || text.slice(permissionsStart, jobsStart) !== "permissions:\n  contents: read\n\n") {
+    reject(`${label} must put only top-level contents: read before jobs`);
+  }
   requireText(text, "name: Rustia Bulk trust fixture\n", label);
   requireText(text,
     "run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}\n",
@@ -216,37 +278,87 @@ function checkBulk(text) {
   }
 
   const integrity = jobs.get("integrity");
-  requireText(integrity, "if: github.ref == 'refs/heads/main'", `${label} integrity`);
-  for (const fragment of [
-    '[[ "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]',
-    '[[ "$ATTEMPT_ID" =~ ^[1-9][0-9]*$ ]]',
-    '[[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]',
-    '[[ "$MANIFEST_DIGEST" =~ ^[0-9a-f]{64}$ ]]',
-  ]) requireText(integrity, fragment, `${label} dispatch validation`);
-  const validate = integrity.indexOf("      - name: Validate dispatch inputs\n");
-  const checkout = integrity.indexOf("      - name: Checkout candidate\n");
-  const verify = integrity.indexOf("      - name: Verify exact checkout\n");
-  if (!(validate >= 0 && validate < checkout && checkout < verify)) {
-    reject(`${label} integrity must validate inputs, check out the candidate, then verify the exact checkout`);
-  }
+  requireExactJobHeader(integrity, `  integrity:
+    name: integrity
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:`, `${label} integrity`);
+  const integritySteps = exactStepBlocks(integrity, [
+    "Validate dispatch inputs",
+    "Checkout candidate",
+    "Verify exact checkout",
+  ], `${label} integrity`);
+  requireExactStep(integritySteps, "Validate dispatch inputs", `      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          REPOSITORY_ID: \${{ inputs.repository_id }}
+          ATTEMPT_ID: \${{ inputs.attempt_id }}
+          CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+          MANIFEST_DIGEST: \${{ inputs.manifest_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ATTEMPT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$MANIFEST_DIGEST" =~ ^[0-9a-f]{64}$ ]]`, `${label} integrity`);
+  requireExactStep(integritySteps, "Checkout candidate", `      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false`, `${label} integrity`);
+  requireExactStep(integritySteps, "Verify exact checkout", `      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} integrity`);
   if ((text.match(/      - name: Verify exact checkout\n/g) ?? []).length !== 1) {
     reject(`${label} must contain exactly one Verify exact checkout step`);
   }
-  requireText(integrity, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', `${label} integrity`);
 
   const test = jobs.get("test");
-  requireText(test, "needs: integrity", `${label} test`);
-  requireText(test, "if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'", `${label} test`);
-  const testCheckout = test.indexOf("      - name: Checkout candidate\n");
-  const testVerify = test.indexOf("      - name: Verify test checkout\n");
-  const policy = test.indexOf("      - name: Check the protected workflow policy\n");
-  if (!(testCheckout >= 0 && testCheckout < testVerify && testVerify < policy)) {
-    reject(`${label} test must check out and verify the candidate before executing its policy checker`);
-  }
-  requireText(test, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', `${label} test`);
-  requireText(test, "run: node tools/check-workflows.js", `${label} test`);
-  if ((text.match(/uses: actions\/checkout@/g) ?? []).length !== 2) {
-    reject(`${label} must contain exactly one pinned checkout in each job`);
+  requireExactJobHeader(test, `  test:
+    name: test
+    needs: integrity
+    if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:`, `${label} test`);
+  const testSteps = exactStepBlocks(test, [
+    "Checkout protected policy",
+    "Checkout candidate",
+    "Verify test checkout",
+    "Check the protected workflow policy",
+  ], `${label} test`);
+  requireExactStep(testSteps, "Checkout protected policy", `      - name: Checkout protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false`, `${label} test`);
+  requireExactStep(testSteps, "Checkout candidate", `      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ inputs.checkout_sha }}
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false`, `${label} test`);
+  requireExactStep(testSteps, "Verify test checkout", `      - name: Verify test checkout
+        shell: bash
+        working-directory: candidate
+        env:
+          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} test`);
+  requireExactStep(testSteps, "Check the protected workflow policy", `      - name: Check the protected workflow policy
+        run: node trusted/tools/check-workflows.js`, `${label} test`);
+  if ((text.match(/uses: actions\/checkout@/g) ?? []).length !== 3) {
+    reject(`${label} must contain one candidate checkout per job and one protected-policy checkout`);
   }
 }
 
@@ -515,13 +627,34 @@ function bulkSelfTest(root) {
     ["bulk pull-request trigger", bulk.replace("  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:")],
     ["bulk input drift", bulk.replace("      manifest_digest:", "      reported_digest:")],
     ["bulk write permission", bulk.replace("contents: read", "contents: write")],
+    ["bulk job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    permissions: { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
+    ["bulk spaced job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    permissions : { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
+    ["bulk quoted job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    \"permissions\": { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
+    ["bulk single-quoted job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    'permissions': { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
+    ["bulk job environment preload", bulk.replace("    timeout-minutes: 10\n    steps:", "    timeout-minutes: 10\n    env: { NODE_OPTIONS: --require=./candidate/attacker.js }\n    steps:")],
+    ["bulk top-level environment preload", bulk.replace('"on":\n', "env:\n  NODE_OPTIONS: --require=./candidate/attacker.js\n\n\"on\":\n")],
+    ["bulk top-level run defaults", bulk.replace('"on":\n', "defaults:\n  run:\n    shell: bash -c 'node candidate/attacker.js; bash {0}'\n\n\"on\":\n")],
+    ["bulk token exposure", bulk.replace("        shell: bash", "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n        shell: bash")],
+    ["bulk indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github['token'] }}\n        shell: bash")],
+    ["bulk spaced indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github[ 'token' ] }}\n        shell: bash")],
+    ["bulk double-quoted indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github[ \"token\" ] }}\n        shell: bash")],
+    ["bulk whole context token exposure", bulk.replace("        shell: bash", "        env:\n          CONTEXT: ${{ toJSON(github) }}\n        shell: bash")],
+    ["bulk moving protected policy ref", bulk.replace("ref: ${{ github.sha }}", "ref: main")],
     ["bulk untrusted ref", bulk.replace("ref: ${{ inputs.checkout_sha }}", "ref: main")],
     ["bulk persisted credentials", bulk.replace("persist-credentials: false", "persist-credentials: true")],
     ["bulk self-hosted runner", bulk.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")],
     ["bulk title drift", bulk.replace("run-name: rustia-ci:", "run-name: bulk:")],
     ["bulk job-name drift", bulk.replace("  integrity:\n", "  verify:\n")],
     ["bulk missing exact-checkout step", bulk.replace("Verify exact checkout", "Trust checkout")],
+    ["bulk command before validation", bulk.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - name: Run early command\n        run: true\n\n      - name: Validate dispatch inputs")],
+    ["bulk unnamed command before validation", bulk.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - run: true\n\n      - name: Validate dispatch inputs")],
+    ["bulk command before exact verification", bulk.replace("      - name: Verify exact checkout", "      - name: Run candidate early\n        run: true\n\n      - name: Verify exact checkout")],
+    ["bulk in-step command before exact verification", bulk.replace('          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', '          node candidate/early.js\n          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"')],
     ["bulk test before verification", bulk.replace("      - name: Verify test checkout", "      - name: Check the protected workflow policy\n        run: node tools/check-workflows.js\n\n      - name: Verify test checkout")],
+    ["bulk candidate policy checker", bulk.replace("node trusted/tools/check-workflows.js", "node candidate/tools/check-workflows.js")],
+    ["bulk comment-spoofed policy provenance", bulk
+      .replace("ref: ${{ github.sha }}", "ref: ${{ inputs.checkout_sha }}")
+      .replace("node trusted/tools/check-workflows.js", "node candidate/tools/check-workflows.js\n        # ref: ${{ github.sha }}\n        # run: node trusted/tools/check-workflows.js")],
   ]) {
     assert.notEqual(changed, bulk, `${label}: mutation did not apply`);
     assert.throws(() => checkBulk(changed), /bulk\.yml/, label);

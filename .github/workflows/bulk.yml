@@ -67,15 +67,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Checkout protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_sha }}
+          path: candidate
           fetch-depth: 1
           persist-credentials: false
 
       - name: Verify test checkout
         shell: bash
+        working-directory: candidate
         env:
           EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
         run: |
@@ -83,4 +93,4 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
 
       - name: Check the protected workflow policy
-        run: node tools/check-workflows.js
+        run: node trusted/tools/check-workflows.js
