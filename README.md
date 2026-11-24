@@ -1,4 +1,4 @@
-# Rustia
+# <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
 Embed Luau in Rust games and tools.
 Edit scripts without a rebuild and let players write mods.
