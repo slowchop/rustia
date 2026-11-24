@@ -38,7 +38,7 @@ python3 render-home-comparisons.py doc-index.html > dist/docs/index.html
 cp api-index.html dist/docs/api/index.html
 python3 render-home-comparisons.py garden-source.html > dist/docs/examples/garden/index.html
 cp dist/docs/examples/garden/index.html dist/garden-source/index.html
-cp _headers LICENSE-* bevy-icon.png slowchop-logo.png garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
+cp _headers LICENSE-* bevy-icon.png slowchop-logo.png rustia-mark.svg garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
   sprite-defs.html garden-fragment.html *.luau dist/
 for script in *.mjs; do
   case "$script" in
