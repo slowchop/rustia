@@ -14,6 +14,7 @@ The introductory embedding, chunk-builder, mutable-object, and live-value files 
 - [typed_invocation.rs](./typed_invocation.rs) and [game_objects.rs](./game_objects.rs): borrowed per-call host context and staged output records.
 - [live_values.rs](./live_values.rs): rooted handles, shared/cyclic table identity, and typed stale-handle rejection after reset.
 - [module_resolution.rs](./module_resolution.rs): host-supplied module resolver.
+- [transferable.rs](./transferable.rs): move an idle interpreter and retained function together to a native worker. Run it with `cargo run --locked -p rustia --features transferable --example transferable`.
 - [hot_reload.rs](./hot_reload.rs): candidate installation and host-owned replacement.
 - [mutable_objects.rs](./mutable_objects.rs): immediate standard-profile Rust payload mutation.
 - [hardened_decision.rs](./hardened_decision.rs): correctness-only stateless entry, explicit memory/fuel/record limits, failed-publication check, and automatic reset/reuse.

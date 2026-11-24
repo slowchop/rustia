@@ -308,9 +308,10 @@ impl RustiaBuilder {
 
     /// Limits the VM's accounted live memory. The default is unlimited.
     ///
-    /// Accounting is deterministic across native and Wasm targets. It does not
-    /// bound total process memory, allocator capacity, or memory captured by
-    /// Rust callbacks. Allocations can fail once the limit is reached.
+    /// Some charges depend on pointer width, so a script near its limit can run
+    /// out of memory at different points on native and Wasm targets. The limit
+    /// covers VM-accounted memory and excludes allocator capacity, total process
+    /// memory and memory captured by Rust callbacks.
     pub fn memory_limit_bytes(mut self, bytes: usize) -> Self {
         self.settings.memory_limit_bytes = Some(bytes);
         self

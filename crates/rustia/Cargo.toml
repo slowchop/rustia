@@ -36,5 +36,9 @@ wasm-bindgen = { version = "0.2", optional = true }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 
+[[example]]
+name = "transferable"
+required-features = ["transferable"]
+
 [lints]
 workspace = true

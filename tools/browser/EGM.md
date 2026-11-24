@@ -14,7 +14,7 @@ Pinned Playwright WebKit support for the shared WebAssembly correctness suite. H
 - [record-race.cjs](./record-race.cjs) compares native and WebKit/Wasm race traces, drives the [recording canvas](./race-frame.html) by tick, and atomically replaces the MP4 after validating its frames.
 - [record-edits.cjs](./record-edits.cjs) drives the editor in `--hot-reload` mode. It drives real key events, draws a blinking caret at the text insertion point, shows keycaps and checks every tick through valid and invalid edits. It captures frames at 1280×720.
 - [render-demo-gif.sh](./render-demo-gif.sh) exports a recorded MP4 as a looping GIF and replaces the output only after encoding succeeds.
-- [render-hot-reload-gif.sh](./render-hot-reload-gif.sh) converts the hot-reload MP4 to the looping README image.
+- [render-hot-reload-gif.sh](./render-hot-reload-gif.sh) converts the hot-reload MP4 to a looping GIF.
 
 ## Invariants
 
