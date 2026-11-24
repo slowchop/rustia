@@ -127,7 +127,7 @@ main { width:100% }
 .studio-credit { white-space:nowrap }
 .studio-icon {
   display:inline-block; width:1.2em; height:1.2em; margin-inline-end:.25em; vertical-align:-.2em;
-  background:url("/slowchop-logo.png") no-repeat left top / 215% auto; mix-blend-mode:multiply
+  background:url("/slowchop-logo.png") no-repeat left top / 215% auto; mix-blend-mode:multiply; filter:blur(.28px)
 }
 .home .bench { grid-template-columns:var(--home-columns) }
 .home .garden-source { padding-bottom:36px }
