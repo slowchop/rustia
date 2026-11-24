@@ -240,7 +240,8 @@ def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
             bars.append(
                 f'<li{engine_class} title="{value:.3f} µs per work unit">'
                 f'<span>{escape(engine)}</span>'
-                f'<meter min="0" max="{scale}" value="{time:.6f}" aria-hidden="true"></meter>'
+                '<span class="speed-track" aria-hidden="true">'
+                f'<span class="speed-fill" style="width:{time / scale:.6%}"></span></span>'
                 f'<span>{ratio}×</span></li>'
             )
         if workload == "dense_tables":

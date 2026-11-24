@@ -108,12 +108,10 @@ main { width:100% }
 .speed-chart ul { display:grid; gap:5px; list-style:none; padding:0; margin:0 }
 .speed-chart li { display:grid; grid-template-columns:9em minmax(0,1fr) 4em; align-items:center; gap:8px; padding:2px 4px; font-size:.85rem }
 .speed-chart li > :last-child { text-align:right; font-variant-numeric:tabular-nums }
-.speed-chart meter { --speed-bar:#718b79; width:100%; height:.8rem }
-.speed-chart meter::-webkit-meter-bar { background:#eee5d2; border:0 }
-.speed-chart meter::-webkit-meter-optimum-value { background:var(--speed-bar) }
-.speed-chart meter::-moz-meter-bar { background:var(--speed-bar) }
+.speed-track { height:.4rem; overflow:hidden; border-radius:1rem; background:#eee5d2 }
+.speed-fill { display:block; height:100%; background:#718b79 }
 .speed-chart .speed-baseline { background:#e4eee2; border-radius:4px }
-.speed-chart .speed-baseline meter { --speed-bar:#315640 }
+.speed-baseline .speed-fill { background:#315640 }
 .speed-chart .speed-method { grid-column:2 / -1; text-align:left; font-size:.82rem }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
