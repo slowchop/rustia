@@ -12,7 +12,7 @@
 - `CompileError` carries an optional lexer span; `BuiltinEnvironment` separates public and conformance compilation modes.
 - `ExperimentalO2Options::reachability_exact()` selects the documented corpus-green rewrite track; `ALL` includes dead cleanup-clear elision, which the source marks as blocked on root-liveness work.
 
-- [compiled_call.rs](./compiled_call.rs) emits safe Rust for a numeric closure with one numeric argument and one host-supplied capture. The example exposes this experimental contract to local development tools.
+- [compiled_call.rs](./compiled_call.rs) emits safe Rust for a numeric closure with one numeric argument and one host-supplied capture. The example exposes this experimental contract to local development tools. The source byte and token limits apply before recursive parsing. The lowering checks that the closure actually reads or writes the declared capture.
 
 ## Invariants
 

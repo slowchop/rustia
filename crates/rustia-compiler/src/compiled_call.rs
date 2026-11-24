@@ -1,10 +1,14 @@
 //! Experimental generated Rust for one statically numeric Luau closure.
 use crate::CompileError;
-use rustia_lexer::Span;
-use rustia_parser::{
-    parse_source, AssignmentOp, AssignmentTarget, BinaryOp, Expr, SourceError, Stmt,
-};
+use rustia_lexer::{lex_for_parser, Span};
+use rustia_parser::{AssignmentOp, AssignmentTarget, BinaryOp, Expr, Parser, Stmt};
 use rustia_vm::number::CANON_NAN_BITS;
+
+/// Maximum source size accepted by the experimental compiled-call driver.
+pub const MAX_SOURCE_BYTES: usize = 4096;
+// This small grammar needs few tokens. Bound the token stream before entering
+// the recursive parser, including ineligible syntax and long flat expressions.
+const MAX_TOKENS: usize = 128;
 
 /// Build input for an experimental compiled call. The host owns the capture
 /// storage and must use the interpreter for calls subject to VM budgets.
@@ -19,16 +23,23 @@ pub struct GeneratedCall {
 /// unary closure. The closure may update that capture once before returning.
 pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
     let module_span = Span::new(0, source.len());
-    if source.len() > 4096 {
+    if source.len() > MAX_SOURCE_BYTES {
         return Err(CompileError::at(
-            "compiled module exceeds 4096 source bytes",
+            format!("compiled module exceeds {MAX_SOURCE_BYTES} source bytes"),
             module_span,
         ));
     }
-    let chunk = parse_source(source).map_err(|error| match error {
-        SourceError::Lex(error) => CompileError::at(error.message, error.span),
-        SourceError::Parse(error) => CompileError::at(error.message, error.span),
-    })?;
+    let tokens = lex_for_parser(source.as_bytes())
+        .map_err(|error| CompileError::at(error.message, error.span))?;
+    if let Some(token) = tokens.get(MAX_TOKENS) {
+        return Err(CompileError::at(
+            "compiled module exceeds its token budget",
+            token.span,
+        ));
+    }
+    let chunk = Parser::new(tokens)
+        .parse_chunk()
+        .map_err(|error| CompileError::at(error.message, error.span))?;
     let [Stmt::Local {
         bindings,
         init,
@@ -70,9 +81,10 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
             *function_span,
         ));
     }
-    let names = Names {
+    let mut emitter = Emitter {
         capture: &binding.name,
         parameter: &parameter.name,
+        uses_capture: false,
     };
     let (update, result) = match body.as_ref() {
         [Stmt::Return {
@@ -98,13 +110,14 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
                     *span,
                 ));
             };
-            if name != names.capture {
+            if name != emitter.capture {
                 return Err(CompileError::at(
                     "only the numeric capture can be assigned",
                     *span,
                 ));
             }
-            let value = emit(value, &names)?;
+            emitter.uses_capture = true;
+            let value = emitter.emit(value)?;
             let rhs = match op {
                 AssignmentOp::Assign => value,
                 AssignmentOp::Add => format!("canonical(capture + {value})"),
@@ -122,7 +135,13 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
             ))
         }
     };
-    let result = emit(result, &names)?;
+    let result = emitter.emit(result)?;
+    if !emitter.uses_capture {
+        return Err(CompileError::at(
+            "closure must capture the declared numeric local",
+            *function_span,
+        ));
+    }
     let rust = format!(
         "#[inline]\nfn canonical(value: f64) -> f64 {{\n    if value.is_nan() {{ f64::from_bits({CANON_NAN_BITS}) }} else {{ value }}\n}}\n\n\
          pub fn compiled_call(capture: f64, parameter: f64) -> (f64, f64) {{\n\
@@ -135,32 +154,38 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
     })
 }
 
-struct Names<'a> {
+struct Emitter<'a> {
     capture: &'a str,
     parameter: &'a str,
+    uses_capture: bool,
 }
 
-fn emit(expr: &Expr, names: &Names<'_>) -> Result<String, CompileError> {
-    let unsupported = || CompileError::at("unsupported numeric expression", expr.span());
-    match expr {
-        Expr::Number(value, _) => Ok(format!("canonical(f64::from_bits({}))", value.to_bits())),
-        Expr::Name(name, _) if name == names.capture => Ok("capture".to_owned()),
-        Expr::Name(name, _) if name == names.parameter => Ok("parameter".to_owned()),
-        Expr::Paren { expr, .. } => emit(expr, names),
-        Expr::Binary { op, lhs, rhs, .. } => {
-            let op = match op {
-                BinaryOp::Add => '+',
-                BinaryOp::Sub => '-',
-                BinaryOp::Mul => '*',
-                BinaryOp::Div => '/',
-                _ => return Err(unsupported()),
-            };
-            Ok(format!(
-                "canonical({} {op} {})",
-                emit(lhs, names)?,
-                emit(rhs, names)?
-            ))
+impl Emitter<'_> {
+    fn emit(&mut self, expr: &Expr) -> Result<String, CompileError> {
+        let unsupported = || CompileError::at("unsupported numeric expression", expr.span());
+        match expr {
+            Expr::Number(value, _) => Ok(format!("canonical(f64::from_bits({}))", value.to_bits())),
+            Expr::Name(name, _) if name == self.capture => {
+                self.uses_capture = true;
+                Ok("capture".to_owned())
+            }
+            Expr::Name(name, _) if name == self.parameter => Ok("parameter".to_owned()),
+            Expr::Paren { expr, .. } => self.emit(expr),
+            Expr::Binary { op, lhs, rhs, .. } => {
+                let op = match op {
+                    BinaryOp::Add => '+',
+                    BinaryOp::Sub => '-',
+                    BinaryOp::Mul => '*',
+                    BinaryOp::Div => '/',
+                    _ => return Err(unsupported()),
+                };
+                Ok(format!(
+                    "canonical({} {op} {})",
+                    self.emit(lhs)?,
+                    self.emit(rhs)?
+                ))
+            }
+            _ => Err(unsupported()),
         }
-        _ => Err(unsupported()),
     }
 }
