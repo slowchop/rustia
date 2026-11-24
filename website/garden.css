@@ -114,8 +114,7 @@ main { width:100% }
 .speed-chart meter::-moz-meter-bar { background:var(--speed-bar) }
 .speed-chart .speed-baseline { background:#e4eee2; border-radius:4px }
 .speed-chart .speed-baseline meter { --speed-bar:#315640 }
-.speed-chart li > a { justify-self:end; font-size:.82rem }
-.home-comparison .benchmark-note { font-size:.85rem }
+.speed-chart .speed-method { grid-column:2 / -1; text-align:left; font-size:.82rem }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
