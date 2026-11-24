@@ -39,6 +39,7 @@ main { width:100% }
 
 [data-mobile-editor] .garden-caption { justify-self:stretch; padding-inline:0; min-width:0 }
 .home [data-mobile-editor] .garden-caption { position:relative; isolation:isolate; background:transparent }
+.home .hero-copy::before,
 .home [data-mobile-editor] .garden-caption::before {
   content:""; position:absolute; inset:-6px; z-index:-1;
   background:#f6e7c7ed; border-radius:10px; filter:blur(10px); pointer-events:none
@@ -110,7 +111,10 @@ main { width:100% }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
-.home .hero-copy { margin-bottom:clamp(16px, 3svh, 30px) }
+.home .hero-copy {
+  width:fit-content; max-width:var(--home-content-width); isolation:isolate;
+  margin-bottom:clamp(16px, 3svh, 30px)
+}
 .home .hero-copy p + p { margin-top:4px }
 .home .bench { grid-template-columns:var(--home-columns) }
 .home .garden-source { padding-bottom:36px }
