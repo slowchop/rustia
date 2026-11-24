@@ -12,6 +12,8 @@ plain-text output to the page.
 - [garden.rs](garden.rs), [worker.mjs](worker.mjs), and [garden-player.mjs](garden-player.mjs) connect the script to the browser animation.
 - [draw-garden.mjs](draw-garden.mjs) draws the sprites into the page.
 
+The homepage uses the [unmodified Bevy icon](https://github.com/bevyengine/bevy/blob/main/assets/branding/icon.png) to identify the engine. See the [Bevy Foundation logo policy](https://bevy.org/foundation/logo-policy/).
+
 ## Build and check
 
 From the repository root:

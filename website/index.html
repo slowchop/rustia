@@ -44,10 +44,6 @@
         <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>
         <dd><strong>Keep runaway scripts under control.</strong> Set instruction and VM memory budgets so your app can handle a script that exceeds them.</dd>
       </div>
-      <div>
-        <dt><span class="feature-icon" aria-hidden="true">»</span>JIT and AOT research</dt>
-        <dd><strong>Keep editing while scripts compile.</strong> We’re exploring just-in-time (JIT) compilation in the background during development, and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode.</dd>
-      </div>
     </dl>
   </div>
 </section>
@@ -56,16 +52,20 @@
     <h2 id="roadmap-title">Roadmap</h2>
     <dl class="home-roadmap">
       <div>
-        <dt><span class="feature-icon" aria-hidden="true">«</span><a href="https://github.com/slowchop/rustia/issues/71">Time-travel debugging</a></dt>
-        <dd>Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable.</dd>
+        <dt><span class="feature-icon" aria-hidden="true">«</span>Time-travel debugging</dt>
+        <dd>Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. <a href="https://github.com/slowchop/rustia/issues/71">Follow the debugger work</a>.</dd>
       </div>
       <div>
-        <dt><span class="feature-icon" aria-hidden="true">🎮</span>A Luau layer for Bevy</dt>
-        <dd>We’re building a Luau layer on top of Bevy so you can change gameplay while the game runs, without rebuilding the Rust app.</dd>
+        <dt><span class="feature-icon" aria-hidden="true"><img src="/bevy-icon.png" width="20" height="20" alt=""></span>A Luau layer for Bevy</dt>
+        <dd>We’re building a Luau layer on top of <a href="https://bevy.org/">Bevy</a> so you can change gameplay while the game runs, without rebuilding the Rust app.</dd>
       </div>
       <div>
         <dt><span class="feature-icon" aria-hidden="true">♫</span>Synth in Luau</dt>
-        <dd>We’re also having fun with a Luau synth. Write sounds and music in code, then tweak them while you listen.</dd>
+        <dd>We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">»</span>JIT and AOT research</dt>
+        <dd>We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. <a href="https://github.com/slowchop/rustia/issues/89">Follow the compilation work</a>.</dd>
       </div>
     </dl>
   </div>

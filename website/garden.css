@@ -62,8 +62,10 @@ main { width:100% }
 .home-features dt, .home-roadmap dt { display:flex; align-items:center; gap:8px; font-weight:650 }
 .feature-icon { display:inline-grid; flex:none; place-items:center; width:1.75rem; height:1.75rem; color:#254735; background:#eee2c5; border-radius:5px; font:650 1.05rem/1 system-ui,sans-serif }
 .home-features dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
-.home-roadmap { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr)); gap:18px 24px; margin:14px 0 0 }
+.home-roadmap { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px 24px; margin:14px 0 0 }
 .home-roadmap dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
+@media(max-width:74rem) { .home-roadmap { grid-template-columns:repeat(2,minmax(0,1fr)) } }
+@media(max-width:40rem) { .home-roadmap { grid-template-columns:1fr } }
 .home-comparison p { margin:8px 0; line-height:1.5 }
 .home-comparison h3 { margin:24px 0 8px; font-size:1.13rem }
 .home-table { overflow-x:auto; border:1px solid #d5c6a6; border-radius:5px; margin-top:12px }
