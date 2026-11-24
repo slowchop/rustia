@@ -42,6 +42,7 @@
 //! | Run a script or get a result back | [`Chunk::exec`] runs it. [`Chunk::eval`] returns a Rust value. |
 //! | Pass data from Rust to Luau | [`Rustia::insert_global`] sets a named value. [`Rustia::insert_serde`] passes a struct or collection. |
 //! | Call a Luau function from Rust | [`Chunk::install`] loads its module. [`Exports::function`] looks up the function for [`Function::call`]. |
+//! | Load a module with `require` | Set a [`RustiaBuilder::module_resolver`]. See the [module resolver example]. |
 //! | Change a script while the app runs | Keep the old functions until the edit installs successfully. See the [hot reload example]. |
 //! | Show where a script failed | Give the script a name with [`Chunk::source_name`] and display [`Error::report`]. |
 //! | Run Luau in a browser | Follow the [browser setup] or build the [bare WebAssembly example]. |
@@ -60,22 +61,14 @@
 //! after it succeeds. If installation fails, Rustia rolls back guest changes and
 //! the app can keep using the previous functions. See the [hot reload example].
 //!
-// Keep comparison rows together in Rustdoc's horizontally scrollable table.
-#![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
-#![doc = include_str!("../compare.md")]
+//! # Cargo features
 //!
-//! # Performance
-//!
-//! The chart compares five workloads on Linux x86-64. Each language has its own
-//! version. Roto's array workload uses a handwritten quadratic sort. It uses a
-//! list for sparse lookups and an ordinary function for the closure test.
-//! Compare times within a column. Lower is better.
-//! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
-//!
-#![doc = include_str!("../performance.svg")]
-//!
-//! These October 2026 measurements cover scripts already running. Small timing
-//! differences may vary between runs. [Full results] · [Benchmark limitations]
+//! - **`web-live`** (default) provides system entropy and browser adapters
+//!   for time and randomness. For bare WebAssembly, disable default features
+//!   and supply host services as needed. See the [bare WebAssembly example].
+//! - **`transferable`** lets an idle interpreter and its live handles move
+//!   between Rust threads under exclusive ownership. See [thread ownership]
+//!   for host data bounds and the [transferable example] for a complete handoff.
 //!
 //! # More about embedding
 //!
@@ -130,11 +123,30 @@
 //!
 //! </details>
 //!
-//! For more, [browse the Rust examples] or read about [moving an idle interpreter
-//! to another thread](struct.Rustia.html#threads).
+//! For more, [browse the Rust examples].
+//!
+// Keep comparison rows together in Rustdoc's horizontally scrollable table.
+#![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
+#![doc = include_str!("../compare.md")]
+//!
+//! # Performance
+//!
+//! The chart compares five workloads on Linux x86-64. Each language has its own
+//! version. Roto's array workload uses a handwritten quadratic sort. It uses a
+//! list for sparse lookups and an ordinary function for the closure test.
+//! Compare times within a column. Lower is better.
+//! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
+//!
+#![doc = include_str!("../performance.svg")]
+//!
+//! These October 2026 measurements cover scripts already running. Small timing
+//! differences may vary between runs. [Full results] · [Benchmark limitations]
 //!
 //! [new Cargo app]: https://github.com/slowchop/rustia#try-it
 //! [hot reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
+//! [module resolver example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs
+//! [thread ownership]: struct.Rustia.html#threads
+//! [transferable example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs
 //! [browser setup]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
 //! [bare WebAssembly example]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
 //! [full results]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md

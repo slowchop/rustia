@@ -4,6 +4,8 @@
 /* The garden shares the hero background. The source is a sheet above it. */
 :root { background:#f6e7c7; color:#183f30 }
 header { width:90%; border-color:#d5c6a6 }
+.mark { display:inline-flex; align-items:center; gap:.35em; color:#183f30 }
+.mark img { flex:none }
 main { width:100% }
 .hero { position:relative; isolation:isolate; overflow:clip; padding:38px 5vw 44px }
 .hero-copy { position:relative; z-index:1; text-align:center; margin:0 auto 30px }

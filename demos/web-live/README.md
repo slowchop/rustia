@@ -42,6 +42,16 @@ Generated files live in `pkg/` and `target/`; they are not source files. Serve
 the directory rather than opening `index.html` through a `file:` URL, so the
 module loader can fetch the Wasm artifact.
 
+## Edit a running race
+
+After the browser build and serve steps above, open
+[the local race editor](http://127.0.0.1:8788/hot-reload.html).
+Place the caret after the `2` in `return x + 2` while the racer is moving.
+Press Backspace and type `2` again. After a few ticks, press Backspace again
+and pause. The editor shows Luau's error while the last good rule keeps the racer
+moving two metres per tick. Type `4` to change its speed to four metres per
+tick from its current position.
+
 ## How the application connects
 
 [Cargo.toml](./Cargo.toml) leaves Rustia's default features enabled and pins
@@ -112,22 +122,13 @@ Set `CARGO_TARGET_DIR` to choose the build volume. To change the race, edit
 `race.luau` and record again. The existing MP4 is replaced after the new
 recording passes its trace and frame checks.
 
-Run `just readme-race` to record both races and export the [README animation](./race.gif).
-After committing a new GIF, use its commit SHA in the race image URL in the project README.
+Run `just readme-race` to export the [native and browser race as a GIF](./race.gif).
 
 The WebKit CI job records both clips automatically and retains them in the
 `rustia-replay` artifact for seven days. These clips show the headless WebKit engine. Physical iPad Safari
 execution has its own [platform evidence](../../design/96-browser-platform-acceptance.md).
 
-## Edit a running race
-
-After the browser build and serve steps above, open
-[the local race editor](http://127.0.0.1:8788/hot-reload.html).
-Place the caret after the `2` in `return x + 2` while the racer is moving.
-Press Backspace and type `2` again. After a few ticks, press Backspace again
-and pause. The editor shows Luau's error while the last good rule keeps the racer
-moving two metres per tick. Type `4` to change its speed to four metres per
-tick from its current position.
+### Record a hot edit
 
 Run `just record-hot-reload` to record the same sequence in headless WebKit.
 The caret blinks at the insertion point, and a keycap at the bottom shows each
@@ -135,8 +136,6 @@ keypress. The recorder checks the racer's position at every tick and saves a
 12-second, 1280×720 clip in `target/demo/rustia-hot-reload.mp4`. To choose a different path, use
 `node tools/browser/record-race.cjs --hot-reload path/to/edits.mp4`.
 
-Run `just readme-hot-reload` to record the demo and refresh the [README animation](./hot-reload.gif).
+Run `just readme-hot-reload` to record the demo and refresh the [hot-reload GIF](./hot-reload.gif).
 To use an existing recording, run `sh tools/browser/render-hot-reload-gif.sh path/to/edits.mp4`
 from the repository root.
-After committing a new GIF, update the image URL in the project README to use
-that commit's full SHA. This keeps each README linked to its own recording.

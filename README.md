@@ -1,4 +1,4 @@
-# Rustia
+# <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
 Embed Luau in Rust games and tools.
 Edit scripts without a rebuild and let players write mods.
@@ -9,25 +9,21 @@ to script character decisions and replay them on desktop and in a browser.
 Rustia is a pure-Rust interpreter for standalone Luau. The source is public
 for experimental use.
 
-**Deterministic replay.** The same Luau script runs natively on the left and as
-WebAssembly in a browser on the right. With the same random seed, each racer
-takes the same steps on both tracks. Change the seed and the winner changes
-from Mint to Iris. [Record the race](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race).
+## Features
 
-![Native and WebAssembly replays side by side. Mint wins with seed 7 and Iris wins with seed 11 on both.](https://github.com/slowchop/rustia/raw/fdcb4bae6d376bc6f323cc47b70521479008133a/demos/web-live/race.gif)
-
-A script can queue moves during a game turn. Rust receives them when the turn
-succeeds. If the turn fails, Rustia discards the queued moves.
-[Game-turn example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+- **Deterministic replay.** Replay a simulation on desktop and in a browser with the same starting state, seed, and inputs. [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic) · [Race demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race)
+- **Hot reload.** Keep calling the working functions if a replacement script fails to install. [Transactional install](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.install) · [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
+- **Two-way calls.** Register a Rust function for Luau or call an exported Luau function from Rust. [Register a function](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.add_fn) · [Call an export](#call-script-functions-from-rust)
+- **Script budgets.** Limit interpreter work and the memory Rustia tracks. [Fuel](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.fuel) · [Memory](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.memory_limit_bytes) · [Game-turn example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 
 ## Try it
 
-Install this interpreter from Git until its first crates.io release. Use the pinned revision below.
+Install the interpreter from Git. The existing [`rustia 0.1.0` crate](https://crates.io/crates/rustia/0.1.0) is the original game engine.
 With Rust 1.95 or newer, run `cargo new hello-rustia`, then `cd hello-rustia`.
 Add this line under `[dependencies]` in `Cargo.toml`.
 
 ```toml
-rustia = { git = "https://github.com/slowchop/rustia", rev = "bfe174e1948259be57807ca10aee3b4ff55f9f56" }
+rustia = { git = "https://github.com/slowchop/rustia", rev = "3acfd682a19ae43af65ef204bc19e1d692c145ba" }
 ```
 
 ### A first script
@@ -54,13 +50,17 @@ fn main() -> rustia::Result<()> {
 }
 ```
 
-The program prints `The score is 42`. Use `eval` to get a value back from Luau,
-or `exec` when you just want to run the script.
+The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,
+or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.
 
 ## Call script functions from Rust
 
-Replace `src/main.rs` with this example and run `cargo run` again. This time
-Luau defines `greet`, and Rust calls it with `"Ada"`. The program prints `Hello, Ada`.
+Luau can export a function for Rust to call. This example passes `"Ada"` to `greet`.
+
+<details>
+<summary>Show the Rust program</summary>
+
+Replace `src/main.rs` with this example and run `cargo run` again. The program prints `Hello, Ada`.
 
 ```rust
 use rustia::Rustia;
@@ -80,17 +80,11 @@ fn main() -> rustia::Result<()> {
 }
 ```
 
+</details>
+
 To reload a script, keep its functions until the edited version installs
 successfully. If the edit fails, your app can keep calling the old functions.
 [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
-
-**Hot reload in the browser.** The racer keeps moving when an edit introduces a syntax
-error. Changing the rule from `+ 2` to `+ 4` doubles its speed on the next tick. [Run the demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#edit-a-running-race).
-
-![A running Luau script keeps its last working rule, then changes from two to four metres per tick.](https://github.com/slowchop/rustia/raw/9fd5cd6162713c356472c99631c3437f5514e92c/demos/web-live/hot-reload.gif)
-
-If a script hits its memory limit, the game can run the next script in the same
-interpreter. [Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
 
 ## Choose an environment
 
@@ -102,11 +96,23 @@ Start with `Rustia::builder()`. It uses a fixed random seed and repeatable clock
 By default, scripts have no instruction or memory budget. To set one, call
 `.fuel(100_000)` or `.memory_limit_bytes(2 * 1024 * 1024)` on the builder.
 Fuel counts work done by the interpreter. The memory limit covers allocations
-Rustia tracks for the script.
+Rustia tracks for the script. After a memory-limit error, the same interpreter
+can run another script. [Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
+
+## Cargo features
+
+- **`web-live`** (default) provides system entropy and the browser adapters for
+  time and randomness. For bare WebAssembly, disable default features and supply
+  the host services your application needs. [Bare Wasm example](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+- **`transferable`** lets an idle interpreter and its live handles move together
+  to another Rust thread. Each call still needs exclusive access to the interpreter.
+  [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
+
+  From a Rustia checkout, run `cargo run --locked -p rustia --features transferable --example transferable`.
 
 ## Examples and API reference
 
-From a checkout, run the embedding example or open the API reference in your browser.
+Read the [API reference](https://rustia.dev/docs/api/) online, or run the embedding example and build Rustdoc from a checkout.
 
 ```sh
 git clone https://github.com/slowchop/rustia.git
@@ -119,7 +125,7 @@ cargo doc --locked -p rustia --no-deps --open
 - [Call methods on a Rust object from Luau](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs)
 - [Show the line that caused a script error](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/diagnostics.rs)
 - [Run Rustia in a browser](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md)
-- [Move an idle interpreter to another thread](https://github.com/slowchop/rustia/blob/main/design/75-embedded-api.md#transferable-application-facade-2026-11-17)
+- [Move an idle interpreter and a retained function to another thread](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
 
 [Browse all Rust examples](https://github.com/slowchop/rustia/tree/main/crates/rustia/examples)
 
