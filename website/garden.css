@@ -76,6 +76,9 @@ main { width:100% }
 .home-table th, .home-table td { padding:8px 12px; text-align:left; vertical-align:top }
 .home-table thead th { background:#f6e7c7 }
 .home-table tbody tr + tr { border-top:1px solid #e5d8be }
+.project-links { display:inline-flex; gap:2px; margin-inline-start:6px; vertical-align:middle }
+.project-links a { display:grid; place-items:center; width:1.5rem; height:1.5rem; border-radius:3px }
+.project-links a:hover, .project-links a:focus-visible { background:#eee2c5 }
 .platform-links, .platform-link { display:inline-flex; align-items:center; gap:3px }
 .platform-links { gap:5px; flex-wrap:wrap }
 .platform-icon { width:1.25em; height:1.25em; vertical-align:middle }
@@ -110,6 +113,7 @@ main { width:100% }
 .speed-chart meter::-moz-meter-bar { background:var(--speed-bar) }
 .speed-chart .speed-baseline { background:#e4eee2; border-radius:4px }
 .speed-chart .speed-baseline meter { --speed-bar:#315640 }
+.speed-chart li > a { justify-self:end; font-size:.82rem }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }

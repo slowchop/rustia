@@ -31,6 +31,7 @@ wasm-bindgen --target web --no-typescript --out-dir dist/pkg \
   "$CARGO_TARGET_DIR/$target/release/rustia_garden.wasm"
 python3 render-home-comparisons.py > dist/index.html
 cp -R ../demos/web-live/icons dist/
+cp github.svg globe.svg dist/icons/
 cp -R "$rustdoc_target/doc/." dist/docs/api/
 rm -f dist/docs/api/.lock
 python3 render-home-comparisons.py doc-index.html > dist/docs/index.html

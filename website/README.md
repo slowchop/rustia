@@ -14,6 +14,8 @@ plain-text output to the page.
 
 The homepage uses the [unmodified Bevy icon](https://github.com/bevyengine/bevy/blob/main/assets/branding/icon.png) to identify the engine. See the [Bevy Foundation logo policy](https://bevy.org/foundation/logo-policy/).
 
+The comparison links use [GitHub Octicons](https://github.com/primer/octicons/tree/e575f9b11ab2a713a02c387206315b3f0a85abaf/icons) under the [MIT license](LICENSE-octicons).
+
 ## Build and check
 
 From the repository root:

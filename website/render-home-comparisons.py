@@ -23,6 +23,15 @@ CHART_ENGINES = {
     "rhai": "Rhai",
     "roto": "Roto",
 }
+PROJECT_LINKS = {
+    "Rustia": ("slowchop/rustia", None),
+    "luaur": ("pjankiewicz/luaur", ("https://pjankiewicz.github.io/luaur/", "playground")),
+    "ulua": ("webc-site/ulua", ("https://webc-site.github.io/ulua/", "playground")),
+    "ruau": ("cortesi/ruau", ("https://docs.rs/ruau/latest/ruau/", "documentation")),
+    "luau-rs/luau": ("luau-rs/luau", ("https://play.luau.rs/", "playground")),
+    "mlua": ("mlua-rs/mlua", ("https://docs.rs/mlua/latest/mlua/", "documentation")),
+    "Lune": ("lune-org/lune", ("https://lune-org.github.io/docs/", "documentation")),
+}
 PLATFORMS = {"Linux": "linux", "macOS": "macos", "Windows": "windows", "iOS": "ios", "Android": "android"}
 MARKER = "<!-- home-comparisons -->"
 
@@ -129,12 +138,28 @@ def render_replay(project: str, note: str) -> str:
     return "Unverified"
 
 
+def render_project_name(project: str) -> str:
+    repository, website = PROJECT_LINKS[project]
+    links = [("github", f"https://github.com/{repository}", "GitHub repository")]
+    if website:
+        url, label = website
+        links.append(("globe", url, label))
+    icons = []
+    for icon, url, destination in links:
+        label = escape(f"{project} {destination}")
+        icons.append(
+            f'<a href="{escape(url)}" title="{label}" aria-label="{label}">'
+            f'<img src="/icons/{icon}.svg" width="16" height="16" alt=""></a>'
+        )
+    return escape(project) + '<span class="project-links">' + "".join(icons) + '</span>'
+
+
 def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
     headings = ["Project", "Runtime", "Platforms", "Hot Reload", "Replay"]
     projects = []
     cards = []
     for name, engine_cell, platforms, browser_cell, edits, _ in rows[1:]:
-        project = render_cell(name)
+        project = name.strip("*")
         source = re.search(r"#luau-note-\d+", platforms)[0]
         note = re.search(rf'<a id="{source[1:]}"></a>([^\n]+)', comparison)[1]
         runtime = engine_cell.replace("Upstream Luau (C++)", "Luau C++")
@@ -144,12 +169,13 @@ def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
             render_reload_state(edits, note),
             render_replay(project, note),
         ]
-        projects.append([project, *values])
+        heading = render_project_name(project)
+        projects.append([heading, *values])
         fields = "".join(
             f"<div><dt>{render_cell(label)}</dt><dd>{value}</dd></div>"
             for label, value in zip(headings[1:], values)
         )
-        cards.append(f"<details><summary>{project}</summary><dl>{fields}</dl></details>")
+        cards.append(f"<details><summary>{heading}</summary><dl>{fields}</dl></details>")
     return (
         '<div class="luau-comparison-wide">'
         + render_table(headings, projects, "luau-comparison")
@@ -213,11 +239,15 @@ def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
                 f'<meter min="0" max="{scale}" value="{time:.6f}" aria-hidden="true"></meter>'
                 f'<span>{ratio}×</span></li>'
             )
-        sort_note = ""
         if workload == "dense_tables":
-            sort_note = (f'<p>Roto uses a hand-written quadratic sort for this task. '
-                         f'<a href="{BENCHMARK_URL}/RESULTS.md">See its timing in the full results</a>.</p>')
-        panels.append(f'<div><h4>{escape(label)}</h4><ul>{"".join(bars)}</ul>{sort_note}</div>')
+            bars.append(
+                '<li><span>Roto</span><span></span>'
+                f'<a href="{BENCHMARK_URL}/RESULTS.md" '
+                'title="Roto uses a handwritten quadratic sort" '
+                'aria-label="Roto uses a handwritten quadratic sort. See its benchmark timing.">'
+                'Note</a></li>'
+            )
+        panels.append(f'<div><h4>{escape(label)}</h4><ul>{"".join(bars)}</ul></div>')
     return '<div class="speed-chart">' + "\n".join(panels) + '</div>'
 
 
