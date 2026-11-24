@@ -11,10 +11,11 @@ for experimental use.
 
 ## Features
 
-- **Deterministic replay.** Replay a simulation on desktop and in a browser with the same starting state, seed, and inputs. [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic) · [Race demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race)
-- **Hot reload.** Keep calling the working functions if a replacement script fails to install. [Transactional install](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.install) · [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
-- **Two-way calls.** Register a Rust function for Luau or call an exported Luau function from Rust. [Register a function](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.add_fn) · [Call an export](#call-script-functions-from-rust)
-- **Script budgets.** Limit interpreter work and the memory Rustia tracks. [Fuel](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.fuel) · [Memory](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.memory_limit_bytes) · [Game-turn example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+- **Hot reload.** Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions [here](https://rustia.dev/). If a reload fails, Rustia can restore the previous script state.
+- **Deterministic execution.** Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+- **Pure Rust runtime.** One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
+- **Rust functions and objects.** Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
+- **Script execution limits.** Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 
 ## Try it
 

@@ -68,7 +68,8 @@ This directory contains internal Node and shell tools for benchmark validation, 
 ## Verification
 
 - `check-crate-metadata.js` verifies the two Rustia description paragraphs
-  against the homepage, README, and crate Rustdoc.
+  against the homepage, README, and crate Rustdoc. It also checks that the README
+  follows the homepage’s feature titles, descriptions, and order.
 
 Run from the repository root: `node --check tools/check-workflows.js` performs syntax validation; `just check-benchmark-results` runs the offline benchmark-tool checks and committed-artifact validation. Neither is a timing result.
 

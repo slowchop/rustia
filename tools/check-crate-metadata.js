@@ -146,7 +146,7 @@ function validatePackage(pkg, workspaceNames, workspaceVersion) {
   return violations;
 }
 
-function validateRustiaDescription(pkg) {
+function validateRustiaCopy(pkg) {
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
   const rustdoc = fs.readFileSync(path.join(root, "crates/rustia/src/lib.rs"), "utf8");
   const homepage = fs.readFileSync(path.join(root, "website/index.html"), "utf8");
@@ -169,6 +169,21 @@ function validateRustiaDescription(pkg) {
       fail(`${source} must match the two paragraphs in crates/rustia/Cargo.toml`);
     }
   }
+  const homepageSection = homepage.match(/<dl class="home-features">([\s\S]*?)<\/dl>/)?.[1] ?? "";
+  const readmeSection = readme.split(/^## /m).find((section) => /^Features\r?\n/.test(section)) ?? "";
+  const homepageFeatures = [...homepageSection.matchAll(/<dt>([\s\S]*?)<\/dt>\s*<dd>([\s\S]*?)<\/dd>/g)]
+    .map(([, title, description]) => [
+      normalize(title.replace(/<span[^>]*>[\s\S]*?<\/span>/g, "")),
+      normalize(description),
+    ]);
+  const readmeFeatures = readmeSection.trim().split(/^- /m).slice(1).map((item) => {
+    const [, title = "", description = ""] = item.match(/^\*\*(.+?)\.\*\*\s+([\s\S]*)/) ?? [];
+    const copy = description.replace(/\s+·\s+\[[^\]]+\]\(https:\/\/[^)]+\)\s*$/, "");
+    return [title, normalize(copy.replace(/`([^`]+)`/g, "$1"))];
+  });
+  if (!homepageFeatures.length || JSON.stringify(readmeFeatures) !== JSON.stringify(homepageFeatures)) {
+    fail("README.md Features titles, descriptions and order must match website/index.html");
+  }
 }
 
 function buildReport() {
@@ -189,7 +204,7 @@ function buildReport() {
   const workspaceNames = new Set(names);
   const reports = packages.map((pkg) => {
     const violations = validatePackage(pkg, workspaceNames, workspaceVersion);
-    if (pkg.name === "rustia") validateRustiaDescription(pkg);
+    if (pkg.name === "rustia") validateRustiaCopy(pkg);
     if (violations.length !== 0) {
       fail(`${pkg.name} metadata audit failed:\n${violations.map((item) => `  - ${item}`).join("\n")}`);
     }
