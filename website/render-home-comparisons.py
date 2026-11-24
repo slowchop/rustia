@@ -138,7 +138,7 @@ def render_replay(project: str, note: str) -> str:
     return "Unverified"
 
 
-def render_project_name(project: str) -> str:
+def render_project_links(project: str) -> str:
     repository, website = PROJECT_LINKS[project]
     links = [("github", f"https://github.com/{repository}", "GitHub repository")]
     if website:
@@ -151,7 +151,7 @@ def render_project_name(project: str) -> str:
             f'<a href="{escape(url)}" title="{label}" aria-label="{label}">'
             f'<img src="/icons/{icon}.svg" width="16" height="16" alt=""></a>'
         )
-    return escape(project) + '<span class="project-links">' + "".join(icons) + '</span>'
+    return '<span class="project-links">' + "".join(icons) + '</span>'
 
 
 def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
@@ -169,13 +169,17 @@ def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
             render_reload_state(edits, note),
             render_replay(project, note),
         ]
-        heading = render_project_name(project)
-        projects.append([heading, *values])
+        project_name = escape(project)
+        links = render_project_links(project)
+        projects.append([project_name + links, *values])
         fields = "".join(
             f"<div><dt>{render_cell(label)}</dt><dd>{value}</dd></div>"
             for label, value in zip(headings[1:], values)
         )
-        cards.append(f"<details><summary>{heading}</summary><dl>{fields}</dl></details>")
+        cards.append(
+            f"<details><summary>{project_name}</summary><dl>"
+            f"<div><dt>Project links</dt><dd>{links}</dd></div>{fields}</dl></details>"
+        )
     return (
         '<div class="luau-comparison-wide">'
         + render_table(headings, projects, "luau-comparison")
@@ -242,10 +246,7 @@ def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
         if workload == "dense_tables":
             bars.append(
                 '<li><span>Roto</span><span></span>'
-                f'<a href="{BENCHMARK_URL}/RESULTS.md" '
-                'title="Roto uses a handwritten quadratic sort" '
-                'aria-label="Roto uses a handwritten quadratic sort. See its benchmark timing.">'
-                'Note</a></li>'
+                '<a href="#roto-array-note" aria-label="Note on Roto’s array sort">Note</a></li>'
             )
         panels.append(f'<div><h4>{escape(label)}</h4><ul>{"".join(bars)}</ul></div>')
     return '<div class="speed-chart">' + "\n".join(panels) + '</div>'
@@ -290,6 +291,7 @@ def render_homepage(homepage: str) -> str:
     <p><strong>Lower is better.</strong> 1× is Rustia’s time for that task. Each chart has its own scale.</p>
     {chart}
     <p>Snapshot from {benchmark_date} UTC on Linux x86-64. These are best observed times after startup, including interpreter, JIT and native results. Each engine uses its own version of each task. Roto JIT-compiles scripts to machine code with Cranelift before running them. Its sparse lookup uses a list, and its state update uses a regular function.</p>
+    <p class="benchmark-note" id="roto-array-note">Roto uses a handwritten quadratic sort in the array test. <a href="{BENCHMARK_URL}/RESULTS.md#L45">See its exact timing</a>.</p>
     <p><a href="{BENCHMARK_URL}/RESULTS.md">Exact benchmark timings on GitHub</a> · <a href="{BENCHMARK_URL}/CLAIMS.md">Benchmark methodology and limitations</a></p>'''
     return homepage.replace(MARKER, section)
 

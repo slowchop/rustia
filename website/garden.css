@@ -100,6 +100,7 @@ main { width:100% }
   .luau-comparison-narrow dl > div { display:grid; grid-template-columns:minmax(7rem,1fr) 2fr; gap:8px; padding:.4rem 0; border-top:1px solid #e5d8be }
   .luau-comparison-narrow dt { font-weight:650 }
   .luau-comparison-narrow dd { margin:0; min-width:0; overflow-wrap:anywhere }
+  .luau-comparison-narrow .project-links { margin-inline-start:0 }
 }
 .speed-chart { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr)); gap:12px; max-width:65rem; margin-block:16px }
 .speed-chart > div { min-width:0; padding:12px 14px; border:1px solid #d5c6a6; border-radius:5px; background:#fffdf4 }
@@ -114,6 +115,7 @@ main { width:100% }
 .speed-chart .speed-baseline { background:#e4eee2; border-radius:4px }
 .speed-chart .speed-baseline meter { --speed-bar:#315640 }
 .speed-chart li > a { justify-self:end; font-size:.82rem }
+.home-comparison .benchmark-note { font-size:.85rem }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
@@ -122,6 +124,11 @@ main { width:100% }
   margin-bottom:clamp(16px, 3svh, 30px)
 }
 .home .hero-copy p + p { margin-top:4px }
+.studio-credit { white-space:nowrap }
+.studio-icon {
+  display:inline-block; width:1.2em; height:1.2em; margin-inline-end:.25em; vertical-align:-.2em;
+  background:url("/slowchop-logo.png") no-repeat left top / 215% auto; mix-blend-mode:multiply
+}
 .home .bench { grid-template-columns:var(--home-columns) }
 .home .garden-source { padding-bottom:36px }
 .garden-source > p, .garden-source dl { max-width:75ch; line-height:1.55 }
