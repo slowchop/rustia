@@ -108,6 +108,7 @@ main { width:100% }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
 .home .hero-copy { margin-bottom:clamp(16px, 3svh, 30px) }
+.home .hero-copy p + p { margin-top:4px }
 .home .bench { grid-template-columns:var(--home-columns) }
 .home .garden-source { padding-bottom:36px }
 .garden-source > p, .garden-source dl { max-width:75ch; line-height:1.55 }

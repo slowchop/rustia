@@ -4,6 +4,9 @@ Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
 application or replay a simulation on native and WebAssembly targets. The source
 is public for experimental use.
 
+Rustia grew out of a game that needed to script character decisions and replay
+them on desktop and in a browser.
+
 **Deterministic replay.** The same Luau script runs natively on the left and as
 WebAssembly in a browser on the right. With the same random seed, each racer
 takes the same steps on both tracks. Change the seed and the winner changes
@@ -24,6 +27,8 @@ Add this line under `[dependencies]` in `Cargo.toml`.
 ```toml
 rustia = { git = "https://github.com/slowchop/rustia", rev = "bfe174e1948259be57807ca10aee3b4ff55f9f56" }
 ```
+
+### A first script
 
 Rust gives Luau a score and a function called `double`. Put this in
 `src/main.rs` and run `cargo run`.
