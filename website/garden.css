@@ -111,9 +111,9 @@ main { width:100% }
 .speed-chart li > :last-child { text-align:right; font-variant-numeric:tabular-nums }
 .speed-track { height:.4rem; overflow:hidden; border-radius:1rem; background:#eee5d2 }
 .speed-fill { display:block; height:100%; background:#54735f }
-.speed-chart .speed-baseline { background:#f1dfc5; border-radius:4px }
-.speed-baseline .speed-track { background:#fff5e4 }
-.speed-baseline .speed-fill { background:#97482d }
+.speed-chart .speed-baseline { background:#e2ecdf; border-radius:4px }
+.speed-baseline .speed-track { background:#c9d9c8 }
+.speed-baseline .speed-fill { background:#244735 }
 .speed-chart .speed-method { grid-column:2 / -1; text-align:left; font-size:.82rem }
 .speed-details { margin-block:12px }
 .speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
