@@ -38,6 +38,11 @@ main { width:100% }
 }
 
 [data-mobile-editor] .garden-caption { justify-self:stretch; padding-inline:0; min-width:0 }
+.home [data-mobile-editor] .garden-caption { position:relative; isolation:isolate; background:transparent }
+.home [data-mobile-editor] .garden-caption::before {
+  content:""; position:absolute; inset:-6px; z-index:-1;
+  background:#f6e7c7ed; border-radius:10px; filter:blur(10px); pointer-events:none
+}
 [data-mobile-editor] .source-views .cm-editor { flex:none; height:clamp(9rem, 26svh, 20rem); min-height:0 }
 .garden-links { display:grid; gap:6px; margin-top:10px; font-size:.92rem }
 .garden-links p { line-height:1.45 }
@@ -51,9 +56,12 @@ main { width:100% }
 .home-next { padding:22px 0 36px; background:#fff9ef; border-top:1px solid #d5c6a6 }
 .home-next h2 { font:normal clamp(26px,3vw,36px)/1.15 Georgia,serif }
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
-.home-features dt { font-weight:650 }
+.home-features dt, .home-roadmap dt { display:flex; align-items:center; gap:8px; font-weight:650 }
+.feature-icon { display:inline-grid; flex:none; place-items:center; width:1.75rem; height:1.75rem; color:#254735; background:#eee2c5; border-radius:5px; font:650 1.05rem/1 system-ui,sans-serif }
 .home-features dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
-.home-comparison p { margin:8px 0; line-height:1.5; max-width:75ch }
+.home-roadmap { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr)); gap:18px 24px; margin:14px 0 0 }
+.home-roadmap dd { margin:4px 0 0; line-height:1.5; max-width:46ch }
+.home-comparison p { margin:8px 0; line-height:1.5 }
 .home-comparison h3 { margin:24px 0 8px; font-size:1.13rem }
 .home-table { overflow-x:auto; border:1px solid #d5c6a6; border-radius:5px; margin-top:12px }
 .home-table:focus-visible { outline:2px solid #52624f; outline-offset:3px }
@@ -61,8 +69,44 @@ main { width:100% }
 .home-table th, .home-table td { padding:8px 12px; text-align:left; vertical-align:top }
 .home-table thead th { background:#f6e7c7 }
 .home-table tbody tr + tr { border-top:1px solid #e5d8be }
-.home-table .numeric td, .home-table .numeric thead th:not(:first-child) { text-align:right; font-variant-numeric:tabular-nums }
-.home-table .numeric td { white-space:nowrap }
+.platform-links, .platform-link { display:inline-flex; align-items:center; gap:3px }
+.platform-links { gap:5px; flex-wrap:wrap }
+.platform-icon { width:1.25em; height:1.25em; vertical-align:middle }
+.platform-icon[src$="macos.svg"] { filter:sepia(1) hue-rotate(215deg) saturate(1.8) }
+.platform-icon[src$="windows.svg"] { filter:sepia(1) hue-rotate(165deg) saturate(3) }
+.runtime-release { display:flex; flex-wrap:wrap; justify-content:space-between; column-gap:.65rem; font-variant-numeric:tabular-nums }
+.runtime-release time { white-space:nowrap }
+.luau-comparison-wide table { white-space:nowrap }
+.luau-comparison-wide .runtime-release { flex-wrap:nowrap }
+.luau-comparison-narrow { display:none }
+.comparison-evidence { margin:8px 0 10px }
+.comparison-evidence dt { font-weight:650 }
+.comparison-evidence dd { margin:0 0 8px }
+@media (max-width: 64rem) {
+  .luau-comparison-wide { display:none }
+  .luau-comparison-narrow { display:grid; gap:6px; margin-block:12px }
+  .luau-comparison-narrow details { border:1px solid #d5c6a6; border-radius:5px; background:#fffdf4 }
+  .luau-comparison-narrow summary { cursor:pointer; padding:.65rem .85rem; font-weight:650 }
+  .luau-comparison-narrow dl { margin:0; padding:.35rem .85rem .65rem }
+  .luau-comparison-narrow dl > div { display:grid; grid-template-columns:minmax(7rem,1fr) 2fr; gap:8px; padding:.4rem 0; border-top:1px solid #e5d8be }
+  .luau-comparison-narrow dt { font-weight:650 }
+  .luau-comparison-narrow dd { margin:0; min-width:0; overflow-wrap:anywhere }
+}
+.speed-chart { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr)); gap:12px; max-width:65rem; margin-block:16px }
+.speed-chart > div { min-width:0; padding:12px 14px; border:1px solid #d5c6a6; border-radius:5px; background:#fffdf4 }
+.speed-chart h4 { margin:0 0 8px; font-size:.96rem }
+.speed-chart ul { display:grid; gap:5px; list-style:none; padding:0; margin:0 }
+.speed-chart li { display:grid; grid-template-columns:9em minmax(0,1fr) 4em; align-items:center; gap:8px; padding:2px 4px; font-size:.85rem }
+.speed-chart li > :last-child { text-align:right; font-variant-numeric:tabular-nums }
+.speed-chart meter { --speed-bar:#718b79; width:100%; height:.8rem }
+.speed-chart meter::-webkit-meter-bar { background:#eee5d2; border:0 }
+.speed-chart meter::-webkit-meter-optimum-value { background:var(--speed-bar) }
+.speed-chart meter::-moz-meter-bar { background:var(--speed-bar) }
+.speed-chart .speed-baseline { background:#e4eee2; border-radius:4px }
+.speed-chart .speed-baseline meter { --speed-bar:#315640 }
+.benchmark-note { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.85rem }
+.speed-details { margin-block:12px }
+.speed-details summary { width:fit-content; cursor:pointer; text-decoration:underline; text-underline-offset:4px }
 .home .hero { padding:clamp(20px, 4svh, 38px) 0 20px }
 .home .hero-copy { margin-bottom:clamp(16px, 3svh, 30px) }
 .home .bench { grid-template-columns:var(--home-columns) }
