@@ -9,7 +9,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 ## Interface
 
 - [`src/EGM.md`](./src/EGM.md) documents compile entry points and lowering modules.
-- Depends on the lexer, parser, and VM crates.
+- Depends on the lexer, parser, and VM crates. The opt-in generated-call example emits Rust for a bounded, numeric closure.
 
 ## Invariants
 

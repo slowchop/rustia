@@ -59,6 +59,8 @@ impl std::error::Error for CompileError {}
 pub type Result<T> = std::result::Result<T, CompileError>;
 
 mod builtins;
+#[doc(hidden)]
+pub mod compiled_call;
 mod o2;
 mod repeat_condition;
 

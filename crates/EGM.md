@@ -12,7 +12,7 @@ The workspace packages and their boundaries are documented in their package maps
 
 - [`rustia`](./rustia/EGM.md): application-facing builder, execution, conversion, and embedding API.
 - [`rustia-cli`](./rustia-cli/EGM.md): `rustia` command-line runner and REPL.
-- [`rustia-compiler`](./rustia-compiler/EGM.md): AST-to-bytecode compilation.
+- [`rustia-compiler`](./rustia-compiler/EGM.md): AST-to-bytecode compilation and experimental numeric Rust generation.
 - [`rustia-conformance`](./rustia-conformance/EGM.md): pinned-corpus runner and reporting library.
 - [`rustia-lexer`](./rustia-lexer/EGM.md): tokenization and byte spans.
 - [`rustia-parser`](./rustia-parser/EGM.md): recursive-descent parser and AST.
