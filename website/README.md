@@ -35,6 +35,13 @@ compiler output on another volume. The browser analyzer and editor bundle are
 vendored with their license notices. The generated runtime and publish directory
 are ignored by Git.
 
+## Project description
+
+Keep the two opening paragraphs in sync with the description in
+[`crates/rustia/Cargo.toml`](../crates/rustia/Cargo.toml). Release preflight checks
+the homepage, root README, and Rustdoc. The homepage renders its search and
+social descriptions from those paragraphs. GitHub About uses the first paragraph.
+
 ## Cloudflare Workers Static Assets
 
 Connect the Rustia repository in Workers Builds, select `main` as the

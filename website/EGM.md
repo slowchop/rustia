@@ -25,8 +25,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   site in dist/, including the facade Rustdoc under /docs/api/.
   render-home-comparisons.py reads the capability table from
   ../crates/rustia/compare.md and builds the runtime chart from the README's
-  pinned benchmark cohort. The chart links to the archived timings. _headers
-  defines the deployed policy.
+  pinned benchmark cohort. The chart links to the archived timings. The renderer
+  also generates search and social descriptions from the homepage intro.
+  _headers defines the deployed policy.
 
 ## Invariants
 

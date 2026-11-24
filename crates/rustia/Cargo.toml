@@ -9,7 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Deterministic Luau interpreter and embedding API"
+description = """
+Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.
+
+Rustia grew out of a game by Slowchop Studios that needed to script character decisions and replay them on desktop and in a browser."""
 publish.workspace = true
 
 [features]

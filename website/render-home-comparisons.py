@@ -253,6 +253,24 @@ def render_speed_chart(rows: list[tuple[str, str, list[float]]]) -> str:
     return '<div class="speed-chart">' + "\n".join(panels) + '</div>'
 
 
+def render_description_metadata(homepage: str) -> str:
+    marker = "<!-- project-description-meta -->"
+    hero = re.search(r'<div class="hero-copy">(.*?)</div>', homepage, re.S)
+    paragraphs = re.findall(r"<p>(.*?)</p>", hero[1], re.S) if hero else []
+    if homepage.count(marker) != 1 or len(paragraphs) != 2:
+        raise ValueError("Expected one description metadata marker and two hero paragraphs")
+    description = " ".join(
+        unescape(re.sub(r"<[^>]+>", "", paragraph)) for paragraph in paragraphs
+    )
+    content = escape(" ".join(description.split()))
+    tags = (
+        f'<meta name="description" content="{content}">',
+        f'<meta property="og:description" content="{content}">',
+        f'<meta name="twitter:description" content="{content}">',
+    )
+    return homepage.replace(marker, "\n".join(tags))
+
+
 def render_homepage(homepage: str) -> str:
     readme = (SITE.parent / "README.md").read_text(encoding="utf-8")
     if homepage.count(MARKER) != 1:
@@ -293,7 +311,7 @@ def render_homepage(homepage: str) -> str:
     {chart}
     <p>Snapshot from {benchmark_date} UTC on Linux x86-64. These are best observed times after startup, including interpreter, JIT and native results. Each engine uses its own version of each task. Roto JIT-compiles scripts to machine code with Cranelift before running them. Its sparse lookup uses a list, and its state update uses a regular function.</p>
     <p><a href="{BENCHMARK_URL}/RESULTS.md">Exact benchmark timings on GitHub</a> · <a href="{BENCHMARK_URL}/CLAIMS.md">Benchmark methodology and limitations</a></p>'''
-    return homepage.replace(MARKER, section)
+    return render_description_metadata(homepage).replace(MARKER, section)
 
 
 def main() -> None:

@@ -1,11 +1,13 @@
 # Rustia
 
-Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
-application or replay a simulation on native and WebAssembly targets. The source
-is public for experimental use.
+Embed Luau in Rust games and tools.
+Edit scripts without a rebuild and let players write mods.
 
 Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed
 to script character decisions and replay them on desktop and in a browser.
+
+Rustia is a pure-Rust interpreter for standalone Luau. The source is public
+for experimental use.
 
 **Deterministic replay.** The same Luau script runs natively on the left and as
 WebAssembly in a browser on the right. With the same random seed, each racer
