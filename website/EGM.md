@@ -8,7 +8,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 ## Interface
 
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
-  The narrow homepage starts with the garden playing and the editor collapsed.
+  The homepage includes the roadmap and starts on narrow screens with the
+  garden playing and the editor collapsed.
 - garden-source.html documents the files that run and draw the garden. The
   build publishes it at /garden-source/.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
@@ -18,9 +19,11 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 - source-editor.mjs and editor.mjs supply shared editing and file selection.
   analysis/ contains the pinned, licensed Luau browser analyzer.
 - build.sh prepares the pinned Rust and Wasm tools and stages the static
-  site in dist/. render-home-comparisons.py renders the README comparison
-  tables and a chart of relative runtime into the static homepage. _headers
-  defines the deployed policy.
+  site in dist/. render-home-comparisons.py renders the README capability
+  table and compact-screen disclosures with icons from the web demo and a
+  dated release snapshot. It also builds the runtime chart from the README's
+  pinned benchmark cohort and links to the archived timings. _headers defines
+  the deployed policy.
 
 ## Invariants
 
