@@ -46,7 +46,8 @@ main { width:100% }
 [data-mobile-editor] .source-views .cm-editor { flex:none; height:clamp(9rem, 26svh, 20rem); min-height:0 }
 .garden-links { display:grid; gap:6px; margin-top:10px; font-size:.92rem }
 .garden-links p { line-height:1.45 }
-.garden-links nav { flex-wrap:wrap; gap:4px 18px }
+.garden-links nav { flex-wrap:wrap; gap:4px 16px }
+@media(max-width:66rem) { .garden-links nav { flex-direction:column; align-items:flex-start } }
 .standalone .hero { min-height:100svh }
 .home { --home-content-width:min(90%, 1430px); --home-columns:minmax(0,1fr) minmax(0,46%) }
 .home > header, .home .hero-copy, .home [data-garden], .home-next-inner {

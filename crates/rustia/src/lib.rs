@@ -1,8 +1,9 @@
 //! Rustia is a pure-Rust interpreter for standalone Luau. Use it to script a Rust
 //! application or replay a simulation on native and WebAssembly targets.
 //!
-//! Rustia grew out of a game that needed to script character decisions and replay
-//! them on desktop and in a browser. Use [`RustiaBuilder::deterministic`] when
+//! Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that
+//! needed to script character decisions and replay them on desktop and in a
+//! browser. Use [`RustiaBuilder::deterministic`] when
 //! the same script, seed, and inputs need to produce the same decisions.
 //!
 //! # A first script
