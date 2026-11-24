@@ -77,10 +77,7 @@ main { width:100% }
 .platform-icon { width:1.25em; height:1.25em; vertical-align:middle }
 .platform-icon[src$="macos.svg"] { filter:sepia(1) hue-rotate(215deg) saturate(1.8) }
 .platform-icon[src$="windows.svg"] { filter:sepia(1) hue-rotate(165deg) saturate(3) }
-.runtime-release { display:flex; flex-wrap:wrap; justify-content:space-between; column-gap:.65rem; font-variant-numeric:tabular-nums }
-.runtime-release time { white-space:nowrap }
 .luau-comparison-wide table { white-space:nowrap }
-.luau-comparison-wide .runtime-release { flex-wrap:nowrap }
 .luau-comparison-narrow { display:none }
 .comparison-evidence { margin:8px 0 10px }
 .comparison-evidence dt { font-weight:650 }

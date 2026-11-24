@@ -1,6 +1,6 @@
 """Render the capability comparison and dated benchmark charts for the homepage."""
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from html import escape, unescape
 import json
 from math import ceil
@@ -22,16 +22,6 @@ CHART_ENGINES = {
     "rhai": "Rhai",
     "roto": "Roto",
 }
-# Release metadata is a dated snapshot. Capability evidence can use older revisions.
-LATEST_RELEASES = {
-    "luaur": ("0.1.8", "2026-07-06", "https://crates.io/crates/luaur/0.1.8"),
-    "ulua": ("0.1.7", "2026-10-08", "https://crates.io/crates/ulua/0.1.7"),
-    "ruau": ("0.4.0", "2026-08-17", "https://crates.io/crates/ruau/0.4.0"),
-    "luau-rs/luau": ("0.739.0", "2026-09-23", "https://www.npmjs.com/package/@luau-rs/luau/v/0.739.0"),
-    "mlua": ("0.12.3", "2026-11-22", "https://github.com/mlua-rs/mlua/releases/tag/v0.12.3"),
-    "Lune": ("0.11.1", "2026-10-21", "https://github.com/lune-org/lune/releases/tag/v0.11.1"),
-}
-RELEASES_CHECKED = "24 November 2026"
 PLATFORMS = {"Linux": "linux", "macOS": "macos", "Windows": "windows", "iOS": "ios", "Android": "android"}
 MARKER = "<!-- home-comparisons -->"
 
@@ -70,18 +60,6 @@ def render_table(headings: list[str], body_rows: list[list[str]], heading_id: st
         f'<div class="home-table" role="region" aria-labelledby="{heading_id}" tabindex="0">\n'
         f'<table><thead><tr>{titles}</tr></thead><tbody>\n'
         + "\n".join(body) + "\n</tbody></table></div>"
-    )
-
-
-
-def render_release(name: str) -> str:
-    if name == "Rustia":
-        return "No public release"
-    version, published, url = LATEST_RELEASES[name]
-    release_date = date.fromisoformat(published)
-    return (
-        f'<span class="runtime-release"><a href="{escape(url)}">{escape(version)}</a> '
-        f'<time datetime="{published}">{release_date.day} {release_date:%b %Y}</time></span>'
     )
 
 
@@ -151,7 +129,7 @@ def render_replay(project: str, note: str) -> str:
 
 
 def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
-    headings = ["Project", "Runtime", "Platforms", "Hot Reload", "Replay", "Latest release"]
+    headings = ["Project", "Runtime", "Platforms", "Hot Reload", "Replay"]
     projects = []
     cards = []
     for name, engine_cell, platforms, browser_cell, edits, _ in rows[1:]:
@@ -164,7 +142,6 @@ def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
             render_platform_links(project, platforms, browser_cell, note),
             render_reload_state(edits, note),
             render_replay(project, note),
-            render_release(project),
         ]
         projects.append([project, *values])
         fields = "".join(
@@ -258,7 +235,7 @@ def main() -> None:
     luau = render_luau_comparison(luau_rows, comparison)
     chart = render_speed_chart(speed_rows)
     section = f'''<h3 id="luau-comparison">Luau runtimes + Rust scripting crates</h3>
-    <p>Capabilities are based on the linked source, CI and demos checked {escape(checked)}. Release versions were checked {RELEASES_CHECKED} and may be newer than the versions reviewed.</p>
+    <p>Capabilities are based on the linked source, CI and demos checked {escape(checked)}.</p>
     {luau}
     <details class="speed-details">
       <summary>What we checked</summary>
@@ -267,7 +244,6 @@ def main() -> None:
         <dt>Platforms</dt><dd>Platform evidence comes from CI, release builds or recorded runs. The globe links to a browser demo, test or build. A build confirms compilation. Rustia’s ARM64 mobile checks ran on a physical iPad and an Android 15 emulator.</dd>
         <dt>Hot Reload</dt><dd>The app keeps running in each documented reload path. <strong>Keeps chosen state</strong> means the embedder can carry selected script state across edits, as the Rustia garden does. <strong>Fresh module</strong> means the replacement starts with new module-local variables. <strong>Host-managed state</strong> means the host supplies the replacement and decides what to carry forward. <strong>Unverified</strong> means the sources showed how to run edited code without establishing a reload path.</dd>
         <dt>Replay</dt><dd>Rustia’s recorded deterministic race matched on native and browser Wasm. ruau documents controls for seeds and the clock. Unverified means the reviewed sources did not establish replay support or provide a matching run.</dd>
-        <dt>Latest release</dt><dd>The latest stable version found in the project’s package registry or on GitHub. Dates are in UTC.</dd>
       </dl>
     </details>
     <p><a href="/docs/api/rustia/#compare-luau-projects">Luau comparison sources and notes</a></p>
