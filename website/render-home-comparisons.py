@@ -242,7 +242,15 @@ def render_homepage(homepage: str) -> str:
       <dl class="comparison-evidence">
         <dt>Runtime</dt><dd>The implementation that executes Luau. Luau C++ refers to the upstream Luau runtime.</dd>
         <dt>Platforms</dt><dd>Platform evidence comes from CI, release builds or recorded runs. The globe links to a browser demo, test or build. A build confirms compilation. Rustia’s ARM64 mobile checks ran on a physical iPad and an Android 15 emulator.</dd>
-        <dt>Hot Reload</dt><dd>The app keeps running in each documented reload path. <strong>Keeps chosen state</strong> means the embedder can carry selected script state across edits, as the Rustia garden does. <strong>Fresh module</strong> means the replacement starts with new module-local variables. <strong>Host-managed state</strong> means the host supplies the replacement and decides what to carry forward. <strong>Unverified</strong> means the sources showed how to run edited code without establishing a reload path.</dd>
+        <dt>Hot Reload</dt>
+        <dd>The app keeps running in each documented reload path.
+          <ul>
+            <li><strong>Keeps chosen state.</strong> The embedder can carry selected script state across edits, as the Rustia garden does.</li>
+            <li><strong>Fresh module.</strong> The replacement starts with new module-local variables.</li>
+            <li><strong>Host-managed state.</strong> The host supplies the replacement and decides what to carry forward.</li>
+            <li><strong>Unverified.</strong> The sources showed how to run edited code without establishing a reload path.</li>
+          </ul>
+        </dd>
         <dt>Replay</dt><dd>Rustia’s recorded deterministic race matched on native and browser Wasm. ruau documents controls for seeds and the clock. Unverified means the reviewed sources did not establish replay support or provide a matching run.</dd>
       </dl>
     </details>

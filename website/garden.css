@@ -86,6 +86,8 @@ main { width:100% }
 .comparison-evidence { margin:8px 0 10px }
 .comparison-evidence dt { font-weight:650 }
 .comparison-evidence dd { margin:0 0 8px }
+.comparison-evidence ul { margin:4px 0 0; padding-inline-start:1.4rem }
+.comparison-evidence li + li { margin-top:2px }
 @media (max-width: 64rem) {
   .luau-comparison-wide { display:none }
   .luau-comparison-narrow { display:grid; gap:6px; margin-block:12px }
