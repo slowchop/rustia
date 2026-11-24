@@ -386,7 +386,7 @@ impl Table {
     }
 
     /// Returns the current entries as live key/value handles. Array slots come
-    /// first, in index order, followed by the remaining entries in insertion order.
+    /// first, in index order. The order of other keys is unspecified.
     ///
     /// Mutating the table later does not change which key/value handles this
     /// returned vector contains, though those handles still refer to their
