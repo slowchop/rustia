@@ -26,7 +26,10 @@ This directory contains internal Node and shell tools for benchmark validation, 
 - [`check-public-workflow-profile.js`](check-public-workflow-profile.js) enforces
   the source profile's correctness and differential-fuzz workflow inventory,
   standard hosted runners, read-only permissions, pinned dependencies and required
-  execution blocks. [`check-workflows.js`](check-workflows.js) selects it when
+  execution blocks. It also locks the dispatch-only bulk trust fixture's four
+  inputs, run title, hosted job inventory and checkout-verification order, with
+  exact step inventories, protected checker provenance, token/permission guards
+  and negative mutation fixtures. [`check-workflows.js`](check-workflows.js) selects it when
   the explicit source profile marker exists. The original private profile has
   separate runner and workflow checks.
 
