@@ -38,6 +38,7 @@ benchmark harness. Follow these maps from the root toward the file being edited:
 | Repository tooling | [tools](./tools/EGM.md) | Validation, release/package audits, pinned oracle tooling, and controlled benchmark operations. |
 | Fuzzing | [fuzz](./fuzz/EGM.md) | Separate workspace for bounded frontend/VM, stateful embedding, and differential fuzzing. |
 | Browser examples | [demos](./demos/EGM.md) | Bare-Wasm standard demo, wasm-bindgen services recipe, and a recorded native/WebKit race replay. |
+| Static website | [website](./website/EGM.md) | Browser homepage, playground and static build. |
 | Historical experiments | [spikes](./spikes/EGM.md) | Isolated architecture experiments, outside production workspace guarantees. |
 | Design support code | [design](./design/EGM.md) | Progress renderer and navigation to authoritative specifications. |
 
@@ -52,6 +53,12 @@ standard hosted VMs. Native Windows and real Firefox are manual checks. See the
 [platform record](design/96-browser-platform-acceptance.md) for the earlier
 private Safari attempts. The [Justfile](./Justfile) remains the local validation
 entry point. The ignored private sibling is a separate repository.
+
+The dispatch-only [bulk trust fixture](./.github/workflows/bulk.yml) is loaded
+from protected `main`, projects its four controller inputs into the GitHub run
+title, and verifies the exact candidate checkout before any candidate command.
+Its policy checker comes from a separate protected-`main` checkout. It is an
+inactive controller prerequisite, not the staged production Bulk suite.
 
 The hosted Linux workspace job additionally runs the default-off executor accounting
 diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.

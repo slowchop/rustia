@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- project-description-meta -->
+<title>Rustia · Luau embedded in Rust</title><link rel="stylesheet" href="garden.css?v=chart-bars">
+<body class="home">
+<!-- site-header -->
+<main><section class="hero" aria-labelledby="title">
+  <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
+    <p>Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.</p>
+    <p>Rustia grew out of a game by <a class="studio-credit" href="https://slowchop.com/"><span class="studio-icon" aria-hidden="true"></span>Slowchop Studios</a> that needed to script character decisions and replay them on desktop and in a browser.</p>
+  </div>
+  <div data-garden data-mobile-editor data-tutorial="off" data-starter="examples/garden-studies/wandering-flowers.luau"></div>
+  <template id="garden-home-links">
+    <div class="garden-links">
+      <p>The garden runs Rustia in WebAssembly and reloads Luau as you edit. JavaScript sends pointer input to Rust and draws the sprites your script requests with <code>sprite()</code>.</p>
+      <nav aria-label="Garden links">
+        <a href="playground/?project=garden">Edit in Playground <span aria-hidden="true">↗</span></a>
+        <a href="/docs/examples/garden/">Garden source <span aria-hidden="true">↗</span></a>
+        <a href="/docs/api/rustia/#a-first-script">Run your first Luau script in Rust <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </template>
+</section>
+<section class="home-next" aria-labelledby="features-title">
+  <div class="home-next-inner">
+    <h2 id="features-title">Rustia features</h2>
+    <dl class="home-features">
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">↻</span>Hot reload</dt>
+        <dd>Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions here. If a reload fails, Rustia can restore the previous script state.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">≡</span>Deterministic execution</dt>
+        <dd>Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">🦀</span>Pure Rust runtime</dt>
+        <dd>One interpreter on desktop and web. Rustia’s runtime crates forbid <code>unsafe</code> Rust and build without a C++ toolchain.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">ƒ</span>Rust functions and objects</dt>
+        <dd>Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>
+        <dd>Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="home-next" aria-labelledby="roadmap-title">
+  <div class="home-next-inner">
+    <h2 id="roadmap-title">In development</h2>
+    <dl class="home-roadmap">
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">«</span>Time-travel debugging</dt>
+        <dd>Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. <a href="https://github.com/slowchop/rustia/issues/71">Follow the debugger work</a>.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true"><img src="/bevy-icon.png" width="20" height="20" alt=""></span>A Luau layer for Bevy</dt>
+        <dd>We’re building a Luau layer on top of <a href="https://bevy.org/">Bevy</a> so you can change gameplay while the game runs, without rebuilding the Rust app.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">🧪</span>JIT and AOT research</dt>
+        <dd>We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. <a href="https://github.com/slowchop/rustia/issues/89">Follow the compilation work</a>.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">♫</span>Synth in Luau</dt>
+        <dd>We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="home-next" aria-labelledby="comparison-title">
+  <div class="home-next-inner home-comparison">
+    <h2 id="comparison-title">How Rustia compares</h2>
+    <p>Compare Luau runtimes by platform and workflow, and see how Rustia performed alongside other scripting options for Rust.</p>
+    <!-- home-comparisons -->
+  </div>
+</section>
+</main><script type="module" src="garden.mjs?v=aligned-home"></script></body></html>

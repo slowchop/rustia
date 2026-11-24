@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Rustia Playground</title>
+<link rel="canonical" href="../playground/">
+<script>
+const race = ['#try-locally', '#console-race'].includes(location.hash);
+location.replace('../playground/' + (race ? 'race/' : '') + location.search + location.hash);
+</script>
+<meta http-equiv="refresh" content="0; url=../playground/">
+<a href="../playground/">Open the playground</a></html>

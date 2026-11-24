@@ -10,8 +10,8 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 - [`src/EGM.md`](./src/EGM.md) documents the facade implementation and exports.
 - [`examples/EGM.md`](./examples/EGM.md) documents runnable usage examples.
-- [compare.md](./compare.md) supplies the project comparison for the README and browser page.
-- [performance.svg](./performance.svg) shows a dated ci-bench cohort for the README and browser comparison. Run `node tools/check-readme-comparisons.js` to verify the chart against retained history.
+- [compare.md](./compare.md) supplies the feature lists and project comparison for Rustdoc, the homepage, and the browser demo comparison.
+- [performance.svg](./performance.svg) shows a dated ci-bench cohort for the README and crate documentation. Run `node tools/check-readme-comparisons.js` to verify the chart against retained history.
 - The package is built with `cargo check -p rustia`; `web-live` is enabled by default for browser WebAssembly services.
 
 ## Invariants

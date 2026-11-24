@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Playground · Rustia</title><link rel="stylesheet" href="../garden.css?v=editor-footer"><link rel="stylesheet" href="playground.css?v=garden-project">
+</head><body class="playground-page">
+<header><a class="mark" href="../">-- Rustia</a><nav aria-label="Site"><a href="race/">Console race</a></nav></header>
+<main class="playground">
+  <div class="workspace-toolbar">
+  <h1>Playground</h1>
+  <nav class="starters" aria-label="Starter projects"><a href="?project=hello" data-project="hello">Hello Luau</a><a href="?project=garden" data-project="garden">Garden</a><a href="?project=sprites" data-project="sprites">Sprites</a><a href="?project=guess" data-project="guess">Guess the Number</a><a href="?project=adventure" data-project="adventure">Text Adventure</a><a href="?project=blank" data-project="blank">Blank project</a></nav>
+  </div>
+  <div class="workspace">
+    <aside id="files-pane" class="files" aria-label="Project files">
+      <h2>Files</h2><div id="files"></div>
+      <button type="button" id="add-file" aria-expanded="false" aria-controls="new-file">+ Add file</button>
+      <form id="new-file" hidden><label for="filename">Module filename</label>
+        <input id="filename" placeholder="greeting.luau" autocomplete="off" spellcheck="false" required>
+        <small id="name-error" role="alert"></small>
+        <div><button type="submit">Add</button> <button id="cancel-add" type="button">Cancel</button></div>
+      </form>
+    </aside>
+    <div class="pane-divider" role="separator" aria-orientation="vertical" aria-label="Files width" aria-controls="files-pane" tabindex="0"></div>
+    <section class="editor" aria-label="Source editor">
+      <div class="bar"><strong id="current-file">main.luau</strong><button type="button" id="restore" disabled>Restore file</button></div>
+      <textarea id="source" aria-label="Luau source" disabled spellcheck="false"></textarea>
+      <div class="source-error" id="error" role="alert" hidden><button hidden></button><pre></pre><button id="restore-working" type="button" hidden>Restore last working version</button></div>
+      <div class="garden-options">
+        <label id="garden-solid-option" hidden><input type="checkbox" id="garden-solid"> Solid editor background</label>
+        <label id="garden-pointer-option" hidden><input type="checkbox" id="garden-pointer"> Track mouse over editor</label>
+        <label><input type="checkbox" id="indent-tabs"> Indent with Tab</label>
+        <small id="tab-help" hidden>With tab indentation on, Esc returns to the checkbox. If suggestions are open, Esc closes them first.</small>
+      </div>
+      <div class="foot">
+        <span class="garden-status"><span id="state" role="status" data-tone="pending">Loading…</span> <span id="draft-status" role="status">Autosaves in this browser</span></span>
+        <div><button type="button" id="pause" disabled>Pause</button><button type="button" id="restart" disabled>Restart</button></div>
+      </div>
+    </section>
+    <div class="pane-divider" role="separator" aria-orientation="vertical" aria-label="Preview and output width" aria-controls="output-pane" tabindex="0"></div>
+    <section id="output-pane" class="race-output" aria-label="Preview and output">
+      <div class="bar"><label for="preview-mode">Preview</label>
+        <select id="preview-mode"><option value="console">Console</option><option value="sprites">Sprites</option></select>
+      </div>
+      <div id="sprite-layout-controls" class="bar" hidden>
+        <label for="sprite-layout">Sprite layout</label>
+        <select id="sprite-layout"><option value="compact">Compact</option><option value="garden">Garden backdrop</option></select>
+      </div>
+      <div id="sprite-stage" hidden>
+        <svg id="sprite-preview" hidden viewBox="-240 -135 480 270" aria-label="Sprite preview"><g id="preview-shapes"></g></svg>
+      </div>
+      <div class="bar console-tabs" aria-label="Console panels">
+        <button type="button" id="show-program" aria-pressed="true" aria-controls="program-panel">Program</button>
+        <button type="button" id="show-repl" aria-pressed="false" aria-controls="repl-panel">Luau console</button>
+      </div>
+      <div id="program-panel">
+      <pre id="output" aria-label="Program output" aria-live="polite" tabindex="0"></pre>
+      <form id="program-input" hidden>
+        <label for="input-line">Program input</label>
+        <input id="input-line" maxlength="4096" autocomplete="off" spellcheck="false">
+        <button type="submit">Send</button>
+      </form>
+      </div>
+      <div id="repl-panel" hidden>
+        <pre id="repl-output" aria-label="Luau console output" aria-live="polite" tabindex="0"></pre>
+        <form id="repl-form">
+          <label for="repl-command">Luau command</label>
+          <textarea id="repl-command" rows="2" maxlength="8192" spellcheck="false" aria-describedby="repl-help"></textarea>
+          <small id="repl-help">Enter evaluates. Shift+Enter adds a line. Reset reloads the project modules.</small>
+          <div><button type="submit">Evaluate</button> <button type="button" id="repl-reset">Reset</button></div>
+        </form>
+      </div>
+    </section>
+  </div>
+</main><script type="module" src="playground.mjs?v=garden-project"></script></body></html>

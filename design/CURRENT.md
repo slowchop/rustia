@@ -25,6 +25,18 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
 The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
+The dispatch-only `bulk.yml` trust fixture is the public half of a future
+controller handshake. It accepts a repository ID, attempt ID, exact checkout
+SHA and manifest digest on protected `main`, binds them into the GitHub run
+title, and verifies the checked-out commit in a pinned `integrity` step. Its
+second job exercises the policy checker from a separate protected-`main`
+checkout; candidate code cannot replace that checker. The controller, staged
+Bulk suite and repository settings remain inactive.
+
+## Website
+
+[website/](../website/README.md) builds the static Rustia homepage and browser playground from this checkout. The browser workers use bounded Rustia sessions for console and sprite projects. Site rollout is tracked in [issue #84](https://github.com/slowchop/rustia/issues/84).
+
 ## Error locations and Luau type syntax
 
 A metamethod can use `error(message, 2)` to blame the expression that called it.

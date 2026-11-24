@@ -1,0 +1,9 @@
+<svg id="bed" viewBox="0 0 1100 600" preserveAspectRatio="xMinYMid slice" aria-label="Animated garden reacting to the pointer."><g id="sprites"></g></svg>
+<div class="bench" data-lesson="Garden tutorial"><div class="garden-space"><div class="garden-origin-area" aria-hidden="true"></div><div class="garden-caption"><h2>Garden</h2><p>The ring starts at (0, 0).</p></div></div>
+<button class="garden-editor-toggle" type="button" aria-expanded="false" aria-controls="garden-editor">Edit the garden</button>
+<section id="garden-editor" class="editor"><div class="bar"><div id="files"></div><button id="restore">Restore original</button></div>
+<textarea disabled id="source" autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="Edit garden" wrap="off"></textarea>
+<div id="error" class="source-error" role="alert" hidden><button hidden></button><pre></pre><button type="button" id="restore-working" hidden>Restore last working version</button></div>
+<div class="garden-options"><label><input type="checkbox" id="solid-editor"> Solid editor background</label><label><input type="checkbox" id="track-editor" checked> Track mouse over editor</label><label><input type="checkbox" id="indent-tabs"> Indent with Tab</label><small id="tab-help" hidden>With tab indentation on, Esc returns to the checkbox. If suggestions are open, Esc closes them first.</small></div>
+<div class="foot"><span class="garden-status"><span id="state" role="status">Loading…</span> <span id="draft-status" role="status"></span></span><div><button id="pause" disabled>Pause</button><button id="restart" disabled>Restart</button></div></div>
+</section></div>

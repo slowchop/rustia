@@ -195,10 +195,16 @@ function selfTest(root) {
       fs.writeFileSync(path.join(temporary, ".github/workflows", name), workflows[name]);
       fs.writeFileSync(path.join(temporary, ".github/public-ci", name), workflows[name]);
     }
+    workflows["bulk.yml"] = fs.readFileSync(path.join(root, ".github/workflows/bulk.yml"), "utf8");
+    fs.writeFileSync(path.join(temporary, ".github/workflows/bulk.yml"), workflows["bulk.yml"]);
     fs.writeFileSync(path.join(temporary, "design/public-source-profile.json"), JSON.stringify({ ...profile, correctness_ci: "public-hosted" }));
-    assert.equal(privateProfile.readCheckout(temporary).files, 2);
+    assert.equal(privateProfile.readCheckout(temporary).files, 3);
     assert.equal(readCheckout(temporary).active, true);
-    assert.throws(() => privateProfile.validatePublicProfile({ profile: { ...profile, correctness_ci: "private-self-hosted" }, files: FILES, workflows }));
+    assert.throws(() => privateProfile.validatePublicProfile({
+      profile: { ...profile, correctness_ci: "private-self-hosted" },
+      files: [...FILES, "bulk.yml"],
+      workflows,
+    }));
     // The actual entrypoint must also validate an activated fixture, including
     // its self-test path. This catches private-input assumptions after copying.
     if (!hosted) {

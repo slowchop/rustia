@@ -1,6 +1,17 @@
 # Rustia and other Luau projects
 
-Rustia runs standalone Luau 0.709, including vector and buffer libraries. It accepts type annotations without a static type check. Roblox services are outside its scope. [Tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md)
+## Lua and Luau
+
+- **Lua provides** functions, tables for storing data, and coroutines that can pause and resume.
+- **Luau adds** shortcuts like `score += 1`, `continue` in loops, and optional type annotations. Rustia runs annotated scripts without a static type check.
+
+Rustia targets standalone Luau 0.709, including its vector and buffer libraries. Roblox services are outside that scope. [Tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md)
+
+## What Rustia adds
+
+- **Replay on desktop and in a browser.** In deterministic mode, the same script, seed, and inputs produce the same decisions. [Watch the native and Wasm race](https://github.com/slowchop/rustia#readme)
+- **Keep running through a bad edit.** Try a new module while the app runs. If installation fails, Rustia restores the previous script state and your app can keep calling the old functions. [Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
+- **Give each decision a budget.** Limit the work a script can do and the memory Rustia tracks for it. A script can queue changes for Rust and deliver them only when the call succeeds. [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 
 ## Compare Luau projects
 
@@ -9,8 +20,8 @@ All seven compile Luau to bytecode. ulua, mlua and Lune also offer a native JIT.
 | Project | Engine | Desktop | Browser&nbsp;Wasm | Hot&nbsp;reload | Replay |
 | --- | --- | --- | --- | --- | --- |
 | **Rustia** | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[1\]](#luau-note-1) | [Demo](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md) | Rollback | [✓&nbsp;Tested](#luau-note-1) |
-| luaur | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[2\]](#luau-note-2) | [Playground](https://pjankiewicz.github.io/luaur/) | Run&nbsp;code | — |
-| ulua | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[3\]](#luau-note-3) | [Playground](https://webc-site.github.io/ulua/) | Run&nbsp;code | — |
+| luaur | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[2\]](#luau-note-2) | [Playground](https://pjankiewicz.github.io/luaur/) | Replace&nbsp;module | — |
+| ulua | Rust | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[3\]](#luau-note-3) | [Playground](https://webc-site.github.io/ulua/) | Replace&nbsp;module | — |
 | ruau | Rust | ![Linux][rustia-linux]&nbsp;[\[4\]](#luau-note-4) | — | Reload&nbsp;module | [◐&nbsp;Controls](#luau-note-4) |
 | luau-rs/luau | Rust | ![Linux][rustia-linux]&nbsp;[\[5\]](#luau-note-5) | [CI&nbsp;tests](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml) | Run&nbsp;code | — |
 | mlua | Upstream Luau (C++) | ![Linux][rustia-linux]&nbsp;![macOS][rustia-macos]&nbsp;![Windows][rustia-windows]&nbsp;[\[6\]](#luau-note-6) | [Build](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) | Replace&nbsp;module | — |
@@ -20,18 +31,15 @@ All seven compile Luau to bytecode. ulua, mlua and Lune also offer a native JIT.
 
 **Replay** means the same script and inputs produce the same result across targets in a reproducible configuration. ✓ Tested means matching native and browser results. ◐ Controls means the host can fix the seeds and clock. A dash means the sources below did not establish that capability.
 
-<details>
-<summary>Sources and platform details · Checked 20 November 2026</summary>
+**Sources and details** · Checked 20 November 2026.
 
 1. <a id="luau-note-1"></a>Rustia restores the previous script state when a module install fails. Its deterministic mode reproduces the native run in a browser. ARM64 mobile tests passed on a physical iPad and an Android 15 emulator, with a browser run in iPad Safari. [Compiler](https://github.com/slowchop/rustia/blob/main/crates/rustia-compiler/src/lib.rs) · [Hot reload](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs) · [Native/Wasm replay](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md#record-the-race) · [Desktop](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md) · [Mobile](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md#type-grammar-candidate-execution--2026-11-13) · [Safari](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md#physical-ipad-safari-execution--2026-11-14)
-2. <a id="luau-note-2"></a>luaur 0.1.8 is a Rust port. It can run new code in the same VM. Native JIT execution is outside this version’s scope. [Project](https://github.com/pjankiewicz/luaur/tree/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739) · [Code generation](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/crates/luaur-code-gen/src/functions/compile_code_gen_context.rs) · [Desktop CI](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/.github/workflows/ci.yml)
-3. <a id="luau-note-3"></a>ulua 0.1.7 forks luaur and adds an opt-in native JIT. It can run new code in the same VM. [Project](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md) · [JIT](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md#jit-native-acceleration--switching) · [Desktop CI](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/.github/workflows/ci.yml)
+2. <a id="luau-note-2"></a>luaur 0.1.8 is a Rust port. The host can replace a registered module in the same VM. Native JIT execution is outside this version’s scope. [Project](https://github.com/pjankiewicz/luaur/tree/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739) · [Code generation](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/crates/luaur-code-gen/src/functions/compile_code_gen_context.rs) · [Desktop CI](https://github.com/pjankiewicz/luaur/blob/f0eac7f7cce691d0cdb0b93c3eef9d599f71d739/.github/workflows/ci.yml) · [Module API](https://docs.rs/luaur/0.1.8/luaur/struct.Lua.html#method.register_module)
+3. <a id="luau-note-3"></a>ulua 0.1.7 forks luaur and adds an opt-in native JIT. The host can replace a registered module in the same VM. [Project](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md) · [JIT](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/README.md#jit-native-acceleration--switching) · [Desktop CI](https://github.com/webc-site/ulua/blob/975ebfe98327a968b0b5b2ac787795145bce0101/.github/workflows/ci.yml) · [Module API](https://docs.rs/ulua/0.1.7/ulua/struct.Lua.html#method.register_module)
 4. <a id="luau-note-4"></a>ruau 0.3.0 lets the host unload modules and fix the clock, hash seed and random seed. Its docs describe a Wasm clock. Cross-target replay and browser execution are unverified. [Project](https://github.com/cortesi/ruau/tree/aab5052e1a3d6ed91c3e8860f950ecfea972030d) · [Linux run](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md) · [Wasm clock](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/limits.rs#L29-L77) · [Module API](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/lib.rs#L1522-L1602) · [Seed controls](https://github.com/cortesi/ruau/blob/aab5052e1a3d6ed91c3e8860f950ecfea972030d/crates/ruau-vm/src/limits.rs)
 5. <a id="luau-note-5"></a>luau-rs/luau runs new chunks in the same VM and tests browser execution. Native code generation is in development. [Project](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/README.md) · [Embedding API](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/packages/luau/README.md) · [Browser CI](https://github.com/luau-rs/luau/blob/99cc8ce63190b7535a65752faa84ce620b4230c0/.github/workflows/browser.yml)
-6. <a id="luau-note-6"></a>mlua binds Rust to upstream C++ Luau and also supports Lua. The host can replace a registered module. CI builds for Emscripten. Bare Wasm needs WASI imports and Wasm exceptions. [Project](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/README.md) · [JIT](https://luau.org/performance/) · [Emscripten](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) · [Bare Wasm](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/docs/wasm32.md) · [Module API](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/src/state.rs#L538-L560)
+6. <a id="luau-note-6"></a>mlua binds Rust to upstream C++ Luau and also supports Lua. The host can replace a registered module. CI builds for Emscripten. Bare Wasm needs WASI imports and Wasm exceptions. [Project](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/README.md) · [JIT](https://luau.org/performance/) · [Emscripten](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/.github/workflows/main.yml#L221-L259) · [Bare Wasm](https://github.com/mlua-rs/mlua/blob/3c0fd858825a4756e5e858356c3c70ab83e64dbe/docs/wasm32.md) · [Module API](https://docs.rs/mlua/0.12.3/mlua/struct.Lua.html#method.register_module)
 7. <a id="luau-note-7"></a>Lune 0.11.1 uses mlua. It can load an edited script or bundle its VM and bytecode into a standalone executable. [Project](https://github.com/lune-org/lune/tree/v0.11.1) · [Executable](https://github.com/lune-org/lune/blob/v0.11.1/crates/lune/src/standalone/mod.rs) · [Desktop releases](https://github.com/lune-org/lune/blob/v0.11.1/.github/workflows/release.yaml) · [Script loading](https://github.com/lune-org/lune/blob/v0.11.1/crates/lune-std-luau/src/lib.rs)
-
-</details>
 
 <!-- Generated platform image references -->
 
