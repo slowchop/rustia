@@ -12,6 +12,10 @@ plain-text output to the page.
 - [garden.rs](garden.rs), [worker.mjs](worker.mjs), and [garden-player.mjs](garden-player.mjs) connect the script to the browser animation.
 - [draw-garden.mjs](draw-garden.mjs) draws the sprites into the page.
 
+The homepage uses the [unmodified Bevy icon](https://github.com/bevyengine/bevy/blob/main/assets/branding/icon.png) to identify the engine. See the [Bevy Foundation logo policy](https://bevy.org/foundation/logo-policy/).
+
+The comparison links use [GitHub Octicons](https://github.com/primer/octicons/tree/e575f9b11ab2a713a02c387206315b3f0a85abaf/icons) under the [MIT license](LICENSE-octicons).
+
 ## Build and check
 
 From the repository root:
@@ -24,10 +28,19 @@ python3 -m http.server --directory website/dist 8080
 ```
 
 The build uses this checkout of Rustia, the pinned Rust toolchain, and the
-version of wasm-bindgen in Cargo.lock. Set an absolute CARGO_TARGET_DIR to place
+version of wasm-bindgen in Cargo.lock. It also generates the facade API docs at
+`/docs/api/`, linked from `/docs/`. The garden walkthrough is at
+`/docs/examples/garden/`. Set an absolute CARGO_TARGET_DIR to place
 compiler output on another volume. The browser analyzer and editor bundle are
 vendored with their license notices. The generated runtime and publish directory
 are ignored by Git.
+
+## Project description
+
+Keep the two opening paragraphs in sync with the description in
+[`crates/rustia/Cargo.toml`](../crates/rustia/Cargo.toml). Release preflight checks
+the homepage, root README, and Rustdoc. The homepage renders its search and
+social descriptions from those paragraphs. GitHub About uses the first paragraph.
 
 ## Cloudflare Workers Static Assets
 

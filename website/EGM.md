@@ -10,8 +10,11 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
   The homepage includes the roadmap and starts on narrow screens with the
   garden playing and the editor collapsed.
+- site-header.html supplies the shared homepage and documentation navigation.
+- doc-index.html links readers to the generated API reference and the garden
+  walkthrough. The build publishes it at /docs/.
 - garden-source.html documents the files that run and draw the garden. The
-  build publishes it at /garden-source/.
+  build publishes it at /docs/examples/garden/ and keeps /garden-source/ available.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
 - bridge.rs, garden.rs and playground.rs connect browser workers to the Rustia
   facade. Sprite output contains coordinates and a shape ID. Console input
@@ -19,11 +22,12 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 - source-editor.mjs and editor.mjs supply shared editing and file selection.
   analysis/ contains the pinned, licensed Luau browser analyzer.
 - build.sh prepares the pinned Rust and Wasm tools and stages the static
-  site in dist/. render-home-comparisons.py renders the README capability
-  table and compact-screen disclosures with icons from the web demo and a
-  dated release snapshot. It also builds the runtime chart from the README's
-  pinned benchmark cohort and links to the archived timings. _headers defines
-  the deployed policy.
+  site in dist/, including the facade Rustdoc under /docs/api/.
+  render-home-comparisons.py reads the capability table from
+  ../crates/rustia/compare.md and builds the runtime chart from the README's
+  pinned benchmark cohort. The chart links to the archived timings. The renderer
+  also generates search and social descriptions from the homepage intro.
+  _headers defines the deployed policy.
 
 ## Invariants
 

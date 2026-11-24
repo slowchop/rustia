@@ -1,6 +1,6 @@
 # Embed Rustia in a browser with JavaScript services
 
-[Compare Rustia with other Luau projects](../../README.md#compare-luau-projects) for features and platform support.
+[Compare Rustia with other Luau projects](../../crates/rustia/compare.md#compare-luau-projects) for features and platform support.
 
 This standalone application keeps Rustia's default `web-live` feature and uses
 `wasm-bindgen` to connect WebAssembly to JavaScript. It runs a short Luau script,
