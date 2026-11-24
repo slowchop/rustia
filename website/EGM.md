@@ -11,8 +11,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   The homepage includes the roadmap and starts on narrow screens with the
   garden playing and the editor collapsed.
 - site-header.html supplies the shared homepage and documentation navigation.
-  rustia-mark.svg supplies the staggered dash mark for website headers, browser
-  tabs, and the repository README. The build copies it to the site root.
+  rustia-mark.svg supplies the staggered dash mark for website headers and browser
+  tabs. The build copies it to the site root. rustia-readme-mark.svg is the
+  transparent, theme-aware mark used by the repository README.
 - doc-index.html links readers to the generated API reference and the garden
   walkthrough. The build publishes it at /docs/.
 - garden-source.html documents the files that run and draw the garden. The
