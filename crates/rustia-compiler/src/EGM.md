@@ -12,6 +12,8 @@
 - `CompileError` carries an optional lexer span; `BuiltinEnvironment` separates public and conformance compilation modes.
 - `ExperimentalO2Options::reachability_exact()` selects the documented corpus-green rewrite track; `ALL` includes dead cleanup-clear elision, which the source marks as blocked on root-liveness work.
 
+- [compiled_call.rs](./compiled_call.rs) emits safe Rust for a numeric closure with one numeric argument and one host-supplied capture. The example exposes this experimental contract to local development tools. The source byte and token limits apply before recursive parsing. The lowering checks that the closure actually reads or writes the declared capture.
+
 ## Invariants
 
 - Source lines for calls follow the callee end or method name. Indexed stores retain the target location across RHS evaluation. Iterator callback lines identify the loop header.
@@ -38,3 +40,5 @@ From the repository root, run `cargo test --locked -p rustia-compiler`.
 `tests/capture_metadata.rs` covers names, source provenance, shadowing, transitive captures, detached chunks, and execution equivalence with names removed.
 It also covers branch restoration and repeated scoped reads which previously
 duplicated names and could exhaust the distinct-upvalue limit.
+
+Run `cargo test --locked -p rustia-compiler --test compiled_call` for source diagnostic and generated-code equivalence.

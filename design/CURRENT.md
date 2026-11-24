@@ -175,7 +175,18 @@ logical clocks and deterministic collection must preserve the logical-unit sched
 memory-limited/instrumented paths retain required scalar checks. Experimental O2
 stays **default-off**; dead-clear elision is blocked on liveness-aware root scans.
 Corpus-green rewrites still need per-workload measurement. [VM Core 2](58-vm-core2.md)
-records these gates. Wasm JIT/AOT spikes are research, not a shipped execution tier.
+records these gates. Wasm JIT/AOT spikes remain research.
+
+[Rustia #89](https://github.com/slowchop/rustia/issues/89) has a development-only
+generated-Rust experiment for a single module returning a one-argument numeric
+closure. It recognizes a literal numeric capture, at most one capture assignment
+and scalar arithmetic, with a bounded source and token stream. The closure must
+read or write the declared capture. The generated function accepts and returns
+the numeric state explicitly and follows the VM's f64 NaN canonicalization. It does not
+enter the VM's execution or budget machinery. The experiment is currently
+limited to explicitly opted-in calls outside VM policy. Module graphs, rooted
+capture integration, dynamic values and a generally supported execution backend
+remain separate work.
 
 ## Validation and benchmark scope
 
