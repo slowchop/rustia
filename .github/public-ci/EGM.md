@@ -8,6 +8,10 @@ Parent: [repository map](../../EGM.md).
   GitHub executes the files in [workflows](../workflows/).
 - [README.md](README.md) describes the triggers and execution scope and links the verified launch results.
 - [SECURITY.md](SECURITY.md) points to the [active reporting policy](../../SECURITY.md).
+- The active dispatch-only [bulk trust fixture](../workflows/bulk.yml) is kept
+  outside this mirrored launch inventory. The public workflow-profile validator
+  pins its inputs, run title, hosted runner, read-only permissions, job names and
+  exact-checkout verification step.
 
 The source workflow validator checks the required job inventory, hosted runners,
 read-only permissions and event triggers. The `public` event starts both

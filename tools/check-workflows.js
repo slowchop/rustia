@@ -1300,6 +1300,8 @@ if (fs.existsSync(publicSourceProfilePath)) {
   const publicProfile = require("./check-public-workflow-profile.js");
   if (process.argv?.includes("--self-test")) {
     const marker = JSON.parse(fs.readFileSync(publicSourceProfilePath, "utf8"));
+    const bulk = publicProfile.bulkSelfTest(root);
+    console.log(`bulk workflow policy self-tests ok (${bulk.cases} negative fixtures)`);
     if (marker.correctness_ci !== "public-hosted") {
       const result = publicProfile.selfTest(root);
       console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);

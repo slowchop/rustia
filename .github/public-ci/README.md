@@ -15,6 +15,12 @@ repository visibility changes outside the authority of this file.
 | Push to `main` | CI runs the preflight, platform and browser checks. |
 | Manual dispatch | CI can also exercise Windows native and real Firefox. The fuzz workflow can run a longer campaign. |
 
+The separate [bulk trust fixture](../workflows/bulk.yml) is dispatch-only. It
+accepts the controller's four typed inputs, uses them in the run title and
+verifies the exact candidate checkout in the `integrity` job. It uses a standard
+hosted runner and read-only permissions. It does not activate the controller or
+replace the current correctness workflows.
+
 The required checks use standard Ubuntu and macOS VMs. They cover the preflight
 stages and aggregate, eight target builds, native Linux and macOS, Node/V8,
 headless WebKit, the browser embedding example and differential smoke. Windows

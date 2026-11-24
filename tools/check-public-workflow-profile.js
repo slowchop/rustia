@@ -4,7 +4,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const EXPECTED_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
+const CORE_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
+const BULK_FILE = "bulk.yml";
+const EXPECTED_FILES = Object.freeze([...CORE_FILES, BULK_FILE]);
+const BULK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric repository identity bound by the controller\n        type: string\n        required: true\n      attempt_id:\n        description: Numeric controller attempt identity\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact candidate commit to check out\n        type: string\n        required: true\n      manifest_digest:\n        description: SHA-256 digest of the canonical attempt manifest\n        type: string\n        required: true\n';
 const HOSTED_MAC_SETUP = [
   "      - name: Install pinned Rust toolchain",
   "        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1",
@@ -183,6 +186,68 @@ function checkNoForbidden(text, label) {
     reject(`${label} must pin every action to a full commit SHA`);
   }
   if (/^\s*(?:-\s+)?uses:\s*\.\//m.test(text)) reject(`${label} must not call a reusable workflow or local action`);
+}
+
+function checkBulk(text) {
+  const label = ".github/workflows/bulk.yml";
+  checkTriggers(text, BULK_TRIGGERS, label);
+  checkPermissions(text, label);
+  checkActionPins(text, label);
+  checkNoForbidden(text, label);
+  requireText(text, "name: Rustia Bulk trust fixture\n", label);
+  requireText(text,
+    "run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}\n",
+    label);
+
+  const jobs = jobBlocks(text, label);
+  const names = [...jobs.keys()].sort();
+  if (JSON.stringify(names) !== JSON.stringify(["integrity", "test"])) {
+    reject(`${label} jobs must be exactly integrity and test; found ${names.join(", ")}`);
+  }
+  for (const [name, block] of jobs) {
+    const runners = [...block.matchAll(/^    runs-on: (.+)$/gm)].map((match) => match[1]);
+    if (JSON.stringify(runners) !== JSON.stringify(["ubuntu-24.04"])) {
+      reject(`${label} job ${name} must run once on ubuntu-24.04`);
+    }
+    requireText(block, `    name: ${name}\n`, `${label} ${name}`);
+    requireText(block, "ref: ${{ inputs.checkout_sha }}", `${label} ${name}`);
+    requireText(block, "fetch-depth: 1", `${label} ${name}`);
+    requireText(block, "persist-credentials: false", `${label} ${name}`);
+  }
+
+  const integrity = jobs.get("integrity");
+  requireText(integrity, "if: github.ref == 'refs/heads/main'", `${label} integrity`);
+  for (const fragment of [
+    '[[ "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]',
+    '[[ "$ATTEMPT_ID" =~ ^[1-9][0-9]*$ ]]',
+    '[[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]',
+    '[[ "$MANIFEST_DIGEST" =~ ^[0-9a-f]{64}$ ]]',
+  ]) requireText(integrity, fragment, `${label} dispatch validation`);
+  const validate = integrity.indexOf("      - name: Validate dispatch inputs\n");
+  const checkout = integrity.indexOf("      - name: Checkout candidate\n");
+  const verify = integrity.indexOf("      - name: Verify exact checkout\n");
+  if (!(validate >= 0 && validate < checkout && checkout < verify)) {
+    reject(`${label} integrity must validate inputs, check out the candidate, then verify the exact checkout`);
+  }
+  if ((text.match(/      - name: Verify exact checkout\n/g) ?? []).length !== 1) {
+    reject(`${label} must contain exactly one Verify exact checkout step`);
+  }
+  requireText(integrity, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', `${label} integrity`);
+
+  const test = jobs.get("test");
+  requireText(test, "needs: integrity", `${label} test`);
+  requireText(test, "if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'", `${label} test`);
+  const testCheckout = test.indexOf("      - name: Checkout candidate\n");
+  const testVerify = test.indexOf("      - name: Verify test checkout\n");
+  const policy = test.indexOf("      - name: Check the protected workflow policy\n");
+  if (!(testCheckout >= 0 && testCheckout < testVerify && testVerify < policy)) {
+    reject(`${label} test must check out and verify the candidate before executing its policy checker`);
+  }
+  requireText(test, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', `${label} test`);
+  requireText(test, "run: node tools/check-workflows.js", `${label} test`);
+  if ((text.match(/uses: actions\/checkout@/g) ?? []).length !== 2) {
+    reject(`${label} must contain exactly one pinned checkout in each job`);
+  }
 }
 
 function hostedJobs(expected) {
@@ -398,18 +463,23 @@ function validatePublicProfile({ profile, files, workflows }) {
   }
   const sortedFiles = files.slice().sort();
   const rehearsalFiles = ["public-ci-rehearsal.yml", "public-error-fuzz-rehearsal.yml"];
-  const withRehearsal = [...EXPECTED_FILES, ...rehearsalFiles].sort();
-  if (JSON.stringify(sortedFiles) !== JSON.stringify(EXPECTED_FILES) &&
+  const activeFiles = hosted ? EXPECTED_FILES : CORE_FILES;
+  const withRehearsal = [...CORE_FILES, ...rehearsalFiles].sort();
+  if (JSON.stringify(sortedFiles) !== JSON.stringify(activeFiles.slice().sort()) &&
       (hosted || JSON.stringify(sortedFiles) !== JSON.stringify(withRehearsal))) {
-    reject(`active workflows must be exactly ${EXPECTED_FILES.join(" and ")}; found ${sortedFiles.join(", ")}`);
+    reject(`active workflows must be exactly ${activeFiles.join(", ")}; found ${sortedFiles.join(", ")}`);
   }
-  for (const file of EXPECTED_FILES) {
+  for (const file of CORE_FILES) {
     const text = workflows[file];
     if (typeof text !== "string") reject(`missing active workflow ${file}`);
     checkNoForbidden(text, `.github/workflows/${file}`);
   }
   checkCi(workflows["ci.yml"], hosted ? "public" : "private");
   checkErrorFuzz(workflows["error-fuzz.yml"], hosted ? "public" : "private");
+  if (hosted) {
+    if (typeof workflows[BULK_FILE] !== "string") reject(`missing active workflow ${BULK_FILE}`);
+    checkBulk(workflows[BULK_FILE]);
+  }
   if (files.includes(rehearsalFiles[0])) {
     checkCi(workflows[rehearsalFiles[0]], "rehearsal");
     checkErrorFuzz(workflows[rehearsalFiles[1]], "rehearsal");
@@ -436,6 +506,30 @@ function readCheckout(root) {
   return validatePublicProfile({ profile, files, workflows });
 }
 
+function bulkSelfTest(root) {
+  const assert = require("node:assert/strict");
+  const bulk = fs.readFileSync(path.join(root, ".github/workflows/bulk.yml"), "utf8");
+  checkBulk(bulk);
+  let cases = 0;
+  for (const [label, changed] of [
+    ["bulk pull-request trigger", bulk.replace("  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:")],
+    ["bulk input drift", bulk.replace("      manifest_digest:", "      reported_digest:")],
+    ["bulk write permission", bulk.replace("contents: read", "contents: write")],
+    ["bulk untrusted ref", bulk.replace("ref: ${{ inputs.checkout_sha }}", "ref: main")],
+    ["bulk persisted credentials", bulk.replace("persist-credentials: false", "persist-credentials: true")],
+    ["bulk self-hosted runner", bulk.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")],
+    ["bulk title drift", bulk.replace("run-name: rustia-ci:", "run-name: bulk:")],
+    ["bulk job-name drift", bulk.replace("  integrity:\n", "  verify:\n")],
+    ["bulk missing exact-checkout step", bulk.replace("Verify exact checkout", "Trust checkout")],
+    ["bulk test before verification", bulk.replace("      - name: Verify test checkout", "      - name: Check the protected workflow policy\n        run: node tools/check-workflows.js\n\n      - name: Verify test checkout")],
+  ]) {
+    assert.notEqual(changed, bulk, `${label}: mutation did not apply`);
+    assert.throws(() => checkBulk(changed), /bulk\.yml/, label);
+    cases += 1;
+  }
+  return { cases, passed: true };
+}
+
 function selfTest(root) {
   const assert = require("node:assert/strict");
   const fs = require("node:fs");
@@ -450,7 +544,7 @@ function selfTest(root) {
     "ci.yml": fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8"),
     "error-fuzz.yml": fs.readFileSync(path.join(root, ".github/workflows/error-fuzz.yml"), "utf8"),
   };
-  const files = EXPECTED_FILES.slice();
+  const files = CORE_FILES.slice();
   const run = (changedProfile = profile, changedFiles = files, changedWorkflows = workflows) =>
     validatePublicProfile({ profile: changedProfile, files: changedFiles, workflows: changedWorkflows });
   let cases = 0;
@@ -526,11 +620,12 @@ function selfTest(root) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
+    cases += bulkSelfTest(root).cases;
     return { cases, passed: true };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
 }
 
-module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, readCheckout, selfTest,
+module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkBulk, readCheckout, selfTest, bulkSelfTest,
   REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };
