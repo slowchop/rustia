@@ -88,6 +88,7 @@ try {
         .some(name => process.env[name] !== undefined)) process.exit(10);
       if (process.env.GIT_SSH_COMMAND !== "ssh transport fixture") process.exit(11);
     }
+    if (mode === "preflight-root" && process.env.RUSTIA_PREFLIGHT_ROOT !== undefined) process.exit(12);
   `);
   fs.writeFileSync(path.join(repository, "tracked"), "fixture");
   git(["add", "."]);
@@ -129,6 +130,11 @@ try {
     GIT_WORK_TREE: repository,
     GIT_INDEX_FILE: path.join(repository, ".git", "index"),
     GIT_SSH_COMMAND: "ssh transport fixture",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(remoteHead(), third);
+  result = validated([], "preflight-root", {
+    RUSTIA_PREFLIGHT_ROOT: path.join(temporary, "other-checkout"),
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(remoteHead(), third);

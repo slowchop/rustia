@@ -18,6 +18,8 @@ try {
     if (process.env.GUARD_TEST_MODE === 'fail') process.exit(1);
     if (process.env.GUARD_TEST_MODE === 'inherited-git' &&
         ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'].some(name => process.env[name] !== undefined)) process.exit(2);
+    if (process.env.GUARD_TEST_MODE === 'preflight-root' &&
+        process.env.RUSTIA_PREFLIGHT_ROOT !== undefined) process.exit(3);
     if (process.env.GUARD_TEST_MODE === 'dirty') fs.writeFileSync('changed', 'x');
   `);
   git("add", "."); git("commit", "-m", "fixture");
@@ -40,6 +42,9 @@ try {
     GIT_INDEX_FILE: path.join(temporary, ".git", "index"),
   }).status, 0, "full validation inherited the pushing repository's Git context");
   protectedFiles.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), before[index]));
+  assert.equal(run(head, "preflight-root", {
+    RUSTIA_PREFLIGHT_ROOT: path.join(temporary, "other-checkout"),
+  }).status, 0, "full validation accepted an inherited preflight root override");
   assert.notEqual(run(first).status, 0, "other source commit accepted");
   assert.notEqual(run(head, "fail").status, 0, "failed validation accepted");
   assert.notEqual(run(head, "dirty").status, 0, "validation mutation accepted");

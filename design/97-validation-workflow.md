@@ -34,7 +34,9 @@ controller-selected source repository and exact commit. Its workflow, command
 inventory and run title come from protected `main`; the candidate checkout is
 only the data being checked. The trusted runner accepts one normalized absolute
 `RUSTIA_PREFLIGHT_ROOT` so the protected command inventory executes in that
-verified checkout. Local validation keeps the repository root default.
+verified checkout. The override is accepted only for the Quick stage (and its
+side-effect-free plan listing). Both local push guards remove it from their
+environment, so they always validate the checkout whose exact commit they push.
 
 `just release-preflight` runs the early checks, then workspace tests and release
 checks concurrently. It keeps two heavy processes at most, retains the normal

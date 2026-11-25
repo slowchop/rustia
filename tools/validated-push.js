@@ -34,6 +34,9 @@ function cleanEnvironment() {
 }
 
 const environment = cleanEnvironment();
+// The trusted Quick workflow may point the protected policy runner at its
+// verified candidate checkout. A validated push must always validate this checkout.
+delete environment.RUSTIA_PREFLIGHT_ROOT;
 
 function git(args, options = {}) {
   const output = childProcess.execFileSync("git", args, {

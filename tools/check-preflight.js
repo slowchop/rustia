@@ -34,6 +34,12 @@ assert.notEqual(spawnSync(process.execPath, [runner, "--list"], {
   encoding: "utf8",
   env: { ...process.env, RUSTIA_PREFLIGHT_ROOT: "relative" },
 }).status, 0);
+for (const args of [[], ["--stage", "workspace"], ["--stage", "release"]]) {
+  assert.notEqual(spawnSync(process.execPath, [runner, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, RUSTIA_PREFLIGHT_ROOT: root },
+  }).status, 0);
+}
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 assert(workflow.includes("stage: [quick, workspace, release]"));
 assert(workflow.includes('run: test "$PREFLIGHT_RESULT" = success'));
