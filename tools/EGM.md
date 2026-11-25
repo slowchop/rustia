@@ -67,7 +67,7 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Verification
 
-- [`sync-project-copy.js`](sync-project-copy.js) renders the shared intro and feature copy
+- [`sync-project-copy.js`](sync-project-copy.js) renders the shared intro, feature copy, and roadmap
   from [`project-copy.json`](../project-copy.json). Edit the JSON and run
   `node tools/sync-project-copy.js` to refresh the marked blocks. The crate metadata
   check used by release preflight runs `--check` and reports stale output.

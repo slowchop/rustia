@@ -49,6 +49,38 @@ Keep runaway scripts under control. Set instruction and VM memory budgets so you
 </details>
 <!-- /project-copy: features -->
 
+## In development
+
+<!-- project-copy: upcoming -->
+<details>
+<summary><strong>Time-travel debugging</strong></summary>
+
+Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. [Follow the debugger work](https://github.com/slowchop/rustia/issues/71).
+
+</details>
+
+<details>
+<summary><strong>A Luau layer for Bevy</strong></summary>
+
+We’re building a Luau layer on top of [Bevy](https://bevy.org/) so you can change gameplay while the game runs, without rebuilding the Rust app.
+
+</details>
+
+<details>
+<summary><strong>JIT and AOT research</strong></summary>
+
+We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. [Follow the compilation work](https://github.com/slowchop/rustia/issues/89).
+
+</details>
+
+<details>
+<summary><strong>Synth in Luau</strong></summary>
+
+We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.
+
+</details>
+<!-- /project-copy: upcoming -->
+
 ## Try it
 
 The Luau interpreter is available from Git while the crates.io release is in

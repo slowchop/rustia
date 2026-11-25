@@ -32,5 +32,27 @@
       "icon": "⏱︎",
       "readmeLink": "[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)"
     }
+  ],
+  "upcoming": [
+    {
+      "title": "Time-travel debugging",
+      "description": "Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. [Follow the debugger work](https://github.com/slowchop/rustia/issues/71).",
+      "icon": "«"
+    },
+    {
+      "title": "A Luau layer for Bevy",
+      "description": "We’re building a Luau layer on top of [Bevy](https://bevy.org/) so you can change gameplay while the game runs, without rebuilding the Rust app.",
+      "iconImage": "/bevy-icon.png"
+    },
+    {
+      "title": "JIT and AOT research",
+      "description": "We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. [Follow the compilation work](https://github.com/slowchop/rustia/issues/89).",
+      "icon": "🧪"
+    },
+    {
+      "title": "Synth in Luau",
+      "description": "We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.",
+      "icon": "♫"
+    }
   ]
 }
