@@ -83,12 +83,11 @@ We’re also having fun with a Luau synth in the browser. Write and tweak sounds
 
 ## Try it
 
-The Luau interpreter is available from Git while the crates.io release is in
-preparation. With Rust 1.95 or newer, add this pinned dependency under
-`[dependencies]` in `Cargo.toml`.
+Until the crates.io release, add Rustia from Git with Rust 1.95 or newer.
+The `main` branch is under active development and its API may change.
 
-```toml
-rustia = { git = "https://github.com/slowchop/rustia", rev = "3acfd682a19ae43af65ef204bc19e1d692c145ba" }
+```sh
+cargo add rustia --git https://github.com/slowchop/rustia --branch main
 ```
 
 ### A first script
