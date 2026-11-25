@@ -93,8 +93,11 @@ rustia = { git = "https://github.com/slowchop/rustia", rev = "3acfd682a19ae43af6
 
 ### A first script
 
-Rust gives Luau a score and a function called `double`. Put this in
-`src/main.rs` and run `cargo run`.
+This example runs a Luau script from Rust. The script calls a Rust function and
+returns the result. The Luau source is inline to keep the example short. In an
+app, you can load it from a `.luau` file.
+
+Put this in `src/main.rs` and run `cargo run`.
 
 ```rust
 use rustia::Rustia;
