@@ -1,12 +1,11 @@
 //! <!-- project-copy: intro -->
-//! Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.
+//! Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 //!
 //! Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
 //! <!-- /project-copy: intro -->
 //!
-//! Rustia is a pure-Rust interpreter for standalone Luau. Use
-//! [`RustiaBuilder::deterministic`] when the same script, seed, and inputs need
-//! to produce the same decisions.
+//! Use [`RustiaBuilder::deterministic`] when the same script, seed, and inputs
+//! need to produce the same decisions.
 //!
 //! # A first script
 //!

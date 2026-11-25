@@ -1,13 +1,14 @@
 # <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
 <!-- project-copy: intro -->
-Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.
+Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 
 Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
 <!-- /project-copy: intro -->
 
-Rustia is a pure-Rust interpreter for standalone Luau. The source is public
-for experimental use.
+**Version note.** [`0.1.0`](https://crates.io/crates/rustia/0.1.0) was an earlier
+game-engine project I set aside. `0.2.0` is planned as the first release of this
+Luau interpreter.
 
 ## Features
 
@@ -50,9 +51,9 @@ Keep runaway scripts under control. Set instruction and VM memory budgets so you
 
 ## Try it
 
-Install the interpreter from Git. The existing [`rustia 0.1.0` crate](https://crates.io/crates/rustia/0.1.0) is the original game engine.
-With Rust 1.95 or newer, run `cargo new hello-rustia`, then `cd hello-rustia`.
-Add this line under `[dependencies]` in `Cargo.toml`.
+The Luau interpreter is available from Git while the crates.io release is in
+preparation. With Rust 1.95 or newer, add this pinned dependency under
+`[dependencies]` in `Cargo.toml`.
 
 ```toml
 rustia = { git = "https://github.com/slowchop/rustia", rev = "3acfd682a19ae43af65ef204bc19e1d692c145ba" }
