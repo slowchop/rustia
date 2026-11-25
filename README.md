@@ -84,7 +84,7 @@ We’re also having fun with a Luau synth in the browser. Write and tweak sounds
 ## Try it
 
 Until the crates.io release, add Rustia from Git with Rust 1.95 or newer.
-The `main` branch is under active development and its API may change.
+Expect API changes on `main` until Rustia reaches `1.0.0`.
 
 ```sh
 cargo add rustia --git https://github.com/slowchop/rustia --branch main
@@ -270,7 +270,7 @@ steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
 
 ## Project status and source access
 
-Rustia’s API may change before its first supported release. See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
+See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
 and [what’s left before release](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md).
 
 Anyone can read the [maintainer backlog](https://github.com/slowchop/rustia/issues) and pull requests.
