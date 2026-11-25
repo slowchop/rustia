@@ -93,8 +93,9 @@ cargo add rustia --git https://github.com/slowchop/rustia --branch main
 ### A first script
 
 This example runs a Luau script from Rust. The script calls a Rust function and
-returns the result. The Luau source is inline to keep the example short. In an
-app, you can load it from a `.luau` file.
+returns the result. The Luau source is inline to keep the example short. In a
+real app, load `.luau` files at runtime so you can edit scripts without
+recompiling the Rust app.
 
 Put this in `src/main.rs` and run `cargo run`.
 
