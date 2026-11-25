@@ -10,6 +10,7 @@ Package metadata: [Cargo.toml](./Cargo.toml).
 
 - [`src/EGM.md`](./src/EGM.md) documents compile entry points and lowering modules.
 - Depends on the lexer, parser, and VM crates. The opt-in generated-call example emits Rust for a bounded, numeric closure.
+- The opt-in captured-host-call driver emits Rust for a bounded callback using host-owned handles.
 
 ## Invariants
 
