@@ -67,8 +67,11 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Verification
 
-- `check-crate-metadata.js` verifies the two Rustia description paragraphs
-  against the homepage, README, and crate Rustdoc.
+- [`sync-project-copy.js`](sync-project-copy.js) renders the shared intro and feature copy
+  from [`project-copy.json`](../project-copy.json). Edit the JSON and run
+  `node tools/sync-project-copy.js` to refresh the marked blocks. The crate metadata
+  check used by release preflight runs `--check` and reports stale output.
+  `--github-about` prints the short blurb for GitHub About.
 
 Run from the repository root: `node --check tools/check-workflows.js` performs syntax validation; `just check-benchmark-results` runs the offline benchmark-tool checks and committed-artifact validation. Neither is a timing result.
 

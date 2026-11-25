@@ -4,7 +4,9 @@
 
 `rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Applications can use the experimental 0.x API from Git. The crate is unpublished, and supported-release acceptance remains open.
 
-Package metadata: [Cargo.toml](./Cargo.toml).
+Package metadata: [Cargo.toml](./Cargo.toml). The package description and crate
+Rustdoc intro are generated from [project-copy.json](../../project-copy.json)
+by `node tools/sync-project-copy.js`.
 
 ## Interface
 

@@ -9,7 +9,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
 
 - index.html, garden.mjs and garden-player.mjs implement the editable homepage.
   The homepage includes the roadmap and starts on narrow screens with the
-  garden playing and the editor collapsed.
+  garden playing and the editor collapsed. The intro and feature list come from
+  [project-copy.json](../project-copy.json) via `node tools/sync-project-copy.js`.
 - site-header.html supplies the shared homepage and documentation navigation.
   rustia-mark.svg supplies the staggered dash mark for website headers and browser
   tabs. The build copies it to the site root. rustia-readme-mark.svg is the

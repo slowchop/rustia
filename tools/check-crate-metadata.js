@@ -146,31 +146,6 @@ function validatePackage(pkg, workspaceNames, workspaceVersion) {
   return violations;
 }
 
-function validateRustiaDescription(pkg) {
-  const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
-  const rustdoc = fs.readFileSync(path.join(root, "crates/rustia/src/lib.rs"), "utf8");
-  const homepage = fs.readFileSync(path.join(root, "website/index.html"), "utf8");
-  const hero = homepage.match(/<div class="hero-copy">([\s\S]*?)<\/div>/)?.[1] ?? "";
-  const paragraphs = [
-    ["README.md", readme.split(/\r?\n\r?\n/).slice(1, 3)],
-    ["crates/rustia/src/lib.rs", rustdoc.match(/^(?:\/\/![^\n]*\n)+/)?.[0]
-      .replace(/^\/\/! ?/gm, "").split(/\r?\n\r?\n/).slice(0, 2) ?? []],
-    ["website/index.html", [...hero.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((match) => match[1])],
-  ];
-  const normalize = (paragraph) => paragraph
-    .replace(/\[([^\]]+)\]\(https:\/\/[^)]+\)/g, "$1")
-    .replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ");
-  const expected = (pkg.description ?? "").trim().split(/\r?\n\r?\n/).map(normalize);
-  if (expected.length !== 2 || expected.some((paragraph) => !paragraph)) {
-    fail("the rustia package description must have two paragraphs");
-  }
-  for (const [source, copy] of paragraphs) {
-    if (copy.length !== expected.length || copy.some((paragraph, i) => normalize(paragraph) !== expected[i])) {
-      fail(`${source} must match the two paragraphs in crates/rustia/Cargo.toml`);
-    }
-  }
-}
-
 function buildReport() {
   const metadata = JSON.parse(
     runCargo(["metadata", "--locked", "--no-deps", "--format-version", "1"]),
@@ -189,7 +164,6 @@ function buildReport() {
   const workspaceNames = new Set(names);
   const reports = packages.map((pkg) => {
     const violations = validatePackage(pkg, workspaceNames, workspaceVersion);
-    if (pkg.name === "rustia") validateRustiaDescription(pkg);
     if (violations.length !== 0) {
       fail(`${pkg.name} metadata audit failed:\n${violations.map((item) => `  - ${item}`).join("\n")}`);
     }
@@ -234,6 +208,13 @@ function buildReport() {
   };
 }
 
+const copyCheck = childProcess.spawnSync(
+  process.execPath,
+  [path.join(__dirname, "sync-project-copy.js"), "--check"],
+  { stdio: "inherit" },
+);
+if (copyCheck.error) fail(copyCheck.error.message);
+if (copyCheck.status !== 0) process.exit(copyCheck.status ?? 1);
 const text = `${JSON.stringify(buildReport(), null, 2)}\n`;
 
 if (checkOnly) {

@@ -35,12 +35,16 @@ compiler output on another volume. The browser analyzer and editor bundle are
 vendored with their license notices. The generated runtime and publish directory
 are ignored by Git.
 
-## Project description
+## Shared project copy
 
-Keep the two opening paragraphs in sync with the description in
-[`crates/rustia/Cargo.toml`](../crates/rustia/Cargo.toml). Release preflight checks
-the homepage, root README, and Rustdoc. The homepage renders its search and
-social descriptions from those paragraphs. GitHub About uses the first paragraph.
+Edit the blurb, origin story, and feature list in
+[`project-copy.json`](../project-copy.json). From the repository root, run
+`node tools/sync-project-copy.js` and commit the source and generated passages
+together. Release preflight checks that the generated copy is current.
+
+The website uses the two intro paragraphs for its search and social descriptions.
+Run `node tools/sync-project-copy.js --github-about` to print the short blurb for
+GitHub About.
 
 ## Cloudflare Workers Static Assets
 
