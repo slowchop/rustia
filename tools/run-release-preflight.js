@@ -6,6 +6,7 @@ const path = require("path");
 
 const argv = process.argv.slice(2);
 const configuredRoot = process.env.RUSTIA_PREFLIGHT_ROOT;
+delete process.env.RUSTIA_PREFLIGHT_ROOT;
 if (configuredRoot !== undefined && (!path.isAbsolute(configuredRoot) || path.normalize(configuredRoot) !== configuredRoot)) {
   throw new Error("RUSTIA_PREFLIGHT_ROOT must be one normalized absolute path");
 }

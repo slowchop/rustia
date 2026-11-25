@@ -6,10 +6,15 @@ const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
 const root = path.resolve(__dirname, "..");
 const runner = path.join(root, "tools/run-release-preflight.js");
-const plan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], { encoding: "utf8" }));
+const environment = { ...process.env };
+delete environment.RUSTIA_PREFLIGHT_ROOT;
+const plan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], {
+  encoding: "utf8",
+  env: environment,
+}));
 const trustedPlan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], {
   encoding: "utf8",
-  env: { ...process.env, RUSTIA_PREFLIGHT_ROOT: root },
+  env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
 }));
 assert.deepEqual(trustedPlan, plan);
 const stages = new Set(["quick", "workspace", "release"]);
@@ -28,16 +33,19 @@ for (const script of ["check-package-dry-runs", "verify-conformance-package", "c
   assert.equal(matches("node", [`tools/${script}.js`])[0].stage, "release");
 }
 for (const args of [["--stage", "typo"], ["--stage"], ["--skip-tests"]]) {
-  assert.equal(spawnSync(process.execPath, [runner, ...args], { encoding: "utf8" }).status, 2);
+  assert.equal(spawnSync(process.execPath, [runner, ...args], {
+    encoding: "utf8",
+    env: environment,
+  }).status, 2);
 }
 assert.notEqual(spawnSync(process.execPath, [runner, "--list"], {
   encoding: "utf8",
-  env: { ...process.env, RUSTIA_PREFLIGHT_ROOT: "relative" },
+  env: { ...environment, RUSTIA_PREFLIGHT_ROOT: "relative" },
 }).status, 0);
 for (const args of [[], ["--stage", "workspace"], ["--stage", "release"]]) {
   assert.notEqual(spawnSync(process.execPath, [runner, ...args], {
     encoding: "utf8",
-    env: { ...process.env, RUSTIA_PREFLIGHT_ROOT: root },
+    env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
   }).status, 0);
 }
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
