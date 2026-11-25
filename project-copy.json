@@ -1,0 +1,36 @@
+{
+  "blurb": "Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.",
+  "origin": "Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.",
+  "features": [
+    {
+      "title": "Hot reload",
+      "description": "Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state.",
+      "icon": "↻",
+      "readmeLink": "[Try the garden](https://rustia.dev/)"
+    },
+    {
+      "title": "Deterministic execution",
+      "description": "Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.",
+      "icon": "≡",
+      "readmeLink": "[Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)"
+    },
+    {
+      "title": "Pure Rust runtime",
+      "description": "One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain.",
+      "icon": "🦀",
+      "readmeLink": "[Platform comparison](https://rustia.dev/#luau-comparison)"
+    },
+    {
+      "title": "Rust functions and objects",
+      "description": "Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.",
+      "icon": "ƒ",
+      "readmeLink": "[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)"
+    },
+    {
+      "title": "Script execution limits",
+      "description": "Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.",
+      "icon": "⏱︎",
+      "readmeLink": "[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)"
+    }
+  ]
+}

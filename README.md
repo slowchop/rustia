@@ -1,21 +1,23 @@
 # <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
-Embed Luau in Rust games and tools.
-Edit scripts without a rebuild and let players write mods.
+<!-- project-copy: intro -->
+Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.
 
-Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed
-to script character decisions and replay them on desktop and in a browser.
+Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
+<!-- /project-copy: intro -->
 
 Rustia is a pure-Rust interpreter for standalone Luau. The source is public
 for experimental use.
 
 ## Features
 
-- **Hot reload.** Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions [here](https://rustia.dev/). If a reload fails, Rustia can restore the previous script state.
+<!-- project-copy: features -->
+- **Hot reload.** Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
 - **Deterministic execution.** Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
 - **Pure Rust runtime.** One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
 - **Rust functions and objects.** Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
 - **Script execution limits.** Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+<!-- /project-copy: features -->
 
 ## Try it
 
