@@ -4,7 +4,11 @@
 const childProcess = require("child_process");
 const path = require("path");
 
-const root = path.resolve(__dirname, "..");
+const configuredRoot = process.env.RUSTIA_PREFLIGHT_ROOT;
+if (configuredRoot !== undefined && (!path.isAbsolute(configuredRoot) || path.normalize(configuredRoot) !== configuredRoot)) {
+  throw new Error("RUSTIA_PREFLIGHT_ROOT must be one normalized absolute path");
+}
+const root = configuredRoot ?? path.resolve(__dirname, "..");
 for (const name of ["RUSTIA_UPDATE_C23_CENSUS", "RUSTIA_UPDATE_C23_O2_PREVIEW"]) {
   if (process.env[name] !== undefined) {
     throw new Error(`Validation refuses evidence-regeneration override ${name}`);

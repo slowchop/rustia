@@ -5,8 +5,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CORE_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
+const QUICK_FILE = "quick.yml";
 const BULK_FILE = "bulk.yml";
-const EXPECTED_FILES = Object.freeze([...CORE_FILES, BULK_FILE]);
+const EXPECTED_FILES = Object.freeze([...CORE_FILES, QUICK_FILE, BULK_FILE]);
+const QUICK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric target repository identity bound by the controller\n        type: string\n        required: true\n      admission_id:\n        description: Canonical controller admission identity\n        type: string\n        required: true\n      pull_request:\n        description: Numeric source pull-request identity\n        type: string\n        required: true\n      head_repository_id:\n        description: Numeric source repository identity\n        type: string\n        required: true\n      head_repository_full_name:\n        description: Source owner and repository used for the exact checkout\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact source commit to check out\n        type: string\n        required: true\n      quick_intent_digest:\n        description: SHA-256 digest of the canonical Quick intent\n        type: string\n        required: true\n';
 const BULK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric repository identity bound by the controller\n        type: string\n        required: true\n      attempt_id:\n        description: Numeric controller attempt identity\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact candidate commit to check out\n        type: string\n        required: true\n      manifest_digest:\n        description: SHA-256 digest of the canonical attempt manifest\n        type: string\n        required: true\n';
 const HOSTED_MAC_SETUP = [
   "      - name: Install pinned Rust toolchain",
@@ -362,6 +364,156 @@ function checkBulk(text) {
   }
 }
 
+function checkQuick(text) {
+  const label = ".github/workflows/quick.yml";
+  const expectedPrefix = [
+    "name: Rustia Quick trust fixture",
+    "run-name: rustia-quick:${{ inputs.repository_id }}:${{ inputs.admission_id }}:${{ inputs.checkout_sha }}:${{ inputs.quick_intent_digest }}",
+    "",
+    QUICK_TRIGGERS.trimEnd(),
+    "",
+    "permissions:",
+    "  contents: read",
+    "",
+    "jobs:",
+    "",
+  ].join("\n");
+  if (!text.startsWith(expectedPrefix)) {
+    reject(`${label} must retain the exact reviewed top-level configuration before jobs`);
+  }
+  checkTriggers(text, QUICK_TRIGGERS, label);
+  checkPermissions(text, label);
+  checkActionPins(text, label);
+  checkNoForbidden(text, label);
+
+  const jobs = jobBlocks(text, label);
+  const names = [...jobs.keys()].sort();
+  if (JSON.stringify(names) !== JSON.stringify(["integrity", "test"])) {
+    reject(`${label} jobs must be exactly integrity and test; found ${names.join(", ")}`);
+  }
+  for (const [name, block] of jobs) {
+    const runners = [...block.matchAll(/^    runs-on: (.+)$/gm)].map((match) => match[1]);
+    if (JSON.stringify(runners) !== JSON.stringify(["ubuntu-24.04"])) {
+      reject(`${label} job ${name} must run once on ubuntu-24.04`);
+    }
+    requireText(block, `    name: ${name}\n`, `${label} ${name}`);
+    requireText(block, "repository: ${{ inputs.head_repository_full_name }}", `${label} ${name}`);
+    requireText(block, "ref: ${{ inputs.checkout_sha }}", `${label} ${name}`);
+    requireText(block, "fetch-depth: 1", `${label} ${name}`);
+    requireText(block, "persist-credentials: false", `${label} ${name}`);
+  }
+
+  const integrity = jobs.get("integrity");
+  requireExactJobHeader(integrity, `  integrity:
+    name: integrity
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:`, `${label} integrity`);
+  const integritySteps = exactStepBlocks(integrity, [
+    "Validate dispatch inputs",
+    "Checkout candidate",
+    "Verify exact checkout",
+  ], `${label} integrity`);
+  requireExactStep(integritySteps, "Validate dispatch inputs", `      - name: Validate dispatch inputs
+        shell: bash
+        env:
+          REPOSITORY_ID: \${{ inputs.repository_id }}
+          ADMISSION_ID: \${{ inputs.admission_id }}
+          PULL_REQUEST: \${{ inputs.pull_request }}
+          HEAD_REPOSITORY_ID: \${{ inputs.head_repository_id }}
+          HEAD_REPOSITORY_FULL_NAME: \${{ inputs.head_repository_full_name }}
+          CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+          QUICK_INTENT_DIGEST: \${{ inputs.quick_intent_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ADMISSION_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+          [[ "$PULL_REQUEST" =~ ^[1-9][0-9]*$ ]]
+          [[ "$HEAD_REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$HEAD_REPOSITORY_FULL_NAME" =~ ^[^/[:space:][:cntrl:]]+/[^/[:space:][:cntrl:]]+$ ]]
+          owner=\${HEAD_REPOSITORY_FULL_NAME%%/*}
+          repository=\${HEAD_REPOSITORY_FULL_NAME#*/}
+          (( \${#owner} <= 255 && \${#repository} <= 255 ))
+          [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$QUICK_INTENT_DIGEST" =~ ^[0-9a-f]{64}$ ]]`, `${label} integrity`);
+  requireExactStep(integritySteps, "Checkout candidate", `      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: \${{ inputs.head_repository_full_name }}
+          ref: \${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false`, `${label} integrity`);
+  requireExactStep(integritySteps, "Verify exact checkout", `      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} integrity`);
+  if ((text.match(/      - name: Verify exact checkout\n/g) ?? []).length !== 1) {
+    reject(`${label} must contain exactly one Verify exact checkout step`);
+  }
+
+  const test = jobs.get("test");
+  requireExactJobHeader(test, `  test:
+    name: test
+    needs: integrity
+    if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:`, `${label} test`);
+  const testSteps = exactStepBlocks(test, [
+    "Checkout protected policy",
+    "Checkout candidate",
+    "Verify test checkout",
+    "Install pinned Rust toolchain",
+    "Install Node",
+    "Run protected Quick policy",
+  ], `${label} test`);
+  requireExactStep(testSteps, "Checkout protected policy", `      - name: Checkout protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false`, `${label} test`);
+  requireExactStep(testSteps, "Checkout candidate", `      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: \${{ inputs.head_repository_full_name }}
+          ref: \${{ inputs.checkout_sha }}
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false`, `${label} test`);
+  requireExactStep(testSteps, "Verify test checkout", `      - name: Verify test checkout
+        shell: bash
+        working-directory: candidate
+        env:
+          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} test`);
+  requireExactStep(testSteps, "Install pinned Rust toolchain", `      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+          cache: false`, `${label} test`);
+  requireExactStep(testSteps, "Install Node", `      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"`, `${label} test`);
+  requireExactStep(testSteps, "Run protected Quick policy", `      - name: Run protected Quick policy
+        working-directory: candidate
+        env:
+          RUSTIA_PREFLIGHT_ROOT: \${{ github.workspace }}/candidate
+        run: node ../trusted/tools/run-release-preflight.js --stage quick`, `${label} test`);
+  if ((text.match(/uses: actions\/checkout@/g) ?? []).length !== 3) {
+    reject(`${label} must contain one candidate checkout per job and one protected-policy checkout`);
+  }
+}
+
 function hostedJobs(expected) {
   return Object.fromEntries(Object.entries(expected).filter(([name]) => name !== "safari-runtime").map(([name]) =>
     [name, `runs-on: ${name === "macos-arm64-runtime" ? "macos-15" : name === "windows-runtime" ? "windows-2025" : "ubuntu-24.04"}`]));
@@ -589,7 +741,9 @@ function validatePublicProfile({ profile, files, workflows }) {
   checkCi(workflows["ci.yml"], hosted ? "public" : "private");
   checkErrorFuzz(workflows["error-fuzz.yml"], hosted ? "public" : "private");
   if (hosted) {
+    if (typeof workflows[QUICK_FILE] !== "string") reject(`missing active workflow ${QUICK_FILE}`);
     if (typeof workflows[BULK_FILE] !== "string") reject(`missing active workflow ${BULK_FILE}`);
+    checkQuick(workflows[QUICK_FILE]);
     checkBulk(workflows[BULK_FILE]);
   }
   if (files.includes(rehearsalFiles[0])) {
@@ -658,6 +812,38 @@ function bulkSelfTest(root) {
   ]) {
     assert.notEqual(changed, bulk, `${label}: mutation did not apply`);
     assert.throws(() => checkBulk(changed), /bulk\.yml/, label);
+    cases += 1;
+  }
+  return { cases, passed: true };
+}
+
+function quickSelfTest(root) {
+  const assert = require("node:assert/strict");
+  const quick = fs.readFileSync(path.join(root, ".github/workflows/quick.yml"), "utf8");
+  checkQuick(quick);
+  let cases = 0;
+  for (const [label, changed] of [
+    ["Quick pull-request trigger", quick.replace("  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:")],
+    ["Quick input drift", quick.replace("      quick_intent_digest:", "      reported_digest:")],
+    ["Quick write permission", quick.replace("contents: read", "contents: write")],
+    ["Quick self-hosted runner", quick.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")],
+    ["Quick title drift", quick.replace("run-name: rustia-quick:", "run-name: quick:")],
+    ["Quick job-name drift", quick.replace("  integrity:\n", "  verify:\n")],
+    ["Quick untrusted repository", quick.replace("repository: ${{ inputs.head_repository_full_name }}", "repository: slowchop/rustia")],
+    ["Quick untrusted ref", quick.replace("ref: ${{ inputs.checkout_sha }}", "ref: main")],
+    ["Quick moving policy ref", quick.replace("ref: ${{ github.sha }}", "ref: main")],
+    ["Quick persisted credentials", quick.replace("persist-credentials: false", "persist-credentials: true")],
+    ["Quick token exposure", quick.replace("        shell: bash", "        env:\n          TOKEN: ${{ github.token }}\n        shell: bash")],
+    ["Quick command before validation", quick.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - name: Run early command\n        run: true\n\n      - name: Validate dispatch inputs")],
+    ["Quick candidate before exact verification", quick.replace("      - name: Verify exact checkout", "      - name: Run candidate early\n        run: true\n\n      - name: Verify exact checkout")],
+    ["Quick candidate policy runner", quick.replace("node ../trusted/tools/run-release-preflight.js", "node tools/run-release-preflight.js")],
+    ["Quick wrong candidate root", quick.replace("${{ github.workspace }}/candidate", "${{ github.workspace }}/trusted")],
+    ["Quick skipped compiler partition", quick.replace("--stage quick", "--stage workspace")],
+    ["Quick enabled cache", quick.replace("cache: false", "cache: true")],
+    ["Quick unpinned toolchain", quick.replace("toolchain: 1.95.0", "toolchain: stable")],
+  ]) {
+    assert.notEqual(changed, quick, `${label}: mutation did not apply`);
+    assert.throws(() => checkQuick(changed), /quick\.yml/, label);
     cases += 1;
   }
   return { cases, passed: true };
@@ -753,6 +939,7 @@ function selfTest(root) {
       const mutated = { ...workflows, [file]: transform(workflows[file]) };
       expectFail(label, () => run(profile, files, mutated), expected);
     }
+    cases += quickSelfTest(root).cases;
     cases += bulkSelfTest(root).cases;
     return { cases, passed: true };
   } finally {
@@ -760,5 +947,5 @@ function selfTest(root) {
   }
 }
 
-module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkBulk, readCheckout, selfTest, bulkSelfTest,
+module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkQuick, checkBulk, readCheckout, selfTest, quickSelfTest, bulkSelfTest,
   REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };

@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-21 (Australia/Hobart).
+Updated: 2026-11-25 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -25,13 +25,14 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
 The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
-The dispatch-only `bulk.yml` trust fixture is the public half of a future
-controller handshake. It accepts a repository ID, attempt ID, exact checkout
-SHA and manifest digest on protected `main`, binds them into the GitHub run
-title, and verifies the checked-out commit in a pinned `integrity` step. Its
-second job exercises the policy checker from a separate protected-`main`
-checkout; candidate code cannot replace that checker. The controller, staged
-Bulk suite and repository settings remain inactive.
+The dispatch-only [`quick.yml`](https://github.com/slowchop/rustia/issues/98)
+and `bulk.yml` trust fixtures are the public half
+of a future controller handshake. Both bind the controller's exact inputs into
+their run title, verify the requested checkout before candidate commands, use
+read-only hosted runners and load policy from protected `main`. Quick runs the
+canonical early partition against the exact source repository and commit. Bulk
+retains the synthetic-candidate handshake. The controller, staged Bulk suite
+and repository settings remain inactive.
 
 ## Website
 
