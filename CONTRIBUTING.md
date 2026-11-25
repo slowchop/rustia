@@ -21,7 +21,7 @@ that establish completion. Use the bug or work-item template when helpful.
    updates. File newly discovered independent work as linked follow-up issues.
 3. Link the PR with `Closes #N` when it completes the whole issue, or `Refs #N`
    for partial work. Record validation and remaining acceptance items.
-4. Obtain independent review, pass the full preflight and applicable CI, and merge
+4. Obtain independent review, pass hosted release preflight and other applicable CI, and merge
    with a merge commit. Verify the result on main and the issue's final state.
    A parent tracker stays open until all its acceptance gates are resolved.
 
@@ -49,10 +49,10 @@ cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
 
 `just install-hooks` is equivalent to the Node command above. Install this
 checkout-local guard before pushing. For a frozen commit, prefer
-`just validated-push`: it runs the full `just release-preflight` inventory once,
-rechecks the unchanged clean HEAD, and pushes that exact commit. Ordinary
-`git push` still runs the full inventory through the hook. Focused checks do not
-replace either route. See [the validation workflow](design/97-validation-workflow.md).
+`just validated-push`. It checks formatting, shared copy, and crate metadata,
+then rechecks the clean checkout and pushes that exact commit. Ordinary
+`git push` runs the same local checks through the hook. The complete hosted
+correctness checks gate merges. See [the validation workflow](design/97-validation-workflow.md).
 
 While making a change, run the tests closest to the code you edited. These checks
 are a useful baseline:

@@ -159,10 +159,9 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
 
 ## Before pushing
 
-Install the checkout-local guard with `just install-hooks`. Use `just check-quick`
-while iterating. For final delivery, prefer `just validated-push`: it runs the
-full `just release-preflight` inventory once, rechecks the exact clean HEAD, and
-immediately pushes only that commit. Ordinary `git push` still runs the full
-hook. A focused test or one stage is not a substitute. Preserve existing hooks
-when installing. Do not bypass failures or regenerate evidence inside validation.
-See `design/97-validation-workflow.md`.
+Install the checkout-local guard with `just install-hooks`. Prefer
+`just validated-push` to push the exact clean commit after the local checks.
+Ordinary `git push` runs the same checks through the hook. Use `just check-quick`
+while iterating and `just release-preflight` for the complete local suite.
+Verify applicable hosted correctness checks before merging. Preserve existing
+hooks and do not skip failing checks. See `design/97-validation-workflow.md`.

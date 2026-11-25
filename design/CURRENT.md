@@ -224,13 +224,12 @@ and required an already logged-in runner desktop. Two attempts failed that
 prerequisite before any browser tests ran; adding the route is not execution
 acceptance. No runner or browser permissions were changed. [Evidence](96-browser-platform-acceptance.md).
 
-Install the checkout-local hook with `just install-hooks`. Prefer
-`just validated-push` for a frozen final commit: it runs the full
-unchanged-commit `just release-preflight` inventory once and immediately pushes
-only that exact clean HEAD. Ordinary `git push` retains the full hook. The
-one-shot route creates no reusable receipt and accepts only exact normal or
-observed-tip leased pushes. No bypass or evidence regeneration inside validation.
-[97 — Validation](97-validation-workflow.md) defines that inventory. The public
+Install the checkout-local hook with `just install-hooks`. Both `git push`
+and `just validated-push` run bounded local checks for whitespace, formatting,
+shared copy, and crate metadata against the exact clean commit. The one-shot route
+creates no reusable receipt and accepts only exact normal or observed-tip leased
+pushes. The full preflight remains available locally and runs in hosted correctness
+CI before merge. [97 — Validation](97-validation-workflow.md) defines the checks. The public
 [launch run](public-source-activation.md) executed the native macOS arm64 tests.
 
 **Never run performance measurements locally.** The source correctness profile gives
