@@ -34,6 +34,9 @@ function cleanEnvironment() {
 }
 
 const environment = cleanEnvironment();
+// The trusted Quick workflow may point the protected policy runner at its
+// verified candidate checkout. A validated push must always validate this checkout.
+delete environment.RUSTIA_PREFLIGHT_ROOT;
 
 function git(args, options = {}) {
   const output = childProcess.execFileSync("git", args, {
@@ -162,7 +165,7 @@ function main() {
     if (expectedRemoteTip === null) fail("--force-with-lease requires an existing remote branch");
   }
 
-  childProcess.execFileSync(process.execPath, [path.join(root, "tools/run-release-preflight.js")], {
+  childProcess.execFileSync(process.execPath, [path.join(root, "tools/check-local-push.js")], {
     cwd: root,
     env: environment,
     stdio: "inherit",

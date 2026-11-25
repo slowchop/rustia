@@ -4,7 +4,19 @@
 const childProcess = require("child_process");
 const path = require("path");
 
-const root = path.resolve(__dirname, "..");
+const argv = process.argv.slice(2);
+const configuredRoot = process.env.RUSTIA_PREFLIGHT_ROOT;
+delete process.env.RUSTIA_PREFLIGHT_ROOT;
+if (configuredRoot !== undefined && (!path.isAbsolute(configuredRoot) || path.normalize(configuredRoot) !== configuredRoot)) {
+  throw new Error("RUSTIA_PREFLIGHT_ROOT must be one normalized absolute path");
+}
+if (configuredRoot !== undefined && !(
+  (argv.length === 1 && argv[0] === "--list") ||
+  (argv.length === 2 && argv[0] === "--stage" && argv[1] === "quick")
+)) {
+  throw new Error("RUSTIA_PREFLIGHT_ROOT is available only to the protected Quick invocation");
+}
+const root = configuredRoot ?? path.resolve(__dirname, "..");
 for (const name of ["RUSTIA_UPDATE_C23_CENSUS", "RUSTIA_UPDATE_C23_O2_PREVIEW"]) {
   if (process.env[name] !== undefined) {
     throw new Error(`Validation refuses evidence-regeneration override ${name}`);
@@ -241,7 +253,6 @@ plan.push(compilerCheck);
 function assignedStage(entry) {
   return entry === compilerCheck ? "quick" : stageOf(entry);
 }
-const argv = process.argv.slice(2);
 if (argv.length === 1 && argv[0] === "--list") {
   console.log(JSON.stringify(plan.map(entry => ({ ...entry, stage: assignedStage(entry) })), null, 2));
 } else if (argv.length === 2 && argv[0] === "--stage" && stages.includes(argv[1])) {

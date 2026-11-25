@@ -111,18 +111,18 @@ check-examples:
     cargo run --locked -p rustia --example game_objects
     cargo run --locked -p rustia --example hardened_decision
 
-# Install the full pre-push guard in this checkout.
+# Install the local pre-push guard in this checkout.
 install-hooks:
     node tools/install-git-hooks.js
 
-# Early failures only; the full pre-push gate still runs every check.
+# Run the quick stage of release preflight.
 check-quick:
     node tools/run-release-preflight.js --stage quick
 
 release-preflight:
     node tools/run-release-preflight.js
 
-# Run the full gate once, recheck exact HEAD/clean state, then push that commit.
+# Run local checks, recheck exact HEAD and clean state, then push that commit.
 validated-push remote="":
     node tools/validated-push.js {{ if remote == "" { "" } else { quote(remote) } }}
 

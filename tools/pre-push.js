@@ -25,7 +25,10 @@ try {
     // Temporary consumer/review repos must not inherit this hook's Git directory.
     const environment = { ...process.env };
     for (const name of git("rev-parse", "--local-env-vars").split("\n")) delete environment[name];
-    execFileSync(process.execPath, [path.join(root, "tools/run-release-preflight.js")], { cwd: root, stdio: "inherit", env: environment });
+    // The trusted Quick workflow may point the protected policy runner at its
+    // verified candidate checkout. A local push must always validate this checkout.
+    delete environment.RUSTIA_PREFLIGHT_ROOT;
+    execFileSync(process.execPath, [path.join(root, "tools/check-local-push.js")], { cwd: root, stdio: "inherit", env: environment });
     assertClean(head);
   }
 } catch (error) {

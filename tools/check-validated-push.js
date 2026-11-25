@@ -63,7 +63,7 @@ try {
   git(["remote", "add", "origin", remote]);
   fs.mkdirSync(path.join(repository, "tools"));
   fs.copyFileSync(path.join(__dirname, "validated-push.js"), path.join(repository, "tools/validated-push.js"));
-  fs.writeFileSync(path.join(repository, "tools/run-release-preflight.js"), `
+  fs.writeFileSync(path.join(repository, "tools/check-local-push.js"), `
     "use strict";
     const fs = require("node:fs");
     const cp = require("node:child_process");
@@ -88,6 +88,7 @@ try {
         .some(name => process.env[name] !== undefined)) process.exit(10);
       if (process.env.GIT_SSH_COMMAND !== "ssh transport fixture") process.exit(11);
     }
+    if (mode === "preflight-root" && process.env.RUSTIA_PREFLIGHT_ROOT !== undefined) process.exit(12);
   `);
   fs.writeFileSync(path.join(repository, "tracked"), "fixture");
   git(["add", "."]);
@@ -129,6 +130,11 @@ try {
     GIT_WORK_TREE: repository,
     GIT_INDEX_FILE: path.join(repository, ".git", "index"),
     GIT_SSH_COMMAND: "ssh transport fixture",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(remoteHead(), third);
+  result = validated([], "preflight-root", {
+    RUSTIA_PREFLIGHT_ROOT: path.join(temporary, "other-checkout"),
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(remoteHead(), third);
@@ -237,10 +243,10 @@ exec "${gitExecutable}" "$@"
   const hookSource = fs.readFileSync(path.join(sourceRoot, ".githooks/pre-push"), "utf8");
   const guardSource = fs.readFileSync(path.join(sourceRoot, "tools/pre-push.js"), "utf8");
   assert(hookSource.includes("tools/pre-push.js"));
-  assert(guardSource.includes("tools/run-release-preflight.js"));
+  assert(guardSource.includes("tools/check-local-push.js"));
   assert(guardSource.includes("assertClean(head)"));
 
-  console.log("Validated push gates and pushes exact HEAD once; ordinary push keeps the full hook.");
+  console.log("Validated push gates and pushes exact HEAD once; ordinary push runs the same local checks.");
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });
 }

@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-21 (Australia/Hobart).
+Updated: 2026-11-25 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -25,13 +25,14 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
 The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
-The dispatch-only `bulk.yml` trust fixture is the public half of a future
-controller handshake. It accepts a repository ID, attempt ID, exact checkout
-SHA and manifest digest on protected `main`, binds them into the GitHub run
-title, and verifies the checked-out commit in a pinned `integrity` step. Its
-second job exercises the policy checker from a separate protected-`main`
-checkout; candidate code cannot replace that checker. The controller, staged
-Bulk suite and repository settings remain inactive.
+The dispatch-only [`quick.yml`](https://github.com/slowchop/rustia/issues/98)
+and `bulk.yml` trust fixtures are the public half
+of a future controller handshake. Both bind the controller's exact inputs into
+their run title, verify the requested checkout before candidate commands, use
+read-only hosted runners and load policy from protected `main`. Quick runs the
+canonical early partition against the exact source repository and commit. Bulk
+retains the synthetic-candidate handshake. The controller, staged Bulk suite
+and repository settings remain inactive.
 
 ## Website
 
@@ -223,13 +224,12 @@ and required an already logged-in runner desktop. Two attempts failed that
 prerequisite before any browser tests ran; adding the route is not execution
 acceptance. No runner or browser permissions were changed. [Evidence](96-browser-platform-acceptance.md).
 
-Install the checkout-local hook with `just install-hooks`. Prefer
-`just validated-push` for a frozen final commit: it runs the full
-unchanged-commit `just release-preflight` inventory once and immediately pushes
-only that exact clean HEAD. Ordinary `git push` retains the full hook. The
-one-shot route creates no reusable receipt and accepts only exact normal or
-observed-tip leased pushes. No bypass or evidence regeneration inside validation.
-[97 — Validation](97-validation-workflow.md) defines that inventory. The public
+Install the checkout-local hook with `just install-hooks`. Both `git push`
+and `just validated-push` run bounded local checks for whitespace, formatting,
+shared copy, and crate metadata against the exact clean commit. The one-shot route
+creates no reusable receipt and accepts only exact normal or observed-tip leased
+pushes. The full preflight remains available locally and runs in hosted correctness
+CI before merge. [97 — Validation](97-validation-workflow.md) defines the checks. The public
 [launch run](public-source-activation.md) executed the native macOS arm64 tests.
 
 **Never run performance measurements locally.** The source correctness profile gives
