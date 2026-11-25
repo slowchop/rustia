@@ -6,8 +6,10 @@
 <!-- site-header -->
 <main><section class="hero" aria-labelledby="title">
   <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
+    <!-- project-copy: intro -->
     <p>Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.</p>
     <p>Rustia grew out of a game by <a class="studio-credit" href="https://slowchop.com/"><span class="studio-icon" aria-hidden="true"></span>Slowchop Studios</a> that needed to script character decisions and replay them on desktop and in a browser.</p>
+    <!-- /project-copy: intro -->
   </div>
   <div data-garden data-mobile-editor data-tutorial="off" data-starter="examples/garden-studies/wandering-flowers.luau"></div>
   <template id="garden-home-links">
@@ -25,9 +27,10 @@
   <div class="home-next-inner">
     <h2 id="features-title">Rustia features</h2>
     <dl class="home-features">
+      <!-- project-copy: features -->
       <div>
         <dt><span class="feature-icon" aria-hidden="true">↻</span>Hot reload</dt>
-        <dd>Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions here. If a reload fails, Rustia can restore the previous script state.</dd>
+        <dd>Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state.</dd>
       </div>
       <div>
         <dt><span class="feature-icon" aria-hidden="true">≡</span>Deterministic execution</dt>
@@ -45,6 +48,7 @@
         <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>
         <dd>Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.</dd>
       </div>
+      <!-- /project-copy: features -->
     </dl>
   </div>
 </section>
