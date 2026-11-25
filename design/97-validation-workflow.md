@@ -8,7 +8,7 @@ captured URL's same-name branch. On a branch without an upstream, pass the remot
 once (for example, `just validated-push origin`); tracking is established only
 after that successful exact push. A differently named upstream is rejected. The
 process uses `--no-verify` only for its own final push because it has just run the
-same full validation. It creates no reusable receipt or cached authorization.
+same local checks. It creates no reusable receipt or cached authorization.
 
 Ordinary `git push` runs the same checks through the checkout-local hook. The
 hook validates the actual commit being pushed and checks that neither HEAD nor

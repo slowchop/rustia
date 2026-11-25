@@ -8,7 +8,7 @@ const { performance } = require("node:perf_hooks");
 const root = path.resolve(__dirname, "..");
 const deadline = performance.now() + 50_000;
 const checks = [
-  ["git", ["show", "--format=", "--check", "HEAD"]],
+  ["git", ["--no-pager", "show", "--diff-merges=first-parent", "--format=", "--check", "HEAD"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["fmt", "--manifest-path", "demos/web-live/Cargo.toml", "--", "--check"]],
   [process.execPath, ["tools/check-crate-metadata.js", "--check"]],
