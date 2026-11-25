@@ -12,11 +12,40 @@ for experimental use.
 ## Features
 
 <!-- project-copy: features -->
-- **Hot reload.** Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
-- **Deterministic execution.** Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
-- **Pure Rust runtime.** One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
-- **Rust functions and objects.** Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
-- **Script execution limits.** Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+<details>
+<summary><strong>Hot reload</strong></summary>
+
+Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
+
+</details>
+
+<details>
+<summary><strong>Deterministic execution</strong></summary>
+
+Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+
+</details>
+
+<details>
+<summary><strong>Pure Rust runtime</strong></summary>
+
+One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
+
+</details>
+
+<details>
+<summary><strong>Rust functions and objects</strong></summary>
+
+Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
+
+</details>
+
+<details>
+<summary><strong>Script execution limits</strong></summary>
+
+Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+
+</details>
 <!-- /project-copy: features -->
 
 ## Try it

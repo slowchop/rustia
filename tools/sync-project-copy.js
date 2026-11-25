@@ -40,8 +40,14 @@ function replaceBlock(source, name, start, end, replacement) {
 
 function render() {
   const description = `${blurb}\n\n${origin}`;
-  const markdownFeatures = features.map(({ title, description, readmeLink }) =>
-    `- **${title}.** ${description} · ${readmeLink}`).join("\n");
+  const markdownFeatures = features.map(({ title, description, readmeLink }) => [
+    "<details>",
+    `<summary><strong>${escapeHtml(title)}</strong></summary>`,
+    "",
+    `${description} · ${readmeLink}`,
+    "",
+    "</details>",
+  ].join("\n")).join("\n\n");
   const htmlFeatures = features.map(({ title, description, icon }) => [
     "      <div>",
     `        <dt><span class="feature-icon" aria-hidden="true">${escapeHtml(icon)}</span>${escapeHtml(title)}</dt>`,
