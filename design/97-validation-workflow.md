@@ -34,7 +34,9 @@ controller-selected source repository and exact commit. Its workflow, command
 inventory and run title come from protected `main`; the candidate checkout is
 only the data being checked. The trusted runner accepts one normalized absolute
 `RUSTIA_PREFLIGHT_ROOT` so the protected command inventory executes in that
-verified checkout. The override is accepted only for the Quick stage (and its
+verified checkout. The validation checkout fetches retained history because the
+early partition verifies historical benchmark evidence and source links. The
+override is accepted only for the Quick stage (and its
 side-effect-free plan listing), then consumed before any planned command runs.
 Both local push guards remove it from their environment, so they always validate
 the checkout whose exact commit they push.

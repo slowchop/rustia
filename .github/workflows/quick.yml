@@ -103,7 +103,7 @@ jobs:
           repository: ${{ inputs.head_repository_full_name }}
           ref: ${{ inputs.checkout_sha }}
           path: candidate
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify test checkout

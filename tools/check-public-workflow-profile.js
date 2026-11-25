@@ -399,7 +399,6 @@ function checkQuick(text) {
     requireText(block, `    name: ${name}\n`, `${label} ${name}`);
     requireText(block, "repository: ${{ inputs.head_repository_full_name }}", `${label} ${name}`);
     requireText(block, "ref: ${{ inputs.checkout_sha }}", `${label} ${name}`);
-    requireText(block, "fetch-depth: 1", `${label} ${name}`);
     requireText(block, "persist-credentials: false", `${label} ${name}`);
   }
 
@@ -484,7 +483,7 @@ function checkQuick(text) {
           repository: \${{ inputs.head_repository_full_name }}
           ref: \${{ inputs.checkout_sha }}
           path: candidate
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false`, `${label} test`);
   requireExactStep(testSteps, "Verify test checkout", `      - name: Verify test checkout
         shell: bash
@@ -832,6 +831,7 @@ function quickSelfTest(root) {
     ["Quick untrusted repository", quick.replace("repository: ${{ inputs.head_repository_full_name }}", "repository: slowchop/rustia")],
     ["Quick untrusted ref", quick.replace("ref: ${{ inputs.checkout_sha }}", "ref: main")],
     ["Quick moving policy ref", quick.replace("ref: ${{ github.sha }}", "ref: main")],
+    ["Quick shallow validation history", quick.replace("          path: candidate\n          fetch-depth: 0", "          path: candidate\n          fetch-depth: 1")],
     ["Quick persisted credentials", quick.replace("persist-credentials: false", "persist-credentials: true")],
     ["Quick token exposure", quick.replace("        shell: bash", "        env:\n          TOKEN: ${{ github.token }}\n        shell: bash")],
     ["Quick command before validation", quick.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - name: Run early command\n        run: true\n\n      - name: Validate dispatch inputs")],
