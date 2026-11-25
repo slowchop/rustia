@@ -165,7 +165,7 @@ function main() {
     if (expectedRemoteTip === null) fail("--force-with-lease requires an existing remote branch");
   }
 
-  childProcess.execFileSync(process.execPath, [path.join(root, "tools/run-release-preflight.js")], {
+  childProcess.execFileSync(process.execPath, [path.join(root, "tools/check-local-push.js")], {
     cwd: root,
     env: environment,
     stdio: "inherit",
