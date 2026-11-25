@@ -6,7 +6,17 @@ const path = require("node:path");
 const { execFileSync, spawnSync } = require("node:child_process");
 const root = path.resolve(__dirname, "..");
 const runner = path.join(root, "tools/run-release-preflight.js");
-const plan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], { encoding: "utf8" }));
+const environment = { ...process.env };
+delete environment.RUSTIA_PREFLIGHT_ROOT;
+const plan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], {
+  encoding: "utf8",
+  env: environment,
+}));
+const trustedPlan = JSON.parse(execFileSync(process.execPath, [runner, "--list"], {
+  encoding: "utf8",
+  env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
+}));
+assert.deepEqual(trustedPlan, plan);
 const stages = new Set(["quick", "workspace", "release"]);
 assert(plan.every(entry => stages.has(entry.stage)));
 const matches = (command, args) => plan.filter(entry => entry.command === command && JSON.stringify(entry.args) === JSON.stringify(args));
@@ -23,11 +33,24 @@ for (const script of ["check-package-dry-runs", "verify-conformance-package", "c
   assert.equal(matches("node", [`tools/${script}.js`])[0].stage, "release");
 }
 for (const args of [["--stage", "typo"], ["--stage"], ["--skip-tests"]]) {
-  assert.equal(spawnSync(process.execPath, [runner, ...args], { encoding: "utf8" }).status, 2);
+  assert.equal(spawnSync(process.execPath, [runner, ...args], {
+    encoding: "utf8",
+    env: environment,
+  }).status, 2);
+}
+assert.notEqual(spawnSync(process.execPath, [runner, "--list"], {
+  encoding: "utf8",
+  env: { ...environment, RUSTIA_PREFLIGHT_ROOT: "relative" },
+}).status, 0);
+for (const args of [[], ["--stage", "workspace"], ["--stage", "release"]]) {
+  assert.notEqual(spawnSync(process.execPath, [runner, ...args], {
+    encoding: "utf8",
+    env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
+  }).status, 0);
 }
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 assert(workflow.includes("stage: [quick, workspace, release]"));
 assert(workflow.includes('run: test "$PREFLIGHT_RESULT" = success'));
 assert(workflow.includes('needs: [release-preflight, webkit-runtime]'));
 assert(workflow.includes('&& test "$WEBKIT_RESULT" = success'));
-console.log("Preflight inventory, stage boundaries, and invalid-option rejection pass.");
+console.log("Preflight inventory, trusted-root selection, stage boundaries, and invalid-option rejection pass.");
