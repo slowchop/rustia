@@ -610,22 +610,29 @@ fn literal_require(
     module: &str,
     expression: &Expr,
 ) -> Result<Option<(String, Span)>, ModuleGraphError> {
-    let Expr::Call { callee, args, .. } = expression else {
+    let Some((request, span)) = literal_require_argument(expression) else {
         return Ok(None);
+    };
+    let request = std::str::from_utf8(request)
+        .map_err(|_| ModuleGraphError::graph(module, span, "static require path must be UTF-8"))?;
+    Ok(Some((request.to_owned(), span)))
+}
+
+pub(crate) fn literal_require_argument(expression: &Expr) -> Option<(&[u8], Span)> {
+    let Expr::Call { callee, args, .. } = expression else {
+        return None;
     };
     let mut callee = callee.as_ref();
     while let Expr::TypeInstantiation { expr, .. } = callee {
         callee = expr;
     }
     if !matches!(callee, Expr::Name(name, _) if name == "require") {
-        return Ok(None);
+        return None;
     }
     let [Expr::String(request, span)] = args.as_slice() else {
-        return Ok(None);
+        return None;
     };
-    let request = std::str::from_utf8(request)
-        .map_err(|_| ModuleGraphError::graph(module, *span, "static require path must be UTF-8"))?;
-    Ok(Some((request.to_owned(), *span)))
+    Some((request, *span))
 }
 
 /// Default relative resolver for canonical project module keys.
