@@ -1,4 +1,4 @@
-# <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
+# <img src="https://raw.githubusercontent.com/slowchop/rustia/9e720694dc7dff6f61e6c291922233ad4b2ed99b/website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
 <!-- project-copy: intro -->
 Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
