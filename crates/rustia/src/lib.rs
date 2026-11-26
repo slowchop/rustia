@@ -10,9 +10,9 @@
 //! # A first script
 //!
 //! <!-- project-copy: first-script -->
-//! This example runs a Luau script from Rust. The script calls a Rust function and returns the result. The Luau source is inline to keep the example short. In a real app, load `.luau` files at runtime so you can edit scripts without recompiling the Rust app.
+//! Start with a score of 21 and a Rust function called `double`. The Luau script calls `double(base_score)` and sends 42 back to Rust.
 //!
-//! [Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.
+//! In the Cargo project you [set up with Rustia](https://github.com/slowchop/rustia#try-it), replace `src/main.rs` with this code and run `cargo run`.
 //!
 //! ```rust
 //! use rustia::Rustia;
@@ -33,8 +33,13 @@
 //! }
 //! ```
 //!
-//! The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,
-//! or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.
+//! You should see `The score is 42`.
+//!
+//! - [`insert_global`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.insert_global) gives Luau the starting score, and [`add_fn`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.add_fn) lets it call the Rust function.
+//! - [`source_name`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.source_name) gives the script a label that appears in error messages.
+//! - [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) gives you a value back in Rust. Use [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) when you only want to run the script.
+//!
+//! The example keeps the script in a string so it fits in one file. Read a `.luau` file at runtime if you want to edit it without rebuilding the Rust app.
 //!
 //! From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
 //! <!-- /project-copy: first-script -->
@@ -57,9 +62,9 @@
 //!
 //! # Keeping state across script edits
 //!
-//! Keep the running app's state in Rust, or save the Luau values you want to
-//! carry forward and pass them to the replacement script. The embedder decides
-//! which values to keep. A newly created script local starts with its initializer.
+//! If you want something to survive a reload, like a character’s position,
+//! keep it in Rust or pass the saved value to the new script. Local variables
+//! in the new script start with their initial values.
 //!
 //! Use [`Chunk::install`] to try the replacement, then switch to the new exports
 //! after it succeeds. If installation fails, Rustia rolls back guest changes and
@@ -88,15 +93,18 @@
 //! <details>
 //! <summary>Read a Luau table from Rust</summary>
 //!
-//! Use [`Chunk::eval`] to copy a value into Rust, or [`Chunk::eval_serde`] to read a
-//! table into a Rust struct. These copies stay usable after the interpreter is gone.
-//! Copying strings into a Rust `String` requires UTF-8. Tables with cycles cannot
-//! be copied, and copying the same table twice makes two independent values.
+//! If you only need the result, use [`Chunk::eval`] to copy it into Rust. For
+//! example, ask for a `bool` or an `f64`. If the script returns a table such as
+//! `{ name = "Ada", score = 42 }`, use [`Chunk::eval_serde`] to read it into a Rust
+//! struct. These copies stay usable after the interpreter is gone. A Rust
+//! `String` needs valid UTF-8, and copies of the same table are independent.
 //!
-//! Use [`Chunk::eval_live`] to keep a table with shared references, cycles, or
-//! binary strings in Luau. A live [`Value`], [`Table`], [`Function`], or [`Exports`]
-//! belongs to one interpreter. Resetting it with [`Rustia::reset_decision`] invalidates
-//! those handles. See the [live values example] for a table that refers to itself.
+//! Use [`Chunk::eval_live`] if you need the original Luau value. For example,
+//! a table could refer to itself or share another table with a different part
+//! of the script. You can also use live values to read binary strings without
+//! converting them to UTF-8. A live [`Value`], [`Table`], [`Function`], or [`Exports`]
+//! belongs to one interpreter. After [`Rustia::reset_decision`] those handles
+//! expire. See the [live values example] to try this with a table that refers to itself.
 //!
 //! </details>
 //!
@@ -107,11 +115,12 @@
 //! the function only uses its inputs. In the standard and live environments,
 //! scripts can change a Rust object immediately. See the [mutable object example].
 //!
-//! If a callback needs data borrowed for just one request or frame, pass it in a
-//! [`HostContext`] with [`Rustia::invoke`]. The [typed invocation example] shows how.
-//! For deterministic replay, let scripts propose changes for Rust to apply
-//! after a successful call. See the [game object example]. [`HostFunction`] documents callback permissions
-//! and the rules for data captured by a closure.
+//! To let a callback read something for just one frame, such as the current
+//! target position, pass borrowed data in a [`HostContext`] with [`Rustia::invoke`].
+//! For deterministic replay, a script can ask to move a character and Rust can
+//! apply the move once the call succeeds. The [typed invocation example] and
+//! [game object example] show both parts. See [`HostFunction`] for rules about
+//! callback permissions and the data a closure captures.
 //!
 //! </details>
 //!

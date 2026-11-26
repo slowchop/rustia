@@ -188,7 +188,7 @@ def render_luau_comparison(rows: list[list[str]], comparison: str) -> str:
     )
 
 
-def read_speed_snapshot(snapshot: dict, labels: list[str]) -> list[tuple[str, str, list[float]]]:
+def read_speed_snapshot(snapshot: dict) -> list[tuple[str, str, list[float]]]:
     history = SITE.parent / "bench/history/runs.jsonl"
     engines = CHART_ENGINES
     times = {}
@@ -204,11 +204,9 @@ def read_speed_snapshot(snapshot: dict, labels: list[str]) -> list[tuple[str, st
             if key in times or time <= 0:
                 raise ValueError(f"Invalid benchmark time for {key}")
             times[key] = time
-    if len(labels) != len(snapshot["workloads"]):
-        raise ValueError("Benchmark workload labels do not match the snapshot")
     return [
-        (workload, label, [times[workload, engine] for engine in engines])
-        for label, workload in zip(labels, snapshot["workloads"])
+        (workload, details["label"], [times[workload, engine] for engine in engines])
+        for workload, details in snapshot["workloads"].items()
     ]
 
 
@@ -272,16 +270,15 @@ def render_description_metadata(homepage: str) -> str:
 
 
 def render_homepage(homepage: str) -> str:
-    readme = (SITE.parent / "README.md").read_text(encoding="utf-8")
     if homepage.count(MARKER) != 1:
         raise ValueError("Expected exactly one homepage comparison marker")
-    snapshot = json.loads(readme.split("<!-- rustia-benchmark-snapshot", 1)[1].split("-->", 1)[0])
+    evidence = SITE.parent / "bench/history/site-comparison.json"
+    snapshot = json.loads(evidence.read_text(encoding="utf-8"))
     benchmark_date = datetime.fromtimestamp(snapshot["start"], timezone.utc).date().isoformat()
     comparison = (SITE.parent / "crates/rustia/compare.md").read_text(encoding="utf-8")
     checked = re.search(r"\*\*Sources and details\*\* · Checked ([\w ]+)\.", comparison)[1]
     luau_rows = read_table(comparison, "| Project | Engine | Desktop |")
-    labels = [row[0] for row in read_table(readme, "| Work unit | Rustia |")[1:]]
-    speed_rows = read_speed_snapshot(snapshot, labels)
+    speed_rows = read_speed_snapshot(snapshot)
     luau = render_luau_comparison(luau_rows, comparison)
     chart = render_speed_chart(speed_rows)
     section = f'''<h3 id="luau-comparison">Luau runtimes + Rust scripting crates</h3>

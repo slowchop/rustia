@@ -15,7 +15,6 @@ const engines = [
 ];
 const modeLabels = { interpreter: "Interpreter", jit: "JIT", native: "Native compiled" };
 
-// The full work-unit descriptions and exact harness units belong to the README check.
 const headings = {
   dense_tables: ["Array sort", "256 items"],
   sparse_tables: ["Sparse lookup", "128 keys"],
@@ -60,12 +59,12 @@ function formatTime(ns) {
   return (ns / 1000).toFixed(3).replace(/\B(?=(\d{3})+\.)/g, ",");
 }
 
-function renderPerformance(snapshot, cohort, workUnits) {
+function renderPerformance(snapshot, cohort) {
   const workloads = Object.keys(headings);
-  assert.deepEqual([...snapshot.workloads].sort(), [...workloads].sort(), "chart requires all five README workloads");
+  assert.deepEqual(Object.keys(snapshot.workloads).sort(), [...workloads].sort(), "chart requires all five retained workloads");
   assert.equal(snapshot.target, "linux-x86_64", "chart requires the Linux x86-64 target");
   const times = engines.map(engine => workloads.map(workload =>
-    measuredTime(cohort, engine.id, engine.mode, workload, workUnits[workload][1])));
+    measuredTime(cohort, engine.id, engine.mode, workload, snapshot.workloads[workload].unit)));
   const fastest = workloads.map((_, column) => Math.min(...times.map(row => row[column])));
   const descriptions = engines.map((engine, i) =>
     engine.name + ", " + modeLabels[engine.mode] + ": " + times[i].map(formatTime).join(", ") + ".");
@@ -76,7 +75,7 @@ function renderPerformance(snapshot, cohort, workUnits) {
     '<svg xmlns="http://www.w3.org/2000/svg" width="860" height="471" viewBox="0 0 860 471" style="max-width:100%;height:auto" role="img" aria-labelledby="rustia-perf-title rustia-perf-desc">',
     '<title id="rustia-perf-title">Time per work unit in microseconds</title>',
     '<desc id="rustia-perf-desc">' + source + '. Best observed steady-state times, lower is better. Workloads in order: '
-      + workloads.map(workload => workUnits[workload][0]).join(", ") + ". " + rotoNote + " " + descriptions.join(" ") + '</desc>',
+      + workloads.map(workload => snapshot.workloads[workload].label).join(", ") + ". " + rotoNote + " " + descriptions.join(" ") + '</desc>',
     '<rect width="860" height="471" rx="12" fill="#fafcf9"/>',
     '<g font-family="system-ui, sans-serif" fill="#172d25">',
     '<text x="20" y="36" font-size="26" font-weight="700">Time per work unit</text>',
