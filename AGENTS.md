@@ -21,6 +21,8 @@ serves them.
   the branch/PR and current progress on the issue so another session can see work
   already in progress. Split independent follow-ups into linked issues rather
   than leaving actionable work only in chat, agent memory or a report.
+- Use GitHub sub-issues to track work under a parent issue and issue dependencies
+  to record work that must finish before another issue can close.
 - PRs link their issues. Use `Closes #N` only when the whole issue is resolved;
   use `Refs #N` for partial work and keep the remaining acceptance items open.
   Merge only after independent review and applicable CI pass, then verify both
