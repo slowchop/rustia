@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Command-line runner for rustia Luau scripts"
-publish.workspace = true
+publish = ["crates-io"]
 
 [[bin]]
 name = "rustia"

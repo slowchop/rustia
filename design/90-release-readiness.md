@@ -1,8 +1,7 @@
 # Release Readiness Checklist
 
-This checklist tracks what must be true before any public rustia crate flips
-from `publish = false` to publishable. Updated 2026-10-19; the ordered runtime
-blockers below take precedence over packaging polish.
+This checklist tracks the gates for package publication and supported releases.
+The ordered runtime blockers below take precedence over packaging polish.
 
 The first stable release target and its acceptance checklist are in
 [`92-first-release.md`](92-first-release.md). The current workspace remains
@@ -10,8 +9,7 @@ unpublished; passing preflight does not by itself close this checklist.
 
 This checklist gates package publication and supported releases. Public source
 access launched on 2026-11-20. The [launch record](public-source-activation.md)
-covers visibility, CI and reporting. The package and supported-release checklist below
-remains open.
+covers visibility, CI and reporting.
 
 The active public-source profile runs hosted correctness and artifact checks.
 Public benchmark measurement and publication remain paused. The private maintainer
@@ -23,6 +21,39 @@ These gates protect memory safety, lifecycle, compatibility, and the environment
 caller. They do not make deterministic execution universal: `standard()` permits explicit nondeterministic
 providers/capabilities, and `live()` is a first-class intentionally non-reproducible builder preset. The same
 general embedding API must remain available to those users.
+
+## Rustia 0.2.0 interpreter preview
+
+[Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the first package
+preview. [Draft PR #108](https://github.com/slowchop/rustia/pull/108) prepares
+`publish = ["crates-io"]` for `rustia-lexer`, `rustia-parser`, `rustia-vm`,
+`rustia-compiler`, `rustia`, and `rustia-cli`. Conformance and benchmark tooling
+retain `publish = false`. The allowlist lets us verify the packaging configuration
+for the intended registry. The workspace is still unpublished.
+
+- The [previous draft at `fc6b8cb`](https://github.com/slowchop/rustia/commit/fc6b8cbd14156c290947ee408cf93297763823a5)
+  recorded six inspected archives, both README programs executed from extracted
+  archives, a CLI version and execution smoke test, and an archive-based Rustdoc
+  build with warnings denied. Its [hosted correctness checks](https://github.com/slowchop/rustia/actions/runs/45902022403)
+  and [differential smoke tests](https://github.com/slowchop/rustia/actions/runs/45902022381)
+  passed. Rebuild and verify the six archives from the exact clean allowlisted
+  candidate. Record its archive checks, release preflight, independent review,
+  and required hosted checks on the draft PR before merging.
+- Native Windows, real Firefox, and the extended bounded fuzz campaign are
+  manual hosted checks. The previous draft's regular PR runs skipped those jobs.
+  Track fresh execution separately from the final native and browser matrix in
+  [platform acceptance](96-browser-platform-acceptance.md) and the final-candidate
+  runtime gates below.
+- The [private API acceptance record](93-private-api-acceptance.md) applies to
+  its historical candidate. Any required final controlled-client runs and fresh
+  reviewed private benchmark evidence remain pending for this candidate.
+
+The preview has its own acceptance criteria in #83. The broader supported-release
+gates remain open under [issue #34](https://github.com/slowchop/rustia/issues/34).
+Keep the allowlisted candidate in draft while an applicable package publication
+gate remains open.
+Uploading packages and creating a release tag or GitHub release each require
+separate explicit authorization.
 
 ## Current Release Blockers (Ordered)
 
@@ -109,12 +140,13 @@ reviews remain required for this slice; wider semantic-tail work stays open.
 
 ## Current Policy
 
-- Keep all workspace crates `publish = false` until the P1 engine, conformance,
-  benchmark, and API gates below are complete.
+- Complete the applicable P1 engine, conformance, benchmark, and API gates
+  before package publication. Use the explicit six-crate registry allowlist for
+  the draft preview checks described above.
 - Semver and API stability rules are defined in
   [`91-semver-policy.md`](91-semver-policy.md).
-- Keep `script-bench-harness` unpublished while it depends on unpublished
-  workspace path crates for the optional rustia adapter.
+- Keep `rustia-conformance` and `script-bench-harness` unpublished. Review the
+  benchmark adapter packaging strategy before considering its publication.
 - Use dual `MIT OR Apache-2.0` licensing for every public crate.
 - Keep public rustia APIs generic. Do not publish grabby-specific host types,
   effect catalogs, or integration code from this repository.
@@ -298,7 +330,7 @@ registry installation, public release, or complete platform matrix is implied.
 ## Release Process Gate
 
 - `just release-preflight` and hosted CI invoke the same
-  `tools/run-release-preflight.js` driver before any publishability flip. It checks
+  `tools/run-release-preflight.js` driver on the exact candidate. It checks
   formatting, strict workspace Clippy, strict Clippy for the builds only the
   benchmark host compiles, release notes, package file lists, generated progress
   HTML, benchmark result freshness, crate metadata, workflow policy, example

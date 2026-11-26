@@ -11,11 +11,15 @@ covers source access.
 
 ## Current Status
 
-- The workspace is staged at `0.2.0` with publication disabled.
-  [Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the first interpreter preview.
+- The unpublished workspace is staged at `0.2.0`.
+  [Draft PR #108](https://github.com/slowchop/rustia/pull/108) configures only the
+  six preview packages for crates.io. [Issue #83](https://github.com/slowchop/rustia/issues/83)
+  tracks preview validation and publication.
 - The 0.x milestone validates the API with controlled client applications.
-  Keep publication disabled; a public candidate or stable release needs a
-  separate publication decision. See [`92-first-release.md`](92-first-release.md).
+  The preview draft requires its applicable checks and independent review before
+  merge. Registry publication and a GitHub release each require separate explicit
+  authorization. See [the preview gates](90-release-readiness.md#rustia-020-interpreter-preview)
+  and [the supported-release plan](92-first-release.md).
 - `0.0.x` means implementation-preview only. APIs may still change while P1
   engine, conformance, benchmark, and release gates are open.
 - Until Rustia’s first published crate release, prefer the cleanest coherent long-term
@@ -138,6 +142,8 @@ dependency order:
 
 Conformance and benchmark tooling are excluded from that initial publication.
 Publishing either tool later requires its own packaging and publication decision.
+Confirm each package is visible in the crates.io index before uploading its
+dependants.
 
 The benchmark crate remains unpublished until the rustia adapter strategy is
 chosen: publish `rustia-*` first, move the adapter into a git/path-only

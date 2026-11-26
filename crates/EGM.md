@@ -7,6 +7,8 @@
 ## Interface
 
 The workspace packages and their boundaries are documented in their package maps.
+The 0.2.0 draft allows the six interpreter crates to target crates.io. Conformance
+inherits the workspace's disabled publication setting.
 
 ## Subdirectories & System Boundaries
 

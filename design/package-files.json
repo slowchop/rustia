@@ -563,7 +563,9 @@
       "name": "rustia-cli",
       "version": "0.2.0",
       "manifest": "crates/rustia-cli/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 11,
       "files": [
         ".cargo_vcs_info.json",
@@ -583,7 +585,9 @@
       "name": "rustia-compiler",
       "version": "0.2.0",
       "manifest": "crates/rustia-compiler/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 34,
       "files": [
         ".cargo_vcs_info.json",
@@ -1399,7 +1403,9 @@
       "name": "rustia-lexer",
       "version": "0.2.0",
       "manifest": "crates/rustia-lexer/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 13,
       "files": [
         ".cargo_vcs_info.json",
@@ -1421,7 +1427,9 @@
       "name": "rustia-parser",
       "version": "0.2.0",
       "manifest": "crates/rustia-parser/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 20,
       "files": [
         ".cargo_vcs_info.json",
@@ -1450,7 +1458,9 @@
       "name": "rustia-vm",
       "version": "0.2.0",
       "manifest": "crates/rustia-vm/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 49,
       "files": [
         ".cargo_vcs_info.json",
@@ -1508,7 +1518,9 @@
       "name": "rustia",
       "version": "0.2.0",
       "manifest": "crates/rustia/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "file_count": 87,
       "files": [
         ".cargo_vcs_info.json",

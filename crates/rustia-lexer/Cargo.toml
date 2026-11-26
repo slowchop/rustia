@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Luau lexer for rustia"
-publish.workspace = true
+publish = ["crates-io"]
 
 [lints]
 workspace = true

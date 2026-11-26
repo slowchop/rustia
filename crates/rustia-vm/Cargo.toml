@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Deterministic Luau virtual machine for rustia"
-publish.workspace = true
+publish = ["crates-io"]
 
 [features]
 default = []

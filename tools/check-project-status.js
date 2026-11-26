@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
 const assert = require("assert/strict");
+const { expectedPublication, previewPackages, previewVersion } = require("./preview-package-policy.js");
 
 const root = path.resolve(__dirname, "..");
 
@@ -293,13 +294,26 @@ function checkBenchmark(progress, current) {
 
 function checkPublishability(current) {
   const publishability = readJson("design/publishability.json");
+  const workspaceVersion = readJson("design/crate-metadata.json").summary.workspace_version;
+  const tooling = ["rustia-conformance", "script-bench-harness"];
+  assertArraySetEqual(
+    publishability.packages.map((pkg) => pkg.name),
+    [...previewPackages, ...tooling],
+    "publishability package set",
+  );
   assertEqual(publishability.summary.package_count, 8, "publishability package count");
-  assertEqual(publishability.summary.publish_false_count, 8, "publishability publish=false count");
-  assertEqual(publishability.summary.blocked_count, 8, "publishability blocked count");
+  for (const pkg of publishability.packages) {
+    assertEqual(pkg.version, workspaceVersion, `${pkg.name} publishability version`);
+    assert.deepEqual(pkg.publish, expectedPublication(pkg.name, workspaceVersion), `${pkg.name} publication policy`);
+  }
+  const disabledCount = publishability.packages.filter((pkg) => pkg.publish === false).length;
+  const blockedCount = publishability.packages.filter((pkg) => pkg.blockers.length > 0).length;
+  assertEqual(publishability.summary.publish_false_count, disabledCount, "publishability publish=false count");
+  assertEqual(publishability.summary.blocked_count, blockedCount, "publishability blocked count");
   requireIncludes(
     "design/CURRENT.md",
     current,
-    "all 8 blocked by publish=false",
+    workspaceVersion === previewVersion ? "six interpreter crates target crates.io" : "all 8 blocked by publish=false",
     "current publishability status",
   );
 }

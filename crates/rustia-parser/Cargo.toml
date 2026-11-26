@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Luau parser for rustia"
-publish.workspace = true
+publish = ["crates-io"]
 
 [dependencies]
 rustia-lexer.workspace = true

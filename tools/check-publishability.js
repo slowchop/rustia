@@ -4,6 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const { previewPackages } = require("./preview-package-policy.js");
 
 const root = path.resolve(__dirname, "..");
 const outputPath = path.join(root, "design", "publishability.json");
@@ -15,16 +16,7 @@ const toolingRoles = new Map([
   ["script-bench-harness", "standalone-benchmark"],
 ]);
 
-const publicOrderHint = [
-  "rustia-lexer",
-  "rustia-parser",
-  "rustia-vm",
-  "rustia-compiler",
-  "rustia",
-  "rustia-cli",
-  "rustia-conformance",
-  "script-bench-harness",
-];
+const publicOrderHint = [...previewPackages, ...toolingRoles.keys()];
 
 function fail(message) {
   console.error(`check-publishability: ${message}`);
