@@ -219,9 +219,9 @@ record; the broader public matrix below remains open.
 - [x] Add maintainer build/validation notes and keep local worktrees out of Git's untracked list.
 - [ ] Complete the API reference: defaults, failure behavior, lifetime/reset rules,
   and at least one useful example for each supported public workflow.
-- [x] Document the source-launch contribution policy. Issues and pull requests are
-  publicly readable. Only repository collaborators may submit either. See the
-  [maintenance notes](../CONTRIBUTING.md) and [private security reporting route](../SECURITY.md).
+- [x] Document the [source-launch contribution policy](public-source-activation.md).
+  See the [current contribution guide](../CONTRIBUTING.md#contributing) and
+  [private security reporting route](../SECURITY.md).
 - [ ] Define any support commitment offered with the supported release.
 - [ ] Check all documentation links in the packaged crates and build the docs
   with warnings treated as errors. Both checks now run in release preflight;

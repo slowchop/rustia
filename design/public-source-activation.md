@@ -7,8 +7,10 @@ The repository contains the experimental interpreter under MIT OR Apache-2.0.
 All eight workspace packages had publication disabled at launch.
 The historic and operations repositories stayed private.
 
-Anyone can read the issue tracker and pull requests. Only collaborators can open
-either. GitHub private vulnerability reporting is enabled. [Security policy](../SECURITY.md).
+At launch, the contribution policy let anyone read issues and pull requests
+and reserved opening them for collaborators. See the
+[current contribution policy](../CONTRIBUTING.md#contributing) and
+[security policy](../SECURITY.md).
 
 The private rehearsal stopped before GitHub assigned a runner. At launch, the
 `public` event ran both workflows on the reviewed commit using standard GitHub-hosted

@@ -18,42 +18,54 @@ Luau interpreter.
 <details>
 <summary><strong>Hot reload</strong></summary>
 
-Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
+Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state.
+
+[Try the garden](https://rustia.dev/)
 
 </details>
 
 <details>
 <summary><strong>Deterministic execution</strong></summary>
 
-Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.
+
+[Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
 
 </details>
 
 <details>
 <summary><strong>Pure Rust runtime</strong></summary>
 
-One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
+One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain.
+
+[Platform comparison](https://rustia.dev/#luau-comparison)
 
 </details>
 
 <details>
 <summary><strong>Sans-I/O core</strong></summary>
 
-Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
+Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.
+
+[Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
 
 </details>
 
 <details>
 <summary><strong>Rust functions and objects</strong></summary>
 
-Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
+Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.
+
+[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
 
 </details>
 
 <details>
 <summary><strong>Script execution limits</strong></summary>
 
-Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.
+
+[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 
 </details>
 <!-- /project-copy: features -->
@@ -205,7 +217,8 @@ script in the same interpreter. See [what happens when a script fails](https://r
   [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
 - **`send`** makes `Rustia` and its live handles `Send`, so you can move
   them together to another thread. Calls still need `&mut Rustia`.
-  [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
+  See [thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)
+  and the [runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs).
 
   From a Rustia checkout, run `cargo run --locked -p rustia --features send --example transferable`.
 
@@ -233,7 +246,7 @@ cargo doc --locked -p rustia --no-deps --open
 Run this command from the checkout to try one line of Luau.
 
 ```sh
-cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
+cargo run --locked --bin rustia -- --eval "print(40 + 2)"
 ```
 
 The command prints `42`. To run a file, pass its path after `--`. For an interactive prompt, pass `--repl`.
@@ -254,10 +267,9 @@ Type `=40 + 2` to see the result and `:quit` to exit.
 See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
 and [what’s left before release](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md).
 
-Anyone can read the [maintainer backlog](https://github.com/slowchop/rustia/issues) and pull requests.
-Only repository collaborators can open issues or pull requests. See the
-[contribution policy](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md) and
-[private reporting instructions](https://github.com/slowchop/rustia/security/policy).
+Bug reports and focused pull requests are welcome. See the
+[contribution guide](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md#contributing)
+and [private security reporting instructions](https://github.com/slowchop/rustia/security/policy).
 
 ## License
 

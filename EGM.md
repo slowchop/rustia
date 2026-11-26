@@ -83,7 +83,10 @@ diagnostic. Its fixed workload path counts are CI-only and carry no timing claim
   boundaries.
 - Performance evidence comes only from `ci-bench`; local correctness/static checks are
   not measurements. Do not run benchmark binaries or timing/profiling scripts locally.
-- GitHub Issues is the maintainer backlog. Anyone can read issues and PRs. Only collaborators can create them; AGENTS.md and CONTRIBUTING.md define the issue-to-PR workflow. CURRENT links to the backlog and remains authoritative for built state and constraints. Issue/PR templates live under `.github/`.
+- GitHub Issues is the maintainer backlog. [CONTRIBUTING.md](CONTRIBUTING.md#contributing)
+  defines the public contribution policy, and [AGENTS.md](AGENTS.md) covers the maintainer
+  workflow. CURRENT links to the backlog and remains authoritative for built state and
+  constraints. Issue and PR templates live under `.github/`.
 - Keep affected maps and parent links current alongside code. Preserve human-facing
   READMEs and report disagreements with authoritative documents explicitly.
 
