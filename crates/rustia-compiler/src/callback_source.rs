@@ -124,7 +124,10 @@ fn named_factory<'a>(fields: &'a [TableField], export: &str, span: Span) -> Resu
                 value,
                 name_span,
                 ..
-            } if name == export => {
+            } => {
+                if name != export {
+                    continue;
+                }
                 if found.replace(value).is_some() {
                     return Err(CompileError::at(
                         format!("duplicate factory export {export:?}"),
