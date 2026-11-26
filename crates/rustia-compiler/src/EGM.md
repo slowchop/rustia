@@ -2,7 +2,7 @@
 
 ## Overview
 
-[lib.rs](./lib.rs) contains the compiler API and lowering passes. [builtins.rs](./builtins.rs) contains recognized global/library names that select specialized call evaluation order. [o2.rs](./o2.rs) contains default-disabled optimization rewrites and logical receipts. [source_bundle.rs](./source_bundle.rs) contains the experimental in-memory source identity and static module-graph boundary.
+[lib.rs](./lib.rs) contains the compiler API and lowering passes. [builtins.rs](./builtins.rs) contains recognized global/library names that select specialized call evaluation order. [o2.rs](./o2.rs) contains default-disabled optimization rewrites and logical receipts. [source_bundle.rs](./source_bundle.rs) contains the experimental in-memory source identity and static module-graph boundary. [stateless_helper.rs](./stateless_helper.rs) applies conservative pure-function admission to a reachable graph without defining host fallback policy.
 
 ## Interface
 
@@ -16,6 +16,7 @@
 - Preparing a numeric call compiles ordinary bytecode from the same admitted entry. Each instance roots an ordinary VM closure. The generated backend reads and commits its numeric capture through the VM only at a healthy, idle boundary. A mismatched receipt, unsupported operand (including raw noncanonical NaNs), active transaction, or profile that needs resource accounting uses the interpreter on that same closure. Experimental compiled calls skip interpreter instruction-clock accounting, so observable clock parity remains outside this entry point.
 - [compiled_host_call.rs](./compiled_host_call.rs) emits native/Wasm-portable Rust for a zero-argument callback with setup captures, text-literal calls or methods, and bounded branching. The embedding retains setup, handle resolution and host dispatch. Generated control flow does not charge interpreter instruction fuel.
 - [source_bundle.rs](./source_bundle.rs) accepts immutable canonical module keys and source bytes without file I/O. Its sorted path/NUL/decimal-length/NUL/source SHA-256 encoding preserves the accepted-source identity already shared by the live compiler and host. It separately fingerprints a dependency-first graph of top-level literal `require` declarations. Embedders may supply their resolver policy; graph ordering, validation, diagnostics, and identity stay compiler-owned.
+- `SourceBundle::stateless_function_graph[_with]` additionally requires every reachable module to return a function whose file-scope declarations are only literal scalars and direct imports. Function bodies may use locals, those immutable scalars, admitted imports, pure scalar builtins, and the bounded `math` operations implemented by the generated-Rust consumer. Mutable captures, host effects, indirect calls, nested closures, stateful initialization, and broader control flow reject with module identity and a source span.
 
 ## Invariants
 
@@ -30,6 +31,7 @@
 - O2 is all-off by default. Rewrites must preserve evaluation/error order and logical schedule.
 - Do not treat the experimental option fields as a stable public compiler contract.
 - Do not treat the source-bundle ABI labels or graph representation as a stable public API. Nested or dynamic `require` calls remain runtime resolver work and are not silently included in the static graph.
+- Stateless admission is conservative compiler policy, not proof that an arbitrary backend implements the admitted syntax. A host may keep an unsupported function in the interpreter; admission does not choose fallback or artifact activation.
 
 - The interpreter compiler ignores validated function attributes. Explicit instantiation evaluates its operand once to a single result. As a method receiver or callee, that value is read before the arguments. A grouped local receiver still follows Luau’s late register read. Writes through instantiated globals still invalidate affected builtin fast paths.
 
@@ -47,3 +49,4 @@ duplicated names and could exhaust the distinct-upvalue limit.
 
 Run `cargo test --locked -p rustia-compiler --test compiled_call` for source diagnostic and generated-code equivalence.
 Run `cargo test --locked -p rustia-compiler --test source_bundle` for source-bundle and module-graph identity, traversal, resolver, and diagnostic coverage.
+Run `cargo test --locked -p rustia-compiler --test stateless_helper` for transitive pure-helper admission and state/effect rejection.
