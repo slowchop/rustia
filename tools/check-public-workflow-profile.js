@@ -289,13 +289,27 @@ function checkStagedCorrectness(text) {
   requireText(jobs.get("stage3-preflight"), "stage: [workspace, release]", label);
   requireText(jobs.get("stage3-preflight"), '--stage "${{ matrix.stage }}"', label);
   requireText(jobs.get("stage2-differential"), "generated_differential_smoke", label);
+  requireText(jobs.get("stage2-differential"), "--test upstream_compiler", label);
+  requireText(jobs.get("stage2-differential"), "--test upstream_parser", label);
+  requireText(jobs.get("stage2-differential"), "audit-release-errors.mjs", label);
   for (const target of [
     "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-ios",
     "aarch64-linux-android", "wasm32-unknown-unknown",
   ]) requireText(jobs.get("stage2-portable"), `- ${target}`, label);
+  requireText(jobs.get("stage2-portable"), "cargo check --locked -p rustia --lib --target ${{ matrix.target }}", label);
+  for (const mode of ["native default aarch64-apple-darwin", "native bare aarch64-apple-darwin"]) {
+    requireText(jobs.get("stage3-macos"), `run-private-platform-golden.sh ${mode}`, label);
+  }
+  for (const mode of ["wasm bare", "wasm default"]) {
+    requireText(jobs.get("stage3-node"), `run-private-platform-golden.sh ${mode}`, label);
+  }
+  requireText(jobs.get("stage3-node"), "mixed_heap_pressure_preserves_the_short_collection_cadence", label);
+  requireText(jobs.get("stage3-webkit"), "image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea", label);
   requireText(jobs.get("stage3-webkit"), "run-browser-correctness.sh webkit 1.64.1", label);
   requireText(jobs.get("stage3-webkit"), "web-live-example.cjs", label);
+  requireText(jobs.get("stage3-preflight"), "run-private-platform-golden.sh native default x86_64-unknown-linux-gnu", label);
+  requireText(jobs.get("stage3-preflight"), "run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu", label);
   requireText(jobs.get("stage3-preflight"), "gc_accounting_paths", label);
 }
 
@@ -788,6 +802,7 @@ function bulkSelfTest(root) {
     ["staged workflow bypasses second gate", staged.replace("needs: stage2-gate", "needs: stage1-gate")],
     ["staged workflow loses exact checkout", staged.replace("name: Verify exact checkout", "name: Trust checkout")],
     ["staged workflow drops differential smoke", staged.replace("generated_differential_smoke", "missing_differential_smoke")],
+    ["staged workflow changes WebKit image", staged.replace(/image: mcr\.microsoft\.com\/playwright:[^\n]+/, "image: mcr.microsoft.com/playwright:latest")],
     ["staged workflow drops WebKit", staged.replace("run-browser-correctness.sh webkit 1.64.1", "true")],
     ["staged workflow enables cache", staged.replace("cache: false", "cache: true")],
   ]) {
