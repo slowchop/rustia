@@ -267,10 +267,9 @@ Type `=40 + 2` to see the result and `:quit` to exit.
 See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
 and [what’s left before release](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md).
 
-Anyone can read the [maintainer backlog](https://github.com/slowchop/rustia/issues) and pull requests.
-Only repository collaborators can open issues or pull requests. See the
-[contribution policy](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md) and
-[private reporting instructions](https://github.com/slowchop/rustia/security/policy).
+Bug reports and focused pull requests are welcome. See the
+[contribution guide](https://github.com/slowchop/rustia/blob/main/CONTRIBUTING.md#contributing)
+and [private security reporting instructions](https://github.com/slowchop/rustia/security/policy).
 
 ## License
 

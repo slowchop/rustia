@@ -3,7 +3,8 @@
 rustia is a from-scratch, **deterministic** Luau interpreter in Rust (replaces koto in grabby).
 Public source access is separate from package publication and supported-release acceptance; full Luau parity
 is not implied by source visibility. **This is an LLM-first codebase** — written and maintained mostly by agents, read and
-reviewed by humans. Issues and PRs are publicly readable. Only repository collaborators can open either. Optimise for *both*: code an agent can reason about locally and a human can trust.
+reviewed by humans. See [CONTRIBUTING.md](CONTRIBUTING.md#contributing) for the public contribution policy.
+Optimise for *both*: code an agent can reason about locally and a human can trust.
 
 **Start every session here:** read [`design/CURRENT.md`](design/CURRENT.md) (the single canonical state), then
 the relevant [`design/`](design/) docs. The design docs + the pinned Luau **0.709** oracle are the SPEC; code
@@ -154,7 +155,7 @@ doc + tests in the same change. `design/CURRENT.md` wins on any disagreement and
   setup, and private tasks as plain markdown. Present only when cloned. Put anything not-for-public **here**.
 - **Claude memory** (`MEMORY.md` + `memory/*.md`, outside the repo) — cross-session agent context.
 - **Tasks:** source development uses GitHub Issues in `slowchop/rustia`; private/infra tasks use files or Issues in
-  `rustia-ops`. Only collaborators create issues and PRs. **No Linear**.
+  `rustia-ops`. **No Linear**.
 - The source workflows use only standard GitHub-hosted runners. Private operations and benchmark runners stay isolated.
 
 ## Before pushing

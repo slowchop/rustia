@@ -11,7 +11,7 @@ repository visibility changes outside the authority of this file.
 | Trigger | Required execution |
 | --- | --- |
 | Repository becomes public (`public`) | Both workflows run the required inventory against the default-branch commit. |
-| Pull request | Both workflows check the proposed change. Only repository collaborators can open PRs. |
+| Pull request | Both workflows check the proposed change. External fork runs require maintainer approval. |
 | Push to `main` | CI runs the preflight, platform and browser checks. |
 | Manual dispatch | CI can also exercise Windows native and real Firefox. The fuzz workflow can run a longer campaign. |
 

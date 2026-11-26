@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-25 (Australia/Hobart).
+Updated: 2026-11-27 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -18,8 +18,8 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 - **`slowchop/rustia-historic`** retains the original private evidence. The
   operations sibling **`rustia-ops`** and private benchmark infrastructure stay private.
 - [GitHub Issues](https://github.com/slowchop/rustia/issues) is the maintainer
-  backlog. Issues and pull requests are publicly readable. Only repository
-  collaborators can create either. [CONTRIBUTING](../CONTRIBUTING.md) describes that workflow.
+  backlog. Public bug reports and focused pull requests are welcome under the
+  [contribution policy](../CONTRIBUTING.md#contributing).
 - [Report a vulnerability privately](https://github.com/slowchop/rustia/security/advisories/new).
 
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
@@ -190,6 +190,18 @@ enter the VM's execution or budget machinery. The experiment is currently
 limited to explicitly opted-in calls outside VM policy. Module graphs, rooted
 capture integration, dynamic values and a generally supported execution backend
 remain separate work.
+
+The same issue now has an experimental compiler-owned source boundary. An
+embedder supplies canonical project-relative module keys and immutable source
+bytes; Rustia preserves the existing live compiler/host SHA-256 over sorted
+paths and exact source bytes, then builds and separately fingerprints a
+dependency-first graph from reachable top-level literal `require` declarations.
+The default resolver accepts relative `./` and `../` requests, while callers with
+different path policy provide an explicit resolver. Missing modules, parse
+failures, resolver failures and cycles identify the importing module and byte
+span. Unreachable invalid source remains part of the accepted-source identity
+without blocking an unrelated entry graph. Filesystem discovery, dynamic
+`require`, build scheduling and artifact publication remain host-owned.
 
 A second opt-in experiment emits Rust for a bounded zero-argument callback
 with calls through named captures, local bindings and conditional control
