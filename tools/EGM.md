@@ -67,9 +67,9 @@ This directory contains internal Node and shell tools for benchmark validation, 
 
 ## Verification
 
-- [`sync-project-copy.js`](sync-project-copy.js) renders the shared intro, feature copy, and roadmap
+- [`sync-project-copy.js`](sync-project-copy.js) renders the shared intro, feature copy, roadmap, and first-script walkthrough
   from [`project-copy.json`](../project-copy.json). Edit the JSON and run
-  `node tools/sync-project-copy.js` to refresh the marked blocks. The crate metadata
+  `node tools/sync-project-copy.js` to refresh the marked blocks. The walkthrough takes its Rust code from [the runnable example](../crates/rustia/examples/first_script.rs). The crate metadata
   check used by release preflight runs `--check` and reports stale output.
   `--github-about` prints the short blurb for GitHub About.
 

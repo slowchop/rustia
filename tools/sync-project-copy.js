@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const { blurb, origin, features, upcoming } = JSON.parse(
+const { blurb, origin, firstScriptIntro, features, upcoming } = JSON.parse(
   fs.readFileSync(path.join(root, "project-copy.json"), "utf8"),
 );
 
@@ -63,20 +63,47 @@ function homepageEntries(entries) {
   }).join("\n");
 }
 
+function rustdocLines(markdown) {
+  return markdown.split("\n").map((line) => line ? `//! ${line}` : "//!").join("\n");
+}
+
+function renderFirstScript() {
+  const examplePath = "crates/rustia/examples/first_script.rs";
+  const example = fs.readFileSync(path.join(root, examplePath), "utf8").trimEnd();
+  return [
+    firstScriptIntro,
+    "",
+    "[Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.",
+    "",
+    "```rust",
+    example,
+    "```",
+    "",
+    "The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,",
+    "or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.",
+    "",
+    `From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/${examplePath}) with \`cargo run --locked -p rustia --example first_script\`.`,
+  ].join("\n");
+}
+
 function render() {
   const description = `${blurb}\n\n${origin}`;
+  const firstScript = renderFirstScript();
   return [
     ["README.md", [
       ["<!-- project-copy: intro -->", "<!-- /project-copy: intro -->", description],
       ["<!-- project-copy: features -->", "<!-- /project-copy: features -->", readmeEntries(features)],
       ["<!-- project-copy: upcoming -->", "<!-- /project-copy: upcoming -->", readmeEntries(upcoming)],
+      ["<!-- project-copy: first-script -->", "<!-- /project-copy: first-script -->", firstScript],
     ]],
     ["crates/rustia/Cargo.toml", [
       ["# project-copy: intro", "# /project-copy: intro", `description = ${JSON.stringify(plainText(description))}`],
     ]],
     ["crates/rustia/src/lib.rs", [
       ["//! <!-- project-copy: intro -->", "//! <!-- /project-copy: intro -->",
-        description.split("\n").map((line) => line ? `//! ${line}` : "//!").join("\n")],
+        rustdocLines(description)],
+      ["//! <!-- project-copy: first-script -->", "//! <!-- /project-copy: first-script -->",
+        rustdocLines(firstScript)],
     ]],
     ["website/index.html", [
       ["    <!-- project-copy: intro -->", "    <!-- /project-copy: intro -->",

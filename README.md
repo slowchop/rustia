@@ -99,12 +99,10 @@ cargo add rustia --git https://github.com/slowchop/rustia --branch main
 
 ### A first script
 
-This example runs a Luau script from Rust. The script calls a Rust function and
-returns the result. The Luau source is inline to keep the example short. In a
-real app, load `.luau` files at runtime so you can edit scripts without
-recompiling the Rust app.
+<!-- project-copy: first-script -->
+This example runs a Luau script from Rust. The script calls a Rust function and returns the result. The Luau source is inline to keep the example short. In a real app, load `.luau` files at runtime so you can edit scripts without recompiling the Rust app.
 
-Put this in `src/main.rs` and run `cargo run`.
+[Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.
 
 ```rust
 use rustia::Rustia;
@@ -127,6 +125,9 @@ fn main() -> rustia::Result<()> {
 
 The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,
 or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.
+
+From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
+<!-- /project-copy: first-script -->
 
 ## Call script functions from Rust
 
