@@ -89,6 +89,7 @@ function renderFirstScript() {
 function render() {
   const description = `${blurb}\n\n${origin}`;
   const firstScript = renderFirstScript();
+  const sansIo = features.find(({ id }) => id === "sans-io");
   return [
     ["README.md", [
       ["<!-- project-copy: intro -->", "<!-- /project-copy: intro -->", description],
@@ -104,6 +105,8 @@ function render() {
         rustdocLines(description)],
       ["//! <!-- project-copy: first-script -->", "//! <!-- /project-copy: first-script -->",
         rustdocLines(firstScript)],
+      ["//! <!-- project-copy: sans-io -->", "//! <!-- /project-copy: sans-io -->",
+        rustdocLines(`# ${sansIo.title}\n\n${sansIo.description}`)],
     ]],
     ["website/index.html", [
       ["    <!-- project-copy: intro -->", "    <!-- /project-copy: intro -->",

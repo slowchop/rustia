@@ -22,6 +22,7 @@
       "readmeLink": "[Platform comparison](https://rustia.dev/#luau-comparison)"
     },
     {
+      "id": "sans-io",
       "title": "Sans-I/O core",
       "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
       "icon": "⇄",

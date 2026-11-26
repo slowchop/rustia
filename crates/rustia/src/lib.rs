@@ -65,6 +65,12 @@
 //! after it succeeds. If installation fails, Rustia rolls back guest changes and
 //! the app can keep using the previous functions. See the [hot reload example].
 //!
+//! <!-- project-copy: sans-io -->
+//! # Sans-I/O core
+//!
+//! Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.
+//! <!-- /project-copy: sans-io -->
+//!
 //! # Cargo features
 //!
 //! - **`platform-adapters`** (default) provides system randomness and connects
