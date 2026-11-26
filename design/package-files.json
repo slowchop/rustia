@@ -584,7 +584,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 34,
+      "file_count": 36,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -604,6 +604,7 @@
         "src/o2.rs",
         "src/repeat_condition.rs",
         "src/source_bundle.rs",
+        "src/stateless_helper.rs",
         "tests/array_slot_write_coverage.rs",
         "tests/capture_metadata.rs",
         "tests/compiled_call.rs",
@@ -619,7 +620,8 @@
         "tests/performance_fastpaths.rs",
         "tests/performance_gc_audit.rs",
         "tests/repeat_condition.rs",
-        "tests/source_bundle.rs"
+        "tests/source_bundle.rs",
+        "tests/stateless_helper.rs"
       ]
     },
     {

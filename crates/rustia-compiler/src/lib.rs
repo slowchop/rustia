@@ -66,6 +66,7 @@ mod o2;
 mod repeat_condition;
 #[doc(hidden)]
 pub mod source_bundle;
+mod stateless_helper;
 
 pub use o2::{ExperimentalO2Options, ProgramReceipts};
 
