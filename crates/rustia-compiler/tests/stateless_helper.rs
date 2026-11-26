@@ -84,3 +84,20 @@ fn custom_resolution_and_graph_errors_still_precede_admission() {
         .unwrap();
     assert_eq!(graph.entries, ["helper.luau"]);
 }
+
+#[test]
+fn admits_explicitly_typed_import_calls() {
+    let sources = bundle(&[
+        (
+            "helper.luau",
+            "local id = require('./id')\nreturn function(n) return id<<number>>(n) end",
+        ),
+        ("id.luau", "return function(value) return value end"),
+    ]);
+
+    let graph = sources.stateless_function_graph(&["helper.luau"]).unwrap();
+    assert_eq!(
+        graph.module_names().collect::<Vec<_>>(),
+        ["id.luau", "helper.luau"]
+    );
+}

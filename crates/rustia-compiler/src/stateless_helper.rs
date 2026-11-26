@@ -88,7 +88,11 @@ impl Helper<'_> {
                 TableField::Keyed { key, value, .. } => valid(key) && valid(value),
             }),
             Expr::Call { callee, args, .. } => {
-                let allowed = match callee.as_ref() {
+                let mut callee = callee.as_ref();
+                while let Expr::TypeInstantiation { expr, .. } = callee {
+                    callee = expr;
+                }
+                let allowed = match callee {
                     Expr::Name(name, _) => {
                         !locals.contains(name.as_str())
                             && (pure_builtin(name) || self.functions.contains(name.as_str()))
