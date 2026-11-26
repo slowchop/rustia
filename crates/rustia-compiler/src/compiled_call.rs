@@ -134,6 +134,8 @@ impl NumericCallInstance<'_> {
     ///
     /// A different receipt, unsupported VM profile or nonnumeric argument
     /// selects the interpreter. The backend runs before capture state changes.
+    /// This experimental path does not advance the interpreter's instruction
+    /// clock. Embedders that observe that clock must call the interpreter.
     pub fn call(
         &self,
         vm: &mut Vm,
@@ -150,12 +152,12 @@ impl NumericCallInstance<'_> {
             && !settings.enable_conformance_coverage
             && !settings.enable_conformance_luau_call_limit
             && !vm.guest_transaction_active();
-        let Some(argument) = parameter
-            .as_number()
-            .filter(|_| allowed && *receipt == self.prepared.receipt)
+        let Some(argument) =
+            backend_number(parameter).filter(|_| allowed && *receipt == self.prepared.receipt)
         else {
             return self.call_interpreted(vm, parameter);
         };
+        vm.ensure_idle_capture_edit()?;
         let Some(capture) = vm.retained_function_capture(&self.function, 0)? else {
             return Err(Error::new(ErrorKind::InvalidProgram {
                 reason: "compiled closure capture is missing",
@@ -166,7 +168,7 @@ impl NumericCallInstance<'_> {
                 reason: "compiled closure capture does not match",
             }));
         }
-        let Some(current) = capture.value.value(vm)?.as_number() else {
+        let Some(current) = backend_number(capture.value.value(vm)?) else {
             return self.call_interpreted(vm, parameter);
         };
         let (next, result) = invoke(current, argument)?;
@@ -176,6 +178,12 @@ impl NumericCallInstance<'_> {
         }
         Ok(Value::number(result))
     }
+}
+
+fn backend_number(value: Value) -> Option<f64> {
+    value
+        .as_number()
+        .filter(|number| !number.is_nan() || number.to_bits() == CANON_NAN_BITS)
 }
 
 /// Lower a single source module defining one numeric capture and returning a

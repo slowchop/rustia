@@ -188,6 +188,64 @@ fn compiled_and_interpreted_calls_share_the_vm_capture() {
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
+fn compiled_call_preserves_buffer_nan_payloads_via_the_interpreter() {
+    let source = "local score = 0 return function(step) score = step return score end";
+    let bundle = SourceBundle::new([("entry.luau", source)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let call = prepared.instantiate(&mut vm).unwrap();
+    let read_bits = compile(&parse_source(
+        "return buffer.readf64(buffer.fromstring(string.char(52, 18, 0, 0, 0, 0, 248, 127)), 0)",
+    ).unwrap()).unwrap();
+    let payload = vm.run(&read_bits).unwrap();
+    let value = call
+        .call(&mut vm, payload, &receipt, |_, _| {
+            panic!("noncanonical argument entered backend")
+        })
+        .unwrap();
+    assert_eq!(value.as_number().unwrap().to_bits(), 0x7ff8_0000_0000_1234);
+    let value = call
+        .call(&mut vm, Value::number(7.0), &receipt, |_, _| {
+            panic!("noncanonical capture entered backend")
+        })
+        .unwrap();
+    assert_eq!(value.as_number(), Some(7.0));
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn compiled_call_rejects_poisoned_vm_before_entering_backend() {
+    use rustia_vm::{ErrorKind, ModuleResolver, VmSettings};
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            module_resolver: Some(ModuleResolver::new(
+                |_, _| panic!("resolver poisoned VM"),
+                true,
+            )),
+            ..VmSettings::default()
+        },
+    );
+    let call = prepared.instantiate(&mut vm).unwrap();
+    let require = compile(&parse_source("return require('./module')").unwrap()).unwrap();
+    assert!(matches!(
+        vm.run(&require).unwrap_err().kind,
+        ErrorKind::HostPanicked { .. }
+    ));
+    let error = call
+        .call(&mut vm, Value::number(1.0), &receipt, |_, _| {
+            panic!("poisoned VM entered backend")
+        })
+        .unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::VmPoisoned));
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
 fn generated_rust_matches_the_interpreter_with_independent_captures() {
     let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
     let (call, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
