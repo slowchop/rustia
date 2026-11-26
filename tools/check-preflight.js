@@ -42,11 +42,19 @@ assert.notEqual(spawnSync(process.execPath, [runner, "--list"], {
   encoding: "utf8",
   env: { ...environment, RUSTIA_PREFLIGHT_ROOT: "relative" },
 }).status, 0);
-for (const args of [[], ["--stage", "workspace"], ["--stage", "release"]]) {
+for (const args of [[]]) {
   assert.notEqual(spawnSync(process.execPath, [runner, ...args], {
     encoding: "utf8",
     env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
   }).status, 0);
+}
+for (const stage of ["quick", "workspace", "release"]) {
+  const staged = JSON.parse(execFileSync(process.execPath, [runner, "--list"], {
+    encoding: "utf8",
+    env: { ...environment, RUSTIA_PREFLIGHT_ROOT: root },
+  })).filter(entry => entry.stage === stage ||
+    (stage !== "quick" && entry.command === "cargo" && ["metadata", "fetch"].includes(entry.args[0])));
+  assert(staged.length > 0, `protected ${stage} stage must retain commands`);
 }
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 assert(workflow.includes("stage: [quick, workspace, release]"));

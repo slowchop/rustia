@@ -1,4 +1,4 @@
-name: Rustia Bulk trust fixture
+name: Rustia Bulk
 run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}
 
 "on":
@@ -60,37 +60,10 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
 
-  test:
-    name: test
+  validation:
+    name: validation
     needs: integrity
     if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout protected policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          path: trusted
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Checkout candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.checkout_sha }}
-          path: candidate
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Verify test checkout
-        shell: bash
-        working-directory: candidate
-        env:
-          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
-
-      - name: Check the protected workflow policy
-        run: node trusted/tools/check-workflows.js
+    uses: ./.github/workflows/staged-correctness.yml
+    with:
+      checkout_sha: ${{ inputs.checkout_sha }}

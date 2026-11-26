@@ -29,13 +29,11 @@ Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
 The [launch record](public-source-activation.md) links the runs and lists the platforms exercised.
 
 The dispatch-only [`quick.yml`](https://github.com/slowchop/rustia/issues/98)
-and `bulk.yml` trust fixtures are the public half
-of a future controller handshake. Both bind the controller's exact inputs into
-their run title, verify the requested checkout before candidate commands, use
-read-only hosted runners and load policy from protected `main`. Quick runs the
-canonical early partition against the exact source repository and commit. Bulk
-retains the synthetic-candidate handshake. The controller, staged Bulk suite
-and repository settings remain inactive.
+and `bulk.yml` workflows are the public half of a future controller handshake.
+Both use protected `main` policy, read-only hosted runners and exact candidate
+commits. Quick runs the early checks. Bulk stops after each failed stage: Quick
+first, portable and differential checks second, then the full platform and
+preflight suite. The private controller and repository settings remain inactive.
 
 ## Website
 

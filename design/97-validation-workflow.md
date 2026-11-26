@@ -34,17 +34,19 @@ For iteration, `just check-quick` runs formatting, repository/evidence checks,
 tool self-tests and all compiler unit tests. This is early feedback, not release
 acceptance. The stale freeze diagnostic assertion is covered by that unit suite.
 
-The dispatch-only protected Quick fixture runs the same partition against the
-controller-selected source repository and exact commit. Its workflow, command
-inventory and run title come from protected `main`; the candidate checkout is
-only the data being checked. The trusted runner accepts one normalized absolute
-`RUSTIA_PREFLIGHT_ROOT` so the protected command inventory executes in that
-verified checkout. The validation checkout fetches retained history because the
-early partition verifies historical benchmark evidence and source links. The
-override is accepted only for the Quick stage (and its
-side-effect-free plan listing), then consumed before any planned command runs.
-Both local push guards remove it from their environment, so they always validate
-the checkout whose exact commit they push.
+The dispatch-only protected Quick workflow runs the same partition against the
+controller-selected source repository and exact commit. Bulk uses the same
+protected command inventory for its Quick, workspace and release stages. The
+candidate checkout is only the data being checked. The trusted runner accepts
+one normalized absolute `RUSTIA_PREFLIGHT_ROOT` for these protected stages and
+for the side-effect-free plan listing. It consumes the override before commands
+run. Both local push guards remove it from their environment, so they always
+validate the checkout whose exact commit they push.
+
+Bulk runs cheap checks first. A gate stops later work after Quick fails. Portable
+target builds and differential checks run next. Only then do the full preflight,
+native macOS, Node/Wasm and WebKit jobs start. Every candidate job checks the
+requested commit before running candidate code.
 
 `just release-preflight` runs the early checks, then workspace tests and release
 checks concurrently. It keeps two heavy processes at most, retains the normal
