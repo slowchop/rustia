@@ -46,18 +46,9 @@ pub fn select(source: &str, selection: Selection<'_>) -> Result<CallbackSource> 
         Selection::Factory { export, parameters } => {
             let factory = match (export, module_value) {
                 (None, value) => value,
-                (Some(export), Expr::Table { fields, .. }) => fields
-                    .iter()
-                    .find_map(|field| match field {
-                        TableField::Named { name, value, .. } if name == export => Some(value),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        CompileError::at(
-                            format!("missing factory export {export:?}"),
-                            module_value.span(),
-                        )
-                    })?,
+                (Some(export), Expr::Table { fields, span }) => {
+                    named_factory(fields, export, *span)?
+                }
                 (Some(_), _) => {
                     return Err(CompileError::at(
                         "named factory requires a returned table",
@@ -122,6 +113,42 @@ pub fn select(source: &str, selection: Selection<'_>) -> Result<CallbackSource> 
         parameter_count: params.len(),
         variadic: *is_vararg,
     })
+}
+
+fn named_factory<'a>(fields: &'a [TableField], export: &str, span: Span) -> Result<&'a Expr> {
+    let mut found = None;
+    for field in fields {
+        match field {
+            TableField::Named {
+                name,
+                value,
+                name_span,
+                ..
+            } if name == export => {
+                if found.replace(value).is_some() {
+                    return Err(CompileError::at(
+                        format!("duplicate factory export {export:?}"),
+                        *name_span,
+                    ));
+                }
+            }
+            TableField::Keyed { key, .. } => {
+                let cannot_replace = match key {
+                    Expr::String(bytes, _) => bytes.as_slice() != export.as_bytes(),
+                    Expr::Number(..) | Expr::Bool(..) => true,
+                    _ => false,
+                };
+                if !cannot_replace {
+                    return Err(CompileError::at(
+                        format!("table key may replace factory export {export:?}"),
+                        key.span(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    found.ok_or_else(|| CompileError::at(format!("missing factory export {export:?}"), span))
 }
 
 fn returned(statements: &[Stmt]) -> Result<(&Expr, Span, &[Stmt])> {
@@ -216,6 +243,40 @@ fn direct_calls_only(tokens: &[Token], alias: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{select, Selection};
+
+    #[test]
+    fn refuses_factory_exports_that_may_be_replaced() {
+        let factory = "function(api) return function() end end";
+        for (second, expected_span) in [
+            ("tick", "tick"),
+            ("['tick']", "'tick'"),
+            ("[alias]", "alias"),
+        ] {
+            let source = format!(
+                "local alias = 'tick'\nreturn {{ tick = {factory}, {second} = {factory} }}"
+            );
+            let error = select(
+                &source,
+                Selection::Factory {
+                    export: Some("tick"),
+                    parameters: 1,
+                },
+            )
+            .err()
+            .expect("ambiguous factory must stay interpreted");
+            let span = error.span.unwrap();
+            assert_eq!(&source[span.start..span.end], expected_span);
+        }
+        let source = format!("return {{ ['other'] = {factory}, tick = {factory} }}");
+        assert!(select(
+            &source,
+            Selection::Factory {
+                export: Some("tick"),
+                parameters: 1
+            }
+        )
+        .is_ok());
+    }
 
     #[test]
     fn specializes_only_stable_direct_import_calls() {
