@@ -97,7 +97,8 @@
 //! example, ask for a `bool` or an `f64`. If the script returns a table such as
 //! `{ name = "Ada", score = 42 }`, use [`Chunk::eval_serde`] to read it into a Rust
 //! struct. These copies stay usable after the interpreter is gone. A Rust
-//! `String` needs valid UTF-8, and copies of the same table are independent.
+//! `String` needs valid UTF-8. Copies of the same table are independent, and
+//! tables with cycles can’t be copied into Rust.
 //!
 //! Use [`Chunk::eval_live`] if you need the original Luau value. For example,
 //! a table could refer to itself or share another table with a different part
