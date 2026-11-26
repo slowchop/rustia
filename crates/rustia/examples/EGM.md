@@ -8,6 +8,7 @@ The introductory embedding, chunk-builder, mutable-object, and live-value files 
 
 ## Interface
 
+- [first_script.rs](./first_script.rs) is the runnable source for the README and crate Rustdoc walkthrough. After editing it, run `node tools/sync-project-copy.js` from the repository root. Run the example with `cargo run --locked -p rustia --example first_script` and expect `The score is 42`.
 - [embedding.rs](./embedding.rs): owned conversion, extension callbacks, Serde, and decision reset.
 - [chunk_builder.rs](./chunk_builder.rs): source labels and exact lexical environments.
 - [diagnostics.rs](./diagnostics.rs): human-readable error reports.

@@ -1506,7 +1506,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
-      "file_count": 86,
+      "file_count": 87,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -1521,6 +1521,7 @@
         "examples/chunk_builder.rs",
         "examples/diagnostics.rs",
         "examples/embedding.rs",
+        "examples/first_script.rs",
         "examples/game_objects.rs",
         "examples/hardened_decision.rs",
         "examples/hot_reload.rs",

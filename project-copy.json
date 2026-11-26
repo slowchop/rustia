@@ -1,6 +1,7 @@
 {
   "blurb": "Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.",
   "origin": "Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.",
+  "firstScriptIntro": "This example runs a Luau script from Rust. The script calls a Rust function and returns the result. The Luau source is inline to keep the example short. In a real app, load `.luau` files at runtime so you can edit scripts without recompiling the Rust app.",
   "features": [
     {
       "title": "Hot reload",
@@ -21,6 +22,7 @@
       "readmeLink": "[Platform comparison](https://rustia.dev/#luau-comparison)"
     },
     {
+      "id": "sans-io",
       "title": "Sans-I/O core",
       "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
       "icon": "⇄",

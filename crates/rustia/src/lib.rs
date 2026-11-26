@@ -9,8 +9,10 @@
 //!
 //! # A first script
 //!
-//! Rust gives Luau a score and a function called `double`. Luau calls the function
-//! and returns the new score to Rust. In a [new Cargo app], put this in `src/main.rs`.
+//! <!-- project-copy: first-script -->
+//! This example runs a Luau script from Rust. The script calls a Rust function and returns the result. The Luau source is inline to keep the example short. In a real app, load `.luau` files at runtime so you can edit scripts without recompiling the Rust app.
+//!
+//! [Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.
 //!
 //! ```rust
 //! use rustia::Rustia;
@@ -31,7 +33,11 @@
 //! }
 //! ```
 //!
-//! Run `cargo run`. It prints `The score is 42`.
+//! The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,
+//! or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.
+//!
+//! From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
+//! <!-- /project-copy: first-script -->
 //!
 //! # Find what you need
 //!
@@ -58,6 +64,12 @@
 //! Use [`Chunk::install`] to try the replacement, then switch to the new exports
 //! after it succeeds. If installation fails, Rustia rolls back guest changes and
 //! the app can keep using the previous functions. See the [hot reload example].
+//!
+//! <!-- project-copy: sans-io -->
+//! # Sans-I/O core
+//!
+//! Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.
+//! <!-- /project-copy: sans-io -->
 //!
 //! # Cargo features
 //!
@@ -143,7 +155,6 @@
 //! These October 2026 measurements cover scripts already running. Small timing
 //! differences may vary between runs. [Full results] · [Benchmark limitations]
 //!
-//! [new Cargo app]: https://github.com/slowchop/rustia#try-it
 //! [hot reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
 //! [module resolver example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs
 //! [thread ownership]: struct.Rustia.html#threads
