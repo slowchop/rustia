@@ -61,6 +61,7 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 mod builtins;
 #[doc(hidden)]
 pub mod compiled_call;
+pub mod compiled_host_call;
 mod o2;
 mod repeat_condition;
 
