@@ -21,6 +21,12 @@
       "readmeLink": "[Platform comparison](https://rustia.dev/#luau-comparison)"
     },
     {
+      "title": "Sans-I/O core",
+      "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
+      "icon": "⇄",
+      "readmeLink": "[Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)"
+    },
+    {
       "title": "Rust functions and objects",
       "description": "Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.",
       "icon": "ƒ",

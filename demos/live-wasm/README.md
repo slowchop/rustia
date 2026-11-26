@@ -2,7 +2,7 @@
 
 This standalone browser demo evaluates Luau source with Rustia's standard
 environment. It instantiates raw Wasm with an empty import object and disables
-Rustia's default `web-live` feature. The directory name `live-wasm` does not mean
+Rustia's default `platform-adapters` feature. The directory name `live-wasm` does not mean
 that it selects `RustiaBuilder::live()` or JavaScript host services. The runner
 disables stdout, so the page displays returned values rather than script `print`
 output.

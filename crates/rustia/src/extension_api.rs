@@ -10,10 +10,18 @@ use rustia_vm::{
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    feature = "platform-adapters"
+))]
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    feature = "platform-adapters"
+))]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = log)]
@@ -240,7 +248,11 @@ impl RustiaBuilder {
             .wall_clock(ServiceClock::system())
             .monotonic_clock(ServiceClock::monotonic())
             .entropy(ServiceEntropy::system());
-        #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+        #[cfg(all(
+            target_arch = "wasm32",
+            target_os = "unknown",
+            feature = "platform-adapters"
+        ))]
         let builder = builder
             .stdout(web_console_log)
             .wall_clock(ServiceClock::system())
@@ -335,14 +347,14 @@ impl RustiaBuilder {
     /// Each call sends one string, with arguments joined by tabs and a trailing
     /// newline. The closure cannot return an error. Output sinks are allowed in
     /// every ordinary profile, including [`Profile::DeterministicSim`].
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn stdout(mut self, sink: impl FnMut(&str) + 'static) -> Self {
         self.settings.services.stdout = Some(StdoutSink::new(sink));
         self
     }
 
     /// Chooses a transferable sink for script `print` output.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn stdout(mut self, sink: impl FnMut(&str) + Send + 'static) -> Self {
         self.settings.services.stdout = Some(StdoutSink::new(sink));
         self
@@ -441,7 +453,7 @@ impl RustiaBuilder {
             return Err(Error::from(VmError::new(VmErrorKind::Unsupported {
                 feature: "live() without a complete platform adapter (plug \
                           .wall_clock/.monotonic_clock/.entropy providers, or enable the \
-                          default web-live feature for browser/JavaScript wasm hosts)",
+                          default platform-adapters feature for browser/JavaScript wasm hosts)",
             })));
         }
         if self.profile.is_deterministic_sim() {
@@ -626,7 +638,7 @@ pub struct ServiceModuleResolver {
 impl ServiceModuleResolver {
     /// Host-supplied replay-stable resolver. The determinism assertion is
     /// trusted, not verified.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
@@ -634,7 +646,7 @@ impl ServiceModuleResolver {
     }
 
     /// Host-supplied replay-stable transferable resolver.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
     ) -> Self {
@@ -642,7 +654,7 @@ impl ServiceModuleResolver {
     }
 
     /// Host-supplied live resolver explicitly labeled nondeterministic.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_nondeterministic_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
     ) -> Self {
@@ -650,14 +662,14 @@ impl ServiceModuleResolver {
     }
 
     /// Host-supplied live transferable resolver.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_nondeterministic_fn(
         resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
     ) -> Self {
         Self::from_fn_with_determinism(resolver, false)
     }
 
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     fn from_fn_with_determinism(
         mut resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + 'static,
         deterministic: bool,
@@ -673,7 +685,7 @@ impl ServiceModuleResolver {
         Self { provider }
     }
 
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     fn from_fn_with_determinism(
         mut resolver: impl FnMut(&str, Option<&str>) -> Result<ModuleSource> + Send + 'static,
         deterministic: bool,
@@ -787,7 +799,11 @@ impl ServiceClock {
     }
 
     /// JavaScript host wall time in seconds since the Unix epoch. Labeled nondeterministic.
-    #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+    #[cfg(all(
+        target_arch = "wasm32",
+        target_os = "unknown",
+        feature = "platform-adapters"
+    ))]
     pub fn system() -> Self {
         Self {
             provider: ClockProvider::new(|| js_sys::Date::now() / 1_000.0, false),
@@ -796,7 +812,11 @@ impl ServiceClock {
 
     /// JavaScript host monotonic time in seconds. Uses `performance.now()` when available and
     /// falls back to `Date.now()`. Labeled nondeterministic.
-    #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+    #[cfg(all(
+        target_arch = "wasm32",
+        target_os = "unknown",
+        feature = "platform-adapters"
+    ))]
     pub fn monotonic() -> Self {
         Self {
             provider: ClockProvider::new(web_monotonic_seconds, false),
@@ -812,7 +832,7 @@ impl ServiceClock {
 
     /// Supplies a clock whose readings the host promises to reproduce during replay.
     /// Rustia trusts this declaration and does not verify it.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, true),
@@ -820,7 +840,7 @@ impl ServiceClock {
     }
 
     /// Supplies a transferable clock whose readings the host promises to reproduce.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_fn(clock: impl FnMut() -> f64 + Send + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, true),
@@ -828,7 +848,7 @@ impl ServiceClock {
     }
 
     /// Host-supplied live clock. The provider is explicitly labeled nondeterministic.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_nondeterministic_fn(clock: impl FnMut() -> f64 + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, false),
@@ -836,7 +856,7 @@ impl ServiceClock {
     }
 
     /// Host-supplied transferable live clock.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_nondeterministic_fn(clock: impl FnMut() -> f64 + Send + 'static) -> Self {
         Self {
             provider: ClockProvider::new(clock, false),
@@ -864,7 +884,11 @@ impl ServiceEntropy {
     /// no-replay-guarantee contract. Labeled nondeterministic.
     #[cfg(any(
         not(all(target_arch = "wasm32", target_os = "unknown")),
-        all(target_arch = "wasm32", target_os = "unknown", feature = "web-live")
+        all(
+            target_arch = "wasm32",
+            target_os = "unknown",
+            feature = "platform-adapters"
+        )
     ))]
     pub fn system() -> Self {
         let fallback_counter = std::sync::atomic::AtomicU64::new(0);
@@ -891,7 +915,7 @@ impl ServiceEntropy {
     }
 
     /// Host-supplied replay-stable seed provider.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, true),
@@ -899,7 +923,7 @@ impl ServiceEntropy {
     }
 
     /// Host-supplied transferable replay-stable seed provider.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_fn(entropy: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, true),
@@ -907,7 +931,7 @@ impl ServiceEntropy {
     }
 
     /// Host-supplied live seed provider, explicitly labeled nondeterministic.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn from_nondeterministic_fn(entropy: impl FnMut() -> u64 + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, false),
@@ -915,7 +939,7 @@ impl ServiceEntropy {
     }
 
     /// Host-supplied transferable live seed provider.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn from_nondeterministic_fn(entropy: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
         Self {
             provider: EntropyProvider::new(entropy, false),
@@ -927,13 +951,13 @@ impl ServiceEntropy {
     }
 }
 
-#[cfg(feature = "web-live")]
+#[cfg(feature = "platform-adapters")]
 fn system_entropy() -> Option<u64> {
     getrandom::u64().ok()
 }
 
 #[cfg(all(
-    not(feature = "web-live"),
+    not(feature = "platform-adapters"),
     not(all(target_arch = "wasm32", target_os = "unknown"))
 ))]
 fn system_entropy() -> Option<u64> {
@@ -948,12 +972,20 @@ fn fallback_entropy(counter: u64) -> u64 {
     (wall as u64) ^ ((wall >> 64) as u64) ^ counter.rotate_left(29)
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    feature = "platform-adapters"
+))]
 fn fallback_entropy(counter: u64) -> u64 {
     js_sys::Date::now().to_bits() ^ web_monotonic_seconds().to_bits() ^ counter.rotate_left(29)
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    feature = "platform-adapters"
+))]
 fn web_monotonic_seconds() -> f64 {
     let global = js_sys::global();
     let performance = js_sys::Reflect::get(&global, &JsValue::from_str("performance"));

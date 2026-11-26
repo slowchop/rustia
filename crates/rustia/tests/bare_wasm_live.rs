@@ -1,7 +1,7 @@
 #![cfg(all(
     target_arch = "wasm32",
     target_os = "unknown",
-    not(feature = "web-live")
+    not(feature = "platform-adapters")
 ))]
 
 use rustia::{RustiaBuilder, ServiceClock, ServiceEntropy, VmErrorKind};

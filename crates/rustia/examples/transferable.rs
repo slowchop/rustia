@@ -1,5 +1,5 @@
 //! Move an idle interpreter and its retained function from the main thread to a worker.
-//! Run with: cargo run --locked -p rustia --features transferable --example transferable
+//! Run with: cargo run --locked -p rustia --features send --example transferable
 //! Expected output: Worker script call returned 42
 
 use rustia::Rustia;

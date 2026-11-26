@@ -11,7 +11,7 @@ Separate Rustia cdylib package that exposes the demo’s raw-Wasm interface.
 
 ## Invariants
 
-- The interactive engine uses the standard builder preset with stdout disabled; the package disables `web-live`.
+- The interactive engine uses the standard builder preset with stdout disabled; the package disables `platform-adapters`.
 - Unsafe ABI pointer contracts require valid caller-owned buffers.
 - Engine, benchmark state and result buffer are thread-local.
 

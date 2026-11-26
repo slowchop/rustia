@@ -2,9 +2,9 @@ use rustia::{
     Effects, Error, FromRustia, HostContext, HostSchema, Input, IntoRustiaMulti, InvocationLimits,
     NewObject, Object, ObjectType, OwnedValue, Result, Rustia, RustiaBuilder, SlotWrites, Slots,
 };
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 use std::cell::Cell;
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 use std::rc::Rc;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::sync::{
@@ -506,7 +506,7 @@ fn owned_arguments_keep_nested_tables_alive_during_later_allocations() -> Result
     all(target_arch = "wasm32", target_os = "unknown"),
     wasm_bindgen_test::wasm_bindgen_test
 )]
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), test)]
 fn forbidden_definitions_are_atomic_and_payloads_need_no_clone_or_send() -> Result<()> {
     struct Local(Rc<Cell<i64>>);
@@ -544,7 +544,7 @@ fn immediate_mutation_survives_errors_and_failed_installation() -> Result<()> {
         RustiaBuilder::standard(),
         #[cfg(any(
             not(all(target_arch = "wasm32", target_os = "unknown")),
-            feature = "web-live"
+            feature = "platform-adapters"
         ))]
         RustiaBuilder::live(),
     ] {

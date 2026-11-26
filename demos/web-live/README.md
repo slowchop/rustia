@@ -2,7 +2,7 @@
 
 [Compare Rustia with other Luau projects](../../crates/rustia/compare.md#compare-luau-projects) for features and platform support.
 
-This standalone application keeps Rustia's default `web-live` feature and uses
+This standalone application keeps Rustia's default `platform-adapters` feature and uses
 `wasm-bindgen` to connect WebAssembly to JavaScript. It runs a short Luau script,
 prints `Hello from Luau` in the browser console, and displays its returned number
 as `Result: 42`. It does not measure performance.
@@ -83,19 +83,19 @@ uses `textContent` and `String(error)` to show those messages as text.
 
 ## Feature and preset are separate choices
 
-The `web-live` Cargo feature makes JavaScript adapters available. Enabling it
+The `platform-adapters` Cargo feature makes JavaScript adapters available. Enabling it
 does not select the live environment. `RustiaBuilder::standard()` still uses a
 fixed random seed and repeatable clocks; on browser Wasm, `print` is silent
 until the application supplies a sink.
 
-This application explicitly uses `RustiaBuilder::live()`. With `web-live`, that
+This application explicitly uses `RustiaBuilder::live()`. With `platform-adapters`, that
 preset connects output to `console`, wall time to `Date`, monotonic time to
 `performance`, and the random seed to host entropy through `crypto`. It also
 enables runtime compilation through `loadstring`. Choose it when the application
 needs those services and permits results that need not repeat.
 
 For direct `WebAssembly.instantiate` with no JavaScript imports, see the
-[bare-Wasm demo](../live-wasm/README.md). It disables `web-live` and uses the
+[bare-Wasm demo](../live-wasm/README.md). It disables `platform-adapters` and uses the
 standard environment. The [platform record](../../design/96-browser-platform-acceptance.md)
 lists the separate native mobile and physical-iPad Safari runs, their tested
 revisions and the remaining release gates.

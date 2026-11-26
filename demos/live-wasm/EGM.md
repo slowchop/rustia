@@ -13,7 +13,7 @@ Standalone bare-Wasm browser demo for evaluating Luau source with the standard p
 
 ## Invariants
 
-- Page instantiates raw Wasm with an empty import object; runner disables Rustia’s default `web-live` feature.
+- Page instantiates raw Wasm with an empty import object; runner disables Rustia’s default `platform-adapters` feature.
 
 ## Side Effects
 

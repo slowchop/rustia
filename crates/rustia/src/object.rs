@@ -420,7 +420,7 @@ impl<H: HostSchema> Rustia<H> {
     ///
     /// `T` need not implement `Clone`, `Send`, or `Sync`. Hardened leaves reject
     /// object construction before allocating guest memory.
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub fn create_object<T: 'static>(&mut self, value: T) -> Result<Object<T>> {
         let epoch = self.vm().decision_epoch();
         let value = self
@@ -432,7 +432,7 @@ impl<H: HostSchema> Rustia<H> {
 
     /// Moves a transferable payload into a registered object type and retains
     /// its live handle.
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub fn create_object<T: Send + Sync + 'static>(&mut self, value: T) -> Result<Object<T>> {
         let epoch = self.vm().decision_epoch();
         let value = self

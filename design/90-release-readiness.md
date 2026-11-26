@@ -345,7 +345,7 @@ registry installation, public release, or complete platform matrix is implied.
 - Hosted CI separately cross-compiles the portable `rustia` engine library for
   macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 MSVC, iOS arm64,
   Android arm64, and `wasm32-unknown-unknown`. It also executes the bare and
-  default web-live wasm adapters through the matching wasm-bindgen test runner
+  default platform-adapters wasm adapters through the matching wasm-bindgen test runner
   on Node 22/V8. Native macOS arm64 also executes the shared contracts.
   [Browser acceptance](96-browser-platform-acceptance.md) records real Firefox
   and Safari runs in both feature modes and 120 native Windows correctness tests, including

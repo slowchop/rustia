@@ -61,12 +61,15 @@
 //!
 //! # Cargo features
 //!
-//! - **`web-live`** (default) provides system entropy and browser adapters
-//!   for time and randomness. For bare WebAssembly, disable default features
-//!   and supply host services as needed. See the [bare WebAssembly example].
-//! - **`transferable`** lets an idle interpreter and its live handles move
-//!   between Rust threads under exclusive ownership. See [thread ownership]
-//!   for host data bounds and the [transferable example] for a complete handoff.
+//! - **`platform-adapters`** (default) provides system randomness and connects
+//!   browser builds to JavaScript clocks, randomness, and console output.
+//!   [`RustiaBuilder::standard()`] starts with repeatable inputs.
+//!   [`RustiaBuilder::live()`] selects real clocks and a fresh seed. For Wasm
+//!   without JavaScript imports, disable default features and supply your own
+//!   clocks and seed provider if you use `live()`. See the [bare WebAssembly example].
+//! - **`send`** makes an idle interpreter and its live handles [`Send`] so they
+//!   can move together to another Rust thread. See [thread ownership] for
+//!   host data bounds and the [transferable example] for a complete handoff.
 //!
 //! # More about embedding
 //!
@@ -261,7 +264,7 @@ pub use value::{
 ///
 /// By default, an interpreter and its live handles are thread-affine. Create
 /// each interpreter in the worker that will run it. Enabling the Cargo feature
-/// `transferable` makes the interpreter and its live handles `Send` when their
+/// `send` makes the interpreter and its live handles `Send` when their
 /// typed host record and Rust payload types are also transferable. Move the
 /// whole idle interpreter and its handles together; every execution operation
 /// still needs exclusive `&mut` access, so this does not permit concurrent entry.

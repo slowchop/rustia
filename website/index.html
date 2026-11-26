@@ -41,6 +41,10 @@
         <dd>One interpreter on desktop and web. Rustia’s runtime crates forbid <code>unsafe</code> Rust and build without a C++ toolchain.</dd>
       </div>
       <div>
+        <dt><span class="feature-icon" aria-hidden="true">⇄</span>Sans-I/O core</dt>
+        <dd>Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where <code>print</code> output goes, and choose how to load scripts.</dd>
+      </div>
+      <div>
         <dt><span class="feature-icon" aria-hidden="true">ƒ</span>Rust functions and objects</dt>
         <dd>Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
       </div>

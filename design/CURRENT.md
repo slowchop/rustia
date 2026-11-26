@@ -100,7 +100,7 @@ call seam that re-enters with the unchanged fuel, depth and dispatcher. The
 saved-caller driver releases bytecode frames before synchronous host dispatch
 and restores their diagnostic context, roots and continuations afterward.
 These are low-level `rustia-vm` contracts used by the Luvy integration. The
-application facade now offers an opt-in `transferable` Cargo feature under
+application facade now offers an opt-in `send` Cargo feature under
 [issue #53](https://github.com/slowchop/rustia/issues/53) that makes
 the interpreter and live handles movable between workers with stricter service
 and object bounds. Execution remains exclusively borrowed, and the default
@@ -125,7 +125,7 @@ resumable.
 
 | Area | Current behavior and detailed contract |
 | --- | --- |
-| Engine | Luau 0.709, vector-3, flags-off, f64-only; one native/Wasm engine and public-workspace `unsafe_code = "forbid"`. The default facade/handles are thread-affine; opt-in `rustia/transferable` and lower-level `rustia-vm/send` permit idle ownership transfer with one exclusive executor. [Target](05-luau-target.md), [architecture](30-architecture.md). |
+| Engine | Luau 0.709, vector-3, flags-off, f64-only; one native/Wasm engine and public-workspace `unsafe_code = "forbid"`. The default facade/handles are thread-affine; opt-in `rustia/send` and lower-level `rustia-vm/send` permit idle ownership transfer with one exclusive executor. [Target](05-luau-target.md), [architecture](30-architecture.md). |
 | Embedding | Facade-owned settings/errors; typed owned conversions and Serde; rooted VM/epoch-safe live values, including quota-atomic host-created tables and immutable vectors ([issue #58](https://github.com/slowchop/rustia/issues/58)); composable chunks, custom environments, compiled modules, atomic installation and host-owned replacement. Lower-level embedders can retain program entries and inspect/migrate rooted captures without executing guest code. [Embedding API](75-embedded-api.md). |
 | Host integration | Synchronous functions, capability declarations, borrowed invocation context, shared fuel, bounded ordered records and typed Rust objects/methods. The low-level scoped dispatcher can re-enter with the active budget/depth; host objects support optional owned field/metamethod hooks, including typed facade length and generalized iteration. [Host bridge](70-host-bridge-contract.md), [functions](78-host-functions.md), [objects](83-rust-objects.md). |
 | Services and modules | Explicit output/clock/entropy providers and native/WASI/browser adapters. `require` needs a host resolver; core has no ambient filesystem. Module ABI v3 supports yieldable loads and coroutine-owned loading state. Each installation has a fresh dependency-cache cohort; older rooted functions retain theirs. [Services](72-host-services.md), [embedding API](75-embedded-api.md). |
@@ -142,7 +142,9 @@ resumable.
   forbidden host capabilities; deterministic output/clock/entropy providers are
   supported. Its collection schedule uses executed instruction counts.
 - **`live()`:** first-class live clocks, entropy, output and runtime compilation;
-  deliberately makes no replay guarantee. It shares the advanced embedding API.
+  deliberately makes no replay guarantee. The default `platform-adapters` feature
+  provides system entropy and JavaScript host adapters. Bare Wasm can use `live()`
+  with app-supplied clocks and entropy. Both presets share the advanced embedding API.
 - **LuauCompat** selects Luau-style hash iteration with the Standard service
   surface. **Puc51Compat** separately targets tested PUC Lua 5.1.5 table/order,
   sorting and formatting behavior with reproducible host-service rules.

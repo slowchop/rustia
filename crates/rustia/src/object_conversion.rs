@@ -8,7 +8,7 @@ impl<T: 'static> adapter::Value for Object<T> {
     }
 }
 
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 impl<T: 'static> adapter::Value for NewObject<T> {
     fn into_host_value(self, _: adapter::Token) -> Result<HostReturnValue> {
         Ok(HostReturnValue::NewObject {
@@ -19,7 +19,7 @@ impl<T: 'static> adapter::Value for NewObject<T> {
     }
 }
 
-#[cfg(feature = "transferable")]
+#[cfg(feature = "send")]
 impl<T: Send + Sync + 'static> adapter::Value for NewObject<T> {
     fn into_host_value(self, _: adapter::Token) -> Result<HostReturnValue> {
         Ok(HostReturnValue::NewObject {
@@ -51,7 +51,7 @@ impl<T: 'static> adapter::Return for Object<T> {
     }
 }
 
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 impl<T: 'static> adapter::Return for NewObject<T> {
     fn into_host_return(self, token: adapter::Token) -> Result<Vec<HostReturnValue>> {
         Ok(vec![adapter::Value::into_host_value(self, token)?])
@@ -61,7 +61,7 @@ impl<T: 'static> adapter::Return for NewObject<T> {
     }
 }
 
-#[cfg(feature = "transferable")]
+#[cfg(feature = "send")]
 impl<T: Send + Sync + 'static> adapter::Return for NewObject<T> {
     fn into_host_return(self, token: adapter::Token) -> Result<Vec<HostReturnValue>> {
         Ok(vec![adapter::Value::into_host_value(self, token)?])

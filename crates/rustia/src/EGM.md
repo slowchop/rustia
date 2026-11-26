@@ -24,7 +24,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 - `install` is guest-state transactional; `eval`/`exec` leave completed guest mutations in place on failure.
 - Invocation callbacks only receive their declared capability views. Captured Rust state remains an embedder trust boundary.
 - Typed object iterator factories hold only a scoped read borrow and create one opaque owned state per loop; steps mutate only that state. Iterator controls/results use the normal typed conversion and host diagnostics.
-- With `transferable`, service closures require `Send`, entropy providers require `Fn + Send + Sync`, object payloads require `Send + Sync`, and the facade/live handles may move only as an idle exclusively owned graph; calls continue to require `&mut Rustia`.
+- With `send`, service closures require `Send`, entropy providers require `Fn + Send + Sync`, object payloads require `Send + Sync`, and the facade/live handles may move only as an idle exclusively owned graph; calls continue to require `&mut Rustia`.
 - Deterministic invocation records have one dense sequence and bounded logical record bytes; host publication is all-or-nothing on escaping failure.
 
 ## Side Effects

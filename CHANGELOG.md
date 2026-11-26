@@ -13,6 +13,8 @@ The benchmark workflows described in earlier entries ran in the private predeces
 
 ### Changed
 
+- Renamed the facade's Cargo features from `transferable` to `send` and from
+  `web-live` to `platform-adapters`. Update feature lists in downstream manifests.
 - Required modules can yield and resume inside guest coroutines. Results enter
   the cache only after completion; cancelled or failed loads can be retried.
   Ordinary module failures keep completed writes and caught typed records,

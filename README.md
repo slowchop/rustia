@@ -35,6 +35,13 @@ One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Ru
 </details>
 
 <details>
+<summary><strong>Sans-I/O core</strong></summary>
+
+Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+
+</details>
+
+<details>
 <summary><strong>Rust functions and objects</strong></summary>
 
 Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
@@ -169,15 +176,18 @@ can run another script. [Memory recovery test](https://github.com/slowchop/rusti
 
 ## Cargo features
 
-- **`web-live`** is on by default. It lets Rustia use the browser’s clock and
-  randomness in live mode, and provides random seeds on native targets. If
-  you’re building WebAssembly without JavaScript imports, set
-  `default-features = false` on the Rustia dependency. [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
-- **`transferable`** makes `Rustia` and its live handles `Send`, so you can move
+- **`platform-adapters`** is on by default. It provides system randomness and
+  connects browser builds to JavaScript clocks, randomness, and console output.
+  `RustiaBuilder::standard()` starts with a fixed seed and repeatable clocks.
+  `RustiaBuilder::live()` uses real clocks and a fresh seed. For WebAssembly
+  without JavaScript imports, set `default-features = false` and pass your own
+  clocks and seed provider if you use `live()`.
+  [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+- **`send`** makes `Rustia` and its live handles `Send`, so you can move
   them together to another thread. Calls still need `&mut Rustia`.
   [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
 
-  From a Rustia checkout, run `cargo run --locked -p rustia --features transferable --example transferable`.
+  From a Rustia checkout, run `cargo run --locked -p rustia --features send --example transferable`.
 
 ## Examples and API reference
 

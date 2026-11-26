@@ -15,9 +15,9 @@ description = "Rustia is a pure-Rust interpreter for embedding standalone Luau i
 publish.workspace = true
 
 [features]
-default = ["web-live"]
-web-live = ["dep:getrandom", "dep:js-sys", "dep:wasm-bindgen", "getrandom/wasm_js"]
-transferable = ["rustia-vm/send"]
+default = ["platform-adapters"]
+platform-adapters = ["dep:getrandom", "dep:js-sys", "dep:wasm-bindgen", "getrandom/wasm_js"]
+send = ["rustia-vm/send"]
 
 [dependencies]
 getrandom = { version = "0.3.4", optional = true }
@@ -37,7 +37,7 @@ wasm-bindgen-test = "0.3"
 
 [[example]]
 name = "transferable"
-required-features = ["transferable"]
+required-features = ["send"]
 
 [lints]
 workspace = true

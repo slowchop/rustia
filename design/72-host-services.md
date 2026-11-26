@@ -77,7 +77,7 @@ any existing construction path — with one documented exception (`os.clock`, be
   environment axis with the other presets. The default `builder()` remains reproducible-by-default —
   the pillar holds because the live world is an explicit, greppable one-word choice, never the
   silent default. Native and WASI use system adapters. Browser `wasm32-unknown-unknown` uses the default
-  `web-live` JavaScript adapter; a bare-Wasm consumer disables default features and plugs wall clock,
+  `platform-adapters` JavaScript adapter; a bare-Wasm consumer disables default features and plugs wall clock,
   monotonic clock, and entropy providers explicitly. `build()` returns a typed error if a requested live
   world is incomplete. `collectgarbage("count")`/`gcinfo` read the same maintained VM-owned logical-live total
   under `standard()` and `live()`. PCG32 stays pinned in every profile, but `live()` starts it from host entropy instead
@@ -163,7 +163,7 @@ Applications configure providers through `RustiaBuilder` and read facade-owned
 clone). Cloning settings shares providers; documented. In `rustia-vm/send`, entropy is an immutable
 `Fn + Send + Sync` provider so cloned settings can construct VMs concurrently without contention or
 panic. Other mutable services retain their nonblocking guarded `FnMut + Send` contract. The facade's
-`transferable` feature exposes these stricter capture bounds.
+`send` feature exposes these stricter capture bounds.
 `ServiceClock` and any new public enum get
 `#[non_exhaustive]` per facade convention.
 
@@ -199,7 +199,7 @@ by the engine.
    A deterministic provider can select another replay-stable sequence; a nondeterministic provider is dropped
    by infallible Sim construction and rejected by the facade. `math.randomseed` can still reset the state later.
 7. wasm32-unknown-unknown: `standard()` retains target-independent deterministic inputs and swallowed output.
-   `live()` uses the default `web-live` JavaScript adapter. A raw/bare Wasm consumer builds without default
+   `live()` uses the default `platform-adapters` JavaScript adapter. A raw/bare Wasm consumer builds without default
    features, at which point `live()` imports nothing and requires explicit providers. This is one semantic
    engine with target adapters, not a target-specific VM fork.
 8. `collectgarbage("count")`/`gcinfo` read maintained VM-owned logical-live KiB; exact allocator/RSS parity with
