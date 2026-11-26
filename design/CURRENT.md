@@ -191,6 +191,18 @@ limited to explicitly opted-in calls outside VM policy. Module graphs, rooted
 capture integration, dynamic values and a generally supported execution backend
 remain separate work.
 
+The same issue now has an experimental compiler-owned source boundary. An
+embedder supplies canonical project-relative module keys and immutable source
+bytes; Rustia preserves the existing live compiler/host SHA-256 over sorted
+paths and exact source bytes, then builds and separately fingerprints a
+dependency-first graph from reachable top-level literal `require` declarations.
+The default resolver accepts relative `./` and `../` requests, while callers with
+different path policy provide an explicit resolver. Missing modules, parse
+failures, resolver failures and cycles identify the importing module and byte
+span. Unreachable invalid source remains part of the accepted-source identity
+without blocking an unrelated entry graph. Filesystem discovery, dynamic
+`require`, build scheduling and artifact publication remain host-owned.
+
 A second opt-in experiment emits Rust for a bounded zero-argument callback
 with calls through named captures, local bindings and conditional control
 flow. The host initializes the captures with the interpreter and implements

@@ -64,6 +64,8 @@ pub mod compiled_call;
 pub mod compiled_host_call;
 mod o2;
 mod repeat_condition;
+#[doc(hidden)]
+pub mod source_bundle;
 
 pub use o2::{ExperimentalO2Options, ProgramReceipts};
 
