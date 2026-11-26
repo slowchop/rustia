@@ -27,6 +27,18 @@ pub fn compiled_host_call<H: Host>(host: &mut H) -> Result<(), H::Error> {
 /// The host must bind the output to the exact source and capture declaration.
 /// Generated control flow is not metered as interpreter bytecode.
 pub fn generate(source: &str) -> Result<String> {
+    generate_with_capture_policy(source, |_, _, _| true)
+}
+
+/// Compile a callback whose setup calls must pass the embedder's policy.
+///
+/// The policy receives the global namespace, member, and exact argument bytes
+/// for each accepted setup shape `local binding = namespace.member("text")`.
+/// It does not run the setup. A denied capture is reported at its declaration.
+pub fn generate_with_capture_policy(
+    source: &str,
+    mut allow_capture: impl FnMut(&str, &str, &[u8]) -> bool,
+) -> Result<String> {
     let span = Span::new(0, source.len());
     if source.len() > MAX_SOURCE_BYTES {
         return Err(CompileError::at(
@@ -87,11 +99,22 @@ pub fn generate(source: &str) -> Result<String> {
                 *span,
             ));
         };
-        if !matches!(callee.as_ref(), Expr::Field { object, .. } if matches!(object.as_ref(), Expr::Name(..)))
-            || !matches!(args.as_slice(), [Expr::String(..)])
-            || !captures.insert(binding.name.as_str())
-        {
+        let (Expr::Field { object, field, .. }, [Expr::String(argument, _)]) =
+            (callee.as_ref(), args.as_slice())
+        else {
             return Err(CompileError::at("unsupported host callback capture", *span));
+        };
+        let Expr::Name(namespace, _) = object.as_ref() else {
+            return Err(CompileError::at("unsupported host callback capture", *span));
+        };
+        if !captures.insert(binding.name.as_str()) {
+            return Err(CompileError::at("unsupported host callback capture", *span));
+        }
+        if !allow_capture(namespace, field, argument) {
+            return Err(CompileError::at(
+                "host callback setup capture denied by embedder policy",
+                *span,
+            ));
         }
     }
     let mut emitted = INTERFACE.to_owned();
@@ -270,7 +293,28 @@ fn text_literal(expr: &Expr) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::generate;
+    use super::{generate, generate_with_capture_policy};
+
+    #[test]
+    fn applies_the_capture_policy_to_exact_source_literals() {
+        let setup = r#"local action = host.native("\xff")"#;
+        let source = format!("{setup} return function() action() end");
+        let allow = |namespace: &str, member: &str, argument: &[u8]| {
+            assert_eq!(
+                (namespace, member, argument),
+                ("host", "native", &[255][..])
+            );
+            true
+        };
+        assert_eq!(
+            generate_with_capture_policy(&source, allow).unwrap(),
+            generate(&source).unwrap()
+        );
+        let error = generate_with_capture_policy(&source, |_, _, _| false).unwrap_err();
+        let span = error.span.unwrap();
+        assert_eq!(&source[span.start..span.end], setup);
+        assert!(error.message.contains("denied by embedder policy"));
+    }
 
     #[test]
     fn emits_capture_calls_and_short_circuits_conditions() {
