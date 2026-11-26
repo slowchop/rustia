@@ -24,7 +24,7 @@
       "title": "Sans-I/O core",
       "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
       "icon": "⇄",
-      "readmeLink": "[Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)"
+      "readmeLink": "[Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)"
     },
     {
       "title": "Rust functions and objects",

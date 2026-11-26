@@ -37,7 +37,7 @@ One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Ru
 <details>
 <summary><strong>Sans-I/O core</strong></summary>
 
-Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
 
 </details>
 
