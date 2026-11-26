@@ -613,7 +613,11 @@ fn literal_require(
     let Expr::Call { callee, args, .. } = expression else {
         return Ok(None);
     };
-    if !matches!(callee.as_ref(), Expr::Name(name, _) if name == "require") {
+    let mut callee = callee.as_ref();
+    while let Expr::TypeInstantiation { expr, .. } = callee {
+        callee = expr;
+    }
+    if !matches!(callee, Expr::Name(name, _) if name == "require") {
         return Ok(None);
     }
     let [Expr::String(request, span)] = args.as_slice() else {

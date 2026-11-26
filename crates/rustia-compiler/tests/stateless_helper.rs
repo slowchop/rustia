@@ -90,7 +90,7 @@ fn admits_explicitly_typed_import_calls() {
     let sources = bundle(&[
         (
             "helper.luau",
-            "local id = require('./id')\nreturn function(n) return id<<number>>(n) end",
+            "local id = require<<any>>('./id')\nreturn function(n) return id<<number>>(n) end",
         ),
         ("id.luau", "return function(value) return value end"),
     ]);

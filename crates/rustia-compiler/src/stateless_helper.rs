@@ -33,8 +33,11 @@ fn import(statement: &Stmt) -> Option<&str> {
     let [Expr::String(..)] = args.as_slice() else {
         return None;
     };
-    matches!(callee.as_ref(), Expr::Name(name, _) if name == "require")
-        .then_some(binding.name.as_str())
+    let mut callee = callee.as_ref();
+    while let Expr::TypeInstantiation { expr, .. } = callee {
+        callee = expr;
+    }
+    matches!(callee, Expr::Name(name, _) if name == "require").then_some(binding.name.as_str())
 }
 
 fn constant(statement: &Stmt) -> Option<(&str, rustia_lexer::Span)> {

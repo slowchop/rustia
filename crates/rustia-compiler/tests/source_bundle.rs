@@ -103,6 +103,29 @@ fn graph_is_dependency_first_with_nested_and_shared_imports() {
 }
 
 #[test]
+fn explicitly_typed_require_is_a_static_dependency() {
+    let sources = bundle(&[
+        (
+            "main.luau",
+            "local leaf = require<<any>>('./leaf')\nreturn leaf",
+        ),
+        ("leaf.luau", "return 1"),
+    ]);
+
+    let graph = sources.static_module_graph(&["main.luau"]).unwrap();
+    assert_eq!(
+        graph.module_names().collect::<Vec<_>>(),
+        ["leaf.luau", "main.luau"]
+    );
+    assert_eq!(
+        graph.module("main.luau").unwrap().requires[0]
+            .alias
+            .as_deref(),
+        Some("leaf")
+    );
+}
+
+#[test]
 fn shadowed_require_is_not_a_static_dependency() {
     let sources = bundle(&[
         (
