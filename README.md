@@ -169,11 +169,12 @@ can run another script. [Memory recovery test](https://github.com/slowchop/rusti
 
 ## Cargo features
 
-- **`web-live`** (default) provides system entropy and the browser adapters for
-  time and randomness. For bare WebAssembly, disable default features and supply
-  the host services your application needs. [Bare Wasm example](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
-- **`transferable`** lets an idle interpreter and its live handles move together
-  to another Rust thread. Each call still needs exclusive access to the interpreter.
+- **`web-live`** is on by default. It lets Rustia use the browser’s clock and
+  randomness in live mode, and provides random seeds on native targets. If
+  you’re building WebAssembly without JavaScript imports, set
+  `default-features = false` on the Rustia dependency. [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+- **`transferable`** makes `Rustia` and its live handles `Send`, so you can move
+  them together to another thread. Calls still need `&mut Rustia`.
   [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
 
   From a Rustia checkout, run `cargo run --locked -p rustia --features transferable --example transferable`.
