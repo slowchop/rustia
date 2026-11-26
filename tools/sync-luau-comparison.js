@@ -21,7 +21,7 @@ function syncComparison(write = false) {
   const original = readText(path.join(root, source));
   const guide = original.split(iconMarker)[0].trimEnd();
   const embedded = [];
-  for (const platform of ["linux", "macos", "windows"]) {
+  for (const platform of ["linux", "macos", "windows", "ios", "android", "browser"]) {
     const file = `demos/web-live/icons/${platform}.svg`;
     const svg = readText(path.join(root, file));
     const ref = `[rustia-${platform}]: `;

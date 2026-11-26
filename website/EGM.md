@@ -27,8 +27,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   analysis/ contains the pinned, licensed Luau browser analyzer.
 - build.sh prepares the pinned Rust and Wasm tools and stages the static
   site in dist/, including the facade Rustdoc under /docs/api/.
-  render-home-comparisons.py reads the capability table from
-  ../crates/rustia/compare.md and builds the runtime chart from the README's
+  render-home-comparisons.py reads table labels, project and platform links,
+  and evidence explanations from [the shared Rustdoc comparison](../crates/rustia/compare.md).
+  It adds the homepage icon styling and narrow-screen cards, and builds the runtime chart from the README's
   pinned benchmark cohort. The chart links to the archived timings. The renderer
   also generates search and social descriptions from the homepage intro.
   _headers defines the deployed policy.
