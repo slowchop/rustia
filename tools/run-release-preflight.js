@@ -12,9 +12,9 @@ if (configuredRoot !== undefined && (!path.isAbsolute(configuredRoot) || path.no
 }
 if (configuredRoot !== undefined && !(
   (argv.length === 1 && argv[0] === "--list") ||
-  (argv.length === 2 && argv[0] === "--stage" && argv[1] === "quick")
+  (argv.length === 2 && argv[0] === "--stage" && ["quick", "workspace", "release"].includes(argv[1]))
 )) {
-  throw new Error("RUSTIA_PREFLIGHT_ROOT is available only to the protected Quick invocation");
+  throw new Error("RUSTIA_PREFLIGHT_ROOT is available only to a protected staged invocation");
 }
 const root = configuredRoot ?? path.resolve(__dirname, "..");
 for (const name of ["RUSTIA_UPDATE_C23_CENSUS", "RUSTIA_UPDATE_C23_O2_PREVIEW"]) {
