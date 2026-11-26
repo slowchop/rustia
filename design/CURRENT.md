@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-25 (Australia/Hobart).
+Updated: 2026-11-27 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -18,8 +18,8 @@ Stable APIs, full Luau parity, consumer rollout and supported releases have sepa
 - **`slowchop/rustia-historic`** retains the original private evidence. The
   operations sibling **`rustia-ops`** and private benchmark infrastructure stay private.
 - [GitHub Issues](https://github.com/slowchop/rustia/issues) is the maintainer
-  backlog. Issues and pull requests are publicly readable. Only repository
-  collaborators can create either. [CONTRIBUTING](../CONTRIBUTING.md) describes that workflow.
+  backlog. Public bug reports and focused pull requests are welcome under the
+  [contribution policy](../CONTRIBUTING.md#contributing).
 - [Report a vulnerability privately](https://github.com/slowchop/rustia/security/advisories/new).
 
 Both GitHub-hosted workflows passed on the public launch commit `e54fd4e`.
