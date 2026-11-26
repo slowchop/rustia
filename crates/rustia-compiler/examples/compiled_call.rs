@@ -1,5 +1,8 @@
 //! Development driver for the experimental generated-call contract.
-use rustia_compiler::compiled_call::{generate, MAX_SOURCE_BYTES};
+use rustia_compiler::{
+    compiled_call::{generate_from_bundle, MAX_SOURCE_BYTES},
+    source_bundle::SourceBundle,
+};
 use std::{
     env,
     error::Error,
@@ -26,11 +29,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
         .into());
     }
-    let module = generate(std::str::from_utf8(&bytes)?)
+    let entry = "entry.luau";
+    let bundle = SourceBundle::new([(entry, bytes)])?;
+    let (module, receipt) = generate_from_bundle(&bundle, entry)
         .map_err(|error| format!("{}: {error}", source.display()))?;
     fs::write(output, module.rust)?;
     println!(
-        "rustia-compiled-call-v1 {} {:016x}",
+        "{} {} {:016x}",
+        receipt.compiler_abi,
         module.capture_name,
         module.initial_capture.to_bits()
     );
