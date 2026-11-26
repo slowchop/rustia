@@ -43,7 +43,7 @@ function readmeEntries(entries) {
     "<details>",
     `<summary><strong>${escapeHtml(title)}</strong></summary>`,
     "",
-    readmeLink ? `${description} · ${readmeLink}` : description,
+    readmeLink ? `${description}\n\n${readmeLink}` : description,
     "",
     "</details>",
   ].join("\n")).join("\n\n");
