@@ -45,11 +45,22 @@ fn interpreted_results() -> String {
 
 #[test]
 fn unsupported_source_reports_a_span() {
-    let source = "local score = 0\nreturn function(step) return unknown(step) end";
+    let source = "local score = 0\nreturn function(step) return score + math.abs(step) end";
     let bundle = SourceBundle::new([("entry.luau", source)]).unwrap();
     let error = generate_from_bundle(&bundle, "entry.luau").unwrap_err();
     let span = error.span.unwrap();
-    assert_eq!(&source[span.start..span.end], "unknown(step)");
+    assert_eq!(&source[span.start..span.end], "math.abs(step)");
+
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let program = compile(&parse_source(source).unwrap()).unwrap();
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let function = vm.run(&program).unwrap();
+        let result = vm
+            .call_function(&program, function, &[Value::number(-2.0)])
+            .unwrap();
+        assert_eq!(result.as_number(), Some(2.0));
+    }
 }
 
 #[test]

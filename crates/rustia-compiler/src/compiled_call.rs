@@ -70,6 +70,42 @@ pub fn generate_from_bundle(
 /// Lower a single source module defining one numeric capture and returning a
 /// unary closure. The closure may update that capture once before returning.
 pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
+    let call = lower(source)?;
+    Ok(GeneratedCall {
+        rust: emit_rust(&call),
+        capture_name: call.capture_name,
+        initial_capture: call.initial_capture,
+    })
+}
+
+struct NumericCall {
+    capture_name: String,
+    initial_capture: f64,
+    capture_update: Option<NumericExpr>,
+    result: NumericExpr,
+}
+
+enum NumericExpr {
+    Literal(f64),
+    Capture,
+    Parameter,
+    Binary(Arithmetic, Box<NumericExpr>, Box<NumericExpr>),
+}
+
+impl NumericExpr {
+    fn binary(op: Arithmetic, lhs: Self, rhs: Self) -> Self {
+        Self::Binary(op, Box::new(lhs), Box::new(rhs))
+    }
+}
+
+enum Arithmetic {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+fn lower(source: &str) -> Result<NumericCall, CompileError> {
     let module_span = Span::new(0, source.len());
     if source.len() > MAX_SOURCE_BYTES {
         return Err(CompileError::at(
@@ -129,7 +165,7 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
             *function_span,
         ));
     }
-    let mut emitter = Emitter {
+    let mut lowerer = Lowerer {
         capture: &binding.name,
         parameter: &parameter.name,
         uses_capture: false,
@@ -139,7 +175,7 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
             value: Some(result),
             extra_values,
             ..
-        }] if extra_values.is_empty() => (String::new(), result),
+        }] if extra_values.is_empty() => (None, result),
         [Stmt::Assignment {
             targets,
             op,
@@ -158,23 +194,27 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
                     *span,
                 ));
             };
-            if name != emitter.capture {
+            if name != lowerer.capture {
                 return Err(CompileError::at(
                     "only the numeric capture can be assigned",
                     *span,
                 ));
             }
-            emitter.uses_capture = true;
-            let value = emitter.emit(value)?;
-            let rhs = match op {
-                AssignmentOp::Assign => value,
-                AssignmentOp::Add => format!("canonical(capture + {value})"),
-                AssignmentOp::Sub => format!("canonical(capture - {value})"),
-                AssignmentOp::Mul => format!("canonical(capture * {value})"),
-                AssignmentOp::Div => format!("canonical(capture / {value})"),
+            lowerer.uses_capture = true;
+            let value = lowerer.expression(value)?;
+            let arithmetic = match op {
+                AssignmentOp::Assign => None,
+                AssignmentOp::Add => Some(Arithmetic::Add),
+                AssignmentOp::Sub => Some(Arithmetic::Subtract),
+                AssignmentOp::Mul => Some(Arithmetic::Multiply),
+                AssignmentOp::Div => Some(Arithmetic::Divide),
                 _ => return Err(CompileError::at("unsupported numeric assignment", *span)),
             };
-            (format!("    let capture = {rhs};\n"), result)
+            let update = match arithmetic {
+                Some(op) => NumericExpr::binary(op, NumericExpr::Capture, value),
+                None => value,
+            };
+            (Some(update), result)
         }
         _ => {
             return Err(CompileError::at(
@@ -183,57 +223,88 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
             ))
         }
     };
-    let result = emitter.emit(result)?;
-    if !emitter.uses_capture {
+    let result = lowerer.expression(result)?;
+    if !lowerer.uses_capture {
         return Err(CompileError::at(
             "closure must capture the declared numeric local",
             *function_span,
         ));
     }
-    let rust = format!(
-        "#[inline]\nfn canonical(value: f64) -> f64 {{\n    if value.is_nan() {{ f64::from_bits({CANON_NAN_BITS}) }} else {{ value }}\n}}\n\n\
-         pub fn compiled_call(capture: f64, parameter: f64) -> (f64, f64) {{\n\
-             let capture = canonical(capture);\n    let parameter = canonical(parameter);\n{update}    (capture, {result})\n}}\n"
-    );
-    Ok(GeneratedCall {
-        rust,
+    Ok(NumericCall {
         capture_name: binding.name.clone(),
         initial_capture: *initial_capture,
+        capture_update: update,
+        result,
     })
 }
 
-struct Emitter<'a> {
+struct Lowerer<'a> {
     capture: &'a str,
     parameter: &'a str,
     uses_capture: bool,
 }
 
-impl Emitter<'_> {
-    fn emit(&mut self, expr: &Expr) -> Result<String, CompileError> {
+impl Lowerer<'_> {
+    fn expression(&mut self, expr: &Expr) -> Result<NumericExpr, CompileError> {
         let unsupported = || CompileError::at("unsupported numeric expression", expr.span());
         match expr {
-            Expr::Number(value, _) => Ok(format!("canonical(f64::from_bits({}))", value.to_bits())),
+            Expr::Number(value, _) => Ok(NumericExpr::Literal(*value)),
             Expr::Name(name, _) if name == self.capture => {
                 self.uses_capture = true;
-                Ok("capture".to_owned())
+                Ok(NumericExpr::Capture)
             }
-            Expr::Name(name, _) if name == self.parameter => Ok("parameter".to_owned()),
-            Expr::Paren { expr, .. } => self.emit(expr),
+            Expr::Name(name, _) if name == self.parameter => Ok(NumericExpr::Parameter),
+            Expr::Paren { expr, .. } => self.expression(expr),
             Expr::Binary { op, lhs, rhs, .. } => {
                 let op = match op {
-                    BinaryOp::Add => '+',
-                    BinaryOp::Sub => '-',
-                    BinaryOp::Mul => '*',
-                    BinaryOp::Div => '/',
+                    BinaryOp::Add => Arithmetic::Add,
+                    BinaryOp::Sub => Arithmetic::Subtract,
+                    BinaryOp::Mul => Arithmetic::Multiply,
+                    BinaryOp::Div => Arithmetic::Divide,
                     _ => return Err(unsupported()),
                 };
-                Ok(format!(
-                    "canonical({} {op} {})",
-                    self.emit(lhs)?,
-                    self.emit(rhs)?
+                Ok(NumericExpr::binary(
+                    op,
+                    self.expression(lhs)?,
+                    self.expression(rhs)?,
                 ))
             }
             _ => Err(unsupported()),
+        }
+    }
+}
+
+fn emit_rust(call: &NumericCall) -> String {
+    let update = call
+        .capture_update
+        .as_ref()
+        .map(|expr| format!("    let capture = {};\n", emit_rust_expression(expr)))
+        .unwrap_or_default();
+    let result = emit_rust_expression(&call.result);
+    format!(
+        "#[inline]\nfn canonical(value: f64) -> f64 {{\n    if value.is_nan() {{ f64::from_bits({CANON_NAN_BITS}) }} else {{ value }}\n}}\n\n\
+         pub fn compiled_call(capture: f64, parameter: f64) -> (f64, f64) {{\n\
+             let capture = canonical(capture);\n    let parameter = canonical(parameter);\n{update}    (capture, {result})\n}}\n"
+    )
+}
+
+fn emit_rust_expression(expr: &NumericExpr) -> String {
+    match expr {
+        NumericExpr::Literal(value) => format!("canonical(f64::from_bits({}))", value.to_bits()),
+        NumericExpr::Capture => "capture".to_owned(),
+        NumericExpr::Parameter => "parameter".to_owned(),
+        NumericExpr::Binary(op, lhs, rhs) => {
+            let operator = match op {
+                Arithmetic::Add => '+',
+                Arithmetic::Subtract => '-',
+                Arithmetic::Multiply => '*',
+                Arithmetic::Divide => '/',
+            };
+            format!(
+                "canonical({} {operator} {})",
+                emit_rust_expression(lhs),
+                emit_rust_expression(rhs)
+            )
         }
     }
 }
