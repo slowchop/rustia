@@ -189,6 +189,13 @@ limited to explicitly opted-in calls outside VM policy. Module graphs, rooted
 capture integration, dynamic values and a generally supported execution backend
 remain separate work.
 
+A second opt-in experiment emits Rust for a bounded zero-argument callback
+with calls through named captures, local bindings and conditional control
+flow. The host initializes the captures with the interpreter and implements
+the emitted call interface against the same runtime values. The generated
+callback has no interpreter instruction metering. The compiler rejects
+unsupported source before emitting code.
+
 ## Validation and benchmark scope
 
 The executable corpus has **736 fixtures**, **526 refs**, **0 pending-oracle**
