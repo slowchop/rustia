@@ -1,5 +1,5 @@
 {
-  "blurb": "Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.",
+  "blurb": "Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.",
   "origin": "Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.",
   "features": [
     {
@@ -21,6 +21,12 @@
       "readmeLink": "[Platform comparison](https://rustia.dev/#luau-comparison)"
     },
     {
+      "title": "Sans-I/O core",
+      "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
+      "icon": "⇄",
+      "readmeLink": "[Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)"
+    },
+    {
       "title": "Rust functions and objects",
       "description": "Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.",
       "icon": "ƒ",
@@ -31,6 +37,28 @@
       "description": "Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.",
       "icon": "⏱︎",
       "readmeLink": "[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)"
+    }
+  ],
+  "upcoming": [
+    {
+      "title": "Time-travel debugging",
+      "description": "Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. [Follow the debugger work](https://github.com/slowchop/rustia/issues/71).",
+      "icon": "«"
+    },
+    {
+      "title": "A Luau layer for Bevy",
+      "description": "We’re building a Luau layer on top of [Bevy](https://bevy.org/) so you can change gameplay while the game runs, without rebuilding the Rust app.",
+      "iconImage": "/bevy-icon.png"
+    },
+    {
+      "title": "JIT and AOT research",
+      "description": "We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. [Follow the compilation work](https://github.com/slowchop/rustia/issues/89).",
+      "icon": "🧪"
+    },
+    {
+      "title": "Synth in Luau",
+      "description": "We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.",
+      "icon": "♫"
     }
   ]
 }

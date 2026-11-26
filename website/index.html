@@ -7,7 +7,7 @@
 <main><section class="hero" aria-labelledby="title">
   <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
     <!-- project-copy: intro -->
-    <p>Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.</p>
+    <p>Rustia is a pure-Rust interpreter for embedding standalone <a href="https://luau.org/">Luau</a> in games and tools. Edit scripts without a rebuild and let players write mods.</p>
     <p>Rustia grew out of a game by <a class="studio-credit" href="https://slowchop.com/"><span class="studio-icon" aria-hidden="true"></span>Slowchop Studios</a> that needed to script character decisions and replay them on desktop and in a browser.</p>
     <!-- /project-copy: intro -->
   </div>
@@ -41,6 +41,10 @@
         <dd>One interpreter on desktop and web. Rustia’s runtime crates forbid <code>unsafe</code> Rust and build without a C++ toolchain.</dd>
       </div>
       <div>
+        <dt><span class="feature-icon" aria-hidden="true">⇄</span>Sans-I/O core</dt>
+        <dd>Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where <code>print</code> output goes, and choose how to load scripts.</dd>
+      </div>
+      <div>
         <dt><span class="feature-icon" aria-hidden="true">ƒ</span>Rust functions and objects</dt>
         <dd>Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
       </div>
@@ -56,6 +60,7 @@
   <div class="home-next-inner">
     <h2 id="roadmap-title">In development</h2>
     <dl class="home-roadmap">
+      <!-- project-copy: upcoming -->
       <div>
         <dt><span class="feature-icon" aria-hidden="true">«</span>Time-travel debugging</dt>
         <dd>Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. <a href="https://github.com/slowchop/rustia/issues/71">Follow the debugger work</a>.</dd>
@@ -72,6 +77,7 @@
         <dt><span class="feature-icon" aria-hidden="true">♫</span>Synth in Luau</dt>
         <dd>We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.</dd>
       </div>
+      <!-- /project-copy: upcoming -->
     </dl>
   </div>
 </section>

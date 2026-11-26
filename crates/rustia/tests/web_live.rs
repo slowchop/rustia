@@ -1,4 +1,8 @@
-#![cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web-live"))]
+#![cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    feature = "platform-adapters"
+))]
 
 use rustia::RustiaBuilder;
 use serde::Deserialize;

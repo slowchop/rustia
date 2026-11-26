@@ -29,17 +29,15 @@ function tableCells(line) {
   return line.slice(1, -1).split("|").map((cell) => cell.trim());
 }
 
-// Installation pins and immutable/current source links must resolve in this checkout's
-// history. Measurement source IDs remain unchanged: the history projection is
-// provenance, not an automatic rewrite of a user's Cargo dependency or URL.
+// The quickstart follows main. Benchmark provenance and other source links
+// still need to resolve against this checkout's history.
 function verifySourceReferences(readme, checkReference) {
-  const dependencies = [...readme.matchAll(/\brustia\s*=\s*\{[^}\n]*\}/g)]
-    .map((match) => match[0])
-    .filter((value) => /git\s*=\s*"https:\/\/github\.com\/slowchop\/rustia(?:\.git)?"/.test(value));
-  requireFact(dependencies.length === 1, "README must contain one pinned Rustia Git dependency");
-  const pin = dependencies[0].match(/\brev\s*=\s*"([a-f0-9]{40})"/);
-  requireFact(pin, "README Git dependency needs a full source commit SHA");
-  checkReference(pin[1], null);
+  const installs = readme.match(/^cargo add rustia\b[^\r\n]*/gm) ?? [];
+  requireFact(
+    installs.length === 1 &&
+      /^cargo add rustia --git https:\/\/github\.com\/slowchop\/rustia(?:\.git)? --branch main$/.test(installs[0]),
+    "README must show how to add Rustia from the main Git branch",
+  );
   for (const match of readme.matchAll(/https:\/\/github\.com\/slowchop\/rustia\/(blob|tree|commit|raw)\/(main|[a-f0-9]{40})(\/[^\s)>\]"`#]+)?/g)) {
     const sourcePath = match[3] ? decodeURIComponent(match[3].slice(1)) : null;
     requireFact(match[1] === "commit" || sourcePath, "source links need a file or directory");
@@ -63,12 +61,8 @@ function checkSourceReferences(readme) {
   verifySourceReferences(readme, checkReference);
   assert.throws(() => verifySourceReferences(`${readme}\nhttps://github.com/slowchop/rustia/blob/main/__missing_current_readme_artifact__`, checkReference),
     /source target is absent/);
-  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, 'rev = "main"'), checkReference),
-    /full source commit SHA/);
-  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, `rev = "${"f".repeat(40)}"`), checkReference),
-    /source commit is unreachable/);
-  assert.throws(() => verifySourceReferences(readme.replace(/rev = "[a-f0-9]{40}"/, 'branch = "main"'), checkReference),
-    /full source commit SHA/);
+  assert.throws(() => verifySourceReferences(readme.replace("--branch main", "--branch other"), checkReference),
+    /main Git branch/);
   const immutable = readme.match(/https:\/\/github\.com\/slowchop\/rustia\/blob\/([a-f0-9]{40})\/[^\s)>]+/);
   requireFact(immutable, "README must link immutable benchmark evidence");
   assert.throws(() => verifySourceReferences(readme.replace(immutable[0],
@@ -143,11 +137,6 @@ function selfTest(readme, history) {
   const source = `${new Date(snapshot.start * 1000).toISOString().slice(0, 10)} UTC at source commit \`${snapshot.commit.slice(0, 7)}\``;
   const wrongSource = source.replace(snapshot.commit.slice(0, 7), "0000000");
   assert.throws(() => verify(readme.replace(source, wrongSource), history), /visible snapshot/);
-  // The install example can legitimately pin the same revision as the table.
-  // Mutate the visible provenance phrase, never an earlier dependency SHA.
-  const matchingDependency = readme.replace(/rev = "[a-f0-9]{40}"/, `rev = "${snapshot.commit}"`);
-  verify(matchingDependency, history);
-  assert.throws(() => verify(matchingDependency.replace(source, wrongSource), history), /visible snapshot/);
   assert.throws(() => verify(readme, history.filter((row) => row !== first)), /expected one history row/);
   assert.throws(() => verify(readme, [...history, first]), /expected one history row/);
   const firstLabel = workUnits[snapshot.workloads[0]][0];

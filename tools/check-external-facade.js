@@ -67,8 +67,8 @@ try {
   fs.writeFileSync(path.join(application, "src", "lib.rs"), "// Clean external application; behavior comes from canonical contract tests.\n");
   const manifest = [
     "[package]", 'name = "rustia-private-consumer"', 'version = "0.0.0"', 'edition = "2021"', "publish = false", "",
-    "[workspace]", "", "[features]", 'default = ["web-live"]', 'web-live = ["rustia/web-live"]',
-    'transferable = ["rustia/transferable"]', "", "[dependencies]",
+    "[workspace]", "", "[features]", 'default = ["platform-adapters"]', 'platform-adapters = ["rustia/platform-adapters"]',
+    'send = ["rustia/send"]', "", "[dependencies]",
     `rustia = { path = ${JSON.stringify(packaged.get("rustia"))}, default-features = false }`,
     `serde = { version = "=${serde}", features = ["derive"] }`, "", "[patch.crates-io]",
     ...crates.map((name) => `${name} = { path = ${JSON.stringify(packaged.get(name))} }`), "",
@@ -109,7 +109,7 @@ try {
   const rejected = spawnSync("cargo", ["check", "--locked", "--offline"], {
     cwd: application, env: environment, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
   });
-  assert.notEqual(rejected.status, 0, "rustia-vm/send without rustia/transferable must be rejected");
+  assert.notEqual(rejected.status, 0, "rustia-vm/send without rustia/send must be rejected");
   assert.match(rejected.stderr, /error\[E0277\]/, "mixed feature graph failed for an unexpected reason");
   assert.match(
     rejected.stderr,
@@ -118,8 +118,8 @@ try {
   );
   console.log("External feature matrix: unmatched rustia-vm/send rejected as unsupported");
 
-  cargo(["check", "--locked", "--offline", "--features", "transferable"], application);
-  console.log("External feature matrix: rustia/transferable forwarding compiled");
+  cargo(["check", "--locked", "--offline", "--features", "send"], application);
+  console.log("External feature matrix: rustia/send forwarding compiled");
   console.log(`External facade acceptance passed: ${contracts.length} reused contract suites, archived runtime, default and bare features.`);
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });

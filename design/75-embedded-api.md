@@ -106,7 +106,7 @@ the parent's non-yieldable boundary when control returns.
 ### Transferable application facade (2026-11-17)
 
 Issue [#53](https://github.com/slowchop/rustia/issues/53) adds an opt-in Cargo
-feature named `transferable` to the public `rustia` crate.
+feature named `send` to the public `rustia` crate.
 It selects the lower-level `rustia-vm/send` ownership mode and reconciles the
 facade's service, object and live-handle bounds with that mode. `Rustia<()>`,
 `Value`, `Table`, `Function` and `Exports` can move together between workers.
@@ -121,7 +121,7 @@ and service/object guards reject conflicting re-entry instead of waiting. The
 default feature set keeps the original local `Rc`/`RefCell` facade and weaker
 payload/provider bounds. Cargo feature unification means any embedder that
 enables `rustia-vm/send` elsewhere in its graph must also forward
-`rustia/transferable`; the unmatched mixed graph is intentionally unsupported
+`rustia/send`; the unmatched mixed graph is intentionally unsupported
 and rejected by the external feature-matrix check. Borrowed scopes
 ([#56](https://github.com/slowchop/rustia/issues/56)), typed hooks
 ([#54](https://github.com/slowchop/rustia/issues/54)), and the sync versus

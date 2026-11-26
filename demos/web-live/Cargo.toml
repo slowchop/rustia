@@ -16,7 +16,7 @@ name = "race-native"
 path = "race-native.rs"
 
 [dependencies]
-# Keep Rustia's default web-live feature: this application uses JavaScript services.
+# Keep Rustia's default platform-adapters feature: this application uses JavaScript services.
 rustia = { path = "../../crates/rustia" }
 wasm-bindgen = "=0.2.126"
 

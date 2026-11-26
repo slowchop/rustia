@@ -14,13 +14,13 @@ by `node tools/sync-project-copy.js`.
 - [`examples/EGM.md`](./examples/EGM.md) documents runnable usage examples.
 - [compare.md](./compare.md) supplies the feature lists and project comparison for Rustdoc, the homepage, and the browser demo comparison.
 - [performance.svg](./performance.svg) shows a dated ci-bench cohort for the README and crate documentation. Run `node tools/check-readme-comparisons.js` to verify the chart against retained history.
-- The package is built with `cargo check -p rustia`; `web-live` is enabled by default for browser WebAssembly services.
+- The package is built with `cargo check -p rustia`; `platform-adapters` is enabled by default for browser WebAssembly services.
 
 ## Invariants
 
 - `OwnedValue` is the acyclic, Rust-owned copy boundary. Live `Value`, `Table`, `Function`, and `Exports` handles preserve identity and belong to one VM and decision epoch. Host-created live vectors remain immutable and use the same quota/root/epoch contract without entering `OwnedValue`.
 - `reset_decision()` requires an idle VM, advances the epoch, preserves configuration and persistent registrations, and invalidates retained guest handles.
-- The default facade is thread-affine. The opt-in `transferable` feature requires transferable service captures (`Send`, with `Fn + Send + Sync` for entropy) and `Send + Sync` object payloads and makes the interpreter/live handles movable between workers; it does not permit concurrent entry. A unified Cargo graph that enables `rustia-vm/send` must forward `rustia/transferable`.
+- The default facade is thread-affine. The opt-in `send` feature requires transferable service captures (`Send`, with `Fn + Send + Sync` for entropy) and `Send + Sync` object payloads and makes the interpreter/live handles movable between workers; it does not permit concurrent entry. A unified Cargo graph that enables `rustia-vm/send` must forward `rustia/send`.
 - Typed invocations borrow their `HostContext` for one call, share a fuel budget, and publish bounded ordered records only after successful completion.
 - Typed Rust objects expose synchronous, reset-safe length and generalized-iterator hooks with ordinary fuel, quota, diagnostics and transferable bounds.
 - `install` rolls back guest state on failure. Ordinary evaluation mutations and external host effects are not undone.

@@ -44,14 +44,14 @@ pub(crate) mod adapter {
         fn is_fallible() -> bool;
     }
 
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     pub(crate) trait IterationState: 'static {}
-    #[cfg(not(feature = "transferable"))]
+    #[cfg(not(feature = "send"))]
     impl<T: 'static> IterationState for T {}
 
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     pub(crate) trait IterationState: Send + Sync + 'static {}
-    #[cfg(feature = "transferable")]
+    #[cfg(feature = "send")]
     impl<T: Send + Sync + 'static> IterationState for T {}
 }
 

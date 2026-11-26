@@ -2,7 +2,7 @@
 
 ## Overview
 
-A standalone application showing browser embedding with Rustia's default `web-live`
+A standalone application showing browser embedding with Rustia's default `platform-adapters`
 feature, the explicit `live()` preset, and wasm-bindgen's generated JavaScript glue.
 
 ## Interface

@@ -37,7 +37,7 @@ are ignored by Git.
 
 ## Shared project copy
 
-Edit the blurb, origin story, and feature list in
+Edit the blurb, origin story, feature list, and roadmap in
 [`project-copy.json`](../project-copy.json). From the repository root, run
 `node tools/sync-project-copy.js` and commit the source and generated passages
 together. Release preflight checks that the generated copy is current.

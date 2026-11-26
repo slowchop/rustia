@@ -1,4 +1,4 @@
-#![cfg(feature = "transferable")]
+#![cfg(feature = "send")]
 
 use rustia::{
     Exports, Function, HostSchema, Object, ObjectType, Rustia, RustiaBuilder, ServiceEntropy,

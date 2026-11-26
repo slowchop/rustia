@@ -7,7 +7,7 @@ use std::sync::{
     Arc,
 };
 
-#[cfg(not(feature = "transferable"))]
+#[cfg(not(feature = "send"))]
 #[test]
 fn default_services_accept_thread_affine_closures() {
     use std::cell::Cell;

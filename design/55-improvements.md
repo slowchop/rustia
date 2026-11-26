@@ -70,7 +70,7 @@ from a fresh borrowed `HostContext<H>` threaded structurally through a lexical `
 `Slots`, `Effects`, `SlotWrites`, and `HostMut` views expose only the registered capability. This supersedes the
 earlier proposed public `Box<dyn Fn(&[OwnedValue])>` firewall and `Ctx<'gc>` sketch. **Why better:** it keeps
 tick-local borrows zero-copy, makes context escape impossible in safe Rust, avoids owned-value deep copies on
-host calls, and preserves the default thread-affine VM. The optional `transferable` feature permits idle moves between workers. Typed callback arities through eight, fallible returns,
+host calls, and preserves the default thread-affine VM. The optional `send` feature permits idle moves between workers. Typed callback arities through eight, fallible returns,
 metadata, panic containment, and contextual dispatch are implemented. See
 [`70-host-bridge-contract.md`](70-host-bridge-contract.md) and
 [`75-embedded-api.md`](75-embedded-api.md).

@@ -1,38 +1,110 @@
 # <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
 <!-- project-copy: intro -->
-Embed Luau in Rust games and tools. Edit scripts without a rebuild and let players write mods.
+Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 
 Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
 <!-- /project-copy: intro -->
 
-Rustia is a pure-Rust interpreter for standalone Luau. The source is public
-for experimental use.
+**Version note.** [`0.1.0`](https://crates.io/crates/rustia/0.1.0) was an earlier
+game-engine project I set aside. `0.2.0` is planned as the first release of this
+Luau interpreter.
 
 ## Features
 
 <!-- project-copy: features -->
-- **Hot reload.** Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
-- **Deterministic execution.** Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
-- **Pure Rust runtime.** One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
-- **Rust functions and objects.** Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
-- **Script execution limits.** Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+<details>
+<summary><strong>Hot reload</strong></summary>
+
+Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
+
+</details>
+
+<details>
+<summary><strong>Deterministic execution</strong></summary>
+
+Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+
+</details>
+
+<details>
+<summary><strong>Pure Rust runtime</strong></summary>
+
+One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
+
+</details>
+
+<details>
+<summary><strong>Sans-I/O core</strong></summary>
+
+Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
+
+</details>
+
+<details>
+<summary><strong>Rust functions and objects</strong></summary>
+
+Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
+
+</details>
+
+<details>
+<summary><strong>Script execution limits</strong></summary>
+
+Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+
+</details>
 <!-- /project-copy: features -->
+
+## In development
+
+<!-- project-copy: upcoming -->
+<details>
+<summary><strong>Time-travel debugging</strong></summary>
+
+Step back through a recorded Luau run, inspect earlier values, and find the line that last changed a variable. [Follow the debugger work](https://github.com/slowchop/rustia/issues/71).
+
+</details>
+
+<details>
+<summary><strong>A Luau layer for Bevy</strong></summary>
+
+We’re building a Luau layer on top of [Bevy](https://bevy.org/) so you can change gameplay while the game runs, without rebuilding the Rust app.
+
+</details>
+
+<details>
+<summary><strong>JIT and AOT research</strong></summary>
+
+We’re exploring just-in-time (JIT) compilation in the background during development and ahead-of-time (AOT) compilation for bundled scripts. Today Rustia interprets Luau bytecode. [Follow the compilation work](https://github.com/slowchop/rustia/issues/89).
+
+</details>
+
+<details>
+<summary><strong>Synth in Luau</strong></summary>
+
+We’re also having fun with a Luau synth in the browser. Write and tweak sounds live, record MIDI performances, and record audio from instruments.
+
+</details>
+<!-- /project-copy: upcoming -->
 
 ## Try it
 
-Install the interpreter from Git. The existing [`rustia 0.1.0` crate](https://crates.io/crates/rustia/0.1.0) is the original game engine.
-With Rust 1.95 or newer, run `cargo new hello-rustia`, then `cd hello-rustia`.
-Add this line under `[dependencies]` in `Cargo.toml`.
+Until the crates.io release, add Rustia from Git with Rust 1.95 or newer.
+Expect API changes on `main` until Rustia reaches `1.0.0`.
 
-```toml
-rustia = { git = "https://github.com/slowchop/rustia", rev = "3acfd682a19ae43af65ef204bc19e1d692c145ba" }
+```sh
+cargo add rustia --git https://github.com/slowchop/rustia --branch main
 ```
 
 ### A first script
 
-Rust gives Luau a score and a function called `double`. Put this in
-`src/main.rs` and run `cargo run`.
+This example runs a Luau script from Rust. The script calls a Rust function and
+returns the result. The Luau source is inline to keep the example short. In a
+real app, load `.luau` files at runtime so you can edit scripts without
+recompiling the Rust app.
+
+Put this in `src/main.rs` and run `cargo run`.
 
 ```rust
 use rustia::Rustia;
@@ -104,14 +176,18 @@ can run another script. [Memory recovery test](https://github.com/slowchop/rusti
 
 ## Cargo features
 
-- **`web-live`** (default) provides system entropy and the browser adapters for
-  time and randomness. For bare WebAssembly, disable default features and supply
-  the host services your application needs. [Bare Wasm example](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
-- **`transferable`** lets an idle interpreter and its live handles move together
-  to another Rust thread. Each call still needs exclusive access to the interpreter.
+- **`platform-adapters`** is on by default. It provides system randomness and
+  connects browser builds to JavaScript clocks, randomness, and console output.
+  `RustiaBuilder::standard()` starts with a fixed seed and repeatable clocks.
+  `RustiaBuilder::live()` uses real clocks and a fresh seed. For WebAssembly
+  without JavaScript imports, set `default-features = false` and pass your own
+  clocks and seed provider if you use `live()`.
+  [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
+- **`send`** makes `Rustia` and its live handles `Send`, so you can move
+  them together to another thread. Calls still need `&mut Rustia`.
   [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
 
-  From a Rustia checkout, run `cargo run --locked -p rustia --features transferable --example transferable`.
+  From a Rustia checkout, run `cargo run --locked -p rustia --features send --example transferable`.
 
 ## Examples and API reference
 
@@ -206,7 +282,7 @@ steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
 
 ## Project status and source access
 
-Rustia’s API may change before its first supported release. See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
+See [which platforms have been tested](https://github.com/slowchop/rustia/blob/main/design/96-browser-platform-acceptance.md)
 and [what’s left before release](https://github.com/slowchop/rustia/blob/main/design/90-release-readiness.md).
 
 Anyone can read the [maintainer backlog](https://github.com/slowchop/rustia/issues) and pull requests.

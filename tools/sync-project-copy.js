@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const { blurb, origin, features } = JSON.parse(
+const { blurb, origin, features, upcoming } = JSON.parse(
   fs.readFileSync(path.join(root, "project-copy.json"), "utf8"),
 );
 
@@ -38,21 +38,38 @@ function replaceBlock(source, name, start, end, replacement) {
   return source.slice(0, begin + start.length) + replacement + source.slice(finish);
 }
 
+function readmeEntries(entries) {
+  return entries.map(({ title, description, readmeLink }) => [
+    "<details>",
+    `<summary><strong>${escapeHtml(title)}</strong></summary>`,
+    "",
+    readmeLink ? `${description} · ${readmeLink}` : description,
+    "",
+    "</details>",
+  ].join("\n")).join("\n\n");
+}
+
+function homepageEntries(entries) {
+  return entries.map(({ title, description, icon, iconImage }) => {
+    const mark = iconImage
+      ? `<img src="${escapeHtml(iconImage)}" width="20" height="20" alt="">`
+      : escapeHtml(icon);
+    return [
+      "      <div>",
+      `        <dt><span class="feature-icon" aria-hidden="true">${mark}</span>${escapeHtml(title)}</dt>`,
+      `        <dd>${html(description)}</dd>`,
+      "      </div>",
+    ].join("\n");
+  }).join("\n");
+}
+
 function render() {
   const description = `${blurb}\n\n${origin}`;
-  const markdownFeatures = features.map(({ title, description, readmeLink }) =>
-    `- **${title}.** ${description} · ${readmeLink}`).join("\n");
-  const htmlFeatures = features.map(({ title, description, icon }) => [
-    "      <div>",
-    `        <dt><span class="feature-icon" aria-hidden="true">${escapeHtml(icon)}</span>${escapeHtml(title)}</dt>`,
-    `        <dd>${html(description)}</dd>`,
-    "      </div>",
-  ].join("\n")).join("\n");
-
   return [
     ["README.md", [
       ["<!-- project-copy: intro -->", "<!-- /project-copy: intro -->", description],
-      ["<!-- project-copy: features -->", "<!-- /project-copy: features -->", markdownFeatures],
+      ["<!-- project-copy: features -->", "<!-- /project-copy: features -->", readmeEntries(features)],
+      ["<!-- project-copy: upcoming -->", "<!-- /project-copy: upcoming -->", readmeEntries(upcoming)],
     ]],
     ["crates/rustia/Cargo.toml", [
       ["# project-copy: intro", "# /project-copy: intro", `description = ${JSON.stringify(plainText(description))}`],
@@ -64,7 +81,8 @@ function render() {
     ["website/index.html", [
       ["    <!-- project-copy: intro -->", "    <!-- /project-copy: intro -->",
         `    <p>${html(blurb)}</p>\n    <p>${html(origin, true)}</p>`],
-      ["      <!-- project-copy: features -->", "      <!-- /project-copy: features -->", htmlFeatures],
+      ["      <!-- project-copy: features -->", "      <!-- /project-copy: features -->", homepageEntries(features)],
+      ["      <!-- project-copy: upcoming -->", "      <!-- /project-copy: upcoming -->", homepageEntries(upcoming)],
     ]],
   ].map(([name, blocks]) => {
     const file = path.join(root, name);
