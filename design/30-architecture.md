@@ -67,7 +67,8 @@ One opcode-handler core, **one portable engine for all targets** (native + wasm3
 rustia-lexer      hand-written Luau lexer
 rustia-parser     recursive-descent → AST; validates supported Luau type syntax, including generics and type packs.
                   Types are erased at runtime. A static type checker is deferred.
-rustia-compiler   canonical in-memory source bundles and static literal-require graphs; AST → rustia bytecode;
+rustia-compiler   canonical in-memory source bundles, static literal-require graphs and conservative stateless
+                  function-graph admission; AST → rustia bytecode;
                   constant folding (SAME pinned libm + canon as the VM), builtin recognition, GENERIC
                   superinstruction fusion, register allocation; O0 mode for hot-reload
 rustia-vm         16-byte tagged Value, owned tracing heap with instruction-count collection, big-match→br_table

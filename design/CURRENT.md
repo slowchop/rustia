@@ -189,9 +189,9 @@ and scalar arithmetic, with a bounded source and token stream. The closure must
 read or write the declared capture. The generated function accepts and returns
 the numeric state explicitly and follows the VM's f64 NaN canonicalization. It does not
 enter the VM's execution or budget machinery. The experiment is currently
-limited to explicitly opted-in calls outside VM policy. Module graphs, rooted
-capture integration, dynamic values and a generally supported execution backend
-remain separate work.
+limited to explicitly opted-in calls outside VM policy. Rooted capture
+integration, dynamic values and a generally supported execution backend remain
+separate work.
 
 The same issue now has an experimental compiler-owned source boundary. An
 embedder supplies canonical project-relative module keys and immutable source
@@ -204,6 +204,14 @@ failures, resolver failures and cycles identify the importing module and byte
 span. Unreachable invalid source remains part of the accepted-source identity
 without blocking an unrelated entry graph. Filesystem discovery, dynamic
 `require`, build scheduling and artifact publication remain host-owned.
+
+The same source boundary can conservatively admit a reachable graph of pure
+function modules. File-scope declarations are limited to direct imports and
+literal scalars; bodies reject mutable captures, host effects, indirect calls,
+nested closures and unsupported control flow with module identity and a source
+span. This policy is now shared compiler behavior, but it does not claim that
+every backend implements every admitted expression. Embedders still choose
+interpreter fallback and the point when an artifact becomes active.
 
 A second opt-in experiment emits Rust for a bounded zero-argument callback
 with calls through named captures, local bindings and conditional control
