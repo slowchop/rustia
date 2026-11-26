@@ -1,0 +1,343 @@
+name: Rustia staged correctness
+
+"on":
+  workflow_call:
+    inputs:
+      checkout_sha:
+        description: Exact candidate commit selected by the protected caller
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  stage1-quick:
+    name: stage1-quick
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact checkout
+        working-directory: candidate
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain and wasm target
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          components: clippy, rustfmt
+          cache: false
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Run canonical early partition
+        working-directory: candidate
+        env:
+          RUSTIA_PREFLIGHT_ROOT: ${{ github.workspace }}/candidate
+        run: node ../trusted/tools/run-release-preflight.js --stage quick
+
+  stage1-gate:
+    name: stage1-gate
+    needs: stage1-quick
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require Stage 1
+        env:
+          QUICK_RESULT: ${{ needs.stage1-quick.result }}
+        run: test "$QUICK_RESULT" = success
+
+  stage2-differential:
+    name: stage2-differential
+    needs: stage1-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          cache: false
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Build the pinned oracle worker
+        run: cargo build --locked --manifest-path fuzz/Cargo.toml --features oracle --bin error-oracle-worker
+      - name: Compare release diagnostics with pinned Luau
+        run: node tools/audit-release-errors.mjs
+      - name: Compare compiler and parser behavior with pinned Luau
+        run: |
+          cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_compiler
+          cargo test --locked --manifest-path fuzz/Cargo.toml --features oracle --test upstream_parser
+          cargo test --locked --manifest-path fuzz/Cargo.toml generated_differential_smoke -- --ignored
+        env:
+          RUSTIA_DIFF_WORKER: ${{ github.workspace }}/fuzz/target/debug/error-oracle-worker
+
+  stage2-portable:
+    name: stage2-portable (${{ matrix.target }})
+    needs: stage1-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+          - aarch64-apple-ios
+          - aarch64-linux-android
+          - wasm32-unknown-unknown
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain and target
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: ${{ matrix.target }}
+          cache: false
+      - name: Check portable engine library
+        run: cargo check --locked -p rustia --lib --target ${{ matrix.target }}
+
+  stage2-gate:
+    name: stage2-gate
+    needs: [stage2-differential, stage2-portable]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every Stage 2 job
+        env:
+          DIFFERENTIAL_RESULT: ${{ needs.stage2-differential.result }}
+          PORTABLE_RESULT: ${{ needs.stage2-portable.result }}
+        run: test "$DIFFERENTIAL_RESULT" = success && test "$PORTABLE_RESULT" = success
+
+  stage3-macos:
+    name: stage3-macos
+    needs: stage2-gate
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: aarch64-apple-darwin
+          cache: false
+      - name: Run native arm64 correctness
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          bash tools/run-private-platform-golden.sh native default aarch64-apple-darwin
+          bash tools/run-private-platform-golden.sh native bare aarch64-apple-darwin
+          cargo test --locked -p rustia --target aarch64-apple-darwin --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations --test numeric_index_contract --test type_grammar
+          cargo test --locked -p rustia --target aarch64-apple-darwin --no-default-features --test host_functions --test typed_objects --test live_value_contract --test module_resolution --test yieldable_require --test callable_continuations --test numeric_index_contract --test type_grammar
+
+  stage3-node:
+    name: stage3-node
+    needs: stage2-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain and wasm target
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          cache: false
+      - name: Install matching wasm-bindgen test runner
+        run: |
+          if [ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen 0.2.126" ]; then
+            cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+          fi
+      - name: Run Node and Wasm correctness
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: |
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --test bare_wasm_live --test mixed_heap_pressure --test host_functions --test typed_objects --test live_value_contract --test yieldable_require --test callable_continuations --test numeric_index_contract --test type_grammar
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --no-default-features --lib engine_boundary_tests::mixed_heap_pressure_preserves_the_short_collection_cadence
+          bash tools/run-private-platform-golden.sh wasm bare
+          cargo test --locked -p rustia --target wasm32-unknown-unknown --test web_live --test host_functions --test typed_objects --test live_value_contract --test yieldable_require --test callable_continuations --test numeric_index_contract --test type_grammar
+          bash tools/run-private-platform-golden.sh wasm default
+
+  stage3-webkit:
+    name: stage3-webkit
+    needs: stage2-gate
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+    steps:
+      - name: Install build dependencies
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev python3
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain and wasm target
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          cache: false
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install pinned browser tools
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
+          npm ci --prefix tools/browser --ignore-scripts
+      - name: Run headless WebKit correctness
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash tools/run-browser-correctness.sh webkit 1.64.1
+      - name: Run documented browser example
+        run: |
+          cargo build --locked --manifest-path demos/web-live/Cargo.toml --target wasm32-unknown-unknown --release --target-dir demos/web-live/target
+          wasm-bindgen --target web --out-dir demos/web-live/pkg --out-name rustia_example demos/web-live/target/wasm32-unknown-unknown/release/rustia_web_live_example.wasm
+          node tools/browser/web-live-example.cjs
+
+  stage3-preflight:
+    name: stage3-preflight (${{ matrix.stage }})
+    needs: stage2-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [workspace, release]
+    steps:
+      - name: Checkout protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact checkout
+        working-directory: candidate
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"
+      - name: Install pinned Rust toolchain and wasm target
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.95.0
+          target: wasm32-unknown-unknown
+          components: clippy, rustfmt
+          cache: false
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Run canonical full partition
+        working-directory: candidate
+        env:
+          RUSTIA_PREFLIGHT_ROOT: ${{ github.workspace }}/candidate
+        run: node ../trusted/tools/run-release-preflight.js --stage "${{ matrix.stage }}"
+      - name: Run Linux workspace-only contracts
+        if: matrix.stage == 'workspace'
+        working-directory: candidate
+        run: |
+          bash tools/run-private-platform-golden.sh native default x86_64-unknown-linux-gnu
+          bash tools/run-private-platform-golden.sh native bare x86_64-unknown-linux-gnu
+          cargo clippy --locked -p rustia-compiler --all-targets --features executor-diagnostics -- -D warnings
+          cargo test --locked --release -p rustia-compiler --features executor-diagnostics --test gc_accounting_paths -- --nocapture
+
+  stage3-gate:
+    name: stage3-gate
+    needs: [stage3-macos, stage3-node, stage3-webkit, stage3-preflight]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every Stage 3 job
+        env:
+          MACOS_RESULT: ${{ needs.stage3-macos.result }}
+          NODE_RESULT: ${{ needs.stage3-node.result }}
+          WEBKIT_RESULT: ${{ needs.stage3-webkit.result }}
+          PREFLIGHT_RESULT: ${{ needs.stage3-preflight.result }}
+        run: test "$MACOS_RESULT" = success && test "$NODE_RESULT" = success && test "$WEBKIT_RESULT" = success && test "$PREFLIGHT_RESULT" = success

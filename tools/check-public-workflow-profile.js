@@ -7,7 +7,8 @@ const path = require("node:path");
 const CORE_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
 const QUICK_FILE = "quick.yml";
 const BULK_FILE = "bulk.yml";
-const EXPECTED_FILES = Object.freeze([...CORE_FILES, QUICK_FILE, BULK_FILE]);
+const STAGED_CORRECTNESS_FILE = "staged-correctness.yml";
+const EXPECTED_FILES = Object.freeze([...CORE_FILES, QUICK_FILE, BULK_FILE, STAGED_CORRECTNESS_FILE]);
 const QUICK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric target repository identity bound by the controller\n        type: string\n        required: true\n      admission_id:\n        description: Canonical controller admission identity\n        type: string\n        required: true\n      pull_request:\n        description: Numeric source pull-request identity\n        type: string\n        required: true\n      head_repository_id:\n        description: Numeric source repository identity\n        type: string\n        required: true\n      head_repository_full_name:\n        description: Source owner and repository used for the exact checkout\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact source commit to check out\n        type: string\n        required: true\n      quick_intent_digest:\n        description: SHA-256 digest of the canonical Quick intent\n        type: string\n        required: true\n';
 const BULK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric repository identity bound by the controller\n        type: string\n        required: true\n      attempt_id:\n        description: Numeric controller attempt identity\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact candidate commit to check out\n        type: string\n        required: true\n      manifest_digest:\n        description: SHA-256 digest of the canonical attempt manifest\n        type: string\n        required: true\n';
 const HOSTED_MAC_SETUP = [
@@ -157,10 +158,11 @@ function checkTriggers(text, expected, label) {
   }
 }
 
-function checkActionPins(text, label) {
+function checkActionPins(text, label, allowedLocalWorkflow = null) {
   const normalized = (line) => line.trim().replace(/^-\s+/, "");
   for (const line of text.split(/\r?\n/).map(normalized).filter((value) => value.startsWith("uses: "))) {
     const action = line.slice("uses: ".length).split(/\s+/, 1)[0];
+    if (action === allowedLocalWorkflow) continue;
     if (!PINNED_ACTIONS.has(action)) reject(`${label} uses an unapproved or unpinned action ${action}`);
   }
   const lines = text.split(/\r?\n/);
@@ -231,10 +233,76 @@ function requireExactJobHeader(block, expected, label) {
   }
 }
 
-function checkBulk(text) {
+function checkStagedCorrectness(text) {
+  const label = ".github/workflows/staged-correctness.yml";
+  requireText(text, "name: Rustia staged correctness\n", label);
+  requireText(text, '"on":\n  workflow_call:\n    inputs:\n      checkout_sha:', label);
+  checkPermissions(text, label);
+  checkActionPins(text, label);
+  for (const needle of FORBIDDEN_WORKFLOW_TEXT) {
+    if (needle !== "workflow_call") forbidText(text, needle, label);
+  }
+  if (/^\s*continue-on-error:/m.test(text)) reject(`${label} must not suppress failed checks`);
+  forbidText(text, "self-hosted", label);
+  if (/^\s*(?:-\s+)?uses:\s*\.\//m.test(text)) reject(`${label} must not call another local workflow or action`);
+
+  const jobs = jobBlocks(text, label);
+  const expected = [
+    "stage1-quick", "stage1-gate",
+    "stage2-differential", "stage2-portable", "stage2-gate",
+    "stage3-macos", "stage3-node", "stage3-webkit", "stage3-preflight", "stage3-gate",
+  ];
+  if (JSON.stringify([...jobs.keys()]) !== JSON.stringify(expected)) {
+    reject(`${label} jobs must preserve the reviewed fail-fast order`);
+  }
+  for (const job of expected.filter((name) => name !== "stage3-macos")) {
+    requireText(jobs.get(job), "runs-on: ubuntu-24.04", `${label} ${job}`);
+  }
+  requireText(jobs.get("stage3-macos"), "runs-on: macos-15", `${label} stage3-macos`);
+  for (const job of [
+    "stage1-quick", "stage2-differential", "stage2-portable",
+    "stage3-macos", "stage3-node", "stage3-webkit", "stage3-preflight",
+  ]) {
+    const block = jobs.get(job);
+    requireText(block, "ref: ${{ inputs.checkout_sha }}", `${label} ${job}`);
+    requireText(block, "persist-credentials: false", `${label} ${job}`);
+    requireText(block, "name: Verify exact checkout", `${label} ${job}`);
+    requireText(block, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', `${label} ${job}`);
+  }
+  for (const [gate, needs, results] of [
+    ["stage1-gate", "needs: stage1-quick", ["QUICK_RESULT"]],
+    ["stage2-gate", "needs: [stage2-differential, stage2-portable]", ["DIFFERENTIAL_RESULT", "PORTABLE_RESULT"]],
+    ["stage3-gate", "needs: [stage3-macos, stage3-node, stage3-webkit, stage3-preflight]", ["MACOS_RESULT", "NODE_RESULT", "WEBKIT_RESULT", "PREFLIGHT_RESULT"]],
+  ]) {
+    const block = jobs.get(gate);
+    requireText(block, needs, `${label} ${gate}`);
+    requireText(block, "if: always()", `${label} ${gate}`);
+    for (const result of results) requireText(block, `test \"$${result}\" = success`, `${label} ${gate}`);
+  }
+  requireText(jobs.get("stage2-differential"), "needs: stage1-gate", label);
+  requireText(jobs.get("stage2-portable"), "needs: stage1-gate", label);
+  requireText(jobs.get("stage3-macos"), "needs: stage2-gate", label);
+  requireText(jobs.get("stage3-node"), "needs: stage2-gate", label);
+  requireText(jobs.get("stage3-webkit"), "needs: stage2-gate", label);
+  requireText(jobs.get("stage3-preflight"), "needs: stage2-gate", label);
+  requireText(jobs.get("stage1-quick"), "--stage quick", label);
+  requireText(jobs.get("stage3-preflight"), "stage: [workspace, release]", label);
+  requireText(jobs.get("stage3-preflight"), '--stage "${{ matrix.stage }}"', label);
+  requireText(jobs.get("stage2-differential"), "generated_differential_smoke", label);
+  for (const target of [
+    "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-ios",
+    "aarch64-linux-android", "wasm32-unknown-unknown",
+  ]) requireText(jobs.get("stage2-portable"), `- ${target}`, label);
+  requireText(jobs.get("stage3-webkit"), "run-browser-correctness.sh webkit 1.64.1", label);
+  requireText(jobs.get("stage3-webkit"), "web-live-example.cjs", label);
+  requireText(jobs.get("stage3-preflight"), "gc_accounting_paths", label);
+}
+
+function checkBulk(text, stagedText) {
   const label = ".github/workflows/bulk.yml";
   const expectedPrefix = [
-    "name: Rustia Bulk trust fixture",
+    "name: Rustia Bulk",
     "run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}",
     "",
     BULK_TRIGGERS.trimEnd(),
@@ -243,125 +311,37 @@ function checkBulk(text) {
     "  contents: read",
     "",
     "jobs:",
-    "",
   ].join("\n");
-  if (!text.startsWith(expectedPrefix)) {
-    reject(`${label} must retain the exact reviewed top-level configuration before jobs`);
-  }
-  checkTriggers(text, BULK_TRIGGERS, label);
-  checkPermissions(text, label);
-  checkActionPins(text, label);
-  checkNoForbidden(text, label);
-  const permissionsStart = text.indexOf("permissions:\n");
-  const jobsStart = text.indexOf("jobs:\n", permissionsStart);
-  if (permissionsStart < 0 || jobsStart < 0
-      || text.slice(permissionsStart, jobsStart) !== "permissions:\n  contents: read\n\n") {
-    reject(`${label} must put only top-level contents: read before jobs`);
-  }
-  requireText(text, "name: Rustia Bulk trust fixture\n", label);
+  if (!text.startsWith(expectedPrefix)) reject(`${label} must retain the reviewed top-level configuration`);
+  requireText(text, "name: Rustia Bulk\n", label);
   requireText(text,
     "run-name: rustia-ci:${{ inputs.repository_id }}:${{ inputs.attempt_id }}:${{ inputs.checkout_sha }}:${{ inputs.manifest_digest }}\n",
     label);
-
+  checkTriggers(text, BULK_TRIGGERS, label);
+  checkPermissions(text, label);
+  const localCall = "./.github/workflows/staged-correctness.yml";
+  checkActionPins(text, label, localCall);
+  checkNoForbidden(text.replace(`uses: ${localCall}`, "# reviewed local workflow call"), label);
+  if ((text.match(new RegExp(localCall.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length !== 1) {
+    reject(`${label} must call the staged correctness workflow exactly once`);
+  }
   const jobs = jobBlocks(text, label);
-  const names = [...jobs.keys()].sort();
-  if (JSON.stringify(names) !== JSON.stringify(["integrity", "test"])) {
-    reject(`${label} jobs must be exactly integrity and test; found ${names.join(", ")}`);
+  if (JSON.stringify([...jobs.keys()]) !== JSON.stringify(["integrity", "validation"])) {
+    reject(`${label} jobs must be exactly integrity then validation`);
   }
-  for (const [name, block] of jobs) {
-    const runners = [...block.matchAll(/^    runs-on: (.+)$/gm)].map((match) => match[1]);
-    if (JSON.stringify(runners) !== JSON.stringify(["ubuntu-24.04"])) {
-      reject(`${label} job ${name} must run once on ubuntu-24.04`);
-    }
-    requireText(block, `    name: ${name}\n`, `${label} ${name}`);
-    requireText(block, "ref: ${{ inputs.checkout_sha }}", `${label} ${name}`);
-    requireText(block, "fetch-depth: 1", `${label} ${name}`);
-    requireText(block, "persist-credentials: false", `${label} ${name}`);
-  }
-
   const integrity = jobs.get("integrity");
-  requireExactJobHeader(integrity, `  integrity:
-    name: integrity
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:`, `${label} integrity`);
-  const integritySteps = exactStepBlocks(integrity, [
-    "Validate dispatch inputs",
-    "Checkout candidate",
-    "Verify exact checkout",
-  ], `${label} integrity`);
-  requireExactStep(integritySteps, "Validate dispatch inputs", `      - name: Validate dispatch inputs
-        shell: bash
-        env:
-          REPOSITORY_ID: \${{ inputs.repository_id }}
-          ATTEMPT_ID: \${{ inputs.attempt_id }}
-          CHECKOUT_SHA: \${{ inputs.checkout_sha }}
-          MANIFEST_DIGEST: \${{ inputs.manifest_digest }}
-        run: |
-          set -euo pipefail
-          [[ "$REPOSITORY_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$ATTEMPT_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$CHECKOUT_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$MANIFEST_DIGEST" =~ ^[0-9a-f]{64}$ ]]`, `${label} integrity`);
-  requireExactStep(integritySteps, "Checkout candidate", `      - name: Checkout candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: \${{ inputs.checkout_sha }}
-          fetch-depth: 1
-          persist-credentials: false`, `${label} integrity`);
-  requireExactStep(integritySteps, "Verify exact checkout", `      - name: Verify exact checkout
-        shell: bash
-        env:
-          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} integrity`);
-  if ((text.match(/      - name: Verify exact checkout\n/g) ?? []).length !== 1) {
-    reject(`${label} must contain exactly one Verify exact checkout step`);
-  }
-
-  const test = jobs.get("test");
-  requireExactJobHeader(test, `  test:
-    name: test
-    needs: integrity
-    if: github.ref == 'refs/heads/main' && needs.integrity.result == 'success'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:`, `${label} test`);
-  const testSteps = exactStepBlocks(test, [
-    "Checkout protected policy",
-    "Checkout candidate",
-    "Verify test checkout",
-    "Check the protected workflow policy",
-  ], `${label} test`);
-  requireExactStep(testSteps, "Checkout protected policy", `      - name: Checkout protected policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: \${{ github.sha }}
-          path: trusted
-          fetch-depth: 1
-          persist-credentials: false`, `${label} test`);
-  requireExactStep(testSteps, "Checkout candidate", `      - name: Checkout candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: \${{ inputs.checkout_sha }}
-          path: candidate
-          fetch-depth: 1
-          persist-credentials: false`, `${label} test`);
-  requireExactStep(testSteps, "Verify test checkout", `      - name: Verify test checkout
-        shell: bash
-        working-directory: candidate
-        env:
-          EXPECTED_CHECKOUT_SHA: \${{ inputs.checkout_sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"`, `${label} test`);
-  requireExactStep(testSteps, "Check the protected workflow policy", `      - name: Check the protected workflow policy
-        run: node trusted/tools/check-workflows.js`, `${label} test`);
-  if ((text.match(/uses: actions\/checkout@/g) ?? []).length !== 3) {
-    reject(`${label} must contain one candidate checkout per job and one protected-policy checkout`);
-  }
+  requireText(integrity, "if: github.ref == 'refs/heads/main'", label);
+  requireText(integrity, "runs-on: ubuntu-24.04", label);
+  requireText(integrity, "ref: ${{ inputs.checkout_sha }}", label);
+  requireText(integrity, "name: Verify exact checkout", label);
+  requireText(integrity, 'test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', label);
+  const validation = jobs.get("validation");
+  requireText(validation, "needs: integrity", label);
+  requireText(validation, "needs.integrity.result == 'success'", label);
+  requireText(validation, `uses: ${localCall}`, label);
+  requireText(validation, "checkout_sha: ${{ inputs.checkout_sha }}", label);
+  if (typeof stagedText !== "string") reject(`missing active workflow ${STAGED_CORRECTNESS_FILE}`);
+  checkStagedCorrectness(stagedText);
 }
 
 function checkQuick(text) {
@@ -742,8 +722,9 @@ function validatePublicProfile({ profile, files, workflows }) {
   if (hosted) {
     if (typeof workflows[QUICK_FILE] !== "string") reject(`missing active workflow ${QUICK_FILE}`);
     if (typeof workflows[BULK_FILE] !== "string") reject(`missing active workflow ${BULK_FILE}`);
+    if (typeof workflows[STAGED_CORRECTNESS_FILE] !== "string") reject(`missing active workflow ${STAGED_CORRECTNESS_FILE}`);
     checkQuick(workflows[QUICK_FILE]);
-    checkBulk(workflows[BULK_FILE]);
+    checkBulk(workflows[BULK_FILE], workflows[STAGED_CORRECTNESS_FILE]);
   }
   if (files.includes(rehearsalFiles[0])) {
     checkCi(workflows[rehearsalFiles[0]], "rehearsal");
@@ -774,43 +755,44 @@ function readCheckout(root) {
 function bulkSelfTest(root) {
   const assert = require("node:assert/strict");
   const bulk = fs.readFileSync(path.join(root, ".github/workflows/bulk.yml"), "utf8");
-  checkBulk(bulk);
+  const staged = fs.readFileSync(path.join(root, ".github/workflows/staged-correctness.yml"), "utf8");
+  checkBulk(bulk, staged);
   let cases = 0;
   for (const [label, changed] of [
     ["bulk pull-request trigger", bulk.replace("  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:")],
     ["bulk input drift", bulk.replace("      manifest_digest:", "      reported_digest:")],
     ["bulk write permission", bulk.replace("contents: read", "contents: write")],
     ["bulk job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    permissions: { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
-    ["bulk spaced job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    permissions : { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
-    ["bulk quoted job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    \"permissions\": { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
-    ["bulk single-quoted job flow permission", bulk.replace("    runs-on: ubuntu-24.04", "    'permissions': { actions: write, contents: read }\n    runs-on: ubuntu-24.04")],
-    ["bulk job environment preload", bulk.replace("    timeout-minutes: 10\n    steps:", "    timeout-minutes: 10\n    env: { NODE_OPTIONS: --require=./candidate/attacker.js }\n    steps:")],
     ["bulk top-level environment preload", bulk.replace('"on":\n', "env:\n  NODE_OPTIONS: --require=./candidate/attacker.js\n\n\"on\":\n")],
     ["bulk top-level run defaults", bulk.replace('"on":\n', "defaults:\n  run:\n    shell: bash -c 'node candidate/attacker.js; bash {0}'\n\n\"on\":\n")],
     ["bulk token exposure", bulk.replace("        shell: bash", "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n        shell: bash")],
-    ["bulk indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github['token'] }}\n        shell: bash")],
-    ["bulk spaced indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github[ 'token' ] }}\n        shell: bash")],
-    ["bulk double-quoted indexed token exposure", bulk.replace("        shell: bash", "        env:\n          TOKEN: ${{ github[ \"token\" ] }}\n        shell: bash")],
-    ["bulk whole context token exposure", bulk.replace("        shell: bash", "        env:\n          CONTEXT: ${{ toJSON(github) }}\n        shell: bash")],
-    ["bulk moving protected policy ref", bulk.replace("ref: ${{ github.sha }}", "ref: main")],
     ["bulk untrusted ref", bulk.replace("ref: ${{ inputs.checkout_sha }}", "ref: main")],
     ["bulk persisted credentials", bulk.replace("persist-credentials: false", "persist-credentials: true")],
     ["bulk self-hosted runner", bulk.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")],
     ["bulk title drift", bulk.replace("run-name: rustia-ci:", "run-name: bulk:")],
     ["bulk job-name drift", bulk.replace("  integrity:\n", "  verify:\n")],
     ["bulk missing exact-checkout step", bulk.replace("Verify exact checkout", "Trust checkout")],
-    ["bulk command before validation", bulk.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - name: Run early command\n        run: true\n\n      - name: Validate dispatch inputs")],
-    ["bulk unnamed command before validation", bulk.replace("    steps:\n      - name: Validate dispatch inputs", "    steps:\n      - run: true\n\n      - name: Validate dispatch inputs")],
-    ["bulk command before exact verification", bulk.replace("      - name: Verify exact checkout", "      - name: Run candidate early\n        run: true\n\n      - name: Verify exact checkout")],
-    ["bulk in-step command before exact verification", bulk.replace('          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"', '          node candidate/early.js\n          test "$(git rev-parse HEAD)" = "$EXPECTED_CHECKOUT_SHA"')],
-    ["bulk test before verification", bulk.replace("      - name: Verify test checkout", "      - name: Check the protected workflow policy\n        run: node tools/check-workflows.js\n\n      - name: Verify test checkout")],
-    ["bulk candidate policy checker", bulk.replace("node trusted/tools/check-workflows.js", "node candidate/tools/check-workflows.js")],
-    ["bulk comment-spoofed policy provenance", bulk
-      .replace("ref: ${{ github.sha }}", "ref: ${{ inputs.checkout_sha }}")
-      .replace("node trusted/tools/check-workflows.js", "node candidate/tools/check-workflows.js\n        # ref: ${{ github.sha }}\n        # run: node trusted/tools/check-workflows.js")],
+    ["bulk missing staged call", bulk.replace("./.github/workflows/staged-correctness.yml", "./.github/workflows/ci.yml")],
+    ["bulk wrong staged input", bulk.replace("checkout_sha: ${{ inputs.checkout_sha }}", "checkout_sha: ${{ github.sha }}")],
   ]) {
     assert.notEqual(changed, bulk, `${label}: mutation did not apply`);
-    assert.throws(() => checkBulk(changed), /bulk\.yml/, label);
+    assert.throws(() => checkBulk(changed, staged), /bulk\.yml/, label);
+    cases += 1;
+  }
+  for (const [label, changed] of [
+    ["staged workflow trigger drift", staged.replace("  workflow_call:", "  workflow_dispatch:\n  workflow_call:")],
+    ["staged workflow write permission", staged.replace("contents: read", "contents: write")],
+    ["staged workflow self-hosted runner", staged.replace("runs-on: ubuntu-24.04", "runs-on: self-hosted")],
+    ["staged workflow missing first gate", staged.replace("needs: stage1-quick", "needs: []")],
+    ["staged workflow bypasses first gate", staged.replace("needs: stage1-gate", "needs: stage1-quick")],
+    ["staged workflow bypasses second gate", staged.replace("needs: stage2-gate", "needs: stage1-gate")],
+    ["staged workflow loses exact checkout", staged.replace("name: Verify exact checkout", "name: Trust checkout")],
+    ["staged workflow drops differential smoke", staged.replace("generated_differential_smoke", "missing_differential_smoke")],
+    ["staged workflow drops WebKit", staged.replace("run-browser-correctness.sh webkit 1.64.1", "true")],
+    ["staged workflow enables cache", staged.replace("cache: false", "cache: true")],
+  ]) {
+    assert.notEqual(changed, staged, `${label}: mutation did not apply`);
+    assert.throws(() => checkStagedCorrectness(changed), /staged-correctness\.yml/, label);
     cases += 1;
   }
   return { cases, passed: true };
@@ -947,5 +929,5 @@ function selfTest(root) {
   }
 }
 
-module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkQuick, checkBulk, readCheckout, selfTest, quickSelfTest, bulkSelfTest,
+module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkQuick, checkBulk, checkStagedCorrectness, readCheckout, selfTest, quickSelfTest, bulkSelfTest,
   REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };

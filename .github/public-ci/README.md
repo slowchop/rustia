@@ -16,12 +16,14 @@ repository visibility changes outside the authority of this file.
 | Manual dispatch | CI can also exercise Windows native and real Firefox. The fuzz workflow can run a longer campaign. |
 
 The separate [Quick](../workflows/quick.yml) and
-[Bulk](../workflows/bulk.yml) trust fixtures are dispatch-only. Both bind the
+[Bulk](../workflows/bulk.yml) workflows are dispatch-only. Both bind the
 controller's typed inputs into stable run titles, use read-only hosted runners
-and verify the exact requested checkout before candidate commands. Quick checks
-the source repository and commit, then runs the canonical early partition from
-protected-main policy. Bulk retains the synthetic-candidate handshake. Neither
-fixture activates the controller or replaces the current correctness workflows.
+and verify the exact requested checkout before candidate commands. Quick runs
+the canonical early partition from protected `main`. Bulk runs
+[staged correctness](../workflows/staged-correctness.yml): Quick first, portable
+and differential checks second, then the full platform and preflight suite.
+A failed gate stops later stages. These workflows do not activate the private
+controller or replace the existing pull-request workflows.
 
 The required checks use standard Ubuntu and macOS VMs. They cover the preflight
 stages and aggregate, eight target builds, native Linux and macOS, Node/V8,
