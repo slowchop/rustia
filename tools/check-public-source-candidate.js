@@ -199,12 +199,14 @@ function selfTest(root) {
     fs.writeFileSync(path.join(temporary, ".github/workflows/bulk.yml"), workflows["bulk.yml"]);
     workflows["quick.yml"] = fs.readFileSync(path.join(root, ".github/workflows/quick.yml"), "utf8");
     fs.writeFileSync(path.join(temporary, ".github/workflows/quick.yml"), workflows["quick.yml"]);
+    workflows["staged-correctness.yml"] = fs.readFileSync(path.join(root, ".github/workflows/staged-correctness.yml"), "utf8");
+    fs.writeFileSync(path.join(temporary, ".github/workflows/staged-correctness.yml"), workflows["staged-correctness.yml"]);
     fs.writeFileSync(path.join(temporary, "design/public-source-profile.json"), JSON.stringify({ ...profile, correctness_ci: "public-hosted" }));
-    assert.equal(privateProfile.readCheckout(temporary).files, 4);
+    assert.equal(privateProfile.readCheckout(temporary).files, 5);
     assert.equal(readCheckout(temporary).active, true);
     assert.throws(() => privateProfile.validatePublicProfile({
       profile: { ...profile, correctness_ci: "private-self-hosted" },
-      files: [...FILES, "bulk.yml", "quick.yml"],
+      files: [...FILES, "bulk.yml", "quick.yml", "staged-correctness.yml"],
       workflows,
     }));
     // The actual entrypoint must also validate an activated fixture, including

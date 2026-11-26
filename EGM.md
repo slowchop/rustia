@@ -55,11 +55,13 @@ private Safari attempts. The [Justfile](./Justfile) remains the local validation
 entry point. The ignored private sibling is a separate repository.
 
 The dispatch-only [Quick](./.github/workflows/quick.yml) and
-[Bulk](./.github/workflows/bulk.yml) trust fixtures are loaded from protected
-`main`. They project the controller's typed inputs into stable run titles and
-verify the exact requested checkout before candidate commands. Quick runs the
-canonical early partition from protected policy; Bulk retains the synthetic
-candidate handshake. Both remain inactive controller prerequisites.
+[Bulk](./.github/workflows/bulk.yml) workflows are loaded from protected `main`.
+They project the controller's typed inputs into stable run titles and verify the
+exact requested checkout before candidate commands. Quick runs the canonical
+early partition. Bulk calls the protected
+[staged correctness workflow](./.github/workflows/staged-correctness.yml), which
+gates cheap, portable/differential and full correctness stages in that order.
+The private controller remains inactive.
 
 The hosted Linux workspace job additionally runs the default-off executor accounting
 diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.
