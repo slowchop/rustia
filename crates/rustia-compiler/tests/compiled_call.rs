@@ -1,5 +1,7 @@
 #[cfg(not(target_family = "wasm"))]
 use rustia_compiler::compile;
+#[cfg(not(target_family = "wasm"))]
+use rustia_compiler::compiled_call::{prepare_runtime, CompiledCallReceipt};
 use rustia_compiler::{
     compiled_call::{generate, generate_from_bundle, COMPILED_CALL_ABI},
     source_bundle::SourceBundle,
@@ -131,53 +133,91 @@ fn compiler_rejects_over_budget_syntax_on_a_worker_stack() {
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
-fn generated_rust_matches_the_interpreter_with_independent_captures() {
+fn compiled_and_interpreted_calls_share_the_vm_capture() {
+    use rustia_vm::VmSettings;
     let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
-    let (call, _) = generate_from_bundle(&bundle, "entry.luau").unwrap();
-    assert_eq!(call.capture_name, "score");
-    let mut main = format!(
-        "{}\nfn main() {{\nlet mut captures = [f64::from_bits({}); 2];\n",
-        call.rust,
-        call.initial_capture.to_bits()
-    );
-    use std::fmt::Write;
-    for (slot, step) in CALLS {
-        writeln!(
-            main,
-            "let (next, value) = compiled_call(captures[{slot}], f64::from_bits({}));\ncaptures[{slot}] = next;\nprintln!(\"{{:016x}}\", value.to_bits());",
-            step.to_bits()
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let edited =
+        SourceBundle::new([("entry.luau", SOURCE.replace("score * 2", "score * 3"))]).unwrap();
+    let (_, stale) = generate_from_bundle(&edited, "entry.luau").unwrap();
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let call = prepared.instantiate(&mut vm).unwrap();
+    let value = call.call_interpreted(&mut vm, Value::number(1.0)).unwrap();
+    assert_eq!(value.as_number(), Some(2.0));
+    let value = call
+        .call(
+            &mut vm,
+            Value::number(3.0),
+            &receipt,
+            |capture, parameter| {
+                assert_eq!(capture, 1.0);
+                let next = capture + parameter;
+                Ok((next, next * 2.0))
+            },
         )
         .unwrap();
+    assert_eq!(value.as_number(), Some(8.0));
+    let value = call
+        .call(&mut vm, Value::number(-2.0), &stale, |_, _| {
+            panic!("stale artifact ran")
+        })
+        .unwrap();
+    assert_eq!(value.as_number(), Some(4.0));
+
+    for settings in [
+        VmSettings {
+            initial_fuel: Some(128),
+            ..VmSettings::default()
+        },
+        VmSettings {
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    ] {
+        let mut metered = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let call = prepared.instantiate(&mut metered).unwrap();
+        let value = call
+            .call(&mut metered, Value::number(1.0), &receipt, |_, _| {
+                panic!("metered backend ran")
+            })
+            .unwrap();
+        assert_eq!(value.as_number(), Some(2.0));
     }
-    main.push_str("}\n");
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn generated_rust_matches_the_interpreter_with_independent_captures() {
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let (call, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    assert_eq!(call.capture_name, "score");
+    let driver = r#"
+fn main() {
+    let mut inputs = std::env::args().skip(1).map(|arg| f64::from_bits(arg.parse().unwrap()));
+    let (next, value) = compiled_call(inputs.next().unwrap(), inputs.next().unwrap());
+    println!("{:016x}\n{:016x}", next.to_bits(), value.to_bits());
+}
+"#;
     let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("rustia-compiled-call-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let source = directory.join("generated.rs");
     let exe = directory.join(format!("generated{}", std::env::consts::EXE_SUFFIX));
-    fs::write(&source, main).unwrap();
+    fs::write(&source, format!("{}\n{driver}", call.rust)).unwrap();
     let output = Command::new("rustc")
         .arg(&source)
         .arg("-o")
         .arg(&exe)
         .output()
         .unwrap();
-    let run = output
-        .status
-        .success()
-        .then(|| Command::new(&exe).output().unwrap());
-    fs::remove_dir_all(directory).unwrap();
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let run = run.unwrap();
-    assert!(run.status.success());
-    assert_eq!(
-        String::from_utf8(run.stdout).unwrap(),
-        interpreted_results()
-    );
+    verify_backend(&bundle, &receipt, || Command::new(&exe));
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -185,7 +225,7 @@ fn generated_rust_matches_the_interpreter_with_independent_captures() {
 #[ignore = "requires the wasm32-unknown-unknown target and Node"]
 fn generated_wasm_matches_the_interpreter_with_independent_captures() {
     let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
-    let (call, _) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let (call, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
     let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("rustia-compiled-wasm-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
@@ -212,41 +252,76 @@ pub extern "C" fn step(capture: u64, parameter: u64, return_capture: i32) -> u64
         .output()
         .unwrap();
     let driver = r#"
-const [path, initial, ...calls] = process.argv.slice(1);
+const [path, capture, parameter] = process.argv.slice(1);
 const binary = new WebAssembly.Module(require('node:fs').readFileSync(path));
 const { step } = new WebAssembly.Instance(binary).exports;
-const captures = [BigInt(initial), BigInt(initial)];
-for (const call of calls) {
-    const [slot, parameter] = call.split(':');
-    const capture = captures[slot];
-    const value = step(capture, BigInt(parameter), 0);
-    captures[slot] = step(capture, BigInt(parameter), 1);
-    console.log(BigInt.asUintN(64, value).toString(16).padStart(16, '0'));
+for (const field of [1, 0]) {
+    console.log(BigInt.asUintN(64, step(BigInt(capture), BigInt(parameter), field)).toString(16));
 }
 "#;
-    let run = output.status.success().then(|| {
-        Command::new("node")
-            .args(["-e", driver])
-            .arg(&wasm)
-            .arg(call.initial_capture.to_bits().to_string())
-            .args(CALLS.map(|(slot, step)| format!("{slot}:{}", step.to_bits())))
-            .output()
-            .unwrap()
-    });
-    fs::remove_dir_all(directory).unwrap();
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let run = run.unwrap();
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    assert_eq!(
-        String::from_utf8(run.stdout).unwrap(),
-        interpreted_results()
-    );
+    verify_backend(&bundle, &receipt, || {
+        let mut node = Command::new("node");
+        node.args(["-e", driver]).arg(&wasm);
+        node
+    });
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn verify_backend(
+    bundle: &SourceBundle,
+    receipt: &CompiledCallReceipt,
+    command: impl Fn() -> Command,
+) {
+    let prepared = prepare_runtime(bundle, "entry.luau").unwrap();
+    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let calls = [
+        prepared.instantiate(&mut vm).unwrap(),
+        prepared.instantiate(&mut vm).unwrap(),
+    ];
+    let mut results = String::new();
+    let mut executed = 0;
+    use std::fmt::Write;
+    for (slot, parameter) in CALLS {
+        let value = calls[slot]
+            .call(
+                &mut vm,
+                Value::number(parameter),
+                receipt,
+                |capture, parameter| {
+                    executed += 1;
+                    let run = command()
+                        .arg(capture.to_bits().to_string())
+                        .arg(parameter.to_bits().to_string())
+                        .output()
+                        .unwrap();
+                    assert!(
+                        run.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&run.stderr)
+                    );
+                    let stdout = String::from_utf8(run.stdout).unwrap();
+                    let mut numbers = stdout
+                        .lines()
+                        .map(|line| f64::from_bits(u64::from_str_radix(line, 16).unwrap()));
+                    let values = (numbers.next().unwrap(), numbers.next().unwrap());
+                    assert!(numbers.next().is_none());
+                    Ok(values)
+                },
+            )
+            .unwrap();
+        writeln!(
+            &mut results,
+            "{:016x}",
+            value.as_number().unwrap().to_bits()
+        )
+        .unwrap();
+    }
+    assert_eq!(executed, CALLS.len());
+    assert_eq!(results, interpreted_results());
 }
