@@ -2,9 +2,10 @@
 //!
 //! This module performs no file I/O. Embedders choose project-path and file
 //! policy, then provide canonical module keys and source bytes. Static graph
-//! analysis recognizes top-level calls of the form `require("literal")` in
-//! local initializers or expression statements. Dynamic and nested calls stay
-//! outside this graph and remain an execution-time resolver concern.
+//! analysis recognizes unshadowed top-level calls of the form
+//! `require("literal")` in local initializers or expression statements.
+//! Dynamic and nested calls stay outside this graph and remain an
+//! execution-time resolver concern.
 
 use rustia_lexer::Span;
 use rustia_parser::{parse_source_bytes, Expr, SourceError, Stmt};
@@ -394,7 +395,7 @@ impl SourceBundle {
             bundle: self,
             resolve: &mut resolve,
             loading: Vec::new(),
-            done: BTreeSet::new(),
+            depth_below: BTreeMap::new(),
             modules: Vec::new(),
         };
         for entry in &entries {
@@ -473,7 +474,7 @@ struct Traversal<'a, F> {
     bundle: &'a SourceBundle,
     resolve: &'a mut F,
     loading: Vec<String>,
-    done: BTreeSet<String>,
+    depth_below: BTreeMap<String, usize>,
     modules: Vec<StaticModule>,
 }
 
@@ -487,9 +488,6 @@ where
         name: &str,
         imported_at: Option<(&str, Span)>,
     ) -> Result<(), ModuleGraphError> {
-        if self.done.contains(name) {
-            return Ok(());
-        }
         if let Some(index) = self.loading.iter().position(|loading| loading == name) {
             let mut cycle = self.loading[index..].to_vec();
             cycle.push(name.to_owned());
@@ -500,17 +498,14 @@ where
                 format!("cyclic static require: {}", cycle.join(" -> ")),
             ));
         }
+        if let Some(depth_below) = self.depth_below.get(name) {
+            if self.loading.len().saturating_add(*depth_below) > MAX_STATIC_MODULE_DEPTH {
+                return Err(module_depth_error(imported_at));
+            }
+            return Ok(());
+        }
         if self.loading.len() >= MAX_STATIC_MODULE_DEPTH {
-            return Err(match imported_at {
-                Some((module, span)) => ModuleGraphError::graph(
-                    module,
-                    span,
-                    format!("static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules"),
-                ),
-                None => ModuleGraphError::entry(format!(
-                    "static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules"
-                )),
-            });
+            return Err(module_depth_error(imported_at));
         }
         let source = self.bundle.source(name).ok_or_else(|| match imported_at {
             Some((module, span)) => {
@@ -536,12 +531,31 @@ where
         }
         let popped = self.loading.pop();
         debug_assert_eq!(popped.as_deref(), Some(name));
-        self.done.insert(name.to_owned());
+        let depth_below = requires
+            .iter()
+            .map(|require| {
+                self.depth_below
+                    .get(&require.target)
+                    .copied()
+                    .expect("a dependency is completed before its importer")
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.depth_below.insert(name.to_owned(), depth_below);
         self.modules.push(StaticModule {
             name: name.to_owned(),
             requires,
         });
         Ok(())
+    }
+}
+
+fn module_depth_error(imported_at: Option<(&str, Span)>) -> ModuleGraphError {
+    let message = format!("static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules");
+    match imported_at {
+        Some((module, span)) => ModuleGraphError::graph(module, span, message),
+        None => ModuleGraphError::entry(message),
     }
 }
 
@@ -554,20 +568,30 @@ fn static_requires(
         SourceError::Parse(error) => ModuleGraphError::graph(module, error.span, error.message),
     })?;
     let mut requires = Vec::new();
+    let mut require_shadowed = false;
     for statement in chunk.statements {
         match statement {
             Stmt::Local { bindings, init, .. } => {
-                for (index, expression) in init.iter().enumerate() {
-                    if let Some((request, span)) = literal_require(module, expression)? {
-                        requires.push(UnresolvedRequire {
-                            alias: bindings.get(index).map(|binding| binding.name.clone()),
-                            request,
-                            span,
-                        });
+                // Luau local bindings enter scope after every initializer has
+                // run, so `local require = require("./real")` still calls the
+                // global resolver once and shadows it for later statements.
+                if !require_shadowed {
+                    for (index, expression) in init.iter().enumerate() {
+                        if let Some((request, span)) = literal_require(module, expression)? {
+                            requires.push(UnresolvedRequire {
+                                alias: bindings.get(index).map(|binding| binding.name.clone()),
+                                request,
+                                span,
+                            });
+                        }
                     }
                 }
+                require_shadowed |= bindings.iter().any(|binding| binding.name == "require");
             }
-            Stmt::Expr { expr, .. } => {
+            Stmt::LocalFunction { name, .. } => {
+                require_shadowed |= name == "require";
+            }
+            Stmt::Expr { expr, .. } if !require_shadowed => {
                 if let Some((request, span)) = literal_require(module, &expr)? {
                     requires.push(UnresolvedRequire {
                         alias: None,

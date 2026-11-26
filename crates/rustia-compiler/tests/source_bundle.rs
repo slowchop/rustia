@@ -1,4 +1,6 @@
-use rustia_compiler::source_bundle::{resolve_relative_module, SourceBundle};
+use rustia_compiler::source_bundle::{
+    resolve_relative_module, SourceBundle, MAX_STATIC_MODULE_DEPTH,
+};
 
 fn bundle(sources: &[(&str, &str)]) -> SourceBundle {
     SourceBundle::new(
@@ -98,6 +100,72 @@ fn graph_is_dependency_first_with_nested_and_shared_imports() {
     assert_eq!(main.requires[0].request, "./left");
     assert_eq!(main.requires[0].target, "game/left.luau");
     assert_eq!(main.requires[1].target, "game/right.luau");
+}
+
+#[test]
+fn shadowed_require_is_not_a_static_dependency() {
+    let sources = bundle(&[
+        (
+            "variable.luau",
+            "local require = require('./real')\nlocal missing = require('./missing')\nreturn require",
+        ),
+        (
+            "function.luau",
+            "local function require(_) return 1 end\nrequire('./missing')\nreturn require",
+        ),
+        ("real.luau", "return 1"),
+    ]);
+
+    let variable = sources.static_module_graph(&["variable.luau"]).unwrap();
+    assert_eq!(
+        variable.module_names().collect::<Vec<_>>(),
+        ["real.luau", "variable.luau"]
+    );
+    assert_eq!(variable.module("variable.luau").unwrap().requires.len(), 1);
+
+    let function = sources.static_module_graph(&["function.luau"]).unwrap();
+    assert_eq!(
+        function.module_names().collect::<Vec<_>>(),
+        ["function.luau"]
+    );
+}
+
+#[test]
+fn depth_limit_checks_later_paths_through_shared_subgraphs() {
+    let shared_depth = 3;
+    let chain_depth = MAX_STATIC_MODULE_DEPTH - shared_depth;
+    let mut sources = Vec::new();
+    sources.push((
+        "root.luau".to_owned(),
+        b"require('./shared-0')\nrequire('./chain-0')".to_vec(),
+    ));
+    for index in 0..shared_depth {
+        let source = if index + 1 == shared_depth {
+            b"return 1".to_vec()
+        } else {
+            format!("require('./shared-{}')", index + 1).into_bytes()
+        };
+        sources.push((format!("shared-{index}.luau"), source));
+    }
+    for index in 0..chain_depth {
+        let target = if index + 1 == chain_depth {
+            "shared-0".to_owned()
+        } else {
+            format!("chain-{}", index + 1)
+        };
+        sources.push((
+            format!("chain-{index}.luau"),
+            format!("require('./{target}')").into_bytes(),
+        ));
+    }
+
+    let sources = SourceBundle::new(sources).unwrap();
+    let error = sources.static_module_graph(&["root.luau"]).unwrap_err();
+    assert_eq!(
+        error.module.as_deref(),
+        Some(format!("chain-{}.luau", chain_depth - 1).as_str())
+    );
+    assert!(error.message.contains(&MAX_STATIC_MODULE_DEPTH.to_string()));
 }
 
 #[test]
