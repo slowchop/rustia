@@ -1,10 +1,32 @@
 # Rustia build and maintenance notes
 
 Rustia is available for inspection and experimental use under MIT OR Apache-2.0.
-Start with the [README](README.md) to try the API. GitHub Issues serves the
-maintainer backlog. Issues and pull requests are publicly readable. Creating
-either is restricted to repository collaborators. For private
-vulnerability reports, see [SECURITY.md](SECURITY.md).
+Start with the [README](README.md) to try the API.
+
+## Contributing
+
+1. **Report bugs in public.** Search [GitHub Issues](https://github.com/slowchop/rustia/issues)
+   for duplicates. Include the Rustia version or commit, a small reproduction,
+   and the expected and actual results. Report vulnerabilities privately through
+   the route in [SECURITY.md](SECURITY.md).
+2. **Open focused pull requests.** Small fixes to docs, examples, and tests are
+   welcome. Discuss new features, public API changes, and interpreter behavior
+   changes in an issue before starting the implementation.
+3. **Maintainers approve CI and merges.** External fork CI runs after a
+   maintainer approves it. Public CI uses standard GitHub-hosted runners.
+   Merging requires independent review and passing applicable CI checks.
+4. **Use LLMs with verifiable results.** LLM assistance is welcome. Review the
+   whole diff, explain the change, and be ready to answer questions and revise
+   it. If an LLM drafted a substantial part of the change, tests, or technical
+   analysis, briefly say what it helped with in the issue or PR. Routine
+   autocomplete and copyediting need no disclosure.
+
+   - **Bug report.** Run the reproducer on the revision you report and share
+     what happened.
+   - **Code fix.** Give the exact test command and result. For a behavior fix,
+     show that the regression test fails before the fix and passes with it.
+   - **Docs fix.** Say what you checked, such as the rendered page you previewed
+     or the example you ran. A read-through is enough for a typo fix.
 
 ## Issue-driven development
 
