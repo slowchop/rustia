@@ -1,3 +1,6 @@
+//! Teach Luau’s `require` where to find a module. When the script asks for
+//! `game/config`, Rust supplies the module from a string.
+
 use rustia::{ModuleSource, RustiaBuilder, ServiceModuleResolver};
 
 fn main() -> rustia::Result<()> {

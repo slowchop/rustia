@@ -1,3 +1,7 @@
+//! Give a Luau script the target and last position for a game character.
+//! The script works out how far to move and asks Rust to record the move
+//! and remember the new position. Rust collects both requests in order.
+
 use rustia::{
     Effects, HostContext, HostModule, HostSchema, Input, InvocationLimits, Result, Rustia,
     RustiaBuilder, SlotWrites, Slots,

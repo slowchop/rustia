@@ -1,8 +1,10 @@
-//! Run bounded, stateless decisions and publish commands only on success.
+//! Run the same Luau decision three times with a limit on how many commands
+//! it can issue. The middle run goes over the limit, so the host receives none
+//! of its commands. The third run shows that you can keep using the interpreter.
 //!
-//! Run: `cargo run --locked -p rustia --example hardened_decision`
-//! Expected output: `success: 7; rejected: record limit; recovered: 9; epochs: 3`
-//! This example checks correctness and does not measure execution time.
+//! From the repository root, run
+//! `cargo run --locked -p rustia --example hardened_decision`. It prints
+//! `success: 7; rejected: record limit; recovered: 9; epochs: 3`.
 
 use rustia::{
     Effects, HostContext, HostModule, HostSchema, Input, InvocationLimits, Result, Rustia,

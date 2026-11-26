@@ -1,9 +1,9 @@
-//! Standard/live objects can change application state immediately.
+//! Let a Luau script update a Rust counter. The update takes effect as soon
+//! as the script calls the method, and it stays in place if the script later fails.
 //!
-//! Run from the repository root:
-//! `cargo run --locked -p rustia --example mutable_objects`
-//! Expected output: a line starting with `Counter is 3 after:`, followed by the
-//! script failure. The assertion checks that the counter change survived it.
+//! From the repository root, run
+//! `cargo run --locked -p rustia --example mutable_objects`. It reports that
+//! the counter is 3 and shows the script error.
 
 use rustia::{Error, ObjectType, Result, RustiaBuilder};
 

@@ -1,6 +1,10 @@
-//! Move an idle interpreter and its retained function from the main thread to a worker.
-//! Run with: cargo run --locked -p rustia --features send --example transferable
-//! Expected output: Worker script call returned 42
+//! Load a Luau function on the main thread, then move it and the idle
+//! interpreter to a worker thread. The worker calls the function and sends
+//! the result back.
+//!
+//! From the repository root, run
+//! `cargo run --locked -p rustia --features send --example transferable`.
+//! It prints `Worker script call returned 42`.
 
 use rustia::Rustia;
 

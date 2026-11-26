@@ -1,15 +1,11 @@
-//! Keep shared and cyclic tables as live handles, then reset guest state.
+//! Pass a Luau table back to Rust while keeping references to the original
+//! table and its shared entries. Resetting the interpreter clears those live
+//! values, but the Rust functions you registered are still available.
 //!
-//! Run from the repository root:
-//! ```sh
-//! cargo run --locked -p rustia --example live_values
-//! ```
-//! Expected output:
-//! ```text
-//! host-created values preserved graph identity; reset kept registrations and invalidated live callbacks
-//! ```
-//! Assertions check shared table identity, binary bytes, persistent registrations,
-//! and rejection of a live function handle after reset.
+//! From the repository root, run
+//! `cargo run --locked -p rustia --example live_values`. The example checks
+//! that the shared references and buffer bytes survive the round trip, and
+//! that Rustia rejects the old function handle after reset.
 
 use rustia::{HostFunction, HostModule, Result, RustiaBuilder, Table, ValueType, VmErrorKind};
 

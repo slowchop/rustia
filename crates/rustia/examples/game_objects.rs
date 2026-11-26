@@ -1,5 +1,7 @@
-//! A deterministic decision reads a snapshot and requests changes. The game
-//! applies those requests only after the complete invocation succeeds.
+//! A Luau script decides where an actor should move. It reads the actor’s
+//! target and last goal, then asks the Rust game to move the actor and save the
+//! new goal. The game applies both changes only if the script finishes
+//! successfully.
 
 use rustia::{
     Effects, HostContext, HostSchema, Input, InvocationLimits, ObjectType, Result, Rustia,

@@ -1,11 +1,13 @@
-//! Pass Rust data and callbacks to Luau, read Serde data, and reset guest state.
+//! Pass Rust values and functions to Luau, then read a Luau table back into
+//! a Rust struct with Serde. The last part resets script state and runs the
+//! same compiled code again.
 //!
-//! Run from the repository root:
-//! `cargo run --locked -p rustia --example embedding`
-//! Expected output: `embedding example ok` after all assertions pass.
+//! From the repository root, run
+//! `cargo run --locked -p rustia --example embedding`. It prints
+//! `embedding example ok` when all the checks pass.
 //!
-//! When copying this into an application, add a direct Serde dependency for the
-//! derives: `serde = { version = "1", features = ["derive"] }`.
+//! If you copy this into your app, add Serde with its derive feature enabled
+//! using `serde = { version = "1", features = ["derive"] }`.
 
 use rustia::{FromRustia, Profile, Rustia, RustiaExtension};
 use serde::{Deserialize, Serialize};
