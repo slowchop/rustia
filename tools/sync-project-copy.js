@@ -43,7 +43,7 @@ function readmeEntries(entries) {
     "<details>",
     `<summary><strong>${escapeHtml(title)}</strong></summary>`,
     "",
-    readmeLink ? `${description} · ${readmeLink}` : description,
+    readmeLink ? `${description}\n\n${readmeLink}` : description,
     "",
     "</details>",
   ].join("\n")).join("\n\n");
@@ -68,19 +68,25 @@ function rustdocLines(markdown) {
 }
 
 function renderFirstScript() {
+  const apiDocs = "https://rustia.dev/docs/api/rustia";
   const examplePath = "crates/rustia/examples/first_script.rs";
   const example = fs.readFileSync(path.join(root, examplePath), "utf8").trimEnd();
   return [
     firstScriptIntro,
     "",
-    "[Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.",
+    "In the Cargo project you [set up with Rustia](https://github.com/slowchop/rustia#try-it), replace `src/main.rs` with this code and run `cargo run`.",
     "",
     "```rust",
     example,
     "```",
     "",
-    "The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,",
-    "or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.",
+    "You should see `The score is 42`.",
+    "",
+    `- [\`insert_global\`](${apiDocs}/struct.Rustia.html#method.insert_global) gives Luau the starting score, and [\`add_fn\`](${apiDocs}/struct.Rustia.html#method.add_fn) lets it call the Rust function.`,
+    `- [\`source_name\`](${apiDocs}/struct.Chunk.html#method.source_name) gives the script a label that appears in error messages.`,
+    `- [\`eval\`](${apiDocs}/struct.Chunk.html#method.eval) gives you a value back in Rust. Use [\`exec\`](${apiDocs}/struct.Chunk.html#method.exec) when you only want to run the script.`,
+    "",
+    "The example keeps the script in a string so it fits in one file. Read a `.luau` file at runtime if you want to edit it without rebuilding the Rust app.",
     "",
     `From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/${examplePath}) with \`cargo run --locked -p rustia --example first_script\`.`,
   ].join("\n");

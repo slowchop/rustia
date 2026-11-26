@@ -15,8 +15,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   rustia-mark.svg supplies the staggered dash mark for website headers and browser
   tabs. The build copies it to the site root. rustia-readme-mark.svg is the
   transparent, theme-aware mark used by the repository README.
-- doc-index.html links readers to the generated API reference and the garden
-  walkthrough. The build publishes it at /docs/.
+- doc-index.html links to the first script, embedding guide, API reference, and
+  garden walkthrough. The build publishes it at /docs/.
 - garden-source.html documents the files that run and draw the garden. The
   build publishes it at /docs/examples/garden/ and keeps /garden-source/ available.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
@@ -29,8 +29,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   site in dist/, including the facade Rustdoc under /docs/api/.
   render-home-comparisons.py reads table labels, project and platform links,
   and evidence explanations from [the shared Rustdoc comparison](../crates/rustia/compare.md).
-  It adds the homepage icon styling and narrow-screen cards, and builds the runtime chart from the README's
-  pinned benchmark cohort. The chart links to the archived timings. The renderer
+  It adds homepage icon styling and narrow-screen cards. The chart uses the
+  [retained benchmark cohort](../bench/history/site-comparison.json) and links
+  to the archived timings. The renderer
   also generates search and social descriptions from the homepage intro.
   _headers defines the deployed policy.
 

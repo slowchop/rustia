@@ -10,48 +10,62 @@ Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that need
 game-engine project I set aside. `0.2.0` is planned as the first release of this
 Luau interpreter.
 
+[Run your first script](#try-it) or [try the browser playground](https://rustia.dev/playground/).
+
 ## Features
 
 <!-- project-copy: features -->
 <details>
 <summary><strong>Hot reload</strong></summary>
 
-Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state. · [Try the garden](https://rustia.dev/)
+Edit Luau without a rebuild. Your app keeps running and can carry state across edits, like the flowers’ positions in the garden. If a reload fails, Rustia can restore the previous script state.
+
+[Try the garden](https://rustia.dev/)
 
 </details>
 
 <details>
 <summary><strong>Deterministic execution</strong></summary>
 
-Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync. · [Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.
+
+[Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
 
 </details>
 
 <details>
 <summary><strong>Pure Rust runtime</strong></summary>
 
-One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain. · [Platform comparison](https://rustia.dev/#luau-comparison)
+One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain.
+
+[Platform comparison](https://rustia.dev/#luau-comparison)
 
 </details>
 
 <details>
 <summary><strong>Sans-I/O core</strong></summary>
 
-Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts. · [Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
+Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.
+
+[Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)
 
 </details>
 
 <details>
 <summary><strong>Rust functions and objects</strong></summary>
 
-Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs. · [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
+Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.
+
+[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
 
 </details>
 
 <details>
 <summary><strong>Script execution limits</strong></summary>
 
-Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them. · [Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
+Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.
+
+[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)
 
 </details>
 <!-- /project-copy: features -->
@@ -90,19 +104,24 @@ We’re also having fun with a Luau synth in the browser. Write and tweak sounds
 
 ## Try it
 
-Until the crates.io release, add Rustia from Git with Rust 1.95 or newer.
-Expect API changes on `main` until Rustia reaches `1.0.0`.
+You’ll need [Rust](https://rustup.rs/) 1.95 or newer. Create a small Cargo app
+and add Rustia from Git. If you already have an app, run the last command from
+its directory.
 
 ```sh
+cargo new hello-rustia
+cd hello-rustia
 cargo add rustia --git https://github.com/slowchop/rustia --branch main
 ```
+
+Expect API changes on `main` until Rustia reaches `1.0.0`.
 
 ### A first script
 
 <!-- project-copy: first-script -->
-This example runs a Luau script from Rust. The script calls a Rust function and returns the result. The Luau source is inline to keep the example short. In a real app, load `.luau` files at runtime so you can edit scripts without recompiling the Rust app.
+Start with a score of 21 and a Rust function called `double`. The Luau script calls `double(base_score)` and sends 42 back to Rust.
 
-[Add Rustia to a Cargo project](https://github.com/slowchop/rustia#try-it), put this in `src/main.rs`, and run `cargo run`.
+In the Cargo project you [set up with Rustia](https://github.com/slowchop/rustia#try-it), replace `src/main.rs` with this code and run `cargo run`.
 
 ```rust
 use rustia::Rustia;
@@ -123,15 +142,24 @@ fn main() -> rustia::Result<()> {
 }
 ```
 
-The program prints `The score is 42`. Use [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) to get a value back from Luau,
-or [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) to discard its result.
+You should see `The score is 42`.
+
+- [`insert_global`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.insert_global) gives Luau the starting score, and [`add_fn`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.add_fn) lets it call the Rust function.
+- [`source_name`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.source_name) gives the script a label that appears in error messages.
+- [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) gives you a value back in Rust. Use [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) when you only want to run the script.
+
+The example keeps the script in a string so it fits in one file. Read a `.luau` file at runtime if you want to edit it without rebuilding the Rust app.
 
 From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
 <!-- /project-copy: first-script -->
 
 ## Call script functions from Rust
 
-Luau can export a function for Rust to call. This example passes `"Ada"` to `greet`.
+The first script calls Rust from Luau. Here’s the other direction. Use
+[`install`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.install)
+to load a script that returns a table of exports. Look up `greet` with
+[`Exports::function`](https://rustia.dev/docs/api/rustia/struct.Exports.html#method.function)
+and [call it](https://rustia.dev/docs/api/rustia/struct.Function.html#method.call) from Rust.
 
 <details>
 <summary>Show the Rust program</summary>
@@ -158,35 +186,39 @@ fn main() -> rustia::Result<()> {
 
 </details>
 
-To reload a script, keep its functions until the edited version installs
-successfully. If the edit fails, your app can keep calling the old functions.
-[Hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
+If you’re reloading a script while your app runs, keep calling the old functions
+until the edited version installs successfully. The [hot reload example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs)
+shows a failed edit followed by a successful one.
 
 ## Choose an environment
 
-Start with `Rustia::builder()`. It uses a fixed random seed and repeatable clocks.
+Start with [`Rustia::builder()`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.builder)
+for everyday scripting. It starts with a fixed random seed and repeatable clocks.
 
-- Use `RustiaBuilder::deterministic()` for simulations that need to replay the same way from the same inputs.
-- Use `RustiaBuilder::live()` when a script needs the current time or a fresh random seed.
+- Use [`RustiaBuilder::deterministic()`](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)
+  to replay a simulation with the same inputs.
+- Use [`RustiaBuilder::live()`](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.live)
+  when a script needs the current time or a fresh random seed.
 
-By default, scripts have no instruction or memory budget. To set one, call
-`.fuel(100_000)` or `.memory_limit_bytes(2 * 1024 * 1024)` on the builder.
-Fuel counts work done by the interpreter. The memory limit covers allocations
-Rustia tracks for the script. After a memory-limit error, the same interpreter
-can run another script. [Memory recovery test](https://github.com/slowchop/rustia/blob/main/crates/rustia/tests/error_recovery.rs#L295)
+You can limit the work a script does with
+[`fuel(100_000)`](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.fuel)
+and limit the memory Rustia tracks for it with
+[`memory_limit_bytes(2 * 1024 * 1024)`](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.memory_limit_bytes).
+Both limits are off by default. After a memory-limit error, you can run another
+script in the same interpreter. See [what happens when a script fails](https://rustia.dev/docs/api/rustia/#more-about-embedding).
 
 ## Cargo features
 
 - **`platform-adapters`** is on by default. It provides system randomness and
   connects browser builds to JavaScript clocks, randomness, and console output.
-  `RustiaBuilder::standard()` starts with a fixed seed and repeatable clocks.
-  `RustiaBuilder::live()` uses real clocks and a fresh seed. For WebAssembly
-  without JavaScript imports, set `default-features = false` and pass your own
-  clocks and seed provider if you use `live()`.
+  For WebAssembly without JavaScript imports, set `default-features = false`
+  and give [`live()`](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.live)
+  your own clocks and seed provider.
   [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
 - **`send`** makes `Rustia` and its live handles `Send`, so you can move
   them together to another thread. Calls still need `&mut Rustia`.
-  [Thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads) · [Runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs)
+  See [thread ownership](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)
+  and the [runnable example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs).
 
   From a Rustia checkout, run `cargo run --locked -p rustia --features send --example transferable`.
 
@@ -214,7 +246,7 @@ cargo doc --locked -p rustia --no-deps --open
 Run this command from the checkout to try one line of Luau.
 
 ```sh
-cargo run --locked -p rustia-cli -- --eval "print(40 + 2)"
+cargo run --locked --bin rustia -- --eval "print(40 + 2)"
 ```
 
 The command prints `42`. To run a file, pass its path after `--`. For an interactive prompt, pass `--repl`.
@@ -228,58 +260,7 @@ Type `=40 + 2` to see the result and `:quit` to exit.
 
 [Compare Luau projects](https://rustia.dev/#luau-comparison) for platform support, hot reload, and replay. The [comparison notes](https://rustia.dev/docs/api/rustia/#compare-luau-projects) include the sources. See [tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md) for Rustia’s Luau compatibility.
 
-Koto and Rhai each have their own scripting language. The timings below include both, along with Roto.
-
-### Speed: a measured snapshot
-
-Upstream Luau via mlua was faster than Rustia on all five workloads in this run.
-The chart includes upstream C++ Luau in interpreter and JIT modes alongside the Rust implementations.
-
-![Time per workload for Rustia, luaur, ruau, C++ Luau in two modes, Koto, Rhai, and Roto. Lower is better.](https://github.com/slowchop/rustia/raw/6c1decf946af1a43e104d76fb8fb9ca9dfd11b30/crates/rustia/performance.svg)
-
-Each language has its own version of each workload. Roto's array workload uses a handwritten quadratic sort. It also uses a list
-for sparse lookups and a regular function for the closure test. The timings cover scripts already running. The [full results](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md)
-also show how long each engine took to get started.
-
-<details>
-<summary>See times for Rustia, mlua + Luau, Koto, and Rhai</summary>
-
-**Microseconds per work unit; lower is better.** These are best observed
-steady-state interpreter times on Linux x86-64, measured by `ci-bench` on
-2026-10-22 UTC at source commit `9b12a5a`. Compilation and first-call costs are separate.
-
-<!-- rustia-benchmark-snapshot
-{
-  "commit": "9b12a5a8540f69fe7c0f6daebe467c795bb576c3",
-  "target": "linux-x86_64",
-  "start": 1792642181,
-  "end": 1792642445,
-  "engines": [
-    "rustia",
-    "mlua-luau",
-    "koto",
-    "rhai"
-  ],
-  "workloads": [
-    "dense_tables",
-    "sparse_tables",
-    "closures_upvalues",
-    "generic_iteration",
-    "stdlib_math_table"
-  ]
-}
--->
-| Work unit | Rustia | mlua + Luau | Koto | Rhai |
-|---|---:|---:|---:|---:|
-| Build, sum, and sort a 256-item array | 51.657 | 18.919 | 262.217 | 313.191 |
-| Fill and read 128 hash entries | 87.555 | 22.485 | 146.082 | 348.085 |
-| One closure call updating a captured value | 0.197 | 0.051 | 0.346 | 1.478 |
-| Custom, keyed, and array iteration pass | 14.035 | 4.170 | 7.391 | 9.566 |
-| Math library calls and buffered appends | 1.421 | 0.237 | 1.536 | 3.174 |
-
-[Raw measurements](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/current-results.json) · [Benchmark limitations](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md)
-
-</details>
+[Benchmark methodology](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md)
 
 ## Project status and source access
 
