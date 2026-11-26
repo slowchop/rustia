@@ -1,0 +1,28 @@
+{
+  "commit": "9b12a5a8540f69fe7c0f6daebe467c795bb576c3",
+  "target": "linux-x86_64",
+  "start": 1792642181,
+  "end": 1792642445,
+  "workloads": {
+    "dense_tables": {
+      "label": "Build, sum, and sort a 256-item array",
+      "unit": "build+sum+sort of 256-elem array"
+    },
+    "sparse_tables": {
+      "label": "Fill and read 128 hash entries",
+      "unit": "fill+read 128 hash entries"
+    },
+    "closures_upvalues": {
+      "label": "One closure call updating a captured value",
+      "unit": "one upvalue-mutating closure call"
+    },
+    "generic_iteration": {
+      "label": "Custom, keyed, and array iteration pass",
+      "unit": "__iter(32)+pairs(5)+ipairs(32) pass"
+    },
+    "stdlib_math_table": {
+      "label": "Math library calls and buffered appends",
+      "unit": "math fastcalls + buffered push"
+    }
+  }
+}

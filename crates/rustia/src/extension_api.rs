@@ -237,10 +237,11 @@ impl RustiaBuilder {
     /// additional code at runtime, so choose this preset deliberately for
     /// untrusted scripts.
     ///
-    /// Native and WASI targets use their system services. With the default `web-live` feature,
-    /// `wasm32-unknown-unknown` uses the JavaScript host (`console`, `Date`, `performance`, and
-    /// `crypto`). Bare-Wasm builds can disable default features and plug the three input
-    /// providers explicitly; [`build`](Self::build) then verifies that none are missing.
+    /// Native and WASI targets use their system services. On `wasm32-unknown-unknown`,
+    /// the default `platform-adapters` feature connects to JavaScript’s `console`,
+    /// `Date`, `performance`, and `crypto`. To run without JavaScript imports, disable
+    /// default features and give [`build`](Self::build) a [`wall_clock`](Self::wall_clock),
+    /// a [`monotonic_clock`](Self::monotonic_clock), and an [`entropy`](Self::entropy) provider.
     pub fn live() -> Self {
         let builder = Self::standard();
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
