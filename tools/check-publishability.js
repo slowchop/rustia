@@ -10,6 +10,11 @@ const outputPath = path.join(root, "design", "publishability.json");
 const packageFilesPath = path.join(root, "design", "package-files.json");
 const checkOnly = process.argv.includes("--check");
 
+const toolingRoles = new Map([
+  ["rustia-conformance", "conformance-tooling"],
+  ["script-bench-harness", "standalone-benchmark"],
+]);
+
 const publicOrderHint = [
   "rustia-lexer",
   "rustia-parser",
@@ -162,7 +167,7 @@ function buildReport() {
       version: pkg.version,
       manifest: relative(pkg.manifest_path),
       publish: publishValue(pkg.publish),
-      role: pkg.name === "script-bench-harness" ? "standalone-benchmark" : "public-rustia-crate",
+      role: toolingRoles.get(pkg.name) ?? "public-rustia-crate",
       package_file_audit: {
         file_count: packageFile.file_count,
         forbidden_path_violations: 0,

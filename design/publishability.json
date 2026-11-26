@@ -4,7 +4,7 @@
   "command": "node tools/check-publishability.js",
   "summary": {
     "package_count": 8,
-    "public_rustia_crate_count": 7,
+    "public_rustia_crate_count": 6,
     "publish_false_count": 8,
     "blocked_count": 8,
     "first_publish_candidates_after_policy_flip": [
@@ -17,8 +17,7 @@
       "rustia-vm",
       "rustia-compiler",
       "rustia",
-      "rustia-cli",
-      "rustia-conformance"
+      "rustia-cli"
     ],
     "benchmark_crate_status": "blocked until standalone split or rustia-adapter strategy is chosen"
   },
@@ -207,7 +206,7 @@
       "version": "0.2.0",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
-      "role": "public-rustia-crate",
+      "role": "conformance-tooling",
       "package_file_audit": {
         "file_count": 764,
         "forbidden_path_violations": 0

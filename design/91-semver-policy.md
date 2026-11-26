@@ -1,6 +1,6 @@
 # Semver And API Policy
 
-This policy defines how rustia will move from the current unpublished `0.0.x`
+This policy defines how rustia will move from the unpublished
 workspace to publishable public crates. It applies to the public rustia project
 only; grabby-specific integration code remains outside this repository.
 
@@ -11,7 +11,8 @@ covers source access.
 
 ## Current Status
 
-- All public workspace crates are currently `0.0.1` and `publish = false`.
+- The workspace is staged at `0.2.0` with publication disabled.
+  [Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the first interpreter preview.
 - The 0.x milestone validates the API with controlled client applications.
   Keep publication disabled; a public candidate or stable release needs a
   separate publication decision. See [`92-first-release.md`](92-first-release.md).
@@ -26,13 +27,12 @@ covers source access.
   `Cargo.toml`.
 - The first stable release target is `1.0.0`, following a release-candidate cycle
   and the acceptance checklist in [`92-first-release.md`](92-first-release.md).
-  This is a target, not a declaration that the current API is frozen or ready
-  to publish. The workspace version remains `0.0.1` until its gates pass.
+  The public API remains under development while those gates are open.
 - The future 1.0 promise covers the `rustia` embedding API and the CLI command
   contract. Supporting lexer/parser/compiler/VM packages retain separately
   versioned 0.x APIs; conformance and benchmark tooling remain unpublished.
-  Separate package versions and update uniform-version release checks when
-  preparing the first package release candidate.
+  The first interpreter preview stages the six selected crates at `0.2.0`.
+  Separate the supporting crate versions before the facade and CLI reach 1.0.
 
 ## Public Crate Roles
 

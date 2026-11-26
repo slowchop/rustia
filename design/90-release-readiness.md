@@ -145,17 +145,11 @@ reviews remain required for this slice; wider semantic-tail work stays open.
   `design/publishability.json` and runs
   `cargo package --no-verify --allow-dirty` for the generated first publish
   candidates. The current candidates are `rustia-lexer` and `rustia-vm`.
-- Full-workspace packaging is still blocked until internal crates are published
-  in topological order. The current generated order is `rustia-lexer`,
-  `rustia-parser`, `rustia-vm`, `rustia-compiler`, `rustia`, `rustia-cli`,
-  then `rustia-conformance`; `rustia-lexer` and `rustia-vm` are the first
-  candidates after the policy flip because they have no internal dependencies.
-  This generated workspace order includes conformance archive validation; the
-  initial public publication order in `91-semver-policy.md` excludes conformance
-  and benchmark tooling. Keep both tools unpublished unless separately selected.
-- The benchmark crate must either publish the `rustia-*` crates first, move the
-  rustia adapter into a git/path-only integration crate, or ship that adapter as
-  an example outside the core package.
+- The first interpreter preview publishes in dependency order: `rustia-lexer`,
+  `rustia-parser`, `rustia-vm`, `rustia-compiler`, `rustia`, then `rustia-cli`.
+  The report also audits conformance and the benchmark harness as unpublished
+  tooling. Before their dependencies reach crates.io, archive checks
+  can resolve them through local Cargo patches.
 
 ## API Gate
 

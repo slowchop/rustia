@@ -2,7 +2,7 @@
 
 This plan defines the private 0.x application-acceptance milestone and the later
 supported release. The [experimental public source launch](public-source-activation.md)
-covers source inspection and use. All workspace crates remain at `0.0.1` with
+covers source inspection and use. The workspace is staged at `0.2.0` with
 `publish = false`. Package publication, supported platforms, API stability and
 consumer rollout keep their separate acceptance gates.
 
