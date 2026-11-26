@@ -32,9 +32,10 @@ pub fn generate(source: &str) -> Result<String> {
 
 /// Compile a callback whose setup calls must pass the embedder's policy.
 ///
-/// The policy receives the global namespace, member, and exact argument bytes
-/// for each accepted setup shape `local binding = namespace.member("text")`.
-/// It does not run the setup. A denied capture is reported at its declaration.
+/// The policy receives the written receiver name, member, and exact argument
+/// bytes for each setup call of the form `local binding = receiver.member("text")`.
+/// A preceding local may shadow the receiver. Setup runs in the interpreter,
+/// which resolves the actual binding. A denied capture is reported at its declaration.
 pub fn generate_with_capture_policy(
     source: &str,
     mut allow_capture: impl FnMut(&str, &str, &[u8]) -> bool,
