@@ -2,9 +2,10 @@
 //!
 //! This module performs no file I/O. Embedders choose project-path and file
 //! policy, then provide canonical module keys and source bytes. Static graph
-//! analysis recognizes top-level calls of the form `require("literal")` in
-//! local initializers or expression statements. Dynamic and nested calls stay
-//! outside this graph and remain an execution-time resolver concern.
+//! analysis recognizes unshadowed top-level calls of the form
+//! `require("literal")` in local initializers or expression statements.
+//! Dynamic and nested calls stay outside this graph and remain an
+//! execution-time resolver concern.
 
 use rustia_lexer::Span;
 use rustia_parser::{parse_source_bytes, Expr, SourceError, Stmt};
@@ -342,6 +343,31 @@ impl SourceBundle {
         self.static_module_graph_with(entries, resolve_relative_module)
     }
 
+    /// Build a static graph and require every reachable module to be a pure
+    /// function module that may be instantiated without persistent state.
+    pub fn stateless_function_graph(
+        &self,
+        entries: &[&str],
+    ) -> Result<StaticModuleGraph, ModuleGraphError> {
+        let graph = self.static_module_graph(entries)?;
+        self.validate_stateless_graph(graph)
+    }
+
+    /// Apply embedder-owned request policy, then require every reachable
+    /// module to satisfy Rustia's conservative stateless-function contract.
+    pub fn stateless_function_graph_with<F, E>(
+        &self,
+        entries: &[&str],
+        resolve: F,
+    ) -> Result<StaticModuleGraph, ModuleGraphError>
+    where
+        F: FnMut(&str, &str) -> Result<String, E>,
+        E: fmt::Display,
+    {
+        let graph = self.static_module_graph_with(entries, resolve)?;
+        self.validate_stateless_graph(graph)
+    }
+
     /// Build a graph with embedder-owned request policy. The resolver receives
     /// the importing module and UTF-8 literal request. Rustia still owns parse,
     /// traversal, ordering, cycle/missing checks, source locations and digest.
@@ -369,7 +395,7 @@ impl SourceBundle {
             bundle: self,
             resolve: &mut resolve,
             loading: Vec::new(),
-            done: BTreeSet::new(),
+            depth_below: BTreeMap::new(),
             modules: Vec::new(),
         };
         for entry in &entries {
@@ -383,6 +409,23 @@ impl SourceBundle {
             entries,
             modules: traversal.modules,
         })
+    }
+
+    fn validate_stateless_graph(
+        &self,
+        graph: StaticModuleGraph,
+    ) -> Result<StaticModuleGraph, ModuleGraphError> {
+        for module in &graph.modules {
+            let source = self
+                .source(&module.name)
+                .expect("a static graph module belongs to its source bundle");
+            crate::stateless_helper::validate(source).map_err(|error| ModuleGraphError {
+                module: Some(module.name.clone()),
+                span: error.span,
+                message: error.message,
+            })?;
+        }
+        Ok(graph)
     }
 }
 
@@ -431,7 +474,7 @@ struct Traversal<'a, F> {
     bundle: &'a SourceBundle,
     resolve: &'a mut F,
     loading: Vec<String>,
-    done: BTreeSet<String>,
+    depth_below: BTreeMap<String, usize>,
     modules: Vec<StaticModule>,
 }
 
@@ -445,9 +488,6 @@ where
         name: &str,
         imported_at: Option<(&str, Span)>,
     ) -> Result<(), ModuleGraphError> {
-        if self.done.contains(name) {
-            return Ok(());
-        }
         if let Some(index) = self.loading.iter().position(|loading| loading == name) {
             let mut cycle = self.loading[index..].to_vec();
             cycle.push(name.to_owned());
@@ -458,17 +498,14 @@ where
                 format!("cyclic static require: {}", cycle.join(" -> ")),
             ));
         }
+        if let Some(depth_below) = self.depth_below.get(name) {
+            if self.loading.len().saturating_add(*depth_below) > MAX_STATIC_MODULE_DEPTH {
+                return Err(module_depth_error(imported_at));
+            }
+            return Ok(());
+        }
         if self.loading.len() >= MAX_STATIC_MODULE_DEPTH {
-            return Err(match imported_at {
-                Some((module, span)) => ModuleGraphError::graph(
-                    module,
-                    span,
-                    format!("static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules"),
-                ),
-                None => ModuleGraphError::entry(format!(
-                    "static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules"
-                )),
-            });
+            return Err(module_depth_error(imported_at));
         }
         let source = self.bundle.source(name).ok_or_else(|| match imported_at {
             Some((module, span)) => {
@@ -494,12 +531,31 @@ where
         }
         let popped = self.loading.pop();
         debug_assert_eq!(popped.as_deref(), Some(name));
-        self.done.insert(name.to_owned());
+        let depth_below = requires
+            .iter()
+            .map(|require| {
+                self.depth_below
+                    .get(&require.target)
+                    .copied()
+                    .expect("a dependency is completed before its importer")
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.depth_below.insert(name.to_owned(), depth_below);
         self.modules.push(StaticModule {
             name: name.to_owned(),
             requires,
         });
         Ok(())
+    }
+}
+
+fn module_depth_error(imported_at: Option<(&str, Span)>) -> ModuleGraphError {
+    let message = format!("static module nesting exceeds {MAX_STATIC_MODULE_DEPTH} modules");
+    match imported_at {
+        Some((module, span)) => ModuleGraphError::graph(module, span, message),
+        None => ModuleGraphError::entry(message),
     }
 }
 
@@ -512,20 +568,30 @@ fn static_requires(
         SourceError::Parse(error) => ModuleGraphError::graph(module, error.span, error.message),
     })?;
     let mut requires = Vec::new();
+    let mut require_shadowed = false;
     for statement in chunk.statements {
         match statement {
             Stmt::Local { bindings, init, .. } => {
-                for (index, expression) in init.iter().enumerate() {
-                    if let Some((request, span)) = literal_require(module, expression)? {
-                        requires.push(UnresolvedRequire {
-                            alias: bindings.get(index).map(|binding| binding.name.clone()),
-                            request,
-                            span,
-                        });
+                // Luau local bindings enter scope after every initializer has
+                // run, so `local require = require("./real")` still calls the
+                // global resolver once and shadows it for later statements.
+                if !require_shadowed {
+                    for (index, expression) in init.iter().enumerate() {
+                        if let Some((request, span)) = literal_require(module, expression)? {
+                            requires.push(UnresolvedRequire {
+                                alias: bindings.get(index).map(|binding| binding.name.clone()),
+                                request,
+                                span,
+                            });
+                        }
                     }
                 }
+                require_shadowed |= bindings.iter().any(|binding| binding.name == "require");
             }
-            Stmt::Expr { expr, .. } => {
+            Stmt::LocalFunction { name, .. } => {
+                require_shadowed |= name == "require";
+            }
+            Stmt::Expr { expr, .. } if !require_shadowed => {
                 if let Some((request, span)) = literal_require(module, &expr)? {
                     requires.push(UnresolvedRequire {
                         alias: None,
@@ -547,7 +613,11 @@ fn literal_require(
     let Expr::Call { callee, args, .. } = expression else {
         return Ok(None);
     };
-    if !matches!(callee.as_ref(), Expr::Name(name, _) if name == "require") {
+    let mut callee = callee.as_ref();
+    while let Expr::TypeInstantiation { expr, .. } = callee {
+        callee = expr;
+    }
+    if !matches!(callee, Expr::Name(name, _) if name == "require") {
         return Ok(None);
     }
     let [Expr::String(request, span)] = args.as_slice() else {
