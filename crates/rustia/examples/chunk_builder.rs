@@ -1,9 +1,10 @@
-//! Name script source, supply a custom environment, and execute side effects.
+//! Give a Luau script a filename for error reports, then show how to give it
+//! its own globals. Use `eval` to get a value back and `exec` to run a script
+//! that sets a flag.
 //!
-//! Run from the repository root:
-//! `cargo run --locked -p rustia --example chunk_builder`
-//! Expected result: both evaluations return 42 and the guest flag becomes true.
-//! The example exits without printing output after its assertions pass.
+//! From the repository root, run
+//! `cargo run --locked -p rustia --example chunk_builder`. It checks that both
+//! calculations return 42 and the flag is set, then exits quietly.
 
 use rustia::RustiaBuilder;
 

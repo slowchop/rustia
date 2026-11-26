@@ -1,4 +1,6 @@
-//! Human-readable reports preserve the ordinary error for programmatic use.
+//! A Luau function tries to read a missing target. Print `error.report()` to
+//! show the source line and the calls that led to it.
+
 use rustia::{Result, RustiaBuilder};
 
 fn main() -> Result<()> {

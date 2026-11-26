@@ -1,3 +1,6 @@
+//! Swap in a new version of a Luau script while your Rust app keeps running.
+//! If the edit fails to install, the app can keep calling the old function.
+
 use rustia::Profile;
 
 fn main() -> rustia::Result<()> {
