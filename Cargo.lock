@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "rustia"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "js-sys",
@@ -2463,14 +2463,14 @@ dependencies = [
 
 [[package]]
 name = "rustia-cli"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia",
 ]
 
 [[package]]
 name = "rustia-compiler"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia-lexer",
  "rustia-parser",
@@ -2479,7 +2479,7 @@ dependencies = [
 
 [[package]]
 name = "rustia-conformance"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia",
  "rustia-compiler",
@@ -2489,18 +2489,18 @@ dependencies = [
 
 [[package]]
 name = "rustia-lexer"
-version = "0.0.1"
+version = "0.2.0"
 
 [[package]]
 name = "rustia-parser"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia-lexer",
 ]
 
 [[package]]
 name = "rustia-vm"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "gc-arena",
  "libm",
@@ -2555,7 +2555,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "script-bench-harness"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "boa_engine",
  "koto",

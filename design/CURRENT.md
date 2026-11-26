@@ -12,7 +12,10 @@ and evidence. When an older status statement disagrees, this file wins.
 
 Rustia is a from-scratch Rust interpreter for pinned standalone **Luau 0.709**.
 The experimental interpreter became public on 20 November 2026 under MIT OR Apache-2.0.
-All eight workspace packages remain at **`0.0.1`**, with **all 8 blocked by publish=false**.
+The unpublished workspace is staged at **`0.2.0`**. All eight packages still have
+`publish = false`. The interpreter preview plans to publish six packages, keeping
+conformance and the benchmark harness unpublished. [Issue #83](https://github.com/slowchop/rustia/issues/83)
+tracks the candidate and publication gates.
 Stable APIs, full Luau parity, consumer rollout and supported releases have separate acceptance gates.
 
 - **`slowchop/rustia-historic`** retains the original private evidence. The

@@ -1,6 +1,6 @@
 [package]
 name = "script-bench-harness"
-version = "0.0.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.95"
 description = "Standalone benchmark harness for embedded scripting engines"
@@ -44,9 +44,9 @@ wasmi-engine = ["dep:wasmi"]
 wasmtime-engine = ["dep:wasmtime"]
 
 [dependencies]
-rustia-compiler = { version = "0.0.1", path = "../crates/rustia-compiler", optional = true }
-rustia-parser = { version = "0.0.1", path = "../crates/rustia-parser", optional = true }
-rustia-vm = { version = "0.0.1", path = "../crates/rustia-vm", optional = true }
+rustia-compiler = { version = "0.2.0", path = "../crates/rustia-compiler", optional = true }
+rustia-parser = { version = "0.2.0", path = "../crates/rustia-parser", optional = true }
+rustia-vm = { version = "0.2.0", path = "../crates/rustia-vm", optional = true }
 koto = { version = "0.16", default-features = false, features = ["arc"], optional = true }
 luaur_rt = { package = "luaur-rt", version = "0.1.8", optional = true }
 mlua_luau = { package = "mlua", version = "0.11", default-features = false, features = ["luau"], optional = true }

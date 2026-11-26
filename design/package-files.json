@@ -14,7 +14,7 @@
   "packages": [
     {
       "name": "script-bench-harness",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "bench/Cargo.toml",
       "publish": false,
       "file_count": 537,
@@ -560,7 +560,7 @@
     },
     {
       "name": "rustia-cli",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-cli/Cargo.toml",
       "publish": false,
       "file_count": 11,
@@ -580,7 +580,7 @@
     },
     {
       "name": "rustia-compiler",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
       "file_count": 32,
@@ -621,7 +621,7 @@
     },
     {
       "name": "rustia-conformance",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
       "file_count": 764,
@@ -1394,7 +1394,7 @@
     },
     {
       "name": "rustia-lexer",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-lexer/Cargo.toml",
       "publish": false,
       "file_count": 13,
@@ -1416,7 +1416,7 @@
     },
     {
       "name": "rustia-parser",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-parser/Cargo.toml",
       "publish": false,
       "file_count": 20,
@@ -1445,7 +1445,7 @@
     },
     {
       "name": "rustia-vm",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-vm/Cargo.toml",
       "publish": false,
       "file_count": 49,
@@ -1503,7 +1503,7 @@
     },
     {
       "name": "rustia",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia/Cargo.toml",
       "publish": false,
       "file_count": 87,
