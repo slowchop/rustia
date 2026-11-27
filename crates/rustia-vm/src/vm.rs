@@ -16697,10 +16697,7 @@ impl Vm {
             .coerce_to_number(args[0])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
         let (mantissa, exponent) = math::frexp(value);
-        Ok(vec![
-            Value::number(mantissa),
-            Value::number(f64::from(exponent)),
-        ])
+        Ok(vec![Value::number(mantissa), Value::number(exponent)])
     }
 
     fn native_math_modf(&mut self, args: &[Value]) -> Result<Vec<Value>> {
