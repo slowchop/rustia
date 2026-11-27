@@ -100,6 +100,11 @@ pub fn prepare_runtime(
 }
 
 impl PreparedNumericCall {
+    /// Identity of the generated artifact this prepared entry accepts.
+    pub fn receipt(&self) -> CompiledCallReceipt {
+        self.receipt
+    }
+
     /// Bind to an existing closure from the accepted source. Its bytecode must
     /// match the prepared interpreter entry. The embedder supplies the frozen
     /// source and retires the artifact when that source or closure changes.
