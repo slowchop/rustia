@@ -584,7 +584,7 @@
       "version": "0.0.1",
       "manifest": "crates/rustia-compiler/Cargo.toml",
       "publish": false,
-      "file_count": 36,
+      "file_count": 37,
       "files": [
         ".cargo_vcs_info.json",
         "Cargo.lock",
@@ -598,6 +598,7 @@
         "examples/compiled_host_call.rs",
         "src/EGM.md",
         "src/builtins.rs",
+        "src/callback_source.rs",
         "src/compiled_call.rs",
         "src/compiled_host_call.rs",
         "src/lib.rs",
