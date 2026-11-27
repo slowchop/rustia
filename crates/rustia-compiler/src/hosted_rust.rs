@@ -116,8 +116,13 @@ pub fn emit_module_bundle(
             .source(name)
             .ok_or_else(|| diagnostic(name, "missing Luau module"))?;
         let code = emit_module(name, source, "run", runtime_crate, host)?;
-        writeln!(output, "mod script_{index} {{\n{code}\n}}").unwrap();
-        writeln!(arms, "        {name:?} => Some(script_{index}::run),").unwrap();
+        let mut module_name = format!("script_{index}");
+        // Keep the lookup's crate path distinct from its generated local modules.
+        if module_name == runtime_crate {
+            module_name.push_str("_module");
+        }
+        writeln!(output, "mod {module_name} {{\n{code}\n}}").unwrap();
+        writeln!(arms, "        {name:?} => Some({module_name}::run),").unwrap();
     }
     writeln!(
         output,
@@ -1190,6 +1195,15 @@ mod bundle_tests {
         assert!(first.contains("\"z.luau\" => Some(script_1::run)"));
         assert!(!first.contains("unused.luau"));
         assert!(emit(&[]).contains("fn aot_module(_: &str) -> Option<AotEntry> { None }"));
+    }
+
+    #[test]
+    fn generated_module_names_do_not_shadow_the_runtime_crate() {
+        let bundle = SourceBundle::new([("a.luau", "return 1")]).unwrap();
+        let output = emit_module_bundle(&bundle, &["a.luau"], "script_0", None).unwrap();
+        assert!(output.contains("mod script_0_module {"));
+        assert!(output.contains("\"a.luau\" => Some(script_0_module::run)"));
+        assert!(!output.contains("mod script_0 {"));
     }
 
     #[test]
