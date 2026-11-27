@@ -245,8 +245,10 @@ impl Vm {
         invoke: impl FnOnce(f64, f64) -> Result<(f64, f64)>,
     ) -> Result<Option<Value>> {
         let settings = &self.settings;
-        if self.profile != Profile::ReproducibleStandard
-            || settings.guest_surface.is_hardened_leaf()
+        if !matches!(
+            self.profile,
+            Profile::ReproducibleStandard | Profile::LuauCompat
+        ) || settings.guest_surface.is_hardened_leaf()
             || settings.enable_conformance_native_type_checks
             || settings.recursion_limit == 0
             || settings.enable_memory_tracking

@@ -408,7 +408,7 @@ fn verify_backend(
     use rustia_vm::VmSettings;
     let prepared = prepare_runtime(bundle, "entry.luau").unwrap();
     let mut vm = Vm::with_settings(
-        Profile::ReproducibleStandard,
+        Profile::LuauCompat,
         VmSettings {
             initial_fuel: Some(10_000_000),
             memory_limit_bytes: Some(64 * 1024 * 1024),
