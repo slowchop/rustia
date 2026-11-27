@@ -45,7 +45,8 @@ use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, Hot
 #[cfg(test)]
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
 use crate::number::{
-    binary, canonicalize_number, parse_numeric_text, parse_tonumber_base, NumericOp,
+    binary, canonicalize_number, luau_number_to_string, parse_numeric_text,
+    parse_numeric_text_in_base, NumericOp,
 };
 use crate::ownership::{borrow_service, RegistryCell, ServiceCell, Shared, Weak};
 use crate::profile::{GuestSurface, Profile};
@@ -14675,7 +14676,7 @@ impl Vm {
             self.coerce_to_number(args[0])?
         } else {
             let text = self.value_to_string(args[0])?;
-            parse_tonumber_base(&text, base.expect("non-decimal base is present"))
+            parse_numeric_text_in_base(&text, base.expect("non-decimal base is present"))
         };
         Ok(number.map_or_else(Value::nil, Value::number))
     }
@@ -22629,39 +22630,6 @@ fn apply_format_width(mut text: Vec<u8>, spec: FormatSpec, numeric: bool) -> Vec
     padded
 }
 
-fn luau_number_to_string(value: f64) -> String {
-    let value = canonicalize_number(value);
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value == f64::INFINITY {
-        return "inf".to_owned();
-    }
-    if value == f64::NEG_INFINITY {
-        return "-inf".to_owned();
-    }
-    if value == 0.0 {
-        if value.is_sign_negative() {
-            return "-0".to_owned();
-        }
-        return "0".to_owned();
-    }
-    const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
-    if value.fract() == 0.0 && value.abs() <= MAX_EXACT_INTEGER {
-        return (value as i64).to_string();
-    }
-    let debug = format!("{value:?}");
-    let (negative, magnitude) = debug
-        .strip_prefix('-')
-        .map_or((false, debug.as_str()), |magnitude| (true, magnitude));
-    let mut output =
-        luau_number_magnitude_to_string(magnitude).unwrap_or_else(|| value.to_string());
-    if negative {
-        output.insert(0, '-');
-    }
-    output
-}
-
 /// PUC Lua 5.1 `lua_number2str`: C `sprintf("%.14g")`.
 ///
 /// 14 significant digits, correctly rounded (round half-to-even) via Rust's
@@ -22800,83 +22768,6 @@ mod puc51_number_format_tests {
         assert_eq!(puc51_number_to_string(f64::INFINITY), "inf");
         assert_eq!(puc51_number_to_string(f64::NEG_INFINITY), "-inf");
     }
-}
-
-fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
-    let (mantissa, exponent) = magnitude
-        .split_once('e')
-        .or_else(|| magnitude.split_once('E'))
-        .map_or(Some((magnitude, 0)), |(mantissa, exponent)| {
-            exponent
-                .parse::<i32>()
-                .ok()
-                .map(|exponent| (mantissa, exponent))
-        })?;
-    let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    if integer.is_empty() || !integer.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let mut raw_digits = String::with_capacity(integer.len() + fraction.len());
-    raw_digits.push_str(integer);
-    raw_digits.push_str(fraction);
-    let leading_zeroes = raw_digits
-        .bytes()
-        .position(|byte| byte != b'0')
-        .unwrap_or(raw_digits.len());
-    let mut digits = raw_digits[leading_zeroes..].to_owned();
-    while digits.ends_with('0') {
-        digits.pop();
-    }
-    if digits.is_empty() {
-        return Some("0".to_owned());
-    }
-    let decimal_exponent = exponent + integer.len() as i32 - leading_zeroes as i32 - 1;
-    Some(luau_decimal_digits_to_string(&digits, decimal_exponent))
-}
-
-fn luau_decimal_digits_to_string(digits: &str, decimal_exponent: i32) -> String {
-    if !(-6..21).contains(&decimal_exponent) {
-        return luau_decimal_digits_to_exponent_string(digits, decimal_exponent);
-    }
-
-    let integer_digits = decimal_exponent + 1;
-    if integer_digits <= 0 {
-        let mut output = String::from("0.");
-        output.extend(std::iter::repeat_n('0', (-integer_digits) as usize));
-        output.push_str(digits);
-        return output;
-    }
-
-    let integer_digits = integer_digits as usize;
-    if integer_digits >= digits.len() {
-        let mut output = String::from(digits);
-        output.extend(std::iter::repeat_n('0', integer_digits - digits.len()));
-        return output;
-    }
-
-    let mut output = String::with_capacity(digits.len() + 1);
-    output.push_str(&digits[..integer_digits]);
-    output.push('.');
-    output.push_str(&digits[integer_digits..]);
-    output
-}
-
-fn luau_decimal_digits_to_exponent_string(digits: &str, decimal_exponent: i32) -> String {
-    let mut output = String::with_capacity(digits.len() + 8);
-    output.push_str(&digits[..1]);
-    if digits.len() > 1 {
-        output.push('.');
-        output.push_str(&digits[1..]);
-    }
-    output.push('e');
-    if decimal_exponent >= 0 {
-        output.push('+');
-    }
-    output.push_str(&decimal_exponent.to_string());
-    output
 }
 
 fn format_vector(vector: VectorData) -> String {
