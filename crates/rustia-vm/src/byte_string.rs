@@ -174,20 +174,30 @@ pub fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
 }
 
 pub fn split_luau_string(text: &[u8], separator: &[u8]) -> Vec<Vec<u8>> {
-    if separator.is_empty() {
-        return text.iter().map(|byte| vec![*byte]).collect();
-    }
+    split_parts(text, separator).map(<[u8]>::to_vec).collect()
+}
 
-    let mut parts = Vec::new();
-    let mut start = 0;
-    while let Some(offset) = text[start..]
-        .windows(separator.len())
-        .position(|window| window == separator)
-    {
-        let end = start + offset;
-        parts.push(text[start..end].to_vec());
-        start = end + separator.len();
-    }
-    parts.push(text[start..].to_vec());
-    parts
+/// Borrow each piece, including trailing empty pieces for nonempty separators.
+pub(crate) fn split_parts<'a>(
+    text: &'a [u8],
+    separator: &'a [u8],
+) -> impl Iterator<Item = &'a [u8]> {
+    let mut remaining = Some(text);
+    std::iter::from_fn(move || {
+        let text = remaining.take()?;
+        if separator.is_empty() {
+            let (part, tail) = text.split_at_checked(1)?;
+            remaining = Some(tail);
+            return Some(part);
+        }
+        if let Some(end) = text
+            .windows(separator.len())
+            .position(|part| part == separator)
+        {
+            remaining = Some(&text[end + separator.len()..]);
+            Some(&text[..end])
+        } else {
+            Some(text)
+        }
+    })
 }

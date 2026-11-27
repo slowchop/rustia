@@ -1815,15 +1815,19 @@ impl VmCell {
     }
 
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
+        self.try_alloc_array_table(values.to_vec())
+            .expect("table slot limit exceeded")
+    }
+
+    pub(crate) fn try_alloc_array_table(&mut self, values: Vec<Value>) -> Option<u32> {
         self.insert_table_data(TableData {
-            array: values.to_vec(),
+            array: values,
             hash: empty_hash_part(self.table_layout),
             readonly: false,
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
         })
-        .expect("table slot limit exceeded")
     }
 
     /// Allocates a PUC-layout table with pre-sized array and node parts,
