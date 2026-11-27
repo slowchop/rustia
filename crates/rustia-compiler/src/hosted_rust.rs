@@ -1,0 +1,871 @@
+//! Experimental Rust source backend for a host-supplied value and operation adapter.
+use rustia_parser::{
+    parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, FunctionParam, SourceError,
+    Stmt, TableField, UnaryOp,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::{self, Write},
+};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+    pub message: String,
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            output,
+            "{}:{}:{}: {}",
+            self.file, self.line, self.column, self.message
+        )
+    }
+}
+
+impl std::error::Error for Diagnostic {}
+
+type Result<T> = std::result::Result<T, Diagnostic>;
+
+/// Capture and builtin lookup policy for the caller's runtime adapter.
+pub struct Options<'a> {
+    /// Capture names in an isolated callback. Use `None` for a module.
+    pub captures: Option<&'a BTreeSet<&'a str>>,
+    /// Whether the runtime adapter exposes a named builtin to a callback.
+    pub supports_builtin: fn(&str) -> bool,
+}
+
+/// Lower a module or isolated callback to Rust against a caller-supplied
+/// `compiled_runtime` adapter. Unsupported syntax returns a source diagnostic.
+/// Selection, capture binding, VM state and execution remain caller-owned.
+pub fn emit(
+    file: &str,
+    source: &[u8],
+    function_name: &str,
+    options: Options<'_>,
+) -> Result<String> {
+    let mut emitter = Emitter {
+        file,
+        external: options.captures,
+        supports_builtin: options.supports_builtin,
+        source,
+        scopes: vec![BTreeMap::new()],
+        written_globals: BTreeSet::new(),
+        captures: Vec::new(),
+        next_id: 0,
+        variadic: true,
+        loop_depth: 0,
+        repeat_depth: None,
+    };
+    let mut identifier = function_name.bytes();
+    if !identifier
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        || !identifier.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+        || RUST_KEYWORDS.contains(&function_name)
+    {
+        return Err(emitter.error(0, "invalid generated Rust module function name"));
+    }
+    let program = parse_source_bytes(source).map_err(|error| {
+        let offset = match &error {
+            SourceError::Lex(error) => error.span.start,
+            SourceError::Parse(error) => error.span.start,
+        };
+        emitter.error(offset, error.to_string())
+    })?;
+    let body = emitter.function_body(&program.statements)?;
+    // No module-specific imports at file scope, so generated items concatenate.
+    Ok(format!(
+        "#[allow(clippy::all, dead_code, unreachable_code, unused_imports, unused_variables)]\n\
+         pub fn {function_name}(host: &mut dyn compiled_runtime::Host, _args: Vec<compiled_runtime::Value>) \
+         -> Result<compiled_runtime::Value, compiled_runtime::Error> {{\n\
+         use compiled_runtime::{{Error, LocalValue, Value, call, call_method, cell, get, iterate, set, unary}};\n\
+         let varargs = _args;\n\
+         let result: Result<Value, Error> = (|| {{\n{body}}})();\n\
+         Ok(result?.into_first())\n}}\n"
+    ))
+}
+
+const RUST_KEYWORDS: &[&str] = &[
+    "_", "abstract", "as", "async", "await", "become", "box", "break", "const", "continue",
+    "crate", "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if",
+    "impl", "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "try", "type",
+    "typeof", "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+];
+
+#[derive(Default)]
+struct Captures {
+    self_binding: Option<usize>,
+    first_local: usize,
+    used: BTreeSet<usize>,
+}
+
+struct Emitter<'a> {
+    file: &'a str,
+    external: Option<&'a BTreeSet<&'a str>>,
+    supports_builtin: fn(&str) -> bool,
+    source: &'a [u8],
+    scopes: Vec<BTreeMap<String, usize>>,
+    written_globals: BTreeSet<String>,
+    captures: Vec<Captures>,
+    next_id: usize,
+    variadic: bool,
+    loop_depth: usize,
+    repeat_depth: Option<usize>,
+}
+
+impl Emitter<'_> {
+    fn error(&self, offset: usize, message: impl Into<String>) -> Diagnostic {
+        let prefix = &self.source[..offset.min(self.source.len())];
+        Diagnostic {
+            file: self.file.to_owned(),
+            line: prefix.iter().filter(|&&b| b == b'\n').count() + 1,
+            column: prefix
+                .rsplit(|&b| b == b'\n')
+                .next()
+                .unwrap_or_default()
+                .len()
+                + 1,
+            message: message.into(),
+        }
+    }
+
+    fn fresh(&mut self) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    fn declare(&mut self, name: &str) -> usize {
+        let id = self.fresh();
+        self.scopes.last_mut().unwrap().insert(name.to_owned(), id);
+        id
+    }
+
+    fn local(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn reference(&mut self, id: usize) {
+        for capture in &mut self.captures {
+            if id < capture.first_local {
+                capture.used.insert(id);
+            }
+        }
+    }
+
+    fn block(&mut self, statements: &[Stmt]) -> Result<String> {
+        self.scopes.push(BTreeMap::new());
+        let block = self.statements(statements);
+        self.scopes.pop();
+        block
+    }
+
+    fn statements(&mut self, statements: &[Stmt]) -> Result<String> {
+        let mut output = String::new();
+        for statement in statements {
+            self.statement(statement, &mut output)?;
+        }
+        Ok(output)
+    }
+
+    fn function_body(&mut self, statements: &[Stmt]) -> Result<String> {
+        let mut output = self.statements(statements)?;
+        if !ends_flow(statements) {
+            output.push_str("Ok(Value::Multi(Vec::new()))\n");
+        }
+        Ok(output)
+    }
+
+    fn function(
+        &mut self,
+        params: &[FunctionParam],
+        is_method: bool,
+        is_vararg: bool,
+        body: &[Stmt],
+        binding: Option<usize>,
+        offset: usize,
+    ) -> Result<String> {
+        if self.external.is_some() && !self.captures.is_empty() {
+            return Err(self.error(
+                offset,
+                "callback adapter cannot transfer guest-created closures",
+            ));
+        }
+        let outer_variadic = std::mem::replace(&mut self.variadic, is_vararg);
+        let outer_loops = std::mem::take(&mut self.loop_depth);
+        let outer_repeat = self.repeat_depth.take();
+        self.scopes.push(BTreeMap::new());
+        self.captures.push(Captures {
+            self_binding: binding,
+            first_local: self.next_id,
+            used: BTreeSet::new(),
+        });
+        let mut parameters = String::new();
+        let parameter_names = is_method
+            .then_some("self")
+            .into_iter()
+            .chain(params.iter().map(|param| param.name.as_str()));
+        for name in parameter_names {
+            let id = self.declare(name);
+            writeln!(
+                parameters,
+                "let l{id} = cell(arguments.next().unwrap_or(Value::Nil));"
+            )
+            .unwrap();
+        }
+        if is_vararg {
+            parameters.push_str("let varargs: Vec<Value> = arguments.collect();\n");
+        }
+        let body = self.function_body(body)?;
+        let mut captures = self.captures.pop().unwrap();
+        self.scopes.pop();
+        self.variadic = outer_variadic;
+        self.loop_depth = outer_loops;
+        self.repeat_depth = outer_repeat;
+
+        let mut output = String::from("{\n");
+        let recursive = binding.filter(|id| captures.used.remove(id));
+        let constructor = match (binding, recursive) {
+            (_, Some(id)) => {
+                format!("compiled_runtime::recursive_local(move |host, l{id}, arguments|")
+            }
+            (Some(_), None) => "cell(Value::function(move |host, arguments|".into(),
+            (None, None) => "Value::function(move |host, arguments|".into(),
+        };
+        let close = if binding.is_some() && recursive.is_none() {
+            "))"
+        } else {
+            ")"
+        };
+        for id in captures.used {
+            writeln!(output, "let l{id} = l{id}.clone();").unwrap();
+        }
+        writeln!(
+            output,
+            "{constructor} {{\n\
+             #[allow(unused_mut)] let mut arguments = arguments.into_iter();\n\
+             {parameters}{body}}}{close}\n}}"
+        )
+        .unwrap();
+        Ok(output)
+    }
+
+    fn statement(&mut self, statement: &Stmt, output: &mut String) -> Result<()> {
+        match statement {
+            Stmt::Local { bindings, init, .. } => {
+                let init = self.values(init)?;
+                let id = self.fresh();
+                writeln!(output, "let mut values{id} = ({init}).into_iter();").unwrap();
+                for binding in bindings {
+                    let binding = self.declare(&binding.name);
+                    writeln!(
+                        output,
+                        "let l{binding} = cell(values{id}.next().unwrap_or(Value::Nil));"
+                    )
+                    .unwrap();
+                }
+            }
+            Stmt::LocalFunction {
+                name,
+                params,
+                is_vararg,
+                body,
+                span,
+                ..
+            } => {
+                let id = self.declare(name);
+                let function =
+                    self.function(params, false, *is_vararg, body, Some(id), span.start)?;
+                writeln!(output, "let l{id} = {function};").unwrap();
+            }
+            Stmt::Function {
+                target,
+                is_method,
+                params,
+                is_vararg,
+                body,
+                span,
+                ..
+            } => {
+                let target = self.target(target, output)?;
+                let function =
+                    self.function(params, *is_method, *is_vararg, body, None, span.start)?;
+                writeln!(output, "{}", target.write(&function)).unwrap();
+            }
+            Stmt::Assignment {
+                targets,
+                op,
+                values,
+                span,
+            } => {
+                self.assignment(targets, *op, values, span.start, output)?;
+            }
+            Stmt::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                let condition = self.expr(condition)?;
+                let then_body = self.block(then_body)?;
+                writeln!(output, "if ({condition}).truthy() {{\n{then_body}}}").unwrap();
+                if !else_body.is_empty() {
+                    let else_body = self.block(else_body)?;
+                    writeln!(output, "else {{\n{else_body}}}").unwrap();
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                let condition = self.expr(condition)?;
+                let body = self.loop_body(body)?;
+                writeln!(output, "while ({condition}).truthy() {{\n{body}}}").unwrap();
+            }
+            Stmt::ForNumeric {
+                variable,
+                start,
+                limit,
+                step,
+                body,
+                ..
+            } => {
+                let start = self.expr(start)?;
+                let limit = self.expr(limit)?;
+                let step = step
+                    .as_ref()
+                    .map(|step| self.expr(step))
+                    .transpose()?
+                    .unwrap_or_else(|| "Value::Number(1.0)".to_owned());
+                self.scopes.push(BTreeMap::new());
+                let variable = self.declare(variable);
+                let body = self.loop_body(body)?;
+                self.scopes.pop();
+                writeln!(
+                    output,
+                    "{{\nlet mut current = ({start}).number()?;\n\
+                     let limit = ({limit}).number()?;\n\
+                     let step = ({step}).number()?;\n\
+                     while if step > 0.0 {{ current <= limit }} else {{ current >= limit }} {{\n\
+                     let l{variable} = cell(Value::Number(current));\n\
+                     let next = current + step;\n\
+                     current = next;\n{body}}}\n}}"
+                )
+                .unwrap();
+            }
+            Stmt::ForGeneric {
+                variables,
+                iter,
+                body,
+                ..
+            } => {
+                let iter = self.values(iter)?;
+                self.scopes.push(BTreeMap::new());
+                let mut bindings = String::new();
+                for variable in variables {
+                    let id = self.declare(&variable.name);
+                    writeln!(
+                        bindings,
+                        "let l{id} = cell(row.next().unwrap_or(Value::Nil));"
+                    )
+                    .unwrap();
+                }
+                let body = self.loop_body(body)?;
+                self.scopes.pop();
+                writeln!(
+                    output,
+                    "{{\nlet input = {iter};\n\
+                     let mut rows = compiled_runtime::LoopRows::new(host, input)?;\n\
+                     while let Some(row) = rows.next_row(host)? {{\n\
+                     let mut row = row.into_iter();\n{bindings}{body}}}\n}}"
+                )
+                .unwrap();
+            }
+            Stmt::Do { body, .. } => writeln!(output, "{{\n{}}}", self.block(body)?).unwrap(),
+            Stmt::Break { span } | Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(self.error(span.start, "loop control outside a loop"));
+                }
+                let keyword = if matches!(statement, Stmt::Break { .. }) {
+                    "break"
+                } else {
+                    if self.repeat_depth == Some(self.loop_depth) {
+                        return Err(
+                            self.error(span.start, "continue in a repeat loop is unsupported")
+                        );
+                    }
+                    "continue"
+                };
+                writeln!(output, "{keyword};").unwrap();
+            }
+            Stmt::Return {
+                value,
+                extra_values,
+                ..
+            } => {
+                let values: Vec<_> = value.iter().chain(extra_values).collect();
+                let values = self.value_list(&values)?;
+                writeln!(output, "return Ok(Value::Multi({values}));").unwrap();
+            }
+            Stmt::Expr { expr, .. } => {
+                writeln!(output, "let _ = {};", self.raw_expr(expr)?).unwrap();
+            }
+            Stmt::TypeAlias { .. } | Stmt::TypeFunction { .. } => {}
+            Stmt::Repeat {
+                body, condition, ..
+            } => {
+                self.loop_depth += 1;
+                let outer_repeat = self.repeat_depth.replace(self.loop_depth);
+                self.scopes.push(BTreeMap::new());
+                let body = self.statements(body)?;
+                let condition = self.expr(condition)?;
+                self.scopes.pop();
+                self.repeat_depth = outer_repeat;
+                self.loop_depth -= 1;
+                writeln!(
+                    output,
+                    "loop {{\n{body}if ({condition}).truthy() {{ break; }}\n}}"
+                )
+                .unwrap();
+            }
+        }
+        Ok(())
+    }
+
+    fn loop_body(&mut self, statements: &[Stmt]) -> Result<String> {
+        self.loop_depth += 1;
+        let body = self.block(statements);
+        self.loop_depth -= 1;
+        body
+    }
+
+    fn assignment(
+        &mut self,
+        targets: &[AssignmentTarget],
+        op: AssignmentOp,
+        values: &[Expr],
+        offset: usize,
+        output: &mut String,
+    ) -> Result<()> {
+        if op == AssignmentOp::Assign {
+            let targets = targets
+                .iter()
+                .map(|target| self.target(target, output))
+                .collect::<Result<Vec<_>>>()?;
+            let values = self.values(values)?;
+            let id = self.fresh();
+            writeln!(output, "let mut values{id} = ({values}).into_iter();").unwrap();
+            for target in targets {
+                let value = format!("values{id}.next().unwrap_or(Value::Nil)");
+                writeln!(output, "{}", target.write(&value)).unwrap();
+            }
+        } else {
+            let ([target], [value]) = (targets, values) else {
+                return Err(self.error(offset, "compound assignment needs one target and value"));
+            };
+            let target = self.target(target, output)?;
+            let left = target.read();
+            let right = self.expr(value)?;
+            let op = match op {
+                AssignmentOp::Assign => unreachable!(),
+                AssignmentOp::Add => "+",
+                AssignmentOp::Sub => "-",
+                AssignmentOp::Mul => "*",
+                AssignmentOp::Div => "/",
+                AssignmentOp::FloorDiv => "//",
+                AssignmentOp::Mod => "%",
+                AssignmentOp::Pow => "^",
+                AssignmentOp::Concat => "..",
+            };
+            let calc = format!(
+                "{{ let left = {left}; let right = {right}; host.binary({op:?}, left, right)? }}"
+            );
+            writeln!(output, "{}", target.write(&calc)).unwrap();
+        }
+        Ok(())
+    }
+
+    fn target(&mut self, target: &AssignmentTarget, output: &mut String) -> Result<Target> {
+        let (object, key) = match target {
+            AssignmentTarget::Local { name, span } => {
+                let Some(id) = self.local(name) else {
+                    if let Some(external) = self.external {
+                        if external.contains(name.as_str()) {
+                            return Ok(Target::Capture(name.to_owned()));
+                        }
+                        return Err(
+                            self.error(span.start, format!("cannot assign live global {name:?}"))
+                        );
+                    }
+                    self.written_globals.insert(name.to_owned());
+                    return Ok(Target::Global(name.to_owned()));
+                };
+                if self
+                    .captures
+                    .last()
+                    .is_some_and(|scope| scope.self_binding == Some(id))
+                {
+                    return Err(self.error(span.start, "cannot assign to function self binding"));
+                }
+                self.reference(id);
+                return Ok(Target::Local(id));
+            }
+            AssignmentTarget::Field { object, field, .. } => (object, string(field)),
+            AssignmentTarget::Index { object, index, .. } => (object, self.expr(index)?),
+        };
+        let object = self.expr(object)?;
+        let id = self.fresh();
+        writeln!(output, "let object{id} = {object};\nlet key{id} = {key};").unwrap();
+        Ok(Target::Table(id))
+    }
+
+    fn values(&mut self, expressions: &[Expr]) -> Result<String> {
+        self.value_list(&expressions.iter().collect::<Vec<_>>())
+    }
+
+    fn value_list(&mut self, expressions: &[&Expr]) -> Result<String> {
+        let Some((last, prefix)) = expressions.split_last() else {
+            return Ok("Vec::new()".to_owned());
+        };
+        let prefix = prefix
+            .iter()
+            .map(|expr| self.expr(expr))
+            .collect::<Result<Vec<_>>>()?
+            .join(", ");
+        if expands(last) {
+            let last = self.raw_expr(last)?;
+            Ok(format!(
+                "{{ let mut values = vec![{prefix}]; values.extend(({last}).into_values()); values }}"
+            ))
+        } else {
+            let last = self.expr(last)?;
+            let comma = if prefix.is_empty() { "" } else { ", " };
+            Ok(format!("vec![{prefix}{comma}{last}]"))
+        }
+    }
+
+    fn expr(&mut self, expression: &Expr) -> Result<String> {
+        let source = self.raw_expr(expression)?;
+        if expands(expression) {
+            Ok(format!("({source}).into_first()"))
+        } else {
+            Ok(source)
+        }
+    }
+
+    fn raw_expr(&mut self, expression: &Expr) -> Result<String> {
+        Ok(match expression {
+            Expr::Nil(_) => "Value::Nil".to_owned(),
+            Expr::Bool(value, _) => format!("Value::Bool({value})"),
+            Expr::Number(value, _) => number(*value),
+            Expr::String(value, _) => match std::str::from_utf8(value) {
+                Ok(text) => string(text),
+                Err(_) => format!("Value::from_bytes(vec!{value:?})"),
+            },
+            Expr::InterpolatedString {
+                parts, expressions, ..
+            } => {
+                let mut code = String::from("{ let mut text = Vec::<u8>::new();");
+                for part in parts {
+                    match part {
+                        rustia_parser::InterpolatedStringPart::Text(bytes) => {
+                            writeln!(code, "text.extend_from_slice(&{bytes:?});").unwrap();
+                        }
+                        rustia_parser::InterpolatedStringPart::Expr(index) => {
+                            let value = self.expr(&expressions[*index])?;
+                            writeln!(
+                                code,
+                                "text.extend(compiled_runtime::string_bytes(&({value})));"
+                            )
+                            .unwrap();
+                        }
+                    }
+                }
+                code.push_str("Value::from_bytes(text) }");
+                code
+            }
+            Expr::Name(name, span) => match self.local(name) {
+                Some(id) => {
+                    self.reference(id);
+                    if self
+                        .captures
+                        .last()
+                        .is_some_and(|scope| scope.self_binding == Some(id))
+                    {
+                        format!("l{id}.original()")
+                    } else {
+                        Target::Local(id).read()
+                    }
+                }
+                None if self
+                    .external
+                    .is_some_and(|bindings| bindings.contains(name.as_str())) =>
+                {
+                    format!("host.capture({name:?})?")
+                }
+                None if self.external.is_some() && !(self.supports_builtin)(name) => {
+                    return Err(self.error(span.start, format!("unsupported live global {name:?}")));
+                }
+                None if name == "require" => format!("host.require_function({:?})?", self.file),
+                None => format!("host.global({name:?})?"),
+            },
+            Expr::Varargs(_) if self.variadic => "Value::Multi(varargs.clone())".to_owned(),
+            Expr::Varargs(span) => {
+                return Err(self.error(span.start, "varargs used outside variadic function"));
+            }
+            Expr::Unary { op, expr, .. } => {
+                let expr = self.expr(expr)?;
+                let op = match op {
+                    UnaryOp::Neg => "-",
+                    UnaryOp::Not => "not",
+                    UnaryOp::Len => "#",
+                };
+                format!("{{ let value = {expr}; host.unary({op:?}, value)? }}")
+            }
+            Expr::Binary { op, lhs, rhs, .. } => {
+                let lhs = self.expr(lhs)?;
+                let rhs = self.expr(rhs)?;
+                match op {
+                    BinaryOp::And => {
+                        format!(
+                            "{{ let left = {lhs}; if left.truthy() {{ {rhs} }} else {{ left }} }}"
+                        )
+                    }
+                    BinaryOp::Or => {
+                        format!(
+                            "{{ let left = {lhs}; if left.truthy() {{ left }} else {{ {rhs} }} }}"
+                        )
+                    }
+                    BinaryOp::Eq | BinaryOp::Ne => {
+                        let negate = *op == BinaryOp::Ne;
+                        format!(
+                            "{{ let left = {lhs}; let right = {rhs}; compiled_runtime::equals(host, left, right, {negate})? }}"
+                        )
+                    }
+                    _ => {
+                        let operator = binary_operator(*op);
+                        format!(
+                            "{{ let left = {lhs}; let right = {rhs}; host.binary({operator:?}, left, right)? }}"
+                        )
+                    }
+                }
+            }
+            Expr::IfElse {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => format!(
+                "if ({}).truthy() {{ {} }} else {{ {} }}",
+                self.expr(condition)?,
+                self.expr(then_expr)?,
+                self.expr(else_expr)?
+            ),
+            Expr::Field { object, field, .. } => {
+                let object = self.expr(object)?;
+                let key = string(field);
+                format!("{{ let object = {object}; get(host, object, {key})? }}")
+            }
+            Expr::Index { object, index, .. } => {
+                let object = self.expr(object)?;
+                let key = self.expr(index)?;
+                format!("{{ let object = {object}; let key = {key}; get(host, object, key)? }}")
+            }
+            Expr::Table { fields, .. } => self.table(fields)?,
+            Expr::Function {
+                params,
+                is_vararg,
+                body,
+                ..
+            } => self.function(
+                params,
+                false,
+                *is_vararg,
+                body,
+                None,
+                expression.span().start,
+            )?,
+            Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => self.expr(expr)?,
+            Expr::Call { callee, args, .. } => {
+                let deferred = self.defer_builtin(callee, args);
+                let callee = self.expr(callee)?;
+                let arguments = self.values(args)?;
+                if deferred {
+                    format!(
+                        "{{ let arguments = {arguments}; let function = {callee}; call(host, function, arguments)? }}"
+                    )
+                } else {
+                    format!(
+                        "{{ let function = {callee}; let arguments = {arguments}; call(host, function, arguments)? }}"
+                    )
+                }
+            }
+            Expr::MethodCall {
+                object,
+                method,
+                args,
+                ..
+            } => {
+                let object = self.expr(object)?;
+                let arguments = self.values(args)?;
+                format!(
+                    "{{ let object = {object}; let arguments = {arguments}; call_method(host, object, {method:?}, arguments)? }}"
+                )
+            }
+        })
+    }
+
+    // The pinned Luau builtin list changes callee lookup order even when the
+    // table's function has been replaced. Parentheses and lexical aliases
+    // deliberately take the ordinary evaluate-callee-first path.
+    fn defer_builtin(&self, callee: &Expr, args: &[Expr]) -> bool {
+        let root = match callee {
+            Expr::Name(name, _)
+                if crate::defers_builtin_lookup(
+                    name,
+                    None,
+                    matches!(args, [_, Expr::Varargs(_)]),
+                ) =>
+            {
+                name
+            }
+            Expr::Field { object, field, .. }
+                if let Expr::Name(table, _) = object.as_ref()
+                    && crate::defers_builtin_lookup(table, Some(field), false) =>
+            {
+                table
+            }
+            _ => return false,
+        };
+        self.local(root).is_none()
+            && !self.written_globals.contains(root)
+            && !self
+                .external
+                .is_some_and(|names| names.contains(root.as_str()))
+    }
+
+    fn table(&mut self, fields: &[TableField]) -> Result<String> {
+        let mut init = Vec::new();
+        let mut array_index = 0;
+        let mut expanded = None;
+        for (index, field) in fields.iter().enumerate() {
+            let (key, value) = match field {
+                TableField::Array { value, .. } => {
+                    array_index += 1;
+                    if index + 1 == fields.len() && expands(value) {
+                        expanded = Some(self.raw_expr(value)?);
+                        continue;
+                    }
+                    (format!("Value::Number({array_index}.0)"), value)
+                }
+                TableField::Named { name, value, .. } => (string(name), value),
+                TableField::Keyed { key, value, .. } => (self.expr(key)?, value),
+            };
+            let value = self.expr(value)?;
+            init.push(format!("({key}, {value})"));
+        }
+        let init = init.join(", ");
+        if let Some(values) = expanded {
+            Ok(format!(
+                "{{ let mut fields = vec![{init}];\n\
+                 for (index, value) in ({values}).into_values().into_iter().enumerate() {{\n\
+                 fields.push((Value::Number(({array_index} + index) as f64), value));\n}}\n\
+                 host.make_table(fields)? }}"
+            ))
+        } else {
+            Ok(format!(
+                "{{ let fields = vec![{init}]; host.make_table(fields)? }}"
+            ))
+        }
+    }
+}
+
+fn binary_operator(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::And | BinaryOp::Or => unreachable!(),
+        BinaryOp::Eq => "==",
+        BinaryOp::Ne => "~=",
+        BinaryOp::Lt => "<",
+        BinaryOp::Le => "<=",
+        BinaryOp::Gt => ">",
+        BinaryOp::Ge => ">=",
+        BinaryOp::Concat => "..",
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::FloorDiv => "//",
+        BinaryOp::Mod => "%",
+        BinaryOp::Pow => "^",
+    }
+}
+
+fn string(value: &str) -> String {
+    format!("Value::String(String::from({value:?}))")
+}
+
+fn number(value: f64) -> String {
+    format!("Value::Number(f64::from_bits(0x{:016x}))", value.to_bits())
+}
+
+fn expands(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Call { .. } | Expr::MethodCall { .. } | Expr::Varargs(_)
+    )
+}
+
+fn ends_flow(statements: &[Stmt]) -> bool {
+    match statements.last() {
+        Some(Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. }) => true,
+        Some(Stmt::Do { body, .. }) => ends_flow(body),
+        Some(Stmt::If {
+            then_body,
+            else_body,
+            ..
+        }) => ends_flow(then_body) && ends_flow(else_body),
+        _ => false,
+    }
+}
+
+enum Target {
+    Capture(String),
+    Global(String),
+    Local(usize),
+    Table(usize),
+}
+
+impl Target {
+    fn read(&self) -> String {
+        match self {
+            Self::Capture(name) => format!("host.capture({name:?})?"),
+            Self::Global(name) => format!("host.global({name:?})?"),
+            Self::Local(id) => format!("l{id}.read_local()"),
+            Self::Table(id) => format!("get(host, object{id}.clone(), key{id}.clone())?"),
+        }
+    }
+
+    fn write(&self, expression: &str) -> String {
+        // Evaluate the value before admitting either the host or the local
+        // lock. A callback on the right may read or modify that same cell.
+        match self {
+            Self::Capture(name) => {
+                format!("{{ let value = {expression}; host.set_capture({name:?}, value)?; }}")
+            }
+            Self::Global(name) => {
+                format!("{{ let value = {expression}; host.set_global({name:?}, value)?; }}")
+            }
+            Self::Local(id) => format!("{{ let value = {expression}; l{id}.write_local(value); }}"),
+            Self::Table(id) => {
+                format!("{{ let value = {expression}; set(host, object{id}, key{id}, value)?; }}")
+            }
+        }
+    }
+}
