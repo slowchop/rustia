@@ -70,8 +70,22 @@ fn standalone_policy_checks_host_calls_imports_globals_and_builtin_fields() {
         emit(b"local dep = require('./dep')\nreturn app.open('input'), math.abs(-1)").unwrap();
     assert!(rust.contains("adapter::Host"));
     assert!(rust.contains("host.require(\"mod.luau\", \"./dep\")"));
+    let typed =
+        emit(b"local dep = require<<any>>('./dep')\nreturn app.open<<any>>('input'), math.abs(-1)")
+            .unwrap();
+    assert_eq!(typed, rust);
+    let shadowed =
+        emit(b"local require = function(x) return x end\nreturn require<<any>>('local')").unwrap();
+    assert!(!shadowed.contains("host.require("));
+    let local_namespace =
+        emit(b"local app = { open = function(x) return x end }\nreturn app.open<<any>>('local')")
+            .unwrap();
+    assert!(!local_namespace.contains("host.global(\"app\")"));
+
     for source in [
         &b"return app.open('other')"[..],
+        b"return app.open<<any>>('other')",
+        b"return require<<any>>(load())",
         b"return require(load())",
         b"return math['unknown']",
         b"return math",

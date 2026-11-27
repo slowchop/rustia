@@ -816,8 +816,12 @@ impl Emitter<'_> {
             )?,
             Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => self.expr(expr)?,
             Expr::Call { callee, args, span } => {
+                let mut target = callee.as_ref();
+                while let Expr::TypeInstantiation { expr, .. } = target {
+                    target = expr;
+                }
                 if self.closed.is_some()
-                    && matches!(callee.as_ref(), Expr::Name(name, _) if name == "require" && self.local(name).is_none())
+                    && matches!(target, Expr::Name(name, _) if name == "require" && self.local(name).is_none())
                 {
                     let [Expr::String(specifier, _)] = args.as_slice() else {
                         return Err(self.error(
@@ -834,7 +838,7 @@ impl Emitter<'_> {
                     if self.local(host.namespace).is_some() {
                         return None;
                     }
-                    host_fields(callee, host.namespace).map(|fields| (host, fields))
+                    host_fields(target, host.namespace).map(|fields| (host, fields))
                 });
                 let callee = if let Some((host, fields)) = declaration {
                     let literal = match args.as_slice() {
