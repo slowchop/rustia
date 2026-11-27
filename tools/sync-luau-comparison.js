@@ -31,13 +31,10 @@ function syncComparison(write = false) {
   const markdown = guide + "\n\n" + iconMarker + "\n\n" + embedded.join("\n") + "\n";
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "rustia-compare-"));
   try {
-    const chart = readText(path.join(root, "crates/rustia/performance.svg"));
-    const footer = path.join(temp, "chart.html");
-    fs.writeFileSync(footer, '<section aria-labelledby="performance"><h2 id="performance">Measured performance</h2>\n' + chart + '</section>\n');
     const input = path.join(temp, "compare.md");
     fs.writeFileSync(input, markdown);
     execFileSync("rustdoc", ["--markdown-no-toc", "--markdown-css", "compare.css",
-      "--html-after-content", footer, "--out-dir", temp, input], { cwd: root });
+      "--out-dir", temp, input], { cwd: root });
     const html = readText(path.join(temp, "compare.html"))
       .replace(/[ \t]+$/gm, "")
       .replaceAll("<th>", '<th scope="col">')

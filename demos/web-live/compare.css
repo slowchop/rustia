@@ -23,7 +23,6 @@ table { width: 100%; border-collapse: collapse; }
 td, th { text-align: left; vertical-align: middle; white-space: nowrap; padding: .45rem .65rem; border-bottom: 1px solid #c7d6cc; }
 thead th { background: #e4eee6; }
 img { vertical-align: middle; }
-svg { display: block; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e2ece4; background: #17211d; }

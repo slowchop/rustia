@@ -6,7 +6,7 @@ This directory implements the application API. [lib.rs](./lib.rs) privately comp
 
 ## Interface
 
-- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc opens with the README’s runnable example and a short task index. The task index leads into guides to table ownership, callbacks, and recovery after errors. The crate displays the comparison and archived performance chart. The `Rustia` type documents thread ownership.
+- `Rustia` and `RustiaBuilder`: construct and operate a VM through facade-owned settings and errors. The crate Rustdoc opens with the README’s runnable example and a short task index. The task index leads into guides to table ownership, callbacks, and recovery after errors. The crate displays the project comparison and links to the website performance charts. The `Rustia` type documents thread ownership.
 - `Chunk`: named source, optional rooted lexical environment, then `eval`, `eval_live`, `eval_serde`, `exec`, or transactional `install`.
 - `OwnedValue`/`IntoRustia`/`FromRustia`: owned data conversions; `Value` and `Table`: rooted live guest values. `Rustia::create_vector` creates an immutable rooted Luau vector without broadening the owned snapshot model.
 - `Function`/`Exports` and `HostFunction`: retained script calls and reusable host callbacks.
