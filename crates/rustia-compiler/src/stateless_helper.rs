@@ -1,7 +1,7 @@
 //! Conservative admission for function modules that may be instantiated in a
 //! compiled guest without transferring persistent module state.
 
-use crate::{CompileError, Result};
+use crate::{source_bundle::literal_require_argument, CompileError, Result};
 use rustia_parser::{
     parse_source_bytes, AssignmentTarget, Expr, SourceError, Stmt, TableField, UnaryOp,
 };
@@ -26,18 +26,10 @@ fn import(statement: &Stmt) -> Option<&str> {
     let Stmt::Local { bindings, init, .. } = statement else {
         return None;
     };
-    let ([binding], [Expr::Call { callee, args, .. }]) = (bindings.as_slice(), init.as_slice())
-    else {
+    let ([binding], [initializer]) = (bindings.as_slice(), init.as_slice()) else {
         return None;
     };
-    let [Expr::String(..)] = args.as_slice() else {
-        return None;
-    };
-    let mut callee = callee.as_ref();
-    while let Expr::TypeInstantiation { expr, .. } = callee {
-        callee = expr;
-    }
-    matches!(callee, Expr::Name(name, _) if name == "require").then_some(binding.name.as_str())
+    literal_require_argument(initializer).map(|_| binding.name.as_str())
 }
 
 fn constant(statement: &Stmt) -> Option<(&str, rustia_lexer::Span)> {
