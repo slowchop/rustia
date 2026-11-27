@@ -188,7 +188,7 @@ impl NumericCallInstance<'_> {
 }
 
 /// Lower a single source module defining one numeric capture and returning a
-/// unary closure. The closure may update that capture once before returning.
+/// zero- or one-argument closure. It may update the capture once before returning.
 pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
     let chunk = parse_bounded(source)?;
     Ok(render(lower(&chunk, Span::new(0, source.len()))?))
@@ -241,7 +241,7 @@ pub fn generate_scalar_helper(source: &str) -> Result<String, CompileError> {
     }
     let mut lowerer = Lowerer {
         capture: None,
-        parameter: &parameter.name,
+        parameter: Some(&parameter.name),
         uses_capture: false,
         uses_parameter: false,
     };
@@ -351,13 +351,20 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
             *span,
         ));
     };
-    let [parameter] = params.as_ref() else {
-        return Err(CompileError::at(
-            "expected one numeric parameter",
-            *function_span,
-        ));
+    let parameter = match params.as_ref() {
+        [] => None,
+        [parameter] => Some(parameter.name.as_str()),
+        _ => {
+            return Err(CompileError::at(
+                "expected at most one numeric parameter",
+                *function_span,
+            ))
+        }
     };
-    if !attributes.is_empty() || !extra_values.is_empty() || binding.name == parameter.name {
+    if !attributes.is_empty()
+        || !extra_values.is_empty()
+        || Some(binding.name.as_str()) == parameter
+    {
         return Err(CompileError::at(
             "unsupported compiled closure signature",
             *function_span,
@@ -365,7 +372,7 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
     }
     let mut lowerer = Lowerer {
         capture: Some(&binding.name),
-        parameter: &parameter.name,
+        parameter,
         uses_capture: false,
         uses_parameter: false,
     };
@@ -439,7 +446,7 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
 
 struct Lowerer<'a> {
     capture: Option<&'a str>,
-    parameter: &'a str,
+    parameter: Option<&'a str>,
     uses_capture: bool,
     uses_parameter: bool,
 }
@@ -453,7 +460,7 @@ impl Lowerer<'_> {
                 self.uses_capture = true;
                 Ok(NumericExpr::Capture)
             }
-            Expr::Name(name, _) if name == self.parameter => {
+            Expr::Name(name, _) if Some(name.as_str()) == self.parameter => {
                 self.uses_parameter = true;
                 Ok(NumericExpr::Parameter)
             }
@@ -473,7 +480,7 @@ impl Lowerer<'_> {
                 ))
             }
             Expr::Call { callee, args, .. }
-                if self.capture.is_none() && self.parameter != "math" =>
+                if self.capture.is_none() && self.parameter != Some("math") =>
             {
                 let (Expr::Field { object, field, .. }, [argument]) =
                     (callee.as_ref(), args.as_slice())

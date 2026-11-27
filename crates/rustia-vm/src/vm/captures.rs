@@ -259,9 +259,6 @@ impl Vm {
         {
             return Ok(None);
         }
-        let Some(parameter) = compiled_number(parameter) else {
-            return Ok(None);
-        };
         self.ensure_idle_capture_edit()?;
         let (handle, kind) = self.inspected_function(function)?;
         let (program, prototype) = self.capture_prototype(kind)?;
@@ -279,7 +276,7 @@ impl Vm {
         // The compiler may append an unreachable empty return. Admitted
         // operations have an identity clock schedule and cannot allocate
         // guest objects or dispatch calls.
-        if closure.parameter_count != 1
+        if closure.parameter_count > 1
             || closure.is_vararg
             || !closure.captured_registers.is_empty()
             || closure.upvalues.len() != 1
@@ -304,6 +301,14 @@ impl Vm {
         {
             return Ok(None);
         }
+        let parameter = if closure.parameter_count == 0 {
+            // Keep the numeric backend ABI independent of the guest arity.
+            0.0
+        } else if let Some(parameter) = compiled_number(parameter) {
+            parameter
+        } else {
+            return Ok(None);
+        };
         let Some(next_clock) = self.executed_instructions.checked_add(return_pc as u64 + 1) else {
             return Ok(None);
         };

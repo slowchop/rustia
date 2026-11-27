@@ -534,3 +534,50 @@ fn bind_preserves_an_existing_capture_and_rejects_edits() {
         assert!(prepared.bind(&vm, &other).unwrap().is_none());
     }
 }
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn zero_argument_numeric_callback_keeps_its_capture_and_fuel_budget() {
+    use rustia_vm::VmSettings;
+    let source = "local score = 0 return function() score += 2 return score * 2 end";
+    let bundle = SourceBundle::new([("entry.luau", source)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let mut vm = Vm::with_settings(
+        Profile::LuauCompat,
+        VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
+    let call = prepared.instantiate(&mut vm).unwrap();
+    let expected = prepared.instantiate(&mut vm).unwrap();
+    let mut budget = vm.begin_execution();
+    for value in [4.0, 8.0, 12.0] {
+        let result = call
+            .try_call_in(
+                &mut vm,
+                Value::nil(),
+                &receipt,
+                &mut budget,
+                |capture, parameter| {
+                    assert_eq!(parameter.to_bits(), 0);
+                    let next = capture + 2.0;
+                    Ok((next, next * 2.0))
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.as_number(), Some(value));
+        assert_eq!(
+            result.as_number(),
+            expected
+                .call_interpreted(&mut vm, Value::nil())
+                .unwrap()
+                .as_number()
+        );
+    }
+    assert!(budget.fuel_used() > 0);
+    assert!(generate("local score=0 return function(a,b) score += a return score+b end").is_err());
+}
