@@ -12,7 +12,7 @@ categories.workspace = true
 # project-copy: intro
 description = "Rustia is a pure-Rust interpreter for embedding standalone Luau in games and tools. Edit scripts without a rebuild and let players write mods.\n\nRustia grew out of a game by Slowchop Studios that needed to script character decisions and replay them on desktop and in a browser."
 # /project-copy: intro
-publish.workspace = true
+publish = ["crates-io"]
 
 [features]
 default = ["platform-adapters"]

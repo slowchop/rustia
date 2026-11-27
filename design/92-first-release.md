@@ -2,9 +2,11 @@
 
 This plan defines the private 0.x application-acceptance milestone and the later
 supported release. The [experimental public source launch](public-source-activation.md)
-covers source inspection and use. All workspace crates remain at `0.0.1` with
-`publish = false`. Package publication, supported platforms, API stability and
-consumer rollout keep their separate acceptance gates.
+covers source inspection and use. The unpublished workspace is staged at `0.2.0`.
+[Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the interpreter
+preview packages and [their evidence](90-release-readiness.md#rustia-020-interpreter-preview).
+This plan tracks the broader [supported release](https://github.com/slowchop/rustia/issues/34),
+including platform acceptance, API stability and consumer rollout.
 
 The future stable target remains **Rustia 1.0**, after a separate publication
 and release-candidate decision. That compatibility promise will cover the
@@ -268,11 +270,12 @@ and the final-candidate evidence and publication requirements above remain open.
 4. Resolve all blocking independent-review findings. Land via a merge commit;
    required CI and reviews continue to gate auto-merge.
 5. Review release notes, supported platforms, minimum Rust version, feature flags,
-   license files, examples, and migration notes together. Flip publication policy
-   only after the complete gate passes, then publish dependencies in the order
-   specified by [91-semver-policy.md](91-semver-policy.md).
-6. Tag the released source, verify installation and documentation from the public
-   packages, and record the release/API baseline for future 1.x checks.
+   license files, examples, migration notes, and the package allowlist together.
+   After the complete gate passes and publication is explicitly authorized,
+   publish dependencies in the order specified by [91-semver-policy.md](91-semver-policy.md).
+6. With separate release authorization, tag the released source. Verify installation
+   and documentation from the public packages and record the release/API baseline
+   for future 1.x checks.
 
 This document records the private milestone and the later public-release gates.
 It does not implement the planned API, close runtime or consumer-validation

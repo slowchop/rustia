@@ -262,7 +262,7 @@ checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
 
 [[package]]
 name = "rustia"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia-compiler",
  "rustia-lexer",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "rustia-compiler"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia-lexer",
  "rustia-parser",
@@ -297,18 +297,18 @@ dependencies = [
 
 [[package]]
 name = "rustia-lexer"
-version = "0.0.1"
+version = "0.2.0"
 
 [[package]]
 name = "rustia-parser"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "rustia-lexer",
 ]
 
 [[package]]
 name = "rustia-vm"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "gc-arena",
  "libm",

@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Luau-to-rustia bytecode compiler"
-publish.workspace = true
+publish = ["crates-io"]
 
 [features]
 default = []

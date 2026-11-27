@@ -7,22 +7,35 @@
     "rust_version": "1.95",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/slowchop/rustia",
-    "homepage": "https://github.com/slowchop/rustia",
-    "publish": false
+    "homepage": "https://github.com/slowchop/rustia"
+  },
+  "preview_release": {
+    "version": "0.2.0",
+    "registry": "crates-io",
+    "packages": [
+      "rustia-lexer",
+      "rustia-parser",
+      "rustia-vm",
+      "rustia-compiler",
+      "rustia",
+      "rustia-cli"
+    ]
   },
   "summary": {
     "package_count": 8,
-    "workspace_version": "0.0.1",
-    "publish_false_count": 8,
+    "workspace_version": "0.2.0",
+    "publish_false_count": 2,
     "all_readmes_exist": true,
     "internal_dependency_versions_explicit": true
   },
   "packages": [
     {
       "name": "rustia-lexer",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-lexer/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -46,9 +59,11 @@
     },
     {
       "name": "rustia-parser",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-parser/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -71,16 +86,18 @@
       "internal_dependencies": [
         {
           "name": "rustia-lexer",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         }
       ]
     },
     {
       "name": "rustia-vm",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-vm/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -104,9 +121,11 @@
     },
     {
       "name": "rustia-compiler",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-compiler/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -129,26 +148,28 @@
       "internal_dependencies": [
         {
           "name": "rustia-lexer",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-parser",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-vm",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         }
       ]
     },
     {
       "name": "rustia",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -171,31 +192,33 @@
       "internal_dependencies": [
         {
           "name": "rustia-lexer",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-parser",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-vm",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-compiler",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         }
       ]
     },
     {
       "name": "rustia-cli",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-cli/Cargo.toml",
-      "publish": false,
+      "publish": [
+        "crates-io"
+      ],
       "edition": "2021",
       "rust_version": "1.95",
       "license": "MIT OR Apache-2.0",
@@ -218,14 +241,14 @@
       "internal_dependencies": [
         {
           "name": "rustia",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         }
       ]
     },
     {
       "name": "rustia-conformance",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "crates/rustia-conformance/Cargo.toml",
       "publish": false,
       "edition": "2021",
@@ -250,29 +273,29 @@
       "internal_dependencies": [
         {
           "name": "rustia-parser",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-vm",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia-compiler",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         },
         {
           "name": "rustia",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": false
         }
       ]
     },
     {
       "name": "script-bench-harness",
-      "version": "0.0.1",
+      "version": "0.2.0",
       "manifest": "bench/Cargo.toml",
       "publish": false,
       "edition": "2021",
@@ -295,17 +318,17 @@
       "internal_dependencies": [
         {
           "name": "rustia-parser",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": true
         },
         {
           "name": "rustia-vm",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": true
         },
         {
           "name": "rustia-compiler",
-          "requirement": "^0.0.1",
+          "requirement": "^0.2.0",
           "optional": true
         }
       ]

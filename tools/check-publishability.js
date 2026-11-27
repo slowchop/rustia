@@ -4,22 +4,19 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const { previewPackages } = require("./preview-package-policy.js");
 
 const root = path.resolve(__dirname, "..");
 const outputPath = path.join(root, "design", "publishability.json");
 const packageFilesPath = path.join(root, "design", "package-files.json");
 const checkOnly = process.argv.includes("--check");
 
-const publicOrderHint = [
-  "rustia-lexer",
-  "rustia-parser",
-  "rustia-vm",
-  "rustia-compiler",
-  "rustia",
-  "rustia-cli",
-  "rustia-conformance",
-  "script-bench-harness",
-];
+const toolingRoles = new Map([
+  ["rustia-conformance", "conformance-tooling"],
+  ["script-bench-harness", "standalone-benchmark"],
+]);
+
+const publicOrderHint = [...previewPackages, ...toolingRoles.keys()];
 
 function fail(message) {
   console.error(`check-publishability: ${message}`);
@@ -162,7 +159,7 @@ function buildReport() {
       version: pkg.version,
       manifest: relative(pkg.manifest_path),
       publish: publishValue(pkg.publish),
-      role: pkg.name === "script-bench-harness" ? "standalone-benchmark" : "public-rustia-crate",
+      role: toolingRoles.get(pkg.name) ?? "public-rustia-crate",
       package_file_audit: {
         file_count: packageFile.file_count,
         forbidden_path_violations: 0,

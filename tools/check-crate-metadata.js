@@ -4,18 +4,15 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const { isDeepStrictEqual } = require("node:util");
+const { expectedPublication, previewPackages, previewRegistry, previewVersion } = require("./preview-package-policy.js");
 
 const root = path.resolve(__dirname, "..");
 const outputPath = path.join(root, "design", "crate-metadata.json");
 const checkOnly = process.argv.includes("--check");
 
 const expectedPackages = [
-  "rustia-lexer",
-  "rustia-parser",
-  "rustia-vm",
-  "rustia-compiler",
-  "rustia",
-  "rustia-cli",
+  ...previewPackages,
   "rustia-conformance",
   "script-bench-harness",
 ];
@@ -26,7 +23,6 @@ const expected = {
   license: "MIT OR Apache-2.0",
   repository: "https://github.com/slowchop/rustia",
   homepage: "https://github.com/slowchop/rustia",
-  publish: false,
 };
 
 function fail(message) {
@@ -111,13 +107,11 @@ function checkField(pkg, field, value, violations) {
 function validatePackage(pkg, workspaceNames, workspaceVersion) {
   const violations = [];
   for (const [field, value] of Object.entries(expected)) {
-    if (field === "publish") {
-      if (publishValue(pkg.publish) !== value) {
-        violations.push(`publish must be ${value}, got ${JSON.stringify(pkg.publish)}`);
-      }
-    } else {
-      checkField(pkg, field, value, violations);
-    }
+    checkField(pkg, field, value, violations);
+  }
+  const publish = expectedPublication(pkg.name, pkg.version);
+  if (!isDeepStrictEqual(publishValue(pkg.publish), publish)) {
+    violations.push(`publish must be ${JSON.stringify(publish)}, got ${JSON.stringify(pkg.publish)}`);
   }
   if (pkg.version !== workspaceVersion) {
     violations.push(`version must match workspace version ${workspaceVersion}, got ${pkg.version}`);
@@ -197,6 +191,7 @@ function buildReport() {
     source: "cargo metadata --no-deps",
     command: "node tools/check-crate-metadata.js",
     expected,
+    preview_release: { version: previewVersion, registry: previewRegistry, packages: previewPackages },
     summary: {
       package_count: reports.length,
       workspace_version: workspaceVersion,

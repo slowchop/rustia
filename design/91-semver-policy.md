@@ -1,6 +1,6 @@
 # Semver And API Policy
 
-This policy defines how rustia will move from the current unpublished `0.0.x`
+This policy defines how rustia will move from the unpublished
 workspace to publishable public crates. It applies to the public rustia project
 only; grabby-specific integration code remains outside this repository.
 
@@ -11,10 +11,15 @@ covers source access.
 
 ## Current Status
 
-- All public workspace crates are currently `0.0.1` and `publish = false`.
+- The unpublished workspace is staged at `0.2.0`.
+  [PR #108](https://github.com/slowchop/rustia/pull/108) configures only the
+  six preview packages for crates.io. [Issue #83](https://github.com/slowchop/rustia/issues/83)
+  tracks preview validation and publication.
 - The 0.x milestone validates the API with controlled client applications.
-  Keep publication disabled; a public candidate or stable release needs a
-  separate publication decision. See [`92-first-release.md`](92-first-release.md).
+  The preview requires its applicable checks and independent review before
+  merge. Registry publication and a GitHub release each require separate explicit
+  authorization. See [the preview gates](90-release-readiness.md#rustia-020-interpreter-preview)
+  and [the supported-release plan](92-first-release.md).
 - `0.0.x` means implementation-preview only. APIs may still change while P1
   engine, conformance, benchmark, and release gates are open.
 - Until Rustia’s first published crate release, prefer the cleanest coherent long-term
@@ -26,13 +31,12 @@ covers source access.
   `Cargo.toml`.
 - The first stable release target is `1.0.0`, following a release-candidate cycle
   and the acceptance checklist in [`92-first-release.md`](92-first-release.md).
-  This is a target, not a declaration that the current API is frozen or ready
-  to publish. The workspace version remains `0.0.1` until its gates pass.
+  The public API remains under development while those gates are open.
 - The future 1.0 promise covers the `rustia` embedding API and the CLI command
   contract. Supporting lexer/parser/compiler/VM packages retain separately
   versioned 0.x APIs; conformance and benchmark tooling remain unpublished.
-  Separate package versions and update uniform-version release checks when
-  preparing the first package release candidate.
+  The first interpreter preview stages the six selected crates at `0.2.0`.
+  Separate the supporting crate versions before the facade and CLI reach 1.0.
 
 ## Public Crate Roles
 
@@ -138,6 +142,8 @@ dependency order:
 
 Conformance and benchmark tooling are excluded from that initial publication.
 Publishing either tool later requires its own packaging and publication decision.
+Confirm each package is visible in the crates.io index before uploading its
+dependants.
 
 The benchmark crate remains unpublished until the rustia adapter strategy is
 chosen: publish `rustia-*` first, move the adapter into a git/path-only

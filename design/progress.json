@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "date": "2026-10-18",
+    "date": "2026-11-27",
     "scope": "Public rustia project readiness, based on the current workspace and canonical design docs.",
     "excludes": [
       "Actual grabby integration work"
@@ -130,7 +130,7 @@
         "differential_oracle": "Luau 0.709 in an isolated bounded worker",
         "remote_campaign": "All six targets, including expanded stateful coverage, passed at 347b0af7557535227d7b901713f0e3559c621b02: 30 minutes each plus two-hour stateful/differential extensions; no reported crashes, timeouts or mismatches",
         "evidence": "https://github.com/slowchop/rustia/actions/runs/34334524153",
-        "rollout": "Complete: Rustia #34, WOTS #6, civfun #44 and Grabby #1027 merged after final acceptance gates; all consumers verified against aee98e7815460c2df014c9b20f92de8de5382814"
+        "rollout": "The historical controlled-client rollout was verified against aee98e7815460c2df014c9b20f92de8de5382814. The supported-release tracker (Rustia #34) remains open."
       },
       "wasm_runtime_ci": {
         "runtime": "Node 22/V8",
@@ -139,7 +139,7 @@
       },
       "first_release": {
         "target": "1.0.0 after a release-candidate cycle",
-        "status": "in progress; workspace remains unpublished at 0.0.1",
+        "status": "The 0.2.0 interpreter preview selects six packages for crates.io. The workspace is unpublished. The supported release remains open.",
         "checklist": "design/92-first-release.md"
       }
     }
@@ -177,8 +177,8 @@
       "name": "Public release readiness",
       "complete": 84,
       "confidence": 91,
-      "state": "License, generated crate metadata audit, explicit internal dependency versions, release-preflight-enforced examples, migration guidance, CLI/diagnostics, typed owned values and callbacks, graph-preserving rooted live values, true-root epoch-safe retained handles, host signature/fuel metadata, output/time services, VM memory telemetry, maintained logical-live limits and script counters with atomic OOM, versioned decision reset, a shared native/Node-V8 mixed-heap pressure gate, release-readiness and semver policy, hosted CI, benchmark claim gating, package dry-runs, and publishability auditing are present; crates are still workspace-private and release polish is incomplete.",
-      "future_plan": "Close remaining live-object ergonomics and semantic-tail gates before removing publish blockers in topological order."
+      "state": "The 0.2.0 interpreter preview limits crates.io eligibility to six packages. Issue #83 tracks archive verification, hosted checks, and publication. The workspace is unpublished.",
+      "future_plan": "Track supported-release API, runtime, platform, benchmark, and controlled-client evidence under issue #34."
     }
   ],
   "areas": [
@@ -568,8 +568,8 @@
           "name": "Crate publishability",
           "complete": 62,
           "confidence": 80,
-          "state": "Workspace crates are still publish = false, but generated crate metadata audit, explicit internal dependency versions, publishability-derived leaf package dry-run checks in preflight/CI, package file-list audit, publishability blocker audit, release checklist, semver policy, changelog validation, and release preflight are present.",
-          "future_plan": "Flip policy only after P1 gates, then publish/remove internal dependency blockers in generated order."
+          "state": "The 0.2.0 preview selects six crates for crates.io. Conformance and benchmark tooling still use publish = false. Generated package inventory, metadata, publishability, and leaf dry-run checks cover the workspace.",
+          "future_plan": "Verify all six clean candidate archives. After applicable release gates pass and publication is separately authorized, upload in dependency order and verify registry installation."
         }
       ]
     }
