@@ -19,11 +19,14 @@ function plainText(text) {
   return text.replace(inline, (_, code, label) => code ?? label);
 }
 
-function html(text, studioCredit = false) {
+function html(text, originIcons = false) {
   return escapeHtml(text).replace(inline, (_, code, label, url) => {
     if (code !== undefined) return `<code>${code}</code>`;
-    if (studioCredit && url === "https://slowchop.com/") {
+    if (originIcons && url === "https://slowchop.com/") {
       return `<a class="studio-credit" href="${url}"><span class="studio-icon" aria-hidden="true"></span>${label}</a>`;
+    }
+    if (originIcons && url === "https://bevy.org/") {
+      return `<a class="bevy-credit" href="${url}"><img class="bevy-credit-icon" src="/bevy-icon.png" width="20" height="20" alt="">${label}</a>`;
     }
     return `<a href="${url}">${label}</a>`;
   });

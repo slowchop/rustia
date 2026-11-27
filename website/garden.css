@@ -70,10 +70,16 @@ main { width:100% }
   }
   .home-origin h2, .home-origin p { grid-column:1 }
   .home-origin-logo {
-    display:block; grid-area:1 / 2 / span 2; place-self:center; width:clamp(8rem,11vw,10.5rem); height:auto;
+    display:flex; grid-area:1 / 2 / span 2; place-self:center; align-items:flex-end; width:min(100%,19rem);
     mix-blend-mode:multiply; opacity:.82;
   }
-  .home-origin .studio-icon { display:none }
+  .studio-wordmark, .studio-snail { background-image:url("/slowchop-logo.png"); background-repeat:no-repeat }
+  /* Use two regions of the stacked logo and align the trail with the wordmark rule. */
+  .studio-wordmark { width:54%; aspect-ratio:956 / 344; background-size:129.08% auto; background-position:center bottom }
+  .studio-snail {
+    width:46%; aspect-ratio:1094 / 563; background-size:112.8% auto; background-position:left top;
+    margin-bottom:1.65%; transform:scaleX(-1);
+  }
 }
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
 .home-features dt, .home-roadmap dt { display:flex; align-items:center; gap:8px; font-weight:650 }
@@ -137,11 +143,12 @@ main { width:100% }
   width:fit-content; max-width:var(--home-content-width); isolation:isolate;
   margin-bottom:clamp(16px, 3svh, 30px)
 }
-.studio-credit { white-space:nowrap }
+.studio-credit, .bevy-credit { white-space:nowrap }
 .studio-icon {
   display:inline-block; width:1.2em; height:1.2em; margin-inline-end:.25em; vertical-align:-.2em;
   background:url("/slowchop-logo.png") no-repeat left top / 215% auto; mix-blend-mode:multiply; filter:blur(.28px)
 }
+.bevy-credit-icon { width:1.1em; height:1.1em; margin-inline-end:.25em; vertical-align:-.15em }
 .home .bench { grid-template-columns:var(--home-columns) }
 .home .garden-source { padding-bottom:36px }
 .home :is(p,dd,dt) code, .home pre:has(> code) { background:#eee5d2; border-radius:4px }
