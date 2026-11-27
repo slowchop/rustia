@@ -127,7 +127,7 @@
       ],
       "role": "public-rustia-crate",
       "package_file_audit": {
-        "file_count": 87,
+        "file_count": 86,
         "forbidden_path_violations": 0
       },
       "internal_dependencies": [

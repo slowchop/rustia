@@ -6,8 +6,6 @@ const { execFileSync } = require("node:child_process");
 const fs = require("fs");
 const path = require("path");
 
-const { renderPerformance } = require("./render-readme-performance.js");
-
 const root = path.resolve(__dirname, "..");
 
 function requireFact(condition, message) {
@@ -71,26 +69,65 @@ function readCohort(snapshot, history) {
     && row.timestamp_unix >= snapshot.start && row.timestamp_unix <= snapshot.end);
 }
 
+function measuredTime(cohort, engine, mode, workload, unit) {
+  const label = engine + "/" + workload;
+  const matches = cohort.filter(row => row.engine === engine && row.workload === workload);
+  assert.equal(matches.length, 1, "expected one history row for " + label + ", found " + matches.length);
+  const [row] = matches;
+  assert.ok(row.host === "ci-bench" && row.execution_mode === mode, label + " must be a ci-bench " + mode + " result");
+  const family = engine === "mlua-luau-jit" ? "mlua-luau" : engine;
+  assert.equal(row.mode_family, family, label + " has the wrong execution-mode family");
+  assert.equal(row.unit, unit, label + ": unexpected history unit " + JSON.stringify(row.unit));
+  assert.ok(Number.isFinite(row.ns_per_unit_min) && row.ns_per_unit_min > 0, label + " has no valid minimum time");
+  if (mode === "jit") {
+    assert.ok(row.native_verified === true && row.native_verification === "ab-native-sentinel"
+      && Number.isFinite(row.native_verification_ratio) && row.native_verification_ratio >= 1.5,
+    label + " lacks its verified Luau JIT sentinel");
+  } else if (mode === "native") {
+    assert.ok(row.native_verified === true && row.native_verification === "cranelift-function-construction",
+      label + " lacks verified Cranelift function construction");
+  }
+  return row.ns_per_unit_min;
+}
+
+function validateComparison(snapshot, cohort) {
+  const workloads = ["dense_tables", "sparse_tables", "closures_upvalues", "generic_iteration", "stdlib_math_table"];
+  const engineModes = {
+    rustia: "interpreter",
+    luaur: "interpreter",
+    ruau: "interpreter",
+    "mlua-luau": "interpreter",
+    "mlua-luau-jit": "jit",
+    koto: "interpreter",
+    rhai: "interpreter",
+    roto: "native",
+  };
+  assert.deepEqual(Object.keys(snapshot.workloads).sort(), [...workloads].sort(),
+    "comparison requires all five retained workloads");
+  return Object.entries(engineModes).map(([engine, mode]) => workloads.map(workload =>
+    measuredTime(cohort, engine, mode, workload, snapshot.workloads[workload].unit)));
+}
+
 function selfTest(snapshot, history) {
   const cohort = readCohort(snapshot, history);
   const firstWorkload = Object.keys(snapshot.workloads)[0];
   const first = cohort.find(row => row.engine === "rustia" && row.workload === firstWorkload);
   assert.ok(first, "chart needs a Rustia measurement");
-  const chart = data => renderPerformance(snapshot, readCohort(snapshot, data));
-  assert.throws(() => chart(history.filter(row => row !== first)), /expected one history row/);
-  assert.throws(() => chart([...history, first]), /expected one history row/);
+  const measuredTimes = data => validateComparison(snapshot, readCohort(snapshot, data));
+  assert.throws(() => measuredTimes(history.filter(row => row !== first)), /expected one history row/);
+  assert.throws(() => measuredTimes([...history, first]), /expected one history row/);
   for (const invalid of [{ host: "local" }, { execution_mode: "jit" }]) {
-    assert.throws(() => chart(history.map(row => row === first ? { ...row, ...invalid } : row)),
+    assert.throws(() => measuredTimes(history.map(row => row === first ? { ...row, ...invalid } : row)),
       /ci-bench interpreter/);
   }
-  assert.throws(() => chart(history.map(row => row === first ? { ...row, unit: "different work" } : row)),
+  assert.throws(() => measuredTimes(history.map(row => row === first ? { ...row, unit: "different work" } : row)),
     /unexpected history unit/);
   const jit = history.find(row => row.commit === snapshot.commit && row.engine === "mlua-luau-jit"
     && row.workload === first.workload && row.timestamp_unix >= snapshot.start && row.timestamp_unix <= snapshot.end);
   const native = history.find(row => row.commit === snapshot.commit && row.engine === "roto"
     && row.workload === first.workload && row.timestamp_unix >= snapshot.start && row.timestamp_unix <= snapshot.end);
   assert.ok(jit && native, "chart needs both compiled engines");
-  assert.throws(() => chart([...history, jit]), /expected one history row/);
+  assert.throws(() => measuredTimes([...history, jit]), /expected one history row/);
   for (const [row, change, failure] of [
     [jit, { commit: "0".repeat(40) }, /expected one history row/],
     [jit, { unit: "different work" }, /unexpected history unit/],
@@ -101,10 +138,11 @@ function selfTest(snapshot, history) {
     [native, { native_verification: "not-applicable" }, /verified Cranelift/],
     [native, { native_verified: false }, /verified Cranelift/],
   ]) {
-    assert.throws(() => chart(history.map(item => item === row ? { ...item, ...change } : item)), failure);
+    assert.throws(() => measuredTimes(history.map(item => item === row ? { ...item, ...change } : item)), failure);
   }
   // Newer data must not change a chart for a selected cohort.
-  assert.equal(chart([...history, { ...first, timestamp_unix: snapshot.end + 604800 }]), chart(history));
+  assert.deepEqual(measuredTimes([...history, { ...first, timestamp_unix: snapshot.end + 604800 }]),
+    measuredTimes(history));
 }
 
 try {
@@ -114,18 +152,10 @@ try {
   checkSourceReferences(readme);
   const snapshot = JSON.parse(fs.readFileSync(path.join(root, "bench/history/site-comparison.json"), "utf8"));
   selfTest(snapshot, history);
-  const file = path.join(root, "crates", "rustia", "performance.svg");
-  const svg = renderPerformance(snapshot, readCohort(snapshot, history));
-  const args = process.argv.slice(2);
-  if (args.length === 1 && args[0] === "--write-chart") {
-    fs.writeFileSync(file, svg);
-  } else {
-    requireFact(args.length === 0, "usage: node tools/check-readme-comparisons.js [--write-chart]");
-    requireFact(fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n") === svg,
-      "crates/rustia/performance.svg has drifted; run node tools/check-readme-comparisons.js --write-chart");
-    require("./sync-luau-comparison.js").syncComparison();
-  }
-  console.log(`README sources reachable; the comparison chart matches ci-bench history at ${snapshot.commit.slice(0, 7)}`);
+  requireFact(process.argv.length === 2, "usage: node tools/check-readme-comparisons.js");
+  validateComparison(snapshot, readCohort(snapshot, history));
+  require("./sync-luau-comparison.js").syncComparison();
+  console.log(`README sources reachable and website benchmark evidence valid at ${snapshot.commit.slice(0, 7)}`);
 } catch (error) {
   console.error(`check-readme-comparisons: ${error.message}`);
   process.exit(1);
