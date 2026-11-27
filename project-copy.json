@@ -35,6 +35,12 @@
       "readmeLink": "[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)"
     },
     {
+      "title": "Parallel script execution",
+      "description": "Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.",
+      "icon": "∥",
+      "readmeLink": "[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)"
+    },
+    {
       "title": "Script execution limits",
       "description": "Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.",
       "icon": "⏱︎",

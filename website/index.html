@@ -49,6 +49,10 @@
         <dd>Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
       </div>
       <div>
+        <dt><span class="feature-icon" aria-hidden="true">∥</span>Parallel script execution</dt>
+        <dd>Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.</dd>
+      </div>
+      <div>
         <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>
         <dd>Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.</dd>
       </div>

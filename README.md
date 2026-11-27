@@ -61,6 +61,15 @@ Let scripts work with your app. Expose the functions and objects they need, and 
 </details>
 
 <details>
+<summary><strong>Parallel script execution</strong></summary>
+
+Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.
+
+[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)
+
+</details>
+
+<details>
 <summary><strong>Script execution limits</strong></summary>
 
 Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.
