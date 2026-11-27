@@ -31683,6 +31683,30 @@ mod inline_cache_tests {
     }
 
     #[test]
+    fn quota_limited_concat_preserves_inline_string_representation() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let atom = vm.heap.intern_string_bytes(b"ab");
+        let _atom_root = vm.retain_value(Value::string_atom(atom)).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+
+        let lhs = Value::short_string(b"a").unwrap();
+        let rhs = Value::short_string(b"b").unwrap();
+        let program = Program::new(Function::new(vec![], 0), vec![]);
+        let mut state = vm.begin_execution();
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut RejectHostDispatcher,
+        };
+        let step = vm
+            .concat_operands_step(&program, lhs, rhs, 0, &mut execution)
+            .unwrap();
+        let result = vm
+            .finish_implicit_step(step, &mut execution, first_result_or_nil)
+            .unwrap();
+        assert_eq!(result.as_short_string().unwrap().as_bytes(), b"ab");
+    }
+
+    #[test]
     fn split_admits_the_result_array_and_new_atoms_together() {
         let mut vm = Vm::new(Profile::ReproducibleStandard);
         let text = vm.create_retained_string_bytes(&[b'x'; 200]).unwrap();
