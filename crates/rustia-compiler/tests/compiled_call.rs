@@ -188,6 +188,60 @@ fn compiled_and_interpreted_calls_share_the_vm_capture() {
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
+fn compiled_call_matches_instruction_clock_and_defers_collection() {
+    use rustia_vm::VmSettings;
+    use std::num::NonZeroU64;
+
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let clock = compile(&parse_source("return os.clock()").unwrap()).unwrap();
+    for (interval, should_compile) in [(1, false), (10_000, true)] {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings.clone());
+        let mut reference = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let call = prepared.instantiate(&mut vm).unwrap();
+        let oracle = prepared.instantiate(&mut reference).unwrap();
+        for step in [1.0, 3.0, -2.0] {
+            let mut ran_backend = false;
+            let result = call
+                .call(
+                    &mut vm,
+                    Value::number(step),
+                    &receipt,
+                    |capture, parameter| {
+                        ran_backend = true;
+                        let next = capture + parameter;
+                        Ok((next, next * 2.0))
+                    },
+                )
+                .unwrap();
+            let expected = oracle
+                .call_interpreted(&mut reference, Value::number(step))
+                .unwrap();
+            assert_eq!(ran_backend, should_compile);
+            assert_eq!(result.as_number(), expected.as_number());
+            assert_eq!(
+                vm.executed_instructions(),
+                reference.executed_instructions()
+            );
+            assert_eq!(
+                vm.next_deterministic_collection_instruction(),
+                reference.next_deterministic_collection_instruction()
+            );
+        }
+        assert_eq!(
+            vm.run(&clock).unwrap().as_number(),
+            reference.run(&clock).unwrap().as_number()
+        );
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
 fn compiled_call_preserves_buffer_nan_payloads_via_the_interpreter() {
     let source = "local score = 0 return function(step) score = step return score end";
     let bundle = SourceBundle::new([("entry.luau", source)]).unwrap();

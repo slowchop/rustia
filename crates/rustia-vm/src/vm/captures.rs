@@ -182,6 +182,102 @@ impl Vm {
         }
         Ok(())
     }
+
+    /// Run an externally built, trusted numeric backend at the idle VM boundary.
+    /// The compiler must bind the backend to this exact interpreter closure.
+    /// `None` means ordinary execution is required to preserve VM controls.
+    #[doc(hidden)]
+    pub fn try_run_compiled_numeric_capture(
+        &mut self,
+        function: &RetainedValue,
+        capture_name: &str,
+        parameter: Value,
+        invoke: impl FnOnce(f64, f64) -> Result<(f64, f64)>,
+    ) -> Result<Option<Value>> {
+        let settings = &self.settings;
+        if self.profile != Profile::ReproducibleStandard
+            || settings.initial_fuel.is_some()
+            || settings.memory_limit_bytes.is_some()
+            || settings.recursion_limit == 0
+            || settings.enable_memory_tracking
+            || settings.enable_opcode_census
+            || settings.enable_conformance_coverage
+            || settings.enable_conformance_luau_call_limit
+            || self.guest_transaction_active()
+        {
+            return Ok(None);
+        }
+        let Some(parameter) = compiled_number(parameter) else {
+            return Ok(None);
+        };
+        self.ensure_idle_capture_edit()?;
+        let (handle, kind) = self.inspected_function(function)?;
+        let (program, prototype) = self.capture_prototype(kind)?;
+        let Some(closure) = prototype.and_then(|index| program.functions.get(index as usize))
+        else {
+            return Ok(None);
+        };
+        let Some(return_pc) = closure
+            .code
+            .iter()
+            .position(|step| step.op == Opcode::Return)
+        else {
+            return Ok(None);
+        };
+        // All admitted operations take one logical unit with this compiler
+        // schedule. The compiler may append an unreachable empty return.
+        if closure.parameter_count != 1
+            || closure.is_vararg
+            || !closure.captured_registers.is_empty()
+            || closure.upvalues.len() != 1
+            || closure.upvalue_name(0) != Some(capture_name)
+            || program.logical_units().is_some()
+            || closure.code[return_pc].b != 1
+            || closure.code[..return_pc].iter().any(|step| {
+                !matches!(
+                    step.op,
+                    Opcode::LoadConst
+                        | Opcode::Move
+                        | Opcode::GetUpvalue
+                        | Opcode::SetUpvalue
+                        | Opcode::ClearLocalCell
+                        | Opcode::Add
+                        | Opcode::Sub
+                        | Opcode::Mul
+                        | Opcode::Div
+                )
+            })
+        {
+            return Ok(None);
+        }
+        let Some(next_clock) = self.executed_instructions.checked_add(return_pc as u64 + 1) else {
+            return Ok(None);
+        };
+        // Keep collection at the original instruction boundary. In particular
+        // an external backend cannot reproduce the interpreter's frame roots.
+        if next_clock >= self.next_weak_collection_instruction {
+            return Ok(None);
+        }
+        let cell = self
+            .heap
+            .function_capture(handle, 0)
+            .ok_or_else(|| missing("compiled function capture is missing"))?;
+        let current = self
+            .heap
+            .capture_get(cell)
+            .ok_or_else(|| missing("compiled function capture cell is missing"))?;
+        let Some(current) = compiled_number(current) else {
+            return Ok(None);
+        };
+        let (next, result) = invoke(current, parameter)?;
+        if next.to_bits() != current.to_bits() {
+            self.heap
+                .set_function_capture(handle, 0, Value::number(next))
+                .ok_or_else(|| missing("compiled function capture is missing"))?;
+        }
+        self.executed_instructions = next_clock;
+        Ok(Some(Value::number(result)))
+    }
     pub fn retained_function_environment(
         &mut self,
         function: &RetainedValue,
@@ -283,4 +379,10 @@ impl Vm {
         }
         Ok(())
     }
+}
+
+fn compiled_number(value: Value) -> Option<f64> {
+    value
+        .as_number()
+        .filter(|number| !number.is_nan() || number.to_bits() == crate::number::CANON_NAN_BITS)
 }
