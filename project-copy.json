@@ -16,6 +16,12 @@
       "readmeLink": "[Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)"
     },
     {
+      "title": "Parallel script execution",
+      "description": "Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.",
+      "icon": "∥",
+      "readmeLink": "[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)"
+    },
+    {
       "title": "Pure Rust runtime",
       "description": "One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain.",
       "icon": "🦀",
@@ -33,12 +39,6 @@
       "description": "Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.",
       "icon": "ƒ",
       "readmeLink": "[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)"
-    },
-    {
-      "title": "Parallel script execution",
-      "description": "Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.",
-      "icon": "∥",
-      "readmeLink": "[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)"
     },
     {
       "title": "Script execution limits",

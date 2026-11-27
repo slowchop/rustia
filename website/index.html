@@ -48,6 +48,10 @@
         <dd>Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.</dd>
       </div>
       <div>
+        <dt><span class="feature-icon" aria-hidden="true">∥</span>Parallel script execution</dt>
+        <dd>Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.</dd>
+      </div>
+      <div>
         <dt><span class="feature-icon" aria-hidden="true">🦀</span>Pure Rust runtime</dt>
         <dd>One interpreter on desktop and web. Rustia’s runtime crates forbid <code>unsafe</code> Rust and build without a C++ toolchain.</dd>
       </div>
@@ -58,10 +62,6 @@
       <div>
         <dt><span class="feature-icon" aria-hidden="true">ƒ</span>Rust functions and objects</dt>
         <dd>Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.</dd>
-      </div>
-      <div>
-        <dt><span class="feature-icon" aria-hidden="true">∥</span>Parallel script execution</dt>
-        <dd>Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.</dd>
       </div>
       <div>
         <dt><span class="feature-icon" aria-hidden="true">⏱︎</span>Script execution limits</dt>

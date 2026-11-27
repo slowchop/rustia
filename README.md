@@ -34,6 +34,15 @@ Replay a run. In deterministic mode, the same script, starting state, seed, and 
 </details>
 
 <details>
+<summary><strong>Parallel script execution</strong></summary>
+
+Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.
+
+[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)
+
+</details>
+
+<details>
 <summary><strong>Pure Rust runtime</strong></summary>
 
 One interpreter on desktop and web. Rustia’s runtime crates forbid `unsafe` Rust and build without a C++ toolchain.
@@ -57,15 +66,6 @@ Embed Luau without relying on built-in platform services. Your app can supply cl
 Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.
 
 [Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)
-
-</details>
-
-<details>
-<summary><strong>Parallel script execution</strong></summary>
-
-Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.
-
-[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)
 
 </details>
 

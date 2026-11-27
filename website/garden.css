@@ -72,6 +72,7 @@ main { width:100% }
   .home-origin-logo {
     display:flex; grid-area:1 / 2 / span 2; place-self:center; align-items:flex-end; width:100%;
     mix-blend-mode:multiply; opacity:.82;
+    translate:0 7px; /* Account for the section's 14 px of extra bottom padding. */
   }
   .studio-wordmark, .studio-snail { background-image:url("/slowchop-logo.png"); background-repeat:no-repeat }
   /* Use two regions of the stacked logo and align the trail with the wordmark rule. */
