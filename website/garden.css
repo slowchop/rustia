@@ -66,11 +66,11 @@ main { width:100% }
 .home-origin-logo { display:none }
 @media (min-width:64rem) {
   .home-origin .home-next-inner {
-    display:grid; grid-template-columns:minmax(0,1fr) 28%; column-gap:2rem;
+    display:grid; grid-template-columns:minmax(min(70ch,68%),1fr) minmax(0,26rem); column-gap:2rem;
   }
   .home-origin h2, .home-origin p { grid-column:1 }
   .home-origin-logo {
-    display:flex; grid-area:1 / 2 / span 2; place-self:center; align-items:flex-end; width:min(100%,19rem);
+    display:flex; grid-area:1 / 2 / span 2; place-self:center; align-items:flex-end; width:100%;
     mix-blend-mode:multiply; opacity:.82;
   }
   .studio-wordmark, .studio-snail { background-image:url("/slowchop-logo.png"); background-repeat:no-repeat }
