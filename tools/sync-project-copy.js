@@ -20,10 +20,13 @@ function plainText(text) {
 }
 
 function html(text, studioCredit = false) {
-  const attributes = studioCredit ? ' class="studio-credit"' : "";
-  const icon = studioCredit ? '<span class="studio-icon" aria-hidden="true"></span>' : "";
-  return escapeHtml(text).replace(inline, (_, code, label, url) =>
-    code !== undefined ? `<code>${code}</code>` : `<a${attributes} href="${url}">${icon}${label}</a>`);
+  return escapeHtml(text).replace(inline, (_, code, label, url) => {
+    if (code !== undefined) return `<code>${code}</code>`;
+    if (studioCredit && url === "https://slowchop.com/") {
+      return `<a class="studio-credit" href="${url}"><span class="studio-icon" aria-hidden="true"></span>${label}</a>`;
+    }
+    return `<a href="${url}">${label}</a>`;
+  });
 }
 
 function replaceBlock(source, name, start, end, replacement) {

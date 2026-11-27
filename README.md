@@ -3,7 +3,7 @@
 <!-- project-copy: intro -->
 Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 
-Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
+We built Rustia at [Slowchop Studios](https://slowchop.com/) for a [Bevy](https://bevy.org/) game. We wanted to tweak gameplay without waiting for Rust to recompile, run scripts quickly and safely, and get deterministic results for multiplayer and replays on desktop and in the browser.
 <!-- /project-copy: intro -->
 
 **Version note.** [`0.1.0`](https://crates.io/crates/rustia/0.1.0) was an earlier
