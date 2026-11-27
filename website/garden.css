@@ -74,6 +74,8 @@ main { width:100% }
     mix-blend-mode:multiply; opacity:.82;
     translate:0 7px; /* Account for the section's 14 px of extra bottom padding. */
   }
+  .home-origin-logo:is(:hover,:focus-visible) { opacity:1 }
+  .home-origin-logo:focus-visible { outline:2px solid #52624f; outline-offset:4px }
   .studio-wordmark, .studio-snail { background-image:url("/slowchop-logo.png"); background-repeat:no-repeat }
   /* Use two regions of the stacked logo and align the trail with the wordmark rule. */
   .studio-wordmark { width:54%; aspect-ratio:956 / 344; background-size:129.08% auto; background-position:center bottom }
