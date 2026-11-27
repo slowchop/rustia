@@ -144,10 +144,12 @@ impl NumericCallInstance<'_> {
         if *receipt != self.prepared.receipt {
             return self.call_interpreted(vm, parameter);
         }
+        let mut execution = vm.begin_execution();
         match vm.try_run_compiled_numeric_capture(
             &self.function,
             &self.prepared.capture,
             parameter,
+            &mut execution,
             invoke,
         )? {
             Some(result) => Ok(result),

@@ -185,13 +185,15 @@ impl Vm {
 
     /// Run an externally built, trusted numeric backend at the idle VM boundary.
     /// The compiler must bind the backend to this exact interpreter closure.
-    /// `None` means ordinary execution is required to preserve VM controls.
+    /// The caller passes the same execution budget it would use for the
+    /// interpreter. `None` leaves that budget for the ordinary call.
     #[doc(hidden)]
     pub fn try_run_compiled_numeric_capture(
         &mut self,
         function: &RetainedValue,
         capture_name: &str,
         parameter: Value,
+        execution: &mut VmExecution,
         invoke: impl FnOnce(f64, f64) -> Result<(f64, f64)>,
     ) -> Result<Option<Value>> {
         let settings = &self.settings;
@@ -271,18 +273,21 @@ impl Vm {
         let Some(current) = compiled_number(current) else {
             return Ok(None);
         };
-        // The ordinary idle call starts a fresh budget. Let the interpreter
-        // deliver the exact error and partial state when fuel can run out.
-        if let Some(limit) = self.settings.initial_fuel {
+        // Let the interpreter reproduce the exact error and partial state
+        // when the remainder of this invocation cannot cover the trace.
+        let remaining = if let Some(remaining) = execution.fuel_remaining() {
             let cost = closure.code[..=return_pc]
                 .iter()
                 .try_fold(0_u64, |cost, &step| {
                     Ok::<_, Error>(cost.saturating_add(self.instruction_fuel_cost(step)?))
                 })?;
-            if cost > limit {
+            let Some(remaining) = remaining.checked_sub(cost) else {
                 return Ok(None);
-            }
-        }
+            };
+            Some(remaining)
+        } else {
+            None
+        };
         if let Some(limit) = self.settings.memory_limit_bytes {
             // Quota checks during this trace see one call frame, its register
             // root vector, and an empty continuation-driver slot. The trace
@@ -302,6 +307,7 @@ impl Vm {
                 .set_function_capture(handle, 0, Value::number(next))
                 .ok_or_else(|| missing("compiled function capture is missing"))?;
         }
+        execution.fuel = remaining;
         self.executed_instructions = next_clock;
         self.prune_unreachable_coroutines_if_idle();
         self.release_host_error_traceback();

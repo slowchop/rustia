@@ -256,6 +256,25 @@ fn compiled_numeric_call_defers_to_the_exact_quota_failure() {
         (vm, function)
     };
 
+    let (mut vm, function) = instantiate();
+    let mut execution = vm.begin_transactional_execution_with_fuel(Some(4));
+    let call = |vm: &mut Vm, execution: &mut VmExecution| {
+        vm.try_run_compiled_numeric_capture(
+            &function,
+            "score",
+            Value::number(8.0),
+            execution,
+            |_, step| Ok((step, step)),
+        )
+    };
+    assert_eq!(
+        call(&mut vm, &mut execution).unwrap().unwrap().as_number(),
+        Some(8.0)
+    );
+    assert_eq!(execution.fuel_remaining(), Some(1));
+    assert!(call(&mut vm, &mut execution).unwrap().is_none());
+    assert_eq!(execution.fuel_remaining(), Some(1));
+
     for limit_memory in [false, true] {
         let (mut vm, function) = instantiate();
         let (mut reference, oracle) = instantiate();
@@ -267,20 +286,32 @@ fn compiled_numeric_call_defers_to_the_exact_quota_failure() {
             }
         }
         let parameter = Value::number(9.0);
+        let mut execution = vm.begin_execution();
+        let mut oracle_execution = reference.begin_execution();
         let result = vm
-            .try_run_compiled_numeric_capture(&function, "score", parameter, |_, _| {
-                panic!("quota-limited backend ran")
-            })
+            .try_run_compiled_numeric_capture(
+                &function,
+                "score",
+                parameter,
+                &mut execution,
+                |_, _| panic!("quota-limited backend ran"),
+            )
             .unwrap();
         assert!(result.is_none());
-        let call = |engine: &mut Vm, function: &RetainedValue| {
+        let call = |engine: &mut Vm, function: &RetainedValue, execution: &mut VmExecution| {
             let value = function.value(engine).unwrap();
             engine
-                .call_function(&program, value, &[parameter])
+                .call_retained_function_in(
+                    value,
+                    &[parameter],
+                    execution,
+                    &mut RejectHostDispatcher,
+                )
                 .unwrap_err()
         };
-        let got = call(&mut vm, &function);
-        let expected = call(&mut reference, &oracle);
+        let got = call(&mut vm, &function, &mut execution);
+        let expected = call(&mut reference, &oracle, &mut oracle_execution);
+        assert_eq!(execution.fuel_used(), oracle_execution.fuel_used());
         if limit_memory {
             assert!(matches!(got.kind, ErrorKind::OutOfMemory));
         } else {
