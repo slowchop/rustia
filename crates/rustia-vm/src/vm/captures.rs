@@ -152,6 +152,23 @@ impl Vm {
         index: usize,
         value: &RetainedValue,
     ) -> Result<()> {
+        self.ensure_idle_capture_edit()?;
+        let (handle, kind) = self.inspected_function(function)?;
+        let _ = self.capture_prototype(kind)?;
+        if self.heap.function_capture(handle, index).is_none() {
+            return Err(capture_error("capture index is out of bounds"));
+        }
+        let value = value.value(self)?;
+        self.ensure_memory_growth(0, &[function.value(self)?, value])?;
+        self.heap
+            .set_function_capture(handle, index, value)
+            .ok_or_else(|| missing("function capture is missing"))
+    }
+
+    /// Checks the common entry conditions for compiled capture calls and idle
+    /// capture edits before an external backend runs.
+    #[doc(hidden)]
+    pub fn ensure_idle_capture_edit(&self) -> Result<()> {
         self.ensure_inspection_mutation_allowed()?;
         if !self.call_stack.is_empty()
             || !self.running_coroutines.is_empty()
@@ -163,16 +180,7 @@ impl Vm {
         {
             return Err(capture_error("capture mutation requires an idle VM"));
         }
-        let (handle, kind) = self.inspected_function(function)?;
-        let _ = self.capture_prototype(kind)?;
-        if self.heap.function_capture(handle, index).is_none() {
-            return Err(capture_error("capture index is out of bounds"));
-        }
-        let value = value.value(self)?;
-        self.ensure_memory_growth(0, &[function.value(self)?, value])?;
-        self.heap
-            .set_function_capture(handle, index, value)
-            .ok_or_else(|| missing("function capture is missing"))
+        Ok(())
     }
     pub fn retained_function_environment(
         &mut self,

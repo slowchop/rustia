@@ -213,11 +213,17 @@ pub const STATIC_MODULE_GRAPH_ABI: &str = "rustia-static-module-graph-v1";
 /// Maximum number of modules in one active dependency chain.
 pub const MAX_STATIC_MODULE_DEPTH: usize = 128;
 
-/// A SHA-256 digest over a versioned, length-delimited compiler input.
+/// A SHA-256 digest identifying compiler inputs or outputs.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentDigest([u8; 32]);
 
 impl ContentDigest {
+    pub(crate) fn of_bytes(bytes: &[u8]) -> Self {
+        let mut digest = Sha256::new();
+        digest.update(bytes);
+        Self(digest.finalize())
+    }
+
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
