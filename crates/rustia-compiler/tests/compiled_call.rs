@@ -460,3 +460,58 @@ fn verify_backend(
     assert_eq!(executed, CALLS.len());
     assert_eq!(results, interpreted_results());
 }
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn bind_preserves_an_existing_capture_and_rejects_edits() {
+    use rustia_compiler::{compile_with_options, CompileOptions};
+    use rustia_vm::VmSettings;
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let program = |path, source| {
+        compile_with_options(
+            &parse_source(source).unwrap(),
+            CompileOptions::default().with_source(path, source),
+        )
+        .unwrap()
+    };
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
+    let original = program("entry.luau", SOURCE);
+    let function = vm.run(&original).unwrap();
+    let rooted = vm.retain_value(function).unwrap();
+    let one = Value::number(1.0);
+    let first = vm.call_function(&original, function, &[one]).unwrap();
+    assert_eq!(first.as_number(), Some(2.0));
+
+    let bound = prepared.bind(&vm, &rooted).unwrap().unwrap();
+    let mut execution = vm.begin_execution();
+    let next = bound
+        .try_call_in(&mut vm, one, &receipt, &mut execution, |capture, step| {
+            assert_eq!(capture, 1.0);
+            let next = capture + step;
+            Ok((next, next * 2.0))
+        })
+        .unwrap();
+    assert_eq!(next.unwrap().as_number(), Some(4.0));
+    assert!(execution.fuel_used() > 0);
+    let last = vm.call_function(&original, function, &[one]).unwrap();
+    assert_eq!(last.as_number(), Some(6.0));
+
+    let changed = SOURCE.replace("* 2", "* 3");
+    for candidate in [
+        program("entry.luau", &changed),
+        program("other.luau", SOURCE),
+    ] {
+        let other = vm.run(&candidate).unwrap();
+        let other = vm.retain_value(other).unwrap();
+        assert!(prepared.bind(&vm, &other).unwrap().is_none());
+    }
+}

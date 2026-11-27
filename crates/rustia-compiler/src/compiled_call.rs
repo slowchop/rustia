@@ -100,6 +100,22 @@ pub fn prepare_runtime(
 }
 
 impl PreparedNumericCall {
+    /// Bind to an existing closure from the accepted source. Its bytecode must
+    /// match the prepared interpreter entry. The embedder supplies the frozen
+    /// source and retires the artifact when that source or closure changes.
+    pub fn bind<'artifact>(
+        &'artifact self,
+        vm: &Vm,
+        function: &RetainedValue,
+    ) -> rustia_vm::Result<Option<NumericCallInstance<'artifact>>> {
+        Ok(vm
+            .retained_numeric_call_matches(function, &self.program)?
+            .then(|| NumericCallInstance {
+                prepared: self,
+                function: function.clone(),
+            }))
+    }
+
     /// Instantiate a new closure with its own interpreter-owned capture cell.
     pub fn instantiate<'artifact>(
         &'artifact self,
@@ -141,20 +157,33 @@ impl NumericCallInstance<'_> {
         receipt: &CompiledCallReceipt,
         invoke: impl FnOnce(f64, f64) -> rustia_vm::Result<(f64, f64)>,
     ) -> rustia_vm::Result<Value> {
-        if *receipt != self.prepared.receipt {
-            return self.call_interpreted(vm, parameter);
-        }
         let mut execution = vm.begin_execution();
-        match vm.try_run_compiled_numeric_capture(
-            &self.function,
-            &self.prepared.capture,
-            parameter,
-            &mut execution,
-            invoke,
-        )? {
+        match self.try_call_in(vm, parameter, receipt, &mut execution, invoke)? {
             Some(result) => Ok(result),
             None => self.call_interpreted(vm, parameter),
         }
+    }
+
+    /// Attempt the compiled path with a caller-owned fuel budget. On `None`,
+    /// use the ordinary call with that same budget and host dispatcher.
+    pub fn try_call_in(
+        &self,
+        vm: &mut Vm,
+        parameter: Value,
+        receipt: &CompiledCallReceipt,
+        execution: &mut rustia_vm::VmExecution,
+        invoke: impl FnOnce(f64, f64) -> rustia_vm::Result<(f64, f64)>,
+    ) -> rustia_vm::Result<Option<Value>> {
+        if *receipt != self.prepared.receipt {
+            return Ok(None);
+        }
+        vm.try_run_compiled_numeric_capture(
+            &self.function,
+            &self.prepared.capture,
+            parameter,
+            execution,
+            invoke,
+        )
     }
 }
 

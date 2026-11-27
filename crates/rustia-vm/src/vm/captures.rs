@@ -183,6 +183,54 @@ impl Vm {
         Ok(())
     }
 
+    /// Check an existing closure against the compiler's numeric interpreter
+    /// entry before binding an executable to it. The compiler and embedder
+    /// identify the frozen source and executable separately.
+    #[doc(hidden)]
+    pub fn retained_numeric_call_matches(
+        &self,
+        function: &RetainedValue,
+        expected: &Program,
+    ) -> Result<bool> {
+        let (_, kind) = self.inspected_function(function)?;
+        let FunctionKind::Bytecode {
+            program: Some(program),
+            prototype,
+        } = kind
+        else {
+            return Ok(false);
+        };
+        let program = self.dynamic_program(program)?;
+        let (Some(actual), [expected_function]) = (
+            program.functions.get(prototype as usize),
+            expected.functions.as_slice(),
+        ) else {
+            return Ok(false);
+        };
+        Ok(program.source_name == expected.source_name
+            && program.logical_units().is_none()
+            && expected.logical_units().is_none()
+            && actual.code == expected_function.code
+            && actual.max_registers == expected_function.max_registers
+            && actual.parameter_count == expected_function.parameter_count
+            && actual.is_vararg == expected_function.is_vararg
+            && actual.upvalues == expected_function.upvalues
+            && actual.upvalue_names == expected_function.upvalue_names
+            && actual.captured_registers == expected_function.captured_registers
+            && actual.parameter_types == expected_function.parameter_types
+            && actual.code.iter().all(|step| {
+                if step.op != Opcode::LoadConst {
+                    return true;
+                }
+                let index = usize::from(step.c);
+                matches!(
+                    (program.constants().get(index), expected.constants().get(index)),
+                    (Some(Constant::Number(left)), Some(Constant::Number(right)))
+                        if left.to_bits() == right.to_bits(),
+                )
+            }))
+    }
+
     /// Run an externally built, trusted numeric backend at the idle VM boundary.
     /// The compiler must bind the backend to this exact interpreter closure.
     /// The caller passes the same execution budget it would use for the
