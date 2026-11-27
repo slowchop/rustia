@@ -2,7 +2,7 @@
 
 ## Overview
 
-[lib.rs](./lib.rs) contains the compiler API and lowering passes. [builtins.rs](./builtins.rs) contains recognized global/library names that select specialized call evaluation order. [o2.rs](./o2.rs) contains default-disabled optimization rewrites and logical receipts. [source_bundle.rs](./source_bundle.rs) contains the experimental in-memory source identity and static module-graph boundary. [stateless_helper.rs](./stateless_helper.rs) applies conservative pure-function admission to a reachable graph without defining host fallback policy.
+[lib.rs](./lib.rs) contains the compiler API and lowering passes. [builtins.rs](./builtins.rs) contains recognized global/library names that select specialized call evaluation order. The compiler exposes the same rule to other emitters through `defers_builtin_lookup`. [o2.rs](./o2.rs) contains default-disabled optimization rewrites and logical receipts. [source_bundle.rs](./source_bundle.rs) contains the experimental in-memory source identity and static module-graph boundary. [stateless_helper.rs](./stateless_helper.rs) applies conservative pure-function admission to a reachable graph without defining host fallback policy.
 
 ## Interface
 
