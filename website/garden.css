@@ -78,7 +78,7 @@ main { width:100% }
   .studio-wordmark { width:54%; aspect-ratio:956 / 344; background-size:129.08% auto; background-position:center bottom }
   .studio-snail {
     width:46%; aspect-ratio:1094 / 563; background-size:112.8% auto; background-position:left top;
-    margin-bottom:1.65%; transform:scaleX(-1);
+    margin-bottom:1.65%;
   }
 }
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
