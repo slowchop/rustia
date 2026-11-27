@@ -106,6 +106,30 @@ impl Vm {
             }
         }
     }
+    /// Native argument projection for a caller that transfers values. The
+    /// optional ceiling must be checked before removing ignored arguments.
+    #[doc(hidden)]
+    pub fn retained_native_argument_projection(
+        &self,
+        function: &RetainedValue,
+    ) -> Result<Option<(u8, Option<u8>)>> {
+        let (_, kind) = self.inspected_function(function)?;
+        Ok(match kind {
+            FunctionKind::Native(
+                NativeFunction::StringLen
+                | NativeFunction::StringUpper
+                | NativeFunction::StringLower
+                | NativeFunction::StringReverse,
+            ) => Some((1, None)),
+            FunctionKind::Native(NativeFunction::StringSplit) => Some((2, None)),
+            FunctionKind::Native(NativeFunction::StringSub | NativeFunction::StringByte) => {
+                Some((3, None))
+            }
+            FunctionKind::Native(NativeFunction::StringRep) => Some((2, Some(u8::MAX))),
+            _ => None,
+        })
+    }
+
     /// Reads one zero-based capture without executing guest code.
     pub fn retained_function_capture(
         &mut self,

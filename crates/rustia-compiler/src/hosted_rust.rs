@@ -83,7 +83,8 @@ pub fn emit_module(
 /// Lower a module or isolated callback to Rust against a caller-supplied
 /// `compiled_runtime` adapter. Unsupported syntax returns a source diagnostic.
 /// Selection, capture binding, VM state and execution remain caller-owned.
-/// Each loop body begins with a call to the adapter's `Host::loop_checkpoint`.
+/// Hosted loops use `Host::loop_checkpoint` and `Host::number`. Interpolation
+/// uses `Host::interpolation_value` and the adapter's concatenation operator.
 pub fn emit(
     file: &str,
     source: &[u8],
@@ -437,11 +438,19 @@ impl Emitter<'_> {
                 let variable = self.declare(variable);
                 let body = self.loop_body(body)?;
                 self.scopes.pop();
+                let number = |expression| {
+                    if self.standalone {
+                        format!("({expression}).number()?")
+                    } else {
+                        format!("{{ let value = {expression}; host.number(&value)? }}")
+                    }
+                };
+                let (start, limit, step) = (number(start), number(limit), number(step));
                 writeln!(
                     output,
-                    "{{\nlet mut current = ({start}).number()?;\n\
-                     let limit = ({limit}).number()?;\n\
-                     let step = ({step}).number()?;\n\
+                    "{{\nlet mut current = {start};\n\
+                     let limit = {limit};\n\
+                     let step = {step};\n\
                      while if step > 0.0 {{ current <= limit }} else {{ current >= limit }} {{\n\
                      {checkpoint}let l{variable} = cell(Value::Number(current));\n\
                      let next = current + step;\n\
@@ -675,6 +684,42 @@ impl Emitter<'_> {
             Expr::InterpolatedString {
                 parts, expressions, ..
             } => {
+                if !self.standalone {
+                    let mut code = String::from("{ ");
+                    let mut first = true;
+                    for part in parts {
+                        let part = match part {
+                            rustia_parser::InterpolatedStringPart::Text(bytes) => {
+                                if bytes.is_empty() {
+                                    continue;
+                                }
+                                format!("Value::from_bytes(vec!{bytes:?})")
+                            }
+                            rustia_parser::InterpolatedStringPart::Expr(index) => {
+                                let value = self.expr(&expressions[*index])?;
+                                format!(
+                                    "{{ let value = {value}; host.interpolation_value(value)? }}"
+                                )
+                            }
+                        };
+                        if first {
+                            writeln!(code, "#[allow(unused_mut)] let mut text = {part};").unwrap();
+                            first = false;
+                        } else {
+                            writeln!(
+                                code,
+                                "let part = {part}; text = host.binary(\"..\", text, part)?;"
+                            )
+                            .unwrap();
+                        }
+                    }
+                    code.push_str(if first {
+                        "Value::String(String::new()) }"
+                    } else {
+                        "text }"
+                    });
+                    return Ok(code);
+                }
                 let mut code = String::from("{ let mut text = Vec::<u8>::new();");
                 for part in parts {
                     match part {

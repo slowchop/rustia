@@ -2,6 +2,38 @@ use rustia_compiler::hosted_rust::{emit, Options};
 use std::collections::BTreeSet;
 
 #[test]
+fn hosted_numeric_loops_and_interpolation_use_adapter_values() {
+    use rustia_compiler::hosted_rust::emit_module;
+
+    let source = b"return function(v)
+        for i = v, v, v do return `prefix:{v}:suffix` end
+    end";
+    let hosted = emit(
+        "strings.luau",
+        source,
+        "entry",
+        Options {
+            captures: Some(&BTreeSet::new()),
+            supports_builtin: |_| false,
+        },
+    )
+    .unwrap();
+    assert_eq!(hosted.matches("host.number(&value)?").count(), 3);
+    assert_eq!(
+        hosted.matches("host.interpolation_value(value)?").count(),
+        1
+    );
+    assert_eq!(
+        hosted.matches("host.binary(\"..\", text, part)?").count(),
+        2
+    );
+
+    let standalone = emit_module("strings.luau", source, "entry", "adapter", None).unwrap();
+    assert_eq!(standalone.matches(".number()?").count(), 3);
+    assert!(standalone.contains("text.extend(adapter::string_bytes"));
+}
+
+#[test]
 fn callback_captures_and_builtin_order_follow_lexical_scope() {
     let captures = BTreeSet::from(["count"]);
     let rust = emit(
