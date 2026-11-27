@@ -63,6 +63,18 @@ main { width:100% }
 .home-next { padding:22px 0 36px; background:#fff9ef; border-top:1px solid #d5c6a6 }
 .home-next h2 { font:normal clamp(26px,3vw,36px)/1.15 Georgia,serif }
 .home-origin p { margin:10px 0 0; max-width:70ch; line-height:1.55 }
+.home-origin-logo { display:none }
+@media (min-width:64rem) {
+  .home-origin .home-next-inner {
+    display:grid; grid-template-columns:minmax(0,1fr) 28%; column-gap:2rem;
+  }
+  .home-origin h2, .home-origin p { grid-column:1 }
+  .home-origin-logo {
+    display:block; grid-area:1 / 2 / span 2; place-self:center; width:clamp(8rem,11vw,10.5rem); height:auto;
+    mix-blend-mode:multiply; opacity:.82;
+  }
+  .home-origin .studio-icon { display:none }
+}
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
 .home-features dt, .home-roadmap dt { display:flex; align-items:center; gap:8px; font-weight:650 }
 .home-features dt { font-size:1.1rem; font-weight:700 }
