@@ -104,3 +104,31 @@ fn standalone_policy_checks_host_calls_imports_globals_and_builtin_fields() {
     assert!(open.is_ok());
     assert!(emit_module("mod.luau", b"return 1", "entry", "bad::adapter", None).is_err());
 }
+
+#[test]
+fn hosted_loop_bodies_start_with_a_checkpoint() {
+    use rustia_compiler::hosted_rust::emit_module;
+
+    let source = b"return function()
+        while true do continue end
+        repeat until true
+        for i = 1, 2 do end
+        for key in {} do end
+    end";
+    let hosted = emit(
+        "loops.luau",
+        source,
+        "entry",
+        Options {
+            captures: Some(&BTreeSet::new()),
+            supports_builtin: |_| false,
+        },
+    )
+    .unwrap();
+    let checkpoint = "host.loop_checkpoint()?;";
+    assert_eq!(hosted.matches(checkpoint).count(), 4);
+    assert!(hosted.contains("host.loop_checkpoint()?;\ncontinue;"));
+    assert!(hosted.contains("loop {\nhost.loop_checkpoint()?;\nif"));
+    let standalone = emit_module("loops.luau", source, "entry", "adapter", None).unwrap();
+    assert!(!standalone.contains(checkpoint));
+}

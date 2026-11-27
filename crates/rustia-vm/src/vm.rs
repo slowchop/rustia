@@ -571,7 +571,16 @@ impl VmExecution {
         self.fuel
     }
 
-    /// Fuel consumed across every guest call in this shared execution.
+    /// Charge work performed by trusted generated code to this invocation.
+    /// The caller chooses units and accounts for work before the next VM
+    /// operation. This debit does not advance the logical instruction clock
+    /// or trigger collection.
+    #[doc(hidden)]
+    pub fn charge_compiled_work(&mut self, units: u64) -> Result<()> {
+        charge_fuel(&mut self.fuel, self.fuel_limit, units)
+    }
+
+    /// Fuel consumed across interpreted calls and explicit compiled work debits.
     #[doc(hidden)]
     pub const fn fuel_used(&self) -> u64 {
         match (self.fuel_limit, self.fuel) {
