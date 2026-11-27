@@ -18,7 +18,10 @@ fn hosted_numeric_loops_and_interpolation_use_adapter_values() {
         },
     )
     .unwrap();
-    assert_eq!(hosted.matches("host.number(&value)?").count(), 3);
+    assert_eq!(hosted.matches("host.number(&").count(), 3);
+    let evaluated_step = hosted.find("let step_value = ").unwrap();
+    let first_coercion = hosted.find("host.number(&start_value)?").unwrap();
+    assert!(evaluated_step < first_coercion);
     assert_eq!(
         hosted.matches("host.interpolation_value(value)?").count(),
         1

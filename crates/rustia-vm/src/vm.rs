@@ -31672,6 +31672,14 @@ mod inline_cache_tests {
         let result = concat(&mut vm).unwrap();
         let expected: Vec<_> = [b'a'; 100].into_iter().chain([b'b'; 100]).collect();
         assert_eq!(vm.string_value_bytes(result).unwrap().unwrap(), expected);
+
+        vm.settings.memory_limit_bytes = None;
+        let result = vm.retain_value(result).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+        assert_eq!(
+            concat(&mut vm).unwrap().as_string_atom(),
+            result.value(&vm).unwrap().as_string_atom()
+        );
     }
 
     #[test]

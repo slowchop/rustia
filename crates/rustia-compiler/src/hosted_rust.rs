@@ -438,20 +438,25 @@ impl Emitter<'_> {
                 let variable = self.declare(variable);
                 let body = self.loop_body(body)?;
                 self.scopes.pop();
-                let number = |expression| {
-                    if self.standalone {
-                        format!("({expression}).number()?")
-                    } else {
-                        format!("{{ let value = {expression}; host.number(&value)? }}")
-                    }
+                let bounds = if self.standalone {
+                    format!(
+                        "let mut current = ({start}).number()?;\n\
+                         let limit = ({limit}).number()?;\n\
+                         let step = ({step}).number()?;\n"
+                    )
+                } else {
+                    format!(
+                        "let start_value = {start};\n\
+                         let limit_value = {limit};\n\
+                         let step_value = {step};\n\
+                         let mut current = host.number(&start_value)?;\n\
+                         let limit = host.number(&limit_value)?;\n\
+                         let step = host.number(&step_value)?;\n"
+                    )
                 };
-                let (start, limit, step) = (number(start), number(limit), number(step));
                 writeln!(
                     output,
-                    "{{\nlet mut current = {start};\n\
-                     let limit = {limit};\n\
-                     let step = {step};\n\
-                     while if step > 0.0 {{ current <= limit }} else {{ current >= limit }} {{\n\
+                    "{{\n{bounds}while if step > 0.0 {{ current <= limit }} else {{ current >= limit }} {{\n\
                      {checkpoint}let l{variable} = cell(Value::Number(current));\n\
                      let next = current + step;\n\
                      current = next;\n{body}}}\n}}"
