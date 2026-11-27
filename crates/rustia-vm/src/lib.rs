@@ -20,6 +20,7 @@ pub mod number;
 mod ownership;
 pub mod profile;
 mod register_blocks;
+pub mod table_operations;
 mod tape;
 #[cfg(test)]
 #[path = "../tests/support/ownership.rs"]
