@@ -38,6 +38,48 @@ pub struct Options<'a> {
     pub supports_builtin: fn(&str) -> bool,
 }
 
+/// The part of a builtin available to a closed module.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum Builtin {
+    Missing,
+    Value,
+    Namespace,
+}
+
+type CheckCall<'a> = dyn Fn(&str, Option<&[u8]>) -> std::result::Result<(), String> + 'a;
+
+/// Build-time restrictions for modules linked to a closed host interface.
+pub struct ClosedHost<'a> {
+    pub namespace: &'a str,
+    pub builtin: fn(&str, Option<&str>) -> Builtin,
+    /// Receives a dot-separated declaration and, when present, its single
+    /// literal string argument. The embedder defines its own declarations.
+    pub check_call: &'a CheckCall<'a>,
+}
+
+/// Emit a standalone module for the value adapter named by `runtime_crate`.
+/// The adapter provides standalone operators and retains module state.
+pub fn emit_module(
+    file: &str,
+    source: &[u8],
+    function_name: &str,
+    runtime_crate: &str,
+    host: Option<&ClosedHost<'_>>,
+) -> Result<String> {
+    emit_source(
+        file,
+        source,
+        function_name,
+        Options {
+            captures: None,
+            supports_builtin: |_| true,
+        },
+        runtime_crate,
+        host,
+        true,
+    )
+}
+
 /// Lower a module or isolated callback to Rust against a caller-supplied
 /// `compiled_runtime` adapter. Unsupported syntax returns a source diagnostic.
 /// Selection, capture binding, VM state and execution remain caller-owned.
@@ -47,8 +89,31 @@ pub fn emit(
     function_name: &str,
     options: Options<'_>,
 ) -> Result<String> {
+    emit_source(
+        file,
+        source,
+        function_name,
+        options,
+        "compiled_runtime",
+        None,
+        false,
+    )
+}
+
+fn emit_source<'a>(
+    file: &'a str,
+    source: &'a [u8],
+    function_name: &str,
+    options: Options<'a>,
+    runtime: &'a str,
+    closed: Option<&'a ClosedHost<'a>>,
+    standalone: bool,
+) -> Result<String> {
     let mut emitter = Emitter {
         file,
+        runtime,
+        closed,
+        standalone,
         external: options.captures,
         supports_builtin: options.supports_builtin,
         source,
@@ -60,14 +125,11 @@ pub fn emit(
         loop_depth: 0,
         repeat_depth: None,
     };
-    let mut identifier = function_name.bytes();
-    if !identifier
-        .next()
-        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
-        || !identifier.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
-        || RUST_KEYWORDS.contains(&function_name)
-    {
+    if !rust_identifier(function_name) {
         return Err(emitter.error(0, "invalid generated Rust module function name"));
+    }
+    if !rust_identifier(runtime) {
+        return Err(emitter.error(0, "invalid generated Rust runtime crate name"));
     }
     let program = parse_source_bytes(source).map_err(|error| {
         let offset = match &error {
@@ -77,16 +139,26 @@ pub fn emit(
         emitter.error(offset, error.to_string())
     })?;
     let body = emitter.function_body(&program.statements)?;
+    let binary = if standalone { "binary, " } else { "" };
     // No module-specific imports at file scope, so generated items concatenate.
     Ok(format!(
         "#[allow(clippy::all, dead_code, unreachable_code, unused_imports, unused_variables)]\n\
-         pub fn {function_name}(host: &mut dyn compiled_runtime::Host, _args: Vec<compiled_runtime::Value>) \
-         -> Result<compiled_runtime::Value, compiled_runtime::Error> {{\n\
-         use compiled_runtime::{{Error, LocalValue, Value, call, call_method, cell, get, iterate, set, unary}};\n\
+         pub fn {function_name}(host: &mut dyn {runtime}::Host, _args: Vec<{runtime}::Value>) \
+         -> Result<{runtime}::Value, {runtime}::Error> {{\n\
+         use {runtime}::{{Error, LocalValue, Value, {binary}call, call_method, cell, get, iterate, set, unary}};\n\
          let varargs = _args;\n\
          let result: Result<Value, Error> = (|| {{\n{body}}})();\n\
          Ok(result?.into_first())\n}}\n"
     ))
+}
+
+fn rust_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+        && !RUST_KEYWORDS.contains(&name)
 }
 
 const RUST_KEYWORDS: &[&str] = &[
@@ -106,6 +178,9 @@ struct Captures {
 
 struct Emitter<'a> {
     file: &'a str,
+    runtime: &'a str,
+    closed: Option<&'a ClosedHost<'a>>,
+    standalone: bool,
     external: Option<&'a BTreeSet<&'a str>>,
     supports_builtin: fn(&str) -> bool,
     source: &'a [u8],
@@ -235,7 +310,10 @@ impl Emitter<'_> {
         let recursive = binding.filter(|id| captures.used.remove(id));
         let constructor = match (binding, recursive) {
             (_, Some(id)) => {
-                format!("compiled_runtime::recursive_local(move |host, l{id}, arguments|")
+                format!(
+                    "{}::recursive_local(move |host, l{id}, arguments|",
+                    self.runtime
+                )
             }
             (Some(_), None) => "cell(Value::function(move |host, arguments|".into(),
             (None, None) => "Value::function(move |host, arguments|".into(),
@@ -259,6 +337,7 @@ impl Emitter<'_> {
     }
 
     fn statement(&mut self, statement: &Stmt, output: &mut String) -> Result<()> {
+        let runtime = self.runtime;
         match statement {
             Stmt::Local { bindings, init, .. } => {
                 let init = self.values(init)?;
@@ -382,7 +461,7 @@ impl Emitter<'_> {
                 writeln!(
                     output,
                     "{{\nlet input = {iter};\n\
-                     let mut rows = compiled_runtime::LoopRows::new(host, input)?;\n\
+                     let mut rows = {runtime}::LoopRows::new(host, input)?;\n\
                      while let Some(row) = rows.next_row(host)? {{\n\
                      let mut row = row.into_iter();\n{bindings}{body}}}\n}}"
                 )
@@ -484,8 +563,13 @@ impl Emitter<'_> {
                 AssignmentOp::Pow => "^",
                 AssignmentOp::Concat => "..",
             };
+            let binary = if self.standalone {
+                "binary"
+            } else {
+                "host.binary"
+            };
             let calc = format!(
-                "{{ let left = {left}; let right = {right}; host.binary({op:?}, left, right)? }}"
+                "{{ let left = {left}; let right = {right}; {binary}({op:?}, left, right)? }}"
             );
             writeln!(output, "{}", target.write(&calc)).unwrap();
         }
@@ -503,6 +587,14 @@ impl Emitter<'_> {
                         return Err(
                             self.error(span.start, format!("cannot assign live global {name:?}"))
                         );
+                    }
+                    if self.closed.is_some() {
+                        return Err(self.error(
+                            span.start,
+                            format!(
+                                "global assignment to {name:?} is unsupported by this closed host"
+                            ),
+                        ));
                     }
                     self.written_globals.insert(name.to_owned());
                     return Ok(Target::Global(name.to_owned()));
@@ -561,6 +653,7 @@ impl Emitter<'_> {
     }
 
     fn raw_expr(&mut self, expression: &Expr) -> Result<String> {
+        let runtime = self.runtime;
         Ok(match expression {
             Expr::Nil(_) => "Value::Nil".to_owned(),
             Expr::Bool(value, _) => format!("Value::Bool({value})"),
@@ -580,11 +673,8 @@ impl Emitter<'_> {
                         }
                         rustia_parser::InterpolatedStringPart::Expr(index) => {
                             let value = self.expr(&expressions[*index])?;
-                            writeln!(
-                                code,
-                                "text.extend(compiled_runtime::string_bytes(&({value})));"
-                            )
-                            .unwrap();
+                            writeln!(code, "text.extend({runtime}::string_bytes(&({value})));")
+                                .unwrap();
                         }
                     }
                 }
@@ -612,6 +702,31 @@ impl Emitter<'_> {
                 }
                 None if self.external.is_some() && !(self.supports_builtin)(name) => {
                     return Err(self.error(span.start, format!("unsupported live global {name:?}")));
+                }
+                None if let Some(closed) = self.closed => {
+                    if name == closed.namespace {
+                        return Err(self.error(
+                            span.start,
+                            format!(
+                                "the closed host API requires a direct {} declaration call",
+                                closed.namespace
+                            ),
+                        ));
+                    }
+                    match (closed.builtin)(name, None) {
+                        Builtin::Namespace => {
+                            return Err(self.error(
+                                span.start,
+                                format!("closed host requires a named field of {name}"),
+                            ))
+                        }
+                        Builtin::Missing => {
+                            return Err(
+                                self.error(span.start, format!("unsupported host global {name:?}"))
+                            )
+                        }
+                        Builtin::Value => format!("host.global({name:?})?"),
+                    }
                 }
                 None if name == "require" => format!("host.require_function({:?})?", self.file),
                 None => format!("host.global({name:?})?"),
@@ -646,14 +761,16 @@ impl Emitter<'_> {
                     BinaryOp::Eq | BinaryOp::Ne => {
                         let negate = *op == BinaryOp::Ne;
                         format!(
-                            "{{ let left = {lhs}; let right = {rhs}; compiled_runtime::equals(host, left, right, {negate})? }}"
+                            "{{ let left = {lhs}; let right = {rhs}; {runtime}::equals(host, left, right, {negate})? }}"
                         )
                     }
                     _ => {
                         let operator = binary_operator(*op);
-                        format!(
-                            "{{ let left = {lhs}; let right = {rhs}; host.binary({operator:?}, left, right)? }}"
-                        )
+                        if self.standalone {
+                            format!("binary({operator:?}, {lhs}, {rhs})?")
+                        } else {
+                            format!("{{ let left = {lhs}; let right = {rhs}; host.binary({operator:?}, left, right)? }}")
+                        }
                     }
                 }
             }
@@ -669,12 +786,17 @@ impl Emitter<'_> {
                 self.expr(else_expr)?
             ),
             Expr::Field { object, field, .. } => {
-                let object = self.expr(object)?;
+                let object = self.field_object(object, field)?;
                 let key = string(field);
                 format!("{{ let object = {object}; get(host, object, {key})? }}")
             }
             Expr::Index { object, index, .. } => {
-                let object = self.expr(object)?;
+                let object = match index.as_ref() {
+                    Expr::String(field, _) if let Ok(field) = std::str::from_utf8(field) => {
+                        self.field_object(object, field)?
+                    }
+                    _ => self.expr(object)?,
+                };
                 let key = self.expr(index)?;
                 format!("{{ let object = {object}; let key = {key}; get(host, object, key)? }}")
             }
@@ -693,9 +815,44 @@ impl Emitter<'_> {
                 expression.span().start,
             )?,
             Expr::Paren { expr, .. } | Expr::TypeInstantiation { expr, .. } => self.expr(expr)?,
-            Expr::Call { callee, args, .. } => {
+            Expr::Call { callee, args, span } => {
+                if self.closed.is_some()
+                    && matches!(callee.as_ref(), Expr::Name(name, _) if name == "require" && self.local(name).is_none())
+                {
+                    let [Expr::String(specifier, _)] = args.as_slice() else {
+                        return Err(self.error(
+                            span.start,
+                            "require expects a literal module specifier for this host",
+                        ));
+                    };
+                    let specifier = std::str::from_utf8(specifier)
+                        .map_err(|_| self.error(span.start, "require specifier must be UTF-8"))?;
+                    return Ok(format!("host.require({:?}, {specifier:?})?", self.file));
+                }
                 let deferred = self.defer_builtin(callee, args);
-                let callee = self.expr(callee)?;
+                let declaration = self.closed.and_then(|host| {
+                    if self.local(host.namespace).is_some() {
+                        return None;
+                    }
+                    host_fields(callee, host.namespace).map(|fields| (host, fields))
+                });
+                let callee = if let Some((host, fields)) = declaration {
+                    let literal = match args.as_slice() {
+                        [Expr::String(raw, _)] => Some(raw.as_slice()),
+                        _ => None,
+                    };
+                    (host.check_call)(&fields.join("."), literal)
+                        .map_err(|message| self.error(span.start, message))?;
+                    let namespace = host.namespace;
+                    let mut lookup = format!("host.global({namespace:?})?");
+                    for field in fields {
+                        let key = string(field);
+                        lookup = format!("{{ let parent = {lookup}; get(host, parent, {key})? }}");
+                    }
+                    lookup
+                } else {
+                    self.expr(callee)?
+                };
                 let arguments = self.values(args)?;
                 if deferred {
                     format!(
@@ -751,6 +908,19 @@ impl Emitter<'_> {
                 .is_some_and(|names| names.contains(root.as_str()))
     }
 
+    fn field_object(&mut self, object: &Expr, field: &str) -> Result<String> {
+        let (Some(host), Expr::Name(name, span)) = (self.closed, object) else {
+            return self.expr(object);
+        };
+        if self.local(name).is_some() || (host.builtin)(name, None) != Builtin::Namespace {
+            return self.expr(object);
+        }
+        if (host.builtin)(name, Some(field)) == Builtin::Missing {
+            return Err(self.error(span.start, format!("unsupported builtin {name}.{field}")));
+        }
+        Ok(format!("host.global({name:?})?"))
+    }
+
     fn table(&mut self, fields: &[TableField]) -> Result<String> {
         let mut init = Vec::new();
         let mut array_index = 0;
@@ -785,6 +955,19 @@ impl Emitter<'_> {
             ))
         }
     }
+}
+
+fn host_fields<'a>(mut callee: &'a Expr, namespace: &str) -> Option<Vec<&'a str>> {
+    let mut path = Vec::new();
+    while let Expr::Field { object, field, .. } = callee {
+        path.push(field.as_str());
+        callee = object;
+    }
+    if path.is_empty() || !matches!(callee, Expr::Name(name, _) if name == namespace) {
+        return None;
+    }
+    path.reverse();
+    Some(path)
 }
 
 fn binary_operator(op: BinaryOp) -> &'static str {
