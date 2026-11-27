@@ -222,3 +222,81 @@ fn rollback_reallocation_cannot_make_a_stale_root_valid() {
         .is_err());
     assert!(vm.retained_table_metatable(&replacement).unwrap().is_none());
 }
+
+#[test]
+fn compiled_numeric_call_defers_to_the_exact_quota_failure() {
+    let mut main = Function::new(
+        vec![
+            Instruction::new(Opcode::LoadConst, 0, 0, 0),
+            Instruction::with_aux(Opcode::LoadFunction, 1, 0, 0, 0),
+            Instruction::new(Opcode::Return, 1, 1, 0),
+        ],
+        2,
+    );
+    main.captured_registers = vec![0];
+    let closure = Function::with_params_and_upvalues(
+        vec![
+            Instruction::with_aux(Opcode::SetUpvalue, 0, 0, 0, 0),
+            Instruction::with_aux(Opcode::GetUpvalue, 0, 0, 0, 0),
+            Instruction::new(Opcode::Return, 0, 1, 0),
+        ],
+        1,
+        1,
+        vec![UpvalueDescriptor::ParentLocal(0)],
+        Vec::new(),
+    )
+    .with_upvalue_names(vec!["score".into()]);
+    let program = Program::with_functions(main, vec![Constant::Number(7.0)], vec![closure])
+        .with_source_name(Some("metered.luau".into()));
+    let instantiate = || {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let function = vm.run(&program).unwrap();
+        let function = vm.retain_value(function).unwrap();
+        vm.collect_garbage();
+        (vm, function)
+    };
+
+    for limit_memory in [false, true] {
+        let (mut vm, function) = instantiate();
+        let (mut reference, oracle) = instantiate();
+        for engine in [&mut vm, &mut reference] {
+            if limit_memory {
+                engine.settings.memory_limit_bytes = Some(engine.current_live_bytes());
+            } else {
+                engine.settings.initial_fuel = Some(1);
+            }
+        }
+        let parameter = Value::number(9.0);
+        let result = vm
+            .try_run_compiled_numeric_capture(&function, "score", parameter, |_, _| {
+                panic!("quota-limited backend ran")
+            })
+            .unwrap();
+        assert!(result.is_none());
+        let call = |engine: &mut Vm, function: &RetainedValue| {
+            let value = function.value(engine).unwrap();
+            engine
+                .call_function(&program, value, &[parameter])
+                .unwrap_err()
+        };
+        let got = call(&mut vm, &function);
+        let expected = call(&mut reference, &oracle);
+        if limit_memory {
+            assert!(matches!(got.kind, ErrorKind::OutOfMemory));
+        } else {
+            assert!(matches!(got.kind, ErrorKind::FuelExhausted { limit: 1 }));
+        }
+        assert_eq!(got.to_string(), expected.to_string());
+        assert_eq!(got.pc, expected.pc);
+        assert_eq!(got.location, expected.location);
+        assert_eq!(
+            vm.executed_instructions(),
+            reference.executed_instructions()
+        );
+        vm.settings.memory_limit_bytes = None;
+        assert_eq!(
+            current(&mut vm, &function),
+            if limit_memory { 7.0 } else { 9.0 }
+        );
+    }
+}

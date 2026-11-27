@@ -196,8 +196,8 @@ impl Vm {
     ) -> Result<Option<Value>> {
         let settings = &self.settings;
         if self.profile != Profile::ReproducibleStandard
-            || settings.initial_fuel.is_some()
-            || settings.memory_limit_bytes.is_some()
+            || settings.guest_surface.is_hardened_leaf()
+            || settings.enable_conformance_native_type_checks
             || settings.recursion_limit == 0
             || settings.enable_memory_tracking
             || settings.enable_opcode_census
@@ -224,8 +224,9 @@ impl Vm {
         else {
             return Ok(None);
         };
-        // All admitted operations take one logical unit with this compiler
-        // schedule. The compiler may append an unreachable empty return.
+        // The compiler may append an unreachable empty return. Admitted
+        // operations have an identity clock schedule and cannot allocate
+        // guest objects or dispatch calls.
         if closure.parameter_count != 1
             || closure.is_vararg
             || !closure.captured_registers.is_empty()
@@ -233,19 +234,20 @@ impl Vm {
             || closure.upvalue_name(0) != Some(capture_name)
             || program.logical_units().is_some()
             || closure.code[return_pc].b != 1
-            || closure.code[..return_pc].iter().any(|step| {
-                !matches!(
-                    step.op,
-                    Opcode::LoadConst
-                        | Opcode::Move
-                        | Opcode::GetUpvalue
-                        | Opcode::SetUpvalue
-                        | Opcode::ClearLocalCell
-                        | Opcode::Add
-                        | Opcode::Sub
-                        | Opcode::Mul
-                        | Opcode::Div
-                )
+            || closure.code[..return_pc].iter().any(|step| match step.op {
+                Opcode::LoadConst => !matches!(
+                    program.constants().get(usize::from(step.c)),
+                    Some(Constant::Number(_))
+                ),
+                Opcode::Move
+                | Opcode::GetUpvalue
+                | Opcode::SetUpvalue
+                | Opcode::ClearLocalCell
+                | Opcode::Add
+                | Opcode::Sub
+                | Opcode::Mul
+                | Opcode::Div => false,
+                _ => true,
             })
         {
             return Ok(None);
@@ -269,6 +271,31 @@ impl Vm {
         let Some(current) = compiled_number(current) else {
             return Ok(None);
         };
+        // The ordinary idle call starts a fresh budget. Let the interpreter
+        // deliver the exact error and partial state when fuel can run out.
+        if let Some(limit) = self.settings.initial_fuel {
+            let cost = closure.code[..=return_pc]
+                .iter()
+                .try_fold(0_u64, |cost, &step| {
+                    Ok::<_, Error>(cost.saturating_add(self.instruction_fuel_cost(step)?))
+                })?;
+            if cost > limit {
+                return Ok(None);
+            }
+        }
+        if let Some(limit) = self.settings.memory_limit_bytes {
+            // Quota checks during this trace see one call frame, its register
+            // root vector, and an empty continuation-driver slot. The trace
+            // cannot grow the heap or install any extra roots. If this bound
+            // would collect, leave the normal frame and roots to the VM.
+            let frame_bytes = size_of::<CallStackFrame>()
+                .saturating_add(size_of::<Vec<CoroutineFrame>>())
+                .saturating_add(closure.debug_name.as_ref().map_or(0, String::len))
+                .saturating_add(closure.max_registers.saturating_mul(size_of::<Value>()));
+            if self.current_live_bytes().saturating_add(frame_bytes) > limit {
+                return Ok(None);
+            }
+        }
         let (next, result) = invoke(current, parameter)?;
         if next.to_bits() != current.to_bits() {
             self.heap
@@ -276,6 +303,8 @@ impl Vm {
                 .ok_or_else(|| missing("compiled function capture is missing"))?;
         }
         self.executed_instructions = next_clock;
+        self.prune_unreachable_coroutines_if_idle();
+        self.release_host_error_traceback();
         Ok(Some(Value::number(result)))
     }
     pub fn retained_function_environment(

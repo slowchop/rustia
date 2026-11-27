@@ -177,12 +177,27 @@ fn compiled_and_interpreted_calls_share_the_vm_capture() {
     ] {
         let mut metered = Vm::with_settings(Profile::ReproducibleStandard, settings);
         let call = prepared.instantiate(&mut metered).unwrap();
+        let mut ran_backend = false;
         let value = call
-            .call(&mut metered, Value::number(1.0), &receipt, |_, _| {
-                panic!("metered backend ran")
-            })
+            .call(
+                &mut metered,
+                Value::number(1.0),
+                &receipt,
+                |capture, step| {
+                    ran_backend = true;
+                    assert_eq!((capture, step), (0.0, 1.0));
+                    Ok((1.0, 2.0))
+                },
+            )
             .unwrap();
+        assert!(ran_backend);
         assert_eq!(value.as_number(), Some(2.0));
+        assert_eq!(
+            call.call_interpreted(&mut metered, Value::number(1.0))
+                .unwrap()
+                .as_number(),
+            Some(4.0),
+        );
     }
 }
 
@@ -390,8 +405,16 @@ fn verify_backend(
     receipt: &CompiledCallReceipt,
     command: impl Fn() -> Command,
 ) {
+    use rustia_vm::VmSettings;
     let prepared = prepare_runtime(bundle, "entry.luau").unwrap();
-    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            initial_fuel: Some(10_000_000),
+            memory_limit_bytes: Some(64 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
     let calls = [
         prepared.instantiate(&mut vm).unwrap(),
         prepared.instantiate(&mut vm).unwrap(),
