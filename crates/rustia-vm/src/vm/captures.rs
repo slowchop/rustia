@@ -273,16 +273,16 @@ impl Vm {
         else {
             return Ok(None);
         };
-        // The compiler may append an unreachable empty return. Admitted
-        // operations have an identity clock schedule and cannot allocate
-        // guest objects or dispatch calls.
+        let result_count = closure.code[return_pc].b;
+        // Admitted operations have an identity clock schedule and cannot
+        // allocate guest objects or dispatch calls.
         if closure.parameter_count > 1
             || closure.is_vararg
             || !closure.captured_registers.is_empty()
             || closure.upvalues.len() != 1
             || closure.upvalue_name(0) != Some(capture_name)
             || program.logical_units().is_some()
-            || closure.code[return_pc].b != 1
+            || result_count > 1
             || closure.code[..return_pc].iter().any(|step| match step.op {
                 Opcode::LoadConst => !matches!(
                     program.constants().get(usize::from(step.c)),
@@ -366,7 +366,11 @@ impl Vm {
         self.executed_instructions = next_clock;
         self.prune_unreachable_coroutines_if_idle();
         self.release_host_error_traceback();
-        Ok(Some(Value::number(result)))
+        Ok(Some(if result_count == 0 {
+            Value::nil()
+        } else {
+            Value::number(result)
+        }))
     }
     pub fn retained_function_environment(
         &mut self,

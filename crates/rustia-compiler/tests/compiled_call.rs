@@ -581,3 +581,79 @@ fn zero_argument_numeric_callback_keeps_its_capture_and_fuel_budget() {
     assert!(budget.fuel_used() > 0);
     assert!(generate("local score=0 return function(a,b) score += a return score+b end").is_err());
 }
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn straight_line_updates_return_nil_and_charge_the_interpreted_trace() {
+    use rustia_vm::{ValueKind, VmSettings};
+
+    for (profile, ending) in [
+        (Profile::ReproducibleStandard, ""),
+        (Profile::LuauCompat, " return"),
+    ] {
+        let source = format!("local count = 0 return function() count += 2 count *= 3{ending} end");
+        let bundle = SourceBundle::new([("entry.luau", source.as_str())]).unwrap();
+        let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+        let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+        let settings = || VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(profile, settings());
+        let mut reference = Vm::with_settings(profile, settings());
+        let call = prepared.instantiate(&mut vm).unwrap();
+        let oracle = prepared.instantiate(&mut reference).unwrap();
+
+        for capture_before in [0.0, 6.0, 24.0] {
+            let clock_before = vm.executed_instructions();
+            let mut short_budget = vm.begin_transactional_execution_with_fuel(Some(1));
+            let rejected = call
+                .try_call_in(
+                    &mut vm,
+                    Value::nil(),
+                    &receipt,
+                    &mut short_budget,
+                    |_, _| panic!("underfunded call entered the backend"),
+                )
+                .unwrap();
+            assert!(rejected.is_none());
+            assert_eq!(short_budget.fuel_used(), 0);
+            assert_eq!(vm.executed_instructions(), clock_before);
+
+            let mut budget = vm.begin_execution();
+            let result = call
+                .try_call_in(
+                    &mut vm,
+                    Value::nil(),
+                    &receipt,
+                    &mut budget,
+                    |capture, argument| {
+                        assert_eq!(capture, capture_before);
+                        assert_eq!(argument.to_bits(), 0);
+                        Ok(((capture + 2.0) * 3.0, 123.0))
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            let expected = oracle
+                .call_interpreted(&mut reference, Value::nil())
+                .unwrap();
+            assert_eq!(result.kind(), ValueKind::Nil);
+            assert_eq!(result.kind(), expected.kind());
+            assert!(budget.fuel_used() > 0);
+            assert_eq!(
+                vm.executed_instructions(),
+                reference.executed_instructions()
+            );
+        }
+    }
+
+    for unsupported in [
+        "local count = 0 return function() count += 1 print(count) end",
+        "local count = 0 return function() count += 1 other = count end",
+        "local count = 0 return function() count += 1 return count, count end",
+    ] {
+        assert!(generate(unsupported).is_err(), "{unsupported}");
+    }
+}
