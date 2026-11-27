@@ -188,7 +188,8 @@ impl NumericCallInstance<'_> {
 }
 
 /// Lower a single source module defining one numeric capture and returning a
-/// zero- or one-argument closure. It may update the capture once before returning.
+/// zero- or one-argument closure. It may update the capture before returning
+/// one numeric result or no results.
 pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
     let chunk = parse_bounded(source)?;
     Ok(render(lower(&chunk, Span::new(0, source.len()))?))
@@ -275,8 +276,8 @@ fn render(call: NumericCall) -> GeneratedCall {
 struct NumericCall {
     capture_name: String,
     initial_capture: f64,
-    capture_update: Option<NumericExpr>,
-    result: NumericExpr,
+    capture_updates: Vec<NumericExpr>,
+    result: Option<NumericExpr>,
 }
 
 enum NumericExpr {
@@ -376,60 +377,61 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
         uses_capture: false,
         uses_parameter: false,
     };
-    let (update, result) = match body.as_ref() {
-        [Stmt::Return {
-            value: Some(result),
-            extra_values,
-            ..
-        }] if extra_values.is_empty() => (None, result),
-        [Stmt::Assignment {
+    let (updates, result) = match body.split_last() {
+        Some((
+            Stmt::Return {
+                value,
+                extra_values,
+                ..
+            },
+            updates,
+        )) if extra_values.is_empty() => (updates, value.as_ref()),
+        _ => (body.as_ref(), None),
+    };
+    let mut capture_updates = Vec::with_capacity(updates.len());
+    for statement in updates {
+        let Stmt::Assignment {
             targets,
             op,
             values,
             span,
-        }, Stmt::Return {
-            value: Some(result),
-            extra_values,
-            ..
-        }] if extra_values.is_empty() => {
-            let ([AssignmentTarget::Local { name, .. }], [value]) =
-                (targets.as_slice(), values.as_slice())
-            else {
-                return Err(CompileError::at(
-                    "expected one numeric capture assignment",
-                    *span,
-                ));
-            };
-            if Some(name.as_str()) != lowerer.capture {
-                return Err(CompileError::at(
-                    "only the numeric capture can be assigned",
-                    *span,
-                ));
-            }
-            lowerer.uses_capture = true;
-            let value = lowerer.expression(value)?;
-            let arithmetic = match op {
-                AssignmentOp::Assign => None,
-                AssignmentOp::Add => Some(Arithmetic::Add),
-                AssignmentOp::Sub => Some(Arithmetic::Subtract),
-                AssignmentOp::Mul => Some(Arithmetic::Multiply),
-                AssignmentOp::Div => Some(Arithmetic::Divide),
-                _ => return Err(CompileError::at("unsupported numeric assignment", *span)),
-            };
-            let update = match arithmetic {
-                Some(op) => NumericExpr::binary(op, NumericExpr::Capture, value),
-                None => value,
-            };
-            (Some(update), result)
-        }
-        _ => {
+        } = statement
+        else {
             return Err(CompileError::at(
                 "unsupported compiled closure body",
                 *function_span,
-            ))
+            ));
+        };
+        let ([AssignmentTarget::Local { name, .. }], [value]) =
+            (targets.as_slice(), values.as_slice())
+        else {
+            return Err(CompileError::at(
+                "expected one numeric capture assignment",
+                *span,
+            ));
+        };
+        if Some(name.as_str()) != lowerer.capture {
+            return Err(CompileError::at(
+                "only the numeric capture can be assigned",
+                *span,
+            ));
         }
-    };
-    let result = lowerer.expression(result)?;
+        lowerer.uses_capture = true;
+        let value = lowerer.expression(value)?;
+        let arithmetic = match op {
+            AssignmentOp::Assign => None,
+            AssignmentOp::Add => Some(Arithmetic::Add),
+            AssignmentOp::Sub => Some(Arithmetic::Subtract),
+            AssignmentOp::Mul => Some(Arithmetic::Multiply),
+            AssignmentOp::Div => Some(Arithmetic::Divide),
+            _ => return Err(CompileError::at("unsupported numeric assignment", *span)),
+        };
+        capture_updates.push(match arithmetic {
+            Some(op) => NumericExpr::binary(op, NumericExpr::Capture, value),
+            None => value,
+        });
+    }
+    let result = result.map(|expr| lowerer.expression(expr)).transpose()?;
     if !lowerer.uses_capture {
         return Err(CompileError::at(
             "closure must capture the declared numeric local",
@@ -439,7 +441,7 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
     Ok(NumericCall {
         capture_name: binding.name.clone(),
         initial_capture: *initial_capture,
-        capture_update: update,
+        capture_updates,
         result,
     })
 }
@@ -500,16 +502,22 @@ impl Lowerer<'_> {
 }
 
 fn emit_rust(call: &NumericCall) -> String {
-    let update = call
-        .capture_update
+    let mut updates = String::new();
+    for expr in &call.capture_updates {
+        use std::fmt::Write;
+        writeln!(updates, "    let capture = {};", emit_rust_expression(expr)).unwrap();
+    }
+    // The VM determines result arity from the bound bytecode. Keep the
+    // backend ABI's result slot even when the callback returns no values.
+    let result = call
+        .result
         .as_ref()
-        .map(|expr| format!("    let capture = {};\n", emit_rust_expression(expr)))
-        .unwrap_or_default();
-    let result = emit_rust_expression(&call.result);
+        .map(emit_rust_expression)
+        .unwrap_or_else(|| "0.0".into());
     format!(
         "#[inline]\nfn canonical(value: f64) -> f64 {{\n    if value.is_nan() {{ f64::from_bits({CANON_NAN_BITS}) }} else {{ value }}\n}}\n\n\
          pub fn compiled_call(capture: f64, parameter: f64) -> (f64, f64) {{\n\
-             let capture = canonical(capture);\n    let parameter = canonical(parameter);\n{update}    (capture, {result})\n}}\n"
+             let capture = canonical(capture);\n    let parameter = canonical(parameter);\n{updates}    (capture, {result})\n}}\n"
     )
 }
 
