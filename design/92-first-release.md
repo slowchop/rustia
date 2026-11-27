@@ -4,7 +4,7 @@ This plan defines the private 0.x application-acceptance milestone and the later
 supported release. The [experimental public source launch](public-source-activation.md)
 covers source inspection and use. The unpublished workspace is staged at `0.2.0`.
 [Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the interpreter
-preview package draft and [its evidence](90-release-readiness.md#rustia-020-interpreter-preview).
+preview packages and [their evidence](90-release-readiness.md#rustia-020-interpreter-preview).
 This plan tracks the broader [supported release](https://github.com/slowchop/rustia/issues/34),
 including platform acceptance, API stability and consumer rollout.
 

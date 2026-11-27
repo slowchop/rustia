@@ -6,7 +6,7 @@ Rustia implements a portable Luau interpreter in Rust. Source moves through the 
 parser, and compiler into a bytecode VM; the `rustia` facade supplies application APIs
 and the CLI supplies file/stdin/REPL execution. Selectable environment contracts share
 one engine. The experimental source release uses standard GitHub-hosted correctness
-CI. The unpublished 0.2.0 draft allows only the six interpreter crates to target
+CI. The unpublished 0.2.0 preview allows only the six interpreter crates to target
 crates.io. Public benchmark automation and publication remain paused.
 
 A separate private maintainer bridge supports only manually dispatched, reviewed

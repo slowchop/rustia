@@ -25,7 +25,7 @@ general embedding API must remain available to those users.
 ## Rustia 0.2.0 interpreter preview
 
 [Issue #83](https://github.com/slowchop/rustia/issues/83) tracks the first package
-preview. [Draft PR #108](https://github.com/slowchop/rustia/pull/108) prepares
+preview. [PR #108](https://github.com/slowchop/rustia/pull/108) prepares
 `publish = ["crates-io"]` for `rustia-lexer`, `rustia-parser`, `rustia-vm`,
 `rustia-compiler`, `rustia`, and `rustia-cli`. Conformance and benchmark tooling
 retain `publish = false`. The allowlist lets us verify the packaging configuration
@@ -38,7 +38,7 @@ for the intended registry. The workspace is still unpublished.
   and [differential smoke tests](https://github.com/slowchop/rustia/actions/runs/45902022381)
   passed. Rebuild and verify the six archives from the exact clean allowlisted
   candidate. Record its archive checks, release preflight, independent review,
-  and required hosted checks on the draft PR before merging.
+  and required hosted checks on the PR before merging.
 - Native Windows, real Firefox, and the extended bounded fuzz campaign are
   manual hosted checks. The previous draft's regular PR runs skipped those jobs.
   Track fresh execution separately from the final native and browser matrix in
@@ -50,8 +50,7 @@ for the intended registry. The workspace is still unpublished.
 
 The preview has its own acceptance criteria in #83. The broader supported-release
 gates remain open under [issue #34](https://github.com/slowchop/rustia/issues/34).
-Keep the allowlisted candidate in draft while an applicable package publication
-gate remains open.
+Complete the preview checks in #83 before merging the allowlisted candidate.
 Uploading packages and creating a release tag or GitHub release each require
 separate explicit authorization.
 
@@ -142,7 +141,7 @@ reviews remain required for this slice; wider semantic-tail work stays open.
 
 - Complete the applicable P1 engine, conformance, benchmark, and API gates
   before package publication. Use the explicit six-crate registry allowlist for
-  the draft preview checks described above.
+  the preview checks described above.
 - Semver and API stability rules are defined in
   [`91-semver-policy.md`](91-semver-policy.md).
 - Keep `rustia-conformance` and `script-bench-harness` unpublished. Review the

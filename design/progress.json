@@ -139,7 +139,7 @@
       },
       "first_release": {
         "target": "1.0.0 after a release-candidate cycle",
-        "status": "The 0.2.0 interpreter preview draft selects six packages for crates.io. The workspace is unpublished. The supported release remains open.",
+        "status": "The 0.2.0 interpreter preview selects six packages for crates.io. The workspace is unpublished. The supported release remains open.",
         "checklist": "design/92-first-release.md"
       }
     }
@@ -177,8 +177,8 @@
       "name": "Public release readiness",
       "complete": 84,
       "confidence": 91,
-      "state": "The 0.2.0 interpreter preview draft limits crates.io eligibility to six packages. The previous draft verified archived README examples, CLI execution, and Rustdoc. Fresh checks and review apply to the exact allowlisted candidate. The workspace is unpublished.",
-      "future_plan": "Verify the preview draft and track supported-release API, runtime, platform, benchmark, and controlled-client evidence separately under issue #34."
+      "state": "The 0.2.0 interpreter preview limits crates.io eligibility to six packages. Issue #83 tracks archive verification, hosted checks, and publication. The workspace is unpublished.",
+      "future_plan": "Track supported-release API, runtime, platform, benchmark, and controlled-client evidence under issue #34."
     }
   ],
   "areas": [
@@ -568,7 +568,7 @@
           "name": "Crate publishability",
           "complete": 62,
           "confidence": 80,
-          "state": "The 0.2.0 preview draft selects six crates for crates.io. Conformance and benchmark tooling still use publish = false. Generated package inventory, metadata, publishability, and leaf dry-run checks cover the workspace.",
+          "state": "The 0.2.0 preview selects six crates for crates.io. Conformance and benchmark tooling still use publish = false. Generated package inventory, metadata, publishability, and leaf dry-run checks cover the workspace.",
           "future_plan": "Verify all six clean candidate archives. After applicable release gates pass and publication is separately authorized, upload in dependency order and verify registry installation."
         }
       ]

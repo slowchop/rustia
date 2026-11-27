@@ -12,11 +12,11 @@ covers source access.
 ## Current Status
 
 - The unpublished workspace is staged at `0.2.0`.
-  [Draft PR #108](https://github.com/slowchop/rustia/pull/108) configures only the
+  [PR #108](https://github.com/slowchop/rustia/pull/108) configures only the
   six preview packages for crates.io. [Issue #83](https://github.com/slowchop/rustia/issues/83)
   tracks preview validation and publication.
 - The 0.x milestone validates the API with controlled client applications.
-  The preview draft requires its applicable checks and independent review before
+  The preview requires its applicable checks and independent review before
   merge. Registry publication and a GitHub release each require separate explicit
   authorization. See [the preview gates](90-release-readiness.md#rustia-020-interpreter-preview)
   and [the supported-release plan](92-first-release.md).
