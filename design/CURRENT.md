@@ -12,7 +12,7 @@ and evidence. When an older status statement disagrees, this file wins.
 
 Rustia is a from-scratch Rust interpreter for pinned standalone **Luau 0.709**.
 The experimental interpreter became public on 20 November 2026 under MIT OR Apache-2.0.
-The unpublished workspace is staged at **`0.2.0`**. Six interpreter crates target crates.io only.
+The unpublished workspace is staged at **`0.2.0`**. The six interpreter crates target crates.io only.
 Conformance and the benchmark harness keep `publish = false`. [Issue #83](https://github.com/slowchop/rustia/issues/83)
 tracks the candidate and publication gates. See the
 [preview readiness evidence](90-release-readiness.md#rustia-020-interpreter-preview)
