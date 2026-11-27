@@ -25,6 +25,10 @@ pub use scoped_host::VmHostCall;
 
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
+use crate::byte_string::{
+    char_byte, luau_string_sub, repeat_string, reverse_string_bytes, split_luau_string,
+    string_byte_slice, string_library_index, string_repeat_count, string_repeat_len,
+};
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
 use crate::bytecode::{
@@ -17179,13 +17183,10 @@ impl Vm {
     }
 
     fn string_char_byte(&mut self, value: Value) -> Result<u8> {
-        let byte = self.coerce_to_i32(value, "number")?;
-        if !(0..=255).contains(&byte) {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "byte value",
-            }));
-        }
-        Ok(byte as u8)
+        let number = self
+            .coerce_to_number(value)?
+            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+        char_byte(number)
     }
 
     fn native_utf8_char(&mut self, args: &[Value]) -> Result<Value> {
@@ -19323,18 +19324,7 @@ impl Vm {
         } else {
             start
         };
-        let Some(start_index) =
-            normalize_string_byte_start(text.len(), start, instruction.aux == 3)?
-        else {
-            return Ok(Vec::new());
-        };
-        let Some(end_index) = normalize_string_byte_end(text.len(), end)? else {
-            return Ok(Vec::new());
-        };
-        if end_index < start_index {
-            return Ok(Vec::new());
-        }
-        Ok(text[start_index..=end_index]
+        Ok(string_byte_slice(&text, start, end, instruction.aux == 3)?
             .iter()
             .map(|byte| Value::number(f64::from(*byte)))
             .collect())
@@ -19399,7 +19389,7 @@ impl Vm {
         } else {
             b",".to_vec()
         };
-        let parts = split_luau_string(&text, &separator)?;
+        let parts = split_luau_string(&text, &separator);
         let values = parts
             .iter()
             .map(|part| self.heap.intern_string_value_bytes(part))
@@ -25920,93 +25910,6 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
     })
 }
 
-fn string_library_index(value: f64) -> Result<i64> {
-    // The half-open range also rejects NaN and infinities. At either boundary,
-    // f64 spacing exceeds one, so checking before truncation is equivalent.
-    // The checked cast below supplies truncation without a separate operation.
-    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer string library index",
-        }));
-    }
-    Ok(value as i64)
-}
-
-fn luau_string_sub(text: &[u8], start: i64, end: i64) -> Result<Vec<u8>> {
-    let len = i64::try_from(text.len()).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let start = if start < 0 { len + start + 1 } else { start }.max(1);
-    let end = if end < 0 { len + end + 1 } else { end }.min(len);
-    if start > end {
-        return Ok(Vec::new());
-    }
-    let start = usize::try_from(start - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub start index underflow",
-        })
-    })?;
-    let end = usize::try_from(end).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub end index underflow",
-        })
-    })?;
-    let bytes = text.get(start..end).ok_or_else(|| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub byte range is out of bounds",
-        })
-    })?;
-    Ok(bytes.to_vec())
-}
-
-fn normalize_string_byte_start(
-    len: usize,
-    index: i64,
-    clamp_to_first: bool,
-) -> Result<Option<usize>> {
-    let len = i64::try_from(len).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let mut one_based = if index < 0 { len + index + 1 } else { index };
-    if one_based < 1 && clamp_to_first && len > 0 {
-        one_based = 1;
-    }
-    if one_based < 1 || one_based > len {
-        return Ok(None);
-    }
-    Ok(Some(usize::try_from(one_based - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string index underflow",
-        })
-    })?))
-}
-
-fn normalize_string_byte_end(len: usize, index: i64) -> Result<Option<usize>> {
-    let len = i64::try_from(len).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let one_based = if index < 0 { len + index + 1 } else { index };
-    if one_based < 1 {
-        return Ok(None);
-    }
-    let one_based = one_based.min(len);
-    Ok(Some(usize::try_from(one_based - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string index underflow",
-        })
-    })?))
-}
-
-fn reverse_string_bytes(text: &[u8]) -> Result<Vec<u8>> {
-    Ok(text.iter().rev().copied().collect::<Vec<_>>())
-}
-
 fn encode_luau_utf8_char(codepoint: u32, output: &mut Vec<u8>) {
     if codepoint < 0x80 {
         output.push(codepoint as u8);
@@ -26073,63 +25976,6 @@ fn luau_utf8_posrelat(position: i64, len: i64) -> i64 {
     } else {
         len + position + 1
     }
-}
-
-const MAX_STRING_REPEAT_BYTES: usize = 1 << 30;
-
-fn string_repeat_count(value: f64) -> Result<i64> {
-    if !value.is_finite()
-        || value.fract() != 0.0
-        || value < i64::MIN as f64
-        || value > i64::MAX as f64
-    {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer string.rep count",
-        }));
-    }
-    Ok(value as i64)
-}
-
-fn string_repeat_len(text_len: usize, count: i64) -> Result<usize> {
-    if count <= 0 || text_len == 0 {
-        return Ok(0);
-    }
-    let count = usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::TypeError {
-            expected: "non-negative string.rep count",
-        })
-    })?;
-    let total_len = text_len.checked_mul(count).ok_or_else(|| {
-        Error::new(ErrorKind::TypeError {
-            expected: "string.rep result below allocation limit",
-        })
-    })?;
-    if total_len > MAX_STRING_REPEAT_BYTES {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "string.rep result below allocation limit",
-        }));
-    }
-    Ok(total_len)
-}
-
-fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
-    let total_len = string_repeat_len(text.len(), count)?;
-    if total_len == 0 {
-        return Ok(Vec::new());
-    }
-    let count = usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::TypeError {
-            expected: "non-negative string.rep count",
-        })
-    })?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(total_len)
-        .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-    for _ in 0..count {
-        output.extend_from_slice(text);
-    }
-    Ok(output)
 }
 
 fn luau_string_find_first(
@@ -27958,25 +27804,6 @@ enum SimplePatternAtom {
     Byte(u8),
     Any,
     Control,
-}
-
-fn split_luau_string(text: &[u8], separator: &[u8]) -> Result<Vec<Vec<u8>>> {
-    if separator.is_empty() {
-        return Ok(text.iter().map(|byte| vec![*byte]).collect());
-    }
-
-    let mut parts = Vec::new();
-    let mut start = 0;
-    while let Some(offset) = text[start..]
-        .windows(separator.len())
-        .position(|window| window == separator)
-    {
-        let end = start + offset;
-        parts.push(text[start..end].to_vec());
-        start = end + separator.len();
-    }
-    parts.push(text[start..].to_vec());
-    Ok(parts)
 }
 
 fn get_table(registers: &[Value], register: u8) -> Result<u32> {

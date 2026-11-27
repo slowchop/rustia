@@ -19,6 +19,8 @@
 
 ## Invariants
 
+- [byte_string.rs](./byte_string.rs) shares byte indexing, slicing, conversion and allocation bounds between VM instructions, native builtins and compiled embedders. Callers own value coercion and storage.
+
 - [number/math.rs](./number/math.rs) supplies stateless standard math kernels to VM instructions, native builtins and compiled embedders. Callers handle arity, value coercion and stateful libraries.
 
 - `Vm::create_retained_string_bytes` admits arbitrary byte strings and their roots together, rechecking atom-index growth after quota collection. Luvy's runtime adapter exercises NUL-bearing panic strings through this boundary.
