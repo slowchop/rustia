@@ -3,7 +3,7 @@ use rustia_compiler::compile;
 #[cfg(not(target_family = "wasm"))]
 use rustia_compiler::compiled_call::{prepare_runtime, CompiledCallReceipt};
 use rustia_compiler::{
-    compiled_call::{generate, generate_from_bundle, COMPILED_CALL_ABI},
+    compiled_call::{generate, generate_from_bundle, generate_scalar_helper, COMPILED_CALL_ABI},
     source_bundle::SourceBundle,
 };
 #[cfg(not(target_family = "wasm"))]
@@ -15,6 +15,25 @@ use std::{fs, process::Command};
 
 const SOURCE: &str =
     "local score = 0\nreturn function(step)\n score += step\n return score * 2\nend";
+
+#[test]
+fn scalar_helper_lowers_only_one_parameter_numeric_expression() {
+    let rust = generate_scalar_helper("return function(n) return math.abs(n) * 3 end").unwrap();
+    assert!(rust.contains("pub fn run(parameter: f64) -> f64"));
+    assert!(rust.contains("rustia_vm::number::NumericOp::Abs, parameter, 0.0"));
+    for unsupported in [
+        "return function(n) return n end",
+        "return function(n) return 2 * 3 end",
+        "return function(math) return math.abs(1) + math end",
+        "return function(n) return unknown(n) end",
+        "local x = 0 return function(n) return n * x end",
+    ] {
+        assert!(generate_scalar_helper(unsupported)
+            .unwrap_err()
+            .span
+            .is_some());
+    }
+}
 
 #[cfg(not(target_family = "wasm"))]
 const CALLS: [(usize, f64); 7] = [

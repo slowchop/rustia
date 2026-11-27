@@ -193,6 +193,76 @@ pub fn generate(source: &str) -> Result<GeneratedCall, CompileError> {
     Ok(render(lower(&chunk, Span::new(0, source.len()))?))
 }
 
+/// Generate a numeric helper entry point for an already admitted stateless module.
+///
+/// The generated function requires a number. The embedder validates the value
+/// and supplies Rustia's standard numeric semantics and `math.abs` binding.
+pub fn generate_scalar_helper(source: &str) -> Result<String, CompileError> {
+    let chunk = parse_bounded(source)?;
+    let span = Span::new(0, source.len());
+    let [Stmt::Return {
+        value:
+            Some(Expr::Function {
+                attributes,
+                params,
+                is_vararg: false,
+                body,
+                ..
+            }),
+        extra_values,
+        ..
+    }] = chunk.statements.as_slice()
+    else {
+        return Err(CompileError::at("expected a returned scalar helper", span));
+    };
+    let [parameter] = params.as_ref() else {
+        return Err(CompileError::at(
+            "expected one scalar helper parameter",
+            span,
+        ));
+    };
+    let [Stmt::Return {
+        value: Some(result),
+        extra_values: results,
+        ..
+    }] = body.as_ref()
+    else {
+        return Err(CompileError::at(
+            "expected one returned scalar expression",
+            span,
+        ));
+    };
+    if !attributes.is_empty() || !extra_values.is_empty() || !results.is_empty() {
+        return Err(CompileError::at(
+            "unsupported scalar helper signature",
+            span,
+        ));
+    }
+    let mut lowerer = Lowerer {
+        capture: None,
+        parameter: &parameter.name,
+        uses_capture: false,
+        uses_parameter: false,
+    };
+    let expression = lowerer.expression(result)?;
+    if !lowerer.uses_parameter
+        || !matches!(
+            expression,
+            NumericExpr::Binary(..) | NumericExpr::Absolute(..)
+        )
+    {
+        return Err(CompileError::at(
+            "scalar helper must require a numeric argument",
+            result.span(),
+        ));
+    }
+    Ok(format!(
+        "use rustia_vm::number::canonicalize_number as canonical;\n\
+         pub fn run(parameter: f64) -> f64 {{\n    canonical({})\n}}\n",
+        emit_rust_expression(&expression)
+    ))
+}
+
 fn render(call: NumericCall) -> GeneratedCall {
     GeneratedCall {
         rust: emit_rust(&call),
@@ -213,6 +283,7 @@ enum NumericExpr {
     Capture,
     Parameter,
     Binary(Arithmetic, Box<NumericExpr>, Box<NumericExpr>),
+    Absolute(Box<NumericExpr>),
 }
 
 impl NumericExpr {
@@ -292,9 +363,10 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
         ));
     }
     let mut lowerer = Lowerer {
-        capture: &binding.name,
+        capture: Some(&binding.name),
         parameter: &parameter.name,
         uses_capture: false,
+        uses_parameter: false,
     };
     let (update, result) = match body.as_ref() {
         [Stmt::Return {
@@ -320,7 +392,7 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
                     *span,
                 ));
             };
-            if name != lowerer.capture {
+            if Some(name.as_str()) != lowerer.capture {
                 return Err(CompileError::at(
                     "only the numeric capture can be assigned",
                     *span,
@@ -365,9 +437,10 @@ fn lower(chunk: &Chunk, module_span: Span) -> Result<NumericCall, CompileError> 
 }
 
 struct Lowerer<'a> {
-    capture: &'a str,
+    capture: Option<&'a str>,
     parameter: &'a str,
     uses_capture: bool,
+    uses_parameter: bool,
 }
 
 impl Lowerer<'_> {
@@ -375,11 +448,14 @@ impl Lowerer<'_> {
         let unsupported = || CompileError::at("unsupported numeric expression", expr.span());
         match expr {
             Expr::Number(value, _) => Ok(NumericExpr::Literal(*value)),
-            Expr::Name(name, _) if name == self.capture => {
+            Expr::Name(name, _) if Some(name.as_str()) == self.capture => {
                 self.uses_capture = true;
                 Ok(NumericExpr::Capture)
             }
-            Expr::Name(name, _) if name == self.parameter => Ok(NumericExpr::Parameter),
+            Expr::Name(name, _) if name == self.parameter => {
+                self.uses_parameter = true;
+                Ok(NumericExpr::Parameter)
+            }
             Expr::Paren { expr, .. } => self.expression(expr),
             Expr::Binary { op, lhs, rhs, .. } => {
                 let op = match op {
@@ -394,6 +470,21 @@ impl Lowerer<'_> {
                     self.expression(lhs)?,
                     self.expression(rhs)?,
                 ))
+            }
+            Expr::Call { callee, args, .. }
+                if self.capture.is_none() && self.parameter != "math" =>
+            {
+                let (Expr::Field { object, field, .. }, [argument]) =
+                    (callee.as_ref(), args.as_slice())
+                else {
+                    return Err(unsupported());
+                };
+                if field != "abs"
+                    || !matches!(object.as_ref(), Expr::Name(name, _) if name == "math")
+                {
+                    return Err(unsupported());
+                }
+                Ok(NumericExpr::Absolute(Box::new(self.expression(argument)?)))
             }
             _ => Err(unsupported()),
         }
@@ -419,6 +510,10 @@ fn emit_rust_expression(expr: &NumericExpr) -> String {
         NumericExpr::Literal(value) => format!("canonical(f64::from_bits({}))", value.to_bits()),
         NumericExpr::Capture => "capture".to_owned(),
         NumericExpr::Parameter => "parameter".to_owned(),
+        NumericExpr::Absolute(value) => format!(
+            "rustia_vm::number::binary(rustia_vm::number::NumericOp::Abs, {}, 0.0)",
+            emit_rust_expression(value)
+        ),
         NumericExpr::Binary(op, lhs, rhs) => {
             let operator = match op {
                 Arithmetic::Add => '+',
