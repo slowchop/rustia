@@ -209,6 +209,10 @@ for (const example of ["embedding", "chunk_builder", "mutable_objects", "live_va
 }
 run("cargo", ["test", "--locked", "--workspace"]);
 run("cargo", [
+  "test", "--locked", "-p", "rustia-compiler", "--test", "compiled_call",
+  "generated_wasm_matches_the_interpreter_with_independent_captures", "--", "--ignored", "--exact",
+]);
+run("cargo", [
   "clippy",
   "--locked",
   "-p",
