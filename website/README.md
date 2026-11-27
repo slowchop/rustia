@@ -42,7 +42,7 @@ Edit the blurb, origin story, feature list, and roadmap in
 `node tools/sync-project-copy.js` and commit the source and generated passages
 together. Release preflight checks that the generated copy is current.
 
-The website uses the two intro paragraphs for its search and social descriptions.
+The website uses the hero blurb and the origin story for its search and social descriptions.
 Run `node tools/sync-project-copy.js --github-about` to print the short blurb for
 GitHub About.
 

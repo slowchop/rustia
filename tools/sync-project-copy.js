@@ -119,7 +119,9 @@ function render() {
     ]],
     ["website/index.html", [
       ["    <!-- project-copy: intro -->", "    <!-- /project-copy: intro -->",
-        `    <p>${html(blurb)}</p>\n    <p>${html(origin, true)}</p>`],
+        `    <p>${html(blurb)}</p>`],
+      ["    <!-- project-copy: origin -->", "    <!-- /project-copy: origin -->",
+        `    <p>${html(origin, true)}</p>`],
       ["      <!-- project-copy: features -->", "      <!-- /project-copy: features -->", homepageEntries(features)],
       ["      <!-- project-copy: upcoming -->", "      <!-- /project-copy: upcoming -->", homepageEntries(upcoming)],
     ]],

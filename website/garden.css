@@ -62,6 +62,7 @@ main { width:100% }
 .home > header nav { flex-wrap:wrap; justify-content:flex-end; gap:6px clamp(10px,2vw,24px) }
 .home-next { padding:22px 0 36px; background:#fff9ef; border-top:1px solid #d5c6a6 }
 .home-next h2 { font:normal clamp(26px,3vw,36px)/1.15 Georgia,serif }
+.home-origin p { margin:10px 0 0; max-width:70ch; line-height:1.55 }
 .home-features { display:grid; grid-template-columns:var(--home-columns); gap:18px 16px; margin:14px 0 0 }
 .home-features dt, .home-roadmap dt { display:flex; align-items:center; gap:8px; font-weight:650 }
 .home-features dt { font-size:1.1rem; font-weight:700 }
@@ -124,7 +125,6 @@ main { width:100% }
   width:fit-content; max-width:var(--home-content-width); isolation:isolate;
   margin-bottom:clamp(16px, 3svh, 30px)
 }
-.home .hero-copy p + p { margin-top:4px }
 .studio-credit { white-space:nowrap }
 .studio-icon {
   display:inline-block; width:1.2em; height:1.2em; margin-inline-end:.25em; vertical-align:-.2em;
