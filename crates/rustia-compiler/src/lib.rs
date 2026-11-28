@@ -64,6 +64,7 @@ pub mod callback_source;
 #[doc(hidden)]
 pub mod compiled_call;
 pub mod compiled_host_call;
+pub mod hosted_rust;
 mod o2;
 mod repeat_condition;
 #[doc(hidden)]
