@@ -52,7 +52,7 @@ main { width:100% }
 .garden-links nav { flex-wrap:wrap; gap:4px 16px }
 @media(max-width:66rem) { .garden-links nav { flex-direction:column; align-items:flex-start } }
 .standalone .hero { min-height:100svh }
-.home { --home-content-width:min(90%, 1430px); --home-columns:minmax(0,1fr) minmax(0,46%) }
+.home { --home-content-max:1430px; --home-content-width:min(90%, var(--home-content-max)); --home-columns:minmax(0,1fr) minmax(0,46%) }
 .home > header, .home .hero-copy, .home [data-garden], .home-next-inner {
   width:var(--home-content-width);
   margin-inline:auto;
@@ -105,7 +105,9 @@ main { width:100% }
   .luau-comparison-narrow dd { margin:0; min-width:0; overflow-wrap:anywhere }
   .luau-comparison-narrow .project-links { margin-inline-start:0 }
 }
-.speed-chart { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr)); gap:12px; max-width:65rem; margin-block:16px }
+.speed-chart { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; width:100%; max-width:var(--home-content-max); margin:16px auto }
+@media(max-width:58rem) { .speed-chart { grid-template-columns:minmax(0,1fr) } }
+@media(min-width:108rem) { .speed-chart { grid-template-columns:repeat(3,minmax(0,1fr)) } }
 .speed-chart > div { min-width:0; padding:12px 14px; border:1px solid #d5c6a6; border-radius:5px; background:#fffdf4 }
 .speed-chart h4 { margin:0 0 8px; font-size:.96rem }
 .speed-chart ul { display:grid; gap:5px; list-style:none; padding:0; margin:0 }

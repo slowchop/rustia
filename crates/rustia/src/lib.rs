@@ -148,22 +148,7 @@
 //!
 //! For more, [browse the Rust examples].
 //!
-// Keep comparison rows together in Rustdoc's horizontally scrollable table.
-#![doc = "<style>table:has(a[href='#luau-note-1']) :is(td, th) { white-space: nowrap; }</style>"]
 #![doc = include_str!("../compare.md")]
-//!
-//! # Performance
-//!
-//! The chart compares five workloads on Linux x86-64. Each language has its own
-//! version. Roto's array workload uses a handwritten quadratic sort. It uses a
-//! list for sparse lookups and an ordinary function for the closure test.
-//! Compare times within a column. Lower is better.
-//! The upstream C++ Luau interpreter ran all five faster than Rustia in this run.
-//!
-#![doc = include_str!("../performance.svg")]
-//!
-//! These October 2026 measurements cover scripts already running. Small timing
-//! differences may vary between runs. [Full results] · [Benchmark limitations]
 //!
 //! [hot reload example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hot_reload.rs
 //! [module resolver example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/module_resolution.rs
@@ -171,8 +156,6 @@
 //! [transferable example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/transferable.rs
 //! [browser setup]: https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md
 //! [bare WebAssembly example]: https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md
-//! [full results]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/RESULTS.md
-//! [benchmark limitations]: https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md
 //! [live values example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/live_values.rs
 //! [mutable object example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/mutable_objects.rs
 //! [typed invocation example]: https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/typed_invocation.rs
