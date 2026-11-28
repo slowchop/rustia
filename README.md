@@ -7,7 +7,7 @@
 <!-- project-copy: intro -->
 Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 
-Rustia grew out of a game by [Slowchop Studios](https://slowchop.com/) that needed to script character decisions and replay them on desktop and in a browser.
+We built Rustia at [Slowchop Studios](https://slowchop.com/) for a [Bevy](https://bevy.org/) game. We wanted to tweak gameplay without waiting for Rust to recompile, run scripts quickly and safely, and get deterministic results for multiplayer and replays on desktop and in the browser.
 <!-- /project-copy: intro -->
 
 **Version note.** [`0.1.0`](https://crates.io/crates/rustia/0.1.0) was an earlier
@@ -34,6 +34,15 @@ Edit Luau without a rebuild. Your app keeps running and can carry state across e
 Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.
 
 [Deterministic builder](https://docs.rs/rustia/0.2.0/rustia/struct.RustiaBuilder.html#method.deterministic)
+
+</details>
+
+<details>
+<summary><strong>Parallel script execution</strong></summary>
+
+Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.
+
+[Thread ownership in Rustdoc](https://docs.rs/rustia/0.2.0/rustia/struct.Rustia.html#threads)
 
 </details>
 

@@ -19,11 +19,17 @@ function plainText(text) {
   return text.replace(inline, (_, code, label) => code ?? label);
 }
 
-function html(text, studioCredit = false) {
-  const attributes = studioCredit ? ' class="studio-credit"' : "";
-  const icon = studioCredit ? '<span class="studio-icon" aria-hidden="true"></span>' : "";
-  return escapeHtml(text).replace(inline, (_, code, label, url) =>
-    code !== undefined ? `<code>${code}</code>` : `<a${attributes} href="${url}">${icon}${label}</a>`);
+function html(text, originIcons = false) {
+  return escapeHtml(text).replace(inline, (_, code, label, url) => {
+    if (code !== undefined) return `<code>${code}</code>`;
+    if (originIcons && url === "https://slowchop.com/") {
+      return `<a class="studio-credit" href="${url}"><span class="studio-icon" aria-hidden="true"></span>${label}</a>`;
+    }
+    if (originIcons && url === "https://bevy.org/") {
+      return `<a class="bevy-credit" href="${url}"><img class="bevy-credit-icon" src="/bevy-icon.png" width="20" height="20" alt="">${label}</a>`;
+    }
+    return `<a href="${url}">${label}</a>`;
+  });
 }
 
 function replaceBlock(source, name, start, end, replacement) {
@@ -116,7 +122,9 @@ function render() {
     ]],
     ["website/index.html", [
       ["    <!-- project-copy: intro -->", "    <!-- /project-copy: intro -->",
-        `    <p>${html(blurb)}</p>\n    <p>${html(origin, true)}</p>`],
+        `    <p>${html(blurb)}</p>`],
+      ["    <!-- project-copy: origin -->", "    <!-- /project-copy: origin -->",
+        `    <p>${html(origin, true)}</p>`],
       ["      <!-- project-copy: features -->", "      <!-- /project-copy: features -->", homepageEntries(features)],
       ["      <!-- project-copy: upcoming -->", "      <!-- /project-copy: upcoming -->", homepageEntries(upcoming)],
     ]],

@@ -12,7 +12,6 @@
   <div class="hero-copy"><h1 id="title">Luau, embedded in <em>Rust.</em></h1>
     <!-- project-copy: intro -->
     <p>Rustia is a pure-Rust interpreter for embedding standalone <a href="https://luau.org/">Luau</a> in games and tools. Edit scripts without a rebuild and let players write mods.</p>
-    <p>Rustia grew out of a game by <a class="studio-credit" href="https://slowchop.com/"><span class="studio-icon" aria-hidden="true"></span>Slowchop Studios</a> that needed to script character decisions and replay them on desktop and in a browser.</p>
     <!-- /project-copy: intro -->
   </div>
   <div data-garden data-mobile-editor data-tutorial="off" data-starter="examples/garden-studies/wandering-flowers.luau"></div>
@@ -27,6 +26,18 @@
     </div>
   </template>
 </section>
+<section class="home-next home-origin" aria-labelledby="origin-title">
+  <div class="home-next-inner">
+    <h2 id="origin-title">Why Rustia exists</h2>
+    <!-- project-copy: origin -->
+    <p>We built Rustia at <a class="studio-credit" href="https://slowchop.com/"><span class="studio-icon" aria-hidden="true"></span>Slowchop Studios</a> for a <a class="bevy-credit" href="https://bevy.org/"><img class="bevy-credit-icon" src="/bevy-icon.png" width="20" height="20" alt="">Bevy</a> game. We wanted to tweak gameplay without waiting for Rust to recompile, run scripts quickly and safely, and get deterministic results for multiplayer and replays on desktop and in the browser.</p>
+    <!-- /project-copy: origin -->
+    <a class="home-origin-logo" href="https://slowchop.com/" aria-label="Slowchop Studios">
+      <span class="studio-wordmark"></span>
+      <span class="studio-snail"></span>
+    </a>
+  </div>
+</section>
 <section class="home-next" aria-labelledby="features-title">
   <div class="home-next-inner">
     <h2 id="features-title">Rustia features</h2>
@@ -39,6 +50,10 @@
       <div>
         <dt><span class="feature-icon" aria-hidden="true">≡</span>Deterministic execution</dt>
         <dd>Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.</dd>
+      </div>
+      <div>
+        <dt><span class="feature-icon" aria-hidden="true">∥</span>Parallel script execution</dt>
+        <dd>Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.</dd>
       </div>
       <div>
         <dt><span class="feature-icon" aria-hidden="true">🦀</span>Pure Rust runtime</dt>

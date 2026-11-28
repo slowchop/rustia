@@ -2,7 +2,7 @@
 
 ## Overview
 
-`rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Applications can use the experimental 0.x API from Git. The crate is unpublished, and supported-release acceptance remains open.
+`rustia` is the application-facing facade over the lexer, parser, compiler, and VM. It owns the builder and application settings/errors, typed conversions, host integration, diagnostics, and rooted handles. Applications can use the published 0.2.0 interpreter preview. Supported-release acceptance remains open.
 
 Package metadata: [Cargo.toml](./Cargo.toml). The package description and crate
 Rustdoc intro are generated from [project-copy.json](../../project-copy.json)
@@ -13,7 +13,7 @@ by `node tools/sync-project-copy.js`.
 - [`src/EGM.md`](./src/EGM.md) documents the facade implementation and exports.
 - [`examples/EGM.md`](./examples/EGM.md) documents runnable usage examples.
 - [compare.md](./compare.md) owns the comparison headings, rows, platform evidence and notes for Rustdoc, the homepage, and the browser demo. After an edit, run `node tools/sync-luau-comparison.js --write` from the repository root.
-- [performance.svg](./performance.svg) retains a dated ci-bench cohort as an archival asset. Run `node tools/check-readme-comparisons.js` to verify the chart against retained history.
+- The comparison guide links to the [runtime speed charts](https://rustia.dev/#speed-comparison). Run `node tools/check-readme-comparisons.js` to verify the website chart's retained cohort.
 - The package is built with `cargo check -p rustia`; `platform-adapters` is enabled by default for browser WebAssembly services.
 
 ## Invariants

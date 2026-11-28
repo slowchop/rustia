@@ -252,12 +252,14 @@ def render_speed_chart(snapshot: dict, times: dict) -> str:
 
 def render_description_metadata(homepage: str) -> str:
     marker = "<!-- project-description-meta -->"
-    hero = re.search(r'<div class="hero-copy">(.*?)</div>', homepage, re.S)
-    paragraphs = re.findall(r"<p>(.*?)</p>", hero[1], re.S) if hero else []
-    if homepage.count(marker) != 1 or len(paragraphs) != 2:
-        raise ValueError("Expected one description metadata marker and two hero paragraphs")
+    paragraphs = re.findall(
+        r"<!-- project-copy: (intro|origin) -->\s*<p>(.*?)</p>\s*<!-- /project-copy: \1 -->",
+        homepage, re.S,
+    )
+    if homepage.count(marker) != 1 or [name for name, _ in paragraphs] != ["intro", "origin"]:
+        raise ValueError("Expected one description metadata marker and one intro and origin paragraph each")
     description = " ".join(
-        unescape(re.sub(r"<[^>]+>", "", paragraph)) for paragraph in paragraphs
+        unescape(re.sub(r"<[^>]+>", "", paragraph)) for _, paragraph in paragraphs
     )
     content = escape(" ".join(description.split()))
     tags = (
