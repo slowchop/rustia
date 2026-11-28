@@ -64,6 +64,10 @@ early partition. Bulk calls the protected
 gates cheap, portable/differential and full correctness stages in that order.
 The private controller remains inactive.
 
+The [manual GitHub release workflow](./.github/workflows/github-release.yml)
+verifies the published crates from protected `main` before its separate tag and
+release job receives write access. It runs on GitHub-hosted runners.
+
 The hosted Linux workspace job additionally runs the default-off executor accounting
 diagnostic. Its fixed workload path counts are CI-only and carry no timing claim.
 

@@ -1,0 +1,117 @@
+name: Rustia GitHub release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published crates.io version, without the v prefix
+        required: true
+        type: string
+      commit:
+        description: Full Git SHA recorded in the published archives
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustia-github-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'slowchop/rustia' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.crates.outputs.version }}
+      commit: ${{ steps.crates.outputs.commit }}
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify six published archives
+        id: crates
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          python3 tools/verify-published-release.py "$RELEASE_VERSION" "$RELEASE_COMMIT"
+          printf 'version=%s\ncommit=%s\n' "$RELEASE_VERSION" "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: verify
+    if: github.repository == 'slowchop/rustia' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub tag and release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.commit }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          ref="refs/tags/$tag"
+          repository="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$RELEASE_COMMIT" --jq .sha)" = "$RELEASE_COMMIT"
+
+          # Prefer the peeled target for an existing annotated tag.
+          tag_target() {
+            git ls-remote --tags "$repository.git" "$ref" "$ref^{}" |
+              awk -v ref="$ref" '$2 == ref { direct = $1 }
+                $2 == ref "^{}" { peeled = $1 }
+                END { print (peeled ? peeled : direct) }'
+          }
+          target=$(tag_target)
+          if [[ -n "$target" && "$target" != "$RELEASE_COMMIT" ]]; then
+            echo "$tag does not point to the verified commit" >&2
+            exit 1
+          fi
+
+          # Drafts can exist before their tags. Only a successful lookup with
+          # no matching release permits creation.
+          release_states=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "'"$tag"'") | .draft')
+          case "$release_states" in
+            false)
+              test "$target" = "$RELEASE_COMMIT"
+              echo "Release $tag already exists at $RELEASE_COMMIT."
+              exit 0
+              ;;
+            "") ;;
+            *)
+              echo "An existing draft or multiple releases match $tag." >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "$target" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=$ref" -f "sha=$RELEASE_COMMIT" --silent
+          fi
+          if [[ "$(tag_target)" != "$RELEASE_COMMIT" ]]; then
+            echo "$tag does not point to the verified commit" >&2
+            exit 1
+          fi
+
+          flags=()
+          if [[ "${RELEASE_VERSION%%+*}" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Rustia $RELEASE_VERSION" "${flags[@]}" --notes-file - <<EOF
+          All six Rustia crates at version $RELEASE_VERSION were verified against [$RELEASE_COMMIT]($repository/commit/$RELEASE_COMMIT).
+
+          - [Rustia on crates.io](https://crates.io/crates/rustia/$RELEASE_VERSION)
+          - [Rustia CLI on crates.io](https://crates.io/crates/rustia-cli/$RELEASE_VERSION)
+          - [API documentation](https://docs.rs/rustia/$RELEASE_VERSION/rustia/)
+          EOF
+          test "$(tag_target)" = "$RELEASE_COMMIT"
