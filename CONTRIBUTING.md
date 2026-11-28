@@ -50,8 +50,7 @@ that establish completion. Use the bug or work-item template when helpful.
 Issues own work status and priority. [CURRENT](design/CURRENT.md) records built
 behavior and constraints; design docs and the pinned Luau oracle remain the
 specification. Keep backlog checklists in Issues rather than duplicating them in
-CURRENT or chat. Private infrastructure tasks belong in `rustia-ops`.
-The experimental source release has no support or review deadline.
+CURRENT or chat. The experimental source release has no support or review deadline.
 
 ## Build and test
 
@@ -163,10 +162,8 @@ checks and use merge commits so the recorded source revisions stay reachable.
 
 Everything committed here must be suitable for a public repository. Keep
 credentials, infrastructure addresses, runner configuration, private tasks, and
-client-specific integration details out of source and hosted logs. Private
-operations material belongs in the separately versioned, git-ignored `private/`
-checkout (`rustia-ops`). It is optional and is not needed to build or use Rustia.
-Keep local agent notes and caches out of source control too.
+client-specific integration details out of source and hosted logs. Keep local
+agent notes and caches out of source control too.
 
 The source uses the dual **MIT OR Apache-2.0** license; see
 [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
