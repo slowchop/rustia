@@ -72,3 +72,20 @@ are separate from the harness and provide no measurements.
 | RustPython hosted demo | Web, headless WebKit 27.2 | `rp.pyEval` executed a numeric Python expression and returned 42. This used the deployed demo's Wasm build. [Demo](https://rustpython.github.io/demo/) |
 | Luna 4.0.2 | macOS ARM64 | The interpreter executed all five Lua 5.4 fixtures twice at `n = 3` and matched their checksums, using Rust 1.99.1. [Interpreter API](https://docs.rs/luna-core/4.0.2/luna_core/) |
 | Mun 0.4.0 | Emulated Linux x86-64 | The prerelease compiler built a small library, then the CLI invoked its entry point and returned 42. [Release](https://github.com/mun-lang/mun/releases/tag/v0.4.0) |
+
+## Upstream platform evidence
+
+The [comparison table](../crates/rustia/compare.md#compare-luau-projects) links
+upstream-only badges directly to release binaries, CI workflows, hosted demos,
+or support documentation. These badges record the platform and the kind of
+evidence. They do not extend the scope of the Rustia checks above.
+
+- Mun 0.4.0 published x86-64 CLI binaries for macOS and Windows. Its release
+  notes describe iOS support as experimental. Our CLI probe used Linux only.
+  [Mun release](https://github.com/mun-lang/mun/releases/tag/v0.4.0)
+- RustPython's mobile workflow uses ARM64 compilation checks for iOS and
+  Android. Wasmtime lists both ARM64 mobile targets in its Tier 3 support policy.
+  [RustPython CI](https://github.com/RustPython/RustPython/blob/0a828d892/.github/workflows/ci.yaml#L394-L519) · [Wasmtime tiers](https://docs.wasmtime.dev/stability-tiers.html)
+- rquickjs supports bare WebAssembly and runs its upstream test harness in Deno.
+  The Web badge refers to browser evidence, so the Deno run is recorded here.
+  [rquickjs WebAssembly tests](https://github.com/DelSkayn/rquickjs/blob/65683b3eb/README.md#wasm32-unknown-unknown)
