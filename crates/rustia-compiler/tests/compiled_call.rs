@@ -196,12 +196,81 @@ fn compiled_and_interpreted_calls_share_the_vm_capture() {
     ] {
         let mut metered = Vm::with_settings(Profile::ReproducibleStandard, settings);
         let call = prepared.instantiate(&mut metered).unwrap();
+        let mut ran_backend = false;
         let value = call
-            .call(&mut metered, Value::number(1.0), &receipt, |_, _| {
-                panic!("metered backend ran")
-            })
+            .call(
+                &mut metered,
+                Value::number(1.0),
+                &receipt,
+                |capture, step| {
+                    ran_backend = true;
+                    assert_eq!((capture, step), (0.0, 1.0));
+                    Ok((1.0, 2.0))
+                },
+            )
             .unwrap();
+        assert!(ran_backend);
         assert_eq!(value.as_number(), Some(2.0));
+        assert_eq!(
+            call.call_interpreted(&mut metered, Value::number(1.0))
+                .unwrap()
+                .as_number(),
+            Some(4.0),
+        );
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn compiled_call_matches_instruction_clock_and_defers_collection() {
+    use rustia_vm::VmSettings;
+    use std::num::NonZeroU64;
+
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let clock = compile(&parse_source("return os.clock()").unwrap()).unwrap();
+    for (interval, should_compile) in [(1, false), (10_000, true)] {
+        let settings = VmSettings {
+            deterministic_gc_interval: NonZeroU64::new(interval).unwrap(),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(Profile::ReproducibleStandard, settings.clone());
+        let mut reference = Vm::with_settings(Profile::ReproducibleStandard, settings);
+        let call = prepared.instantiate(&mut vm).unwrap();
+        let oracle = prepared.instantiate(&mut reference).unwrap();
+        for step in [1.0, 3.0, -2.0] {
+            let mut ran_backend = false;
+            let result = call
+                .call(
+                    &mut vm,
+                    Value::number(step),
+                    &receipt,
+                    |capture, parameter| {
+                        ran_backend = true;
+                        let next = capture + parameter;
+                        Ok((next, next * 2.0))
+                    },
+                )
+                .unwrap();
+            let expected = oracle
+                .call_interpreted(&mut reference, Value::number(step))
+                .unwrap();
+            assert_eq!(ran_backend, should_compile);
+            assert_eq!(result.as_number(), expected.as_number());
+            assert_eq!(
+                vm.executed_instructions(),
+                reference.executed_instructions()
+            );
+            assert_eq!(
+                vm.next_deterministic_collection_instruction(),
+                reference.next_deterministic_collection_instruction()
+            );
+        }
+        assert_eq!(
+            vm.run(&clock).unwrap().as_number(),
+            reference.run(&clock).unwrap().as_number()
+        );
     }
 }
 
@@ -355,8 +424,16 @@ fn verify_backend(
     receipt: &CompiledCallReceipt,
     command: impl Fn() -> Command,
 ) {
+    use rustia_vm::VmSettings;
     let prepared = prepare_runtime(bundle, "entry.luau").unwrap();
-    let mut vm = Vm::new(Profile::ReproducibleStandard);
+    let mut vm = Vm::with_settings(
+        Profile::LuauCompat,
+        VmSettings {
+            initial_fuel: Some(10_000_000),
+            memory_limit_bytes: Some(64 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
     let calls = [
         prepared.instantiate(&mut vm).unwrap(),
         prepared.instantiate(&mut vm).unwrap(),
@@ -401,4 +478,182 @@ fn verify_backend(
     }
     assert_eq!(executed, CALLS.len());
     assert_eq!(results, interpreted_results());
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn bind_preserves_an_existing_capture_and_rejects_edits() {
+    use rustia_compiler::{compile_with_options, CompileOptions};
+    use rustia_vm::VmSettings;
+    let bundle = SourceBundle::new([("entry.luau", SOURCE)]).unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let program = |path, source| {
+        compile_with_options(
+            &parse_source(source).unwrap(),
+            CompileOptions::default().with_source(path, source),
+        )
+        .unwrap()
+    };
+    let mut vm = Vm::with_settings(
+        Profile::ReproducibleStandard,
+        VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
+    let original = program("entry.luau", SOURCE);
+    let function = vm.run(&original).unwrap();
+    let rooted = vm.retain_value(function).unwrap();
+    let one = Value::number(1.0);
+    let first = vm.call_function(&original, function, &[one]).unwrap();
+    assert_eq!(first.as_number(), Some(2.0));
+
+    let bound = prepared.bind(&vm, &rooted).unwrap().unwrap();
+    let mut execution = vm.begin_execution();
+    let next = bound
+        .try_call_in(&mut vm, one, &receipt, &mut execution, |capture, step| {
+            assert_eq!(capture, 1.0);
+            let next = capture + step;
+            Ok((next, next * 2.0))
+        })
+        .unwrap();
+    assert_eq!(next.unwrap().as_number(), Some(4.0));
+    assert!(execution.fuel_used() > 0);
+    let last = vm.call_function(&original, function, &[one]).unwrap();
+    assert_eq!(last.as_number(), Some(6.0));
+
+    let changed = SOURCE.replace("* 2", "* 3");
+    for candidate in [
+        program("entry.luau", &changed),
+        program("other.luau", SOURCE),
+    ] {
+        let other = vm.run(&candidate).unwrap();
+        let other = vm.retain_value(other).unwrap();
+        assert!(prepared.bind(&vm, &other).unwrap().is_none());
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn zero_argument_numeric_callback_keeps_its_capture_and_fuel_budget() {
+    use rustia_vm::VmSettings;
+    let source = "local score = 0 return function() score += 2 return score * 2 end";
+    let bundle = SourceBundle::new([("entry.luau", source)]).unwrap();
+    let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+    let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+    let mut vm = Vm::with_settings(
+        Profile::LuauCompat,
+        VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        },
+    );
+    let call = prepared.instantiate(&mut vm).unwrap();
+    let expected = prepared.instantiate(&mut vm).unwrap();
+    let mut budget = vm.begin_execution();
+    for value in [4.0, 8.0, 12.0] {
+        let result = call
+            .try_call_in(
+                &mut vm,
+                Value::nil(),
+                &receipt,
+                &mut budget,
+                |capture, parameter| {
+                    assert_eq!(parameter.to_bits(), 0);
+                    let next = capture + 2.0;
+                    Ok((next, next * 2.0))
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.as_number(), Some(value));
+        assert_eq!(
+            result.as_number(),
+            expected
+                .call_interpreted(&mut vm, Value::nil())
+                .unwrap()
+                .as_number()
+        );
+    }
+    assert!(budget.fuel_used() > 0);
+    assert!(generate("local score=0 return function(a,b) score += a return score+b end").is_err());
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn straight_line_updates_return_nil_and_charge_the_interpreted_trace() {
+    use rustia_vm::{ValueKind, VmSettings};
+
+    for (profile, ending) in [
+        (Profile::ReproducibleStandard, ""),
+        (Profile::LuauCompat, " return"),
+    ] {
+        let source = format!("local count = 0 return function() count += 2 count *= 3{ending} end");
+        let bundle = SourceBundle::new([("entry.luau", source.as_str())]).unwrap();
+        let (_, receipt) = generate_from_bundle(&bundle, "entry.luau").unwrap();
+        let prepared = prepare_runtime(&bundle, "entry.luau").unwrap();
+        let settings = || VmSettings {
+            initial_fuel: Some(128),
+            memory_limit_bytes: Some(4 * 1024 * 1024),
+            ..VmSettings::default()
+        };
+        let mut vm = Vm::with_settings(profile, settings());
+        let mut reference = Vm::with_settings(profile, settings());
+        let call = prepared.instantiate(&mut vm).unwrap();
+        let oracle = prepared.instantiate(&mut reference).unwrap();
+
+        for capture_before in [0.0, 6.0, 24.0] {
+            let clock_before = vm.executed_instructions();
+            let mut short_budget = vm.begin_transactional_execution_with_fuel(Some(1));
+            let rejected = call
+                .try_call_in(
+                    &mut vm,
+                    Value::nil(),
+                    &receipt,
+                    &mut short_budget,
+                    |_, _| panic!("underfunded call entered the backend"),
+                )
+                .unwrap();
+            assert!(rejected.is_none());
+            assert_eq!(short_budget.fuel_used(), 0);
+            assert_eq!(vm.executed_instructions(), clock_before);
+
+            let mut budget = vm.begin_execution();
+            let result = call
+                .try_call_in(
+                    &mut vm,
+                    Value::nil(),
+                    &receipt,
+                    &mut budget,
+                    |capture, argument| {
+                        assert_eq!(capture, capture_before);
+                        assert_eq!(argument.to_bits(), 0);
+                        Ok(((capture + 2.0) * 3.0, 123.0))
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            let expected = oracle
+                .call_interpreted(&mut reference, Value::nil())
+                .unwrap();
+            assert_eq!(result.kind(), ValueKind::Nil);
+            assert_eq!(result.kind(), expected.kind());
+            assert!(budget.fuel_used() > 0);
+            assert_eq!(
+                vm.executed_instructions(),
+                reference.executed_instructions()
+            );
+        }
+    }
+
+    for unsupported in [
+        "local count = 0 return function() count += 1 print(count) end",
+        "local count = 0 return function() count += 1 other = count end",
+        "local count = 0 return function() count += 1 return count, count end",
+    ] {
+        assert!(generate(unsupported).is_err(), "{unsupported}");
+    }
 }
