@@ -13,13 +13,13 @@
       "title": "Deterministic execution",
       "description": "Replay a run. In deterministic mode, the same script, starting state, seed, and ordered inputs produce matching results on native and WebAssembly. That helps reproduce bugs and keep lockstep multiplayer clients in sync.",
       "icon": "≡",
-      "readmeLink": "[Deterministic builder](https://rustia.dev/docs/api/rustia/struct.RustiaBuilder.html#method.deterministic)"
+      "readmeLink": "[Deterministic builder](https://docs.rs/rustia/0.2.0/rustia/struct.RustiaBuilder.html#method.deterministic)"
     },
     {
       "title": "Parallel script execution",
       "description": "Run independent Luau VMs on Rust worker threads. Each VM has its own script state, and your app schedules the work.",
       "icon": "∥",
-      "readmeLink": "[Thread ownership in Rustdoc](https://rustia.dev/docs/api/rustia/struct.Rustia.html#threads)"
+      "readmeLink": "[Thread ownership in Rustdoc](https://docs.rs/rustia/0.2.0/rustia/struct.Rustia.html#threads)"
     },
     {
       "title": "Pure Rust runtime",
@@ -32,19 +32,19 @@
       "title": "Sans-I/O core",
       "description": "Embed Luau without relying on built-in platform services. Your app can supply clocks and randomness, decide where `print` output goes, and choose how to load scripts.",
       "icon": "⇄",
-      "readmeLink": "[Cargo features in Rustdoc](https://rustia.dev/docs/api/rustia/#cargo-features)"
+      "readmeLink": "[Cargo features in Rustdoc](https://docs.rs/rustia/0.2.0/rustia/#cargo-features)"
     },
     {
       "title": "Rust functions and objects",
       "description": "Let scripts work with your app. Expose the functions and objects they need, and use Serde to read Luau tables into Rust structs.",
       "icon": "ƒ",
-      "readmeLink": "[Embedding guide](https://rustia.dev/docs/api/rustia/#more-about-embedding)"
+      "readmeLink": "[Embedding guide](https://docs.rs/rustia/0.2.0/rustia/#more-about-embedding)"
     },
     {
       "title": "Script execution limits",
       "description": "Keep runaway scripts under control. Set instruction and VM memory budgets so your app can handle a script that exceeds them.",
       "icon": "⏱︎",
-      "readmeLink": "[Budget example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/hardened_decision.rs)"
+      "readmeLink": "[Budget example](https://docs.rs/crate/rustia/0.2.0/source/examples/hardened_decision.rs)"
     }
   ],
   "upcoming": [

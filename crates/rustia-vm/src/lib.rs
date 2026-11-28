@@ -4,6 +4,7 @@
 //! 16-byte value type, deterministic numeric helpers, fixed-width bytecode, fuelled big-match
 //! dispatch, profile-aware extension registration, and an owned, generation-checked tracing heap.
 
+pub mod byte_string;
 pub mod bytecode;
 pub mod diagnostic;
 pub mod error;
@@ -19,6 +20,7 @@ pub mod number;
 mod ownership;
 pub mod profile;
 mod register_blocks;
+pub mod table_operations;
 mod tape;
 #[cfg(test)]
 #[path = "../tests/support/ownership.rs"]

@@ -64,6 +64,7 @@ pub mod callback_source;
 #[doc(hidden)]
 pub mod compiled_call;
 pub mod compiled_host_call;
+pub mod hosted_rust;
 mod o2;
 mod repeat_condition;
 #[doc(hidden)]
@@ -71,6 +72,18 @@ pub mod source_bundle;
 mod stateless_helper;
 
 pub use o2::{ExperimentalO2Options, ProgramReceipts};
+
+/// Whether a direct builtin call looks up its callee after evaluating its arguments.
+///
+/// For a global, pass no member. Set `forwarded_varargs` only for the
+/// two-argument call shape with a trailing bare varargs expression.
+/// The caller still checks lexical shadowing and writes to the global.
+pub fn defers_builtin_lookup(root: &str, member: Option<&str>, forwarded_varargs: bool) -> bool {
+    match member {
+        Some(member) => builtins::field(root, member),
+        None => builtins::global(root) || (root == "select" && forwarded_varargs),
+    }
+}
 
 pub fn compile(chunk: &Chunk) -> Result<Program> {
     compile_with_options(chunk, CompileOptions::default())
@@ -5674,10 +5687,7 @@ impl Compiler {
     fn deferred_builtin_import(&mut self, callee: &Expr, args: &[Expr]) -> Result<Option<u32>> {
         let path = match callee {
             Expr::Name(name, _)
-                if builtins::global(name)
-                    || (name == "select"
-                        && args.len() == 2
-                        && matches!(args[1], Expr::Varargs(_))) =>
+                if defers_builtin_lookup(name, None, matches!(args, [_, Expr::Varargs(_)])) =>
             {
                 vec![name.as_str()]
             }
@@ -5685,7 +5695,7 @@ impl Compiler {
                 let Expr::Name(table, _) = object.as_ref() else {
                     return Ok(None);
                 };
-                if !builtins::field(table, field) {
+                if !defers_builtin_lookup(table, Some(field), false) {
                     return Ok(None);
                 }
                 vec![table.as_str(), field.as_str()]

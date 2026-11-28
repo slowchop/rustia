@@ -624,7 +624,9 @@ fn literal_require(
     Ok(Some((request.to_owned(), span)))
 }
 
-pub(crate) fn literal_require_argument(expression: &Expr) -> Option<(&[u8], Span)> {
+/// Identify the literal argument of a syntactically direct require call.
+/// The caller is responsible for checking lexical shadowing.
+pub fn literal_require_argument(expression: &Expr) -> Option<(&[u8], Span)> {
     let Expr::Call { callee, args, .. } = expression else {
         return None;
     };
@@ -667,7 +669,8 @@ pub fn resolve_relative_module(importer: &str, request: &str) -> Result<String, 
     Ok(key)
 }
 
-fn validate_module_key(name: &str) -> Result<(), &'static str> {
+/// Checks a canonical project-relative Luau module key before host I/O.
+pub fn validate_module_key(name: &str) -> Result<(), &'static str> {
     if name.contains(['\\', ':', '\0'])
         || !name.ends_with(".luau")
         || name

@@ -15,8 +15,9 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   rustia-mark.svg supplies the staggered dash mark for website headers and browser
   tabs. The build copies it to the site root. rustia-readme-mark.svg is the
   transparent, theme-aware mark used by the repository README.
-- doc-index.html links to the first script, embedding guide, API reference, and
-  garden walkthrough. The build publishes it at /docs/.
+- doc-index.html links to the released API reference and tutorials on docs.rs,
+  the development API reference built from main, and the garden walkthrough.
+  The build publishes it at /docs/.
 - garden-source.html documents the files that run and draw the garden. The
   build publishes it at /docs/examples/garden/ and keeps /garden-source/ available.
 - [playground](./playground/EGM.md) owns projects, preview modes and the terminal UI.
