@@ -68,7 +68,7 @@ function rustdocLines(markdown) {
 }
 
 function renderFirstScript() {
-  const apiDocs = "https://rustia.dev/docs/api/rustia";
+  const apiDocs = "https://docs.rs/rustia/0.2.0/rustia";
   const examplePath = "crates/rustia/examples/first_script.rs";
   const example = fs.readFileSync(path.join(root, examplePath), "utf8").trimEnd();
   return [
@@ -88,7 +88,7 @@ function renderFirstScript() {
     "",
     "The example keeps the script in a string so it fits in one file. Read a `.luau` file at runtime if you want to edit it without rebuilding the Rust app.",
     "",
-    `From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/${examplePath}) with \`cargo run --locked -p rustia --example first_script\`.`,
+    `From a Rustia checkout, run [the example](https://docs.rs/crate/rustia/0.2.0/source/examples/${path.basename(examplePath)}) with \`cargo run --locked -p rustia --example first_script\`.`,
   ].join("\n");
 }
 

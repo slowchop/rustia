@@ -1,6 +1,6 @@
 # Rustia — current state
 
-Updated: 2026-11-27 (Australia/Hobart).
+Updated: 2026-11-28 (Australia/Hobart).
 
 This is the single authority for implemented state and active project constraints.
 [GitHub Issues](https://github.com/slowchop/rustia/issues) owns development work,
@@ -12,7 +12,11 @@ and evidence. When an older status statement disagrees, this file wins.
 
 Rustia is a from-scratch Rust interpreter for pinned standalone **Luau 0.709**.
 The experimental interpreter became public on 20 November 2026 under MIT OR Apache-2.0.
-All eight workspace packages remain at **`0.0.1`**, with **all 8 blocked by publish=false**.
+The workspace on `main` remains at **`0.0.1`** with **all 8 blocked by publish=false**. The six-crate **0.2.0 interpreter preview** was published
+from [release commit `c89abc1`](https://github.com/slowchop/rustia/commit/c89abc121b5233d29353846217d2db95b93e8a34).
+See the [published crate](https://crates.io/crates/rustia/0.2.0),
+[versioned API docs](https://docs.rs/rustia/0.2.0/rustia/), and
+[release tracker](https://github.com/slowchop/rustia/issues/83).
 Stable APIs, full Luau parity, consumer rollout and supported releases have separate acceptance gates.
 
 - **`slowchop/rustia-historic`** retains the original private evidence. The
