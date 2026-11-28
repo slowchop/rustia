@@ -44,6 +44,7 @@ use crate::heap::{
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
 #[cfg(test)]
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
+use crate::number::math::{self, MathBinary, MathMinMax, MathUnary};
 use crate::number::{
     binary, canonicalize_number, luau_number_to_string, parse_numeric_text,
     parse_numeric_text_in_base, NumericOp,
@@ -16695,11 +16696,8 @@ impl Vm {
         let value = self
             .coerce_to_number(args[0])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let (mantissa, exponent) = libm::frexp(value);
-        Ok(vec![
-            Value::number(mantissa),
-            Value::number(f64::from(exponent)),
-        ])
+        let (mantissa, exponent) = math::frexp(value);
+        Ok(vec![Value::number(mantissa), Value::number(exponent)])
     }
 
     fn native_math_modf(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -16707,7 +16705,7 @@ impl Vm {
         let value = self
             .coerce_to_number(args[0])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let (fraction, integer) = libm::modf(value);
+        let (integer, fraction) = math::modf(value);
         Ok(vec![Value::number(integer), Value::number(fraction)])
     }
 
@@ -19423,35 +19421,7 @@ impl Vm {
         let value = self
             .coerce_to_number(value)?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let result = match op {
-            MathUnary::Floor => libm::floor(value),
-            MathUnary::Ceil => libm::ceil(value),
-            MathUnary::Round => libm::round(value),
-            MathUnary::Sqrt => libm::sqrt(value),
-            MathUnary::Deg => value * (180.0 / LUAU_PI),
-            MathUnary::Rad => value * (LUAU_PI / 180.0),
-            MathUnary::Sin => libm::sin(value),
-            MathUnary::Cos => libm::cos(value),
-            MathUnary::Tan => libm::tan(value),
-            MathUnary::Asin => libm::asin(value),
-            MathUnary::Acos => libm::acos(value),
-            MathUnary::Atan => libm::atan(value),
-            MathUnary::Sinh => libm::sinh(value),
-            MathUnary::Cosh => libm::cosh(value),
-            MathUnary::Tanh => libm::tanh(value),
-            MathUnary::Exp => libm::exp(value),
-            MathUnary::Log10 => libm::log10(value),
-            MathUnary::Sign => {
-                if value > 0.0 {
-                    1.0
-                } else if value < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
-            }
-        };
-        Ok(Value::number(result))
+        Ok(Value::number(op.apply(value)))
     }
 
     fn math_binary(
@@ -19463,12 +19433,7 @@ impl Vm {
         validate_math_arity(instruction, 2, "invalid two-argument math arity")?;
         let lhs = self.math_arg_number(registers, instruction.b, 0)?;
         let rhs = self.math_arg_number(registers, instruction.b, 1)?;
-        let result = match op {
-            MathBinary::Fmod => libm::fmod(lhs, rhs),
-            MathBinary::Pow => libm::pow(lhs, rhs),
-            MathBinary::Atan2 => libm::atan2(lhs, rhs),
-        };
-        Ok(Value::number(result))
+        Ok(Value::number(op.apply(lhs, rhs)))
     }
 
     fn math_log(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19478,26 +19443,25 @@ impl Vm {
             }));
         }
         let value = self.math_arg_number(registers, instruction.b, 0)?;
-        let result = if instruction.aux == 1 {
-            libm::log(value)
+        let base = if instruction.aux == 2 {
+            Some(self.math_arg_number(registers, instruction.b, 1)?)
         } else {
-            let base = self.math_arg_number(registers, instruction.b, 1)?;
-            if base == 2.0 {
-                libm::log2(value)
-            } else if base == 10.0 {
-                libm::log10(value)
-            } else {
-                libm::log(value) / libm::log(base)
-            }
+            None
         };
-        Ok(Value::number(result))
+        Ok(Value::number(math::log(value, base)))
     }
 
     fn math_ldexp(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
         validate_math_arity(instruction, 2, "invalid math.ldexp arity")?;
         let mantissa = self.math_arg_number(registers, instruction.b, 0)?;
-        let exponent = self.math_arg_i32(registers, instruction.b, 1)?;
-        Ok(Value::number(libm::ldexp(mantissa, exponent)))
+        let exponent = self.math_arg_number(registers, instruction.b, 1)?;
+        math::ldexp(mantissa, exponent)
+            .map(Value::number)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::TypeError {
+                    expected: "integer",
+                })
+            })
     }
 
     fn math_predicate(
@@ -19521,19 +19485,13 @@ impl Vm {
         let value = self.math_arg_number(registers, instruction.b, 0)?;
         let min = self.math_arg_number(registers, instruction.b, 1)?;
         let max = self.math_arg_number(registers, instruction.b, 2)?;
-        if min > max || min.is_nan() || max.is_nan() {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "max must be greater than or equal to min",
-            }));
-        }
-        let result = if value < min {
-            min
-        } else if value > max {
-            max
-        } else {
-            value
-        };
-        Ok(Value::number(result))
+        math::clamp(value, min, max)
+            .map(Value::number)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::TypeError {
+                    expected: "max must be greater than or equal to min",
+                })
+            })
     }
 
     fn math_map(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19543,9 +19501,9 @@ impl Vm {
         let in_max = self.math_arg_number(registers, instruction.b, 2)?;
         let out_min = self.math_arg_number(registers, instruction.b, 3)?;
         let out_max = self.math_arg_number(registers, instruction.b, 4)?;
-        Ok(Value::number(
-            out_min + (x - in_min) * (out_max - out_min) / (in_max - in_min),
-        ))
+        Ok(Value::number(math::map(
+            x, in_min, in_max, out_min, out_max,
+        )))
     }
 
     fn math_lerp(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19553,8 +19511,7 @@ impl Vm {
         let a = self.math_arg_number(registers, instruction.b, 0)?;
         let b = self.math_arg_number(registers, instruction.b, 1)?;
         let t = self.math_arg_number(registers, instruction.b, 2)?;
-        let result = if t == 1.0 { b } else { a + (b - a) * t };
-        Ok(Value::number(result))
+        Ok(Value::number(math::lerp(a, b, t)))
     }
 
     fn math_minmax(
@@ -19567,11 +19524,7 @@ impl Vm {
         let mut result = self.math_arg_number(registers, instruction.b, 0)?;
         for offset in 1..argc {
             let value = self.math_arg_number(registers, instruction.b, offset)?;
-            match op {
-                MathMinMax::Min if value < result => result = value,
-                MathMinMax::Max if value > result => result = value,
-                _ => {}
-            }
+            result = op.step(result, value);
         }
         Ok(Value::number(result))
     }
@@ -19583,21 +19536,6 @@ impl Vm {
             })
         })?;
         self.coerce_register_to_number(registers, register)
-    }
-
-    fn math_arg_i32(&mut self, registers: &[Value], first: u8, offset: u8) -> Result<i32> {
-        let value = self.math_arg_number(registers, first, offset)?;
-        if value.is_finite()
-            && value.fract() == 0.0
-            && value >= f64::from(i32::MIN)
-            && value <= f64::from(i32::MAX)
-        {
-            Ok(value as i32)
-        } else {
-            Err(Error::new(ErrorKind::TypeError {
-                expected: "integer",
-            }))
-        }
     }
 
     fn concat_args(
@@ -24679,48 +24617,12 @@ impl VectorMinMax {
 }
 
 #[derive(Clone, Copy)]
-enum MathUnary {
-    Floor,
-    Ceil,
-    Round,
-    Sqrt,
-    Deg,
-    Rad,
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Sinh,
-    Cosh,
-    Tanh,
-    Exp,
-    Log10,
-    Sign,
-}
-
-#[derive(Clone, Copy)]
-enum MathBinary {
-    Fmod,
-    Pow,
-    Atan2,
-}
-
-#[derive(Clone, Copy)]
 enum MathPredicate {
     Nan,
     Inf,
     Finite,
 }
 
-#[derive(Clone, Copy)]
-enum MathMinMax {
-    Min,
-    Max,
-}
-
-const LUAU_PI: f64 = f64::from_bits(0x4009_21fb_5444_2d18);
 const PCG32_MULTIPLIER: u64 = 6_364_136_223_846_793_005;
 const PCG32_INCREMENT: u64 = 105 | 1;
 const PERLIN_HASH: [u8; 257] = [

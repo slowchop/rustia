@@ -1,5 +1,7 @@
 //! Deterministic numeric operations shared by the interpreter and compiled code.
 
+pub mod math;
+
 /// The single quiet-NaN payload rustia uses for every script-number NaN.
 pub const CANON_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 

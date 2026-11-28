@@ -19,6 +19,8 @@
 
 ## Invariants
 
+- [number/math.rs](./number/math.rs) supplies stateless standard math kernels to VM instructions, native builtins and compiled embedders. Callers handle arity, value coercion and stateful libraries.
+
 - `Vm::create_retained_string_bytes` admits arbitrary byte strings and their roots together, rechecking atom-index growth after quota collection. Luvy's runtime adapter exercises NUL-bearing panic strings through this boundary.
 
 - Caller-selected error diagnostics resolve source and mapped spans from the exact caller program/frame, with location-only fallback. Wrapped coroutines carry original handle-free diagnostics across propagation; guest strings and explicit string-rethrow sites are not rewritten. Non-table writes share oracle-checked index errors with reads.
