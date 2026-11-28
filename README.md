@@ -1,5 +1,9 @@
 # <img src="website/rustia-readme-mark.svg" alt="" width="26" height="26"> Rustia
 
+[![crates.io](https://img.shields.io/crates/v/rustia)](https://crates.io/crates/rustia)
+[![docs.rs](https://img.shields.io/docsrs/rustia/0.2.0)](https://docs.rs/rustia/0.2.0/rustia/)
+[![CI on main](https://github.com/slowchop/rustia/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/slowchop/rustia/actions/workflows/ci.yml?query=branch%3Amain)
+
 <!-- project-copy: intro -->
 Rustia is a pure-Rust interpreter for embedding standalone [Luau](https://luau.org/) in games and tools. Edit scripts without a rebuild and let players write mods.
 
