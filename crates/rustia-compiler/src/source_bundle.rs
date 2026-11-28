@@ -669,7 +669,8 @@ pub fn resolve_relative_module(importer: &str, request: &str) -> Result<String, 
     Ok(key)
 }
 
-fn validate_module_key(name: &str) -> Result<(), &'static str> {
+/// Checks a canonical project-relative Luau module key before host I/O.
+pub fn validate_module_key(name: &str) -> Result<(), &'static str> {
     if name.contains(['\\', ':', '\0'])
         || !name.ends_with(".luau")
         || name

@@ -1,4 +1,5 @@
 //! Experimental Rust source backend for a host-supplied value and operation adapter.
+use crate::source_bundle::{validate_module_key, SourceBundle};
 use rustia_parser::{
     parse_source_bytes, AssignmentOp, AssignmentTarget, BinaryOp, Expr, FunctionParam, SourceError,
     Stmt, TableField, UnaryOp,
@@ -78,6 +79,64 @@ pub fn emit_module(
         host,
         true,
     )
+}
+
+/// Emit selected standalone modules and a deterministic entry lookup from frozen bytes.
+/// The embedder owns file discovery, module execution and the runtime adapter.
+pub fn emit_module_bundle(
+    bundle: &SourceBundle,
+    modules: &[&str],
+    runtime_crate: &str,
+    host: Option<&ClosedHost<'_>>,
+) -> Result<String> {
+    let diagnostic = |file: &str, message: &str| Diagnostic {
+        file: file.to_owned(),
+        line: 1,
+        column: 1,
+        message: message.to_owned(),
+    };
+    if !rust_identifier(runtime_crate) {
+        return Err(diagnostic(
+            "<bundle>",
+            "invalid generated Rust runtime crate name",
+        ));
+    }
+    let mut names = BTreeSet::new();
+    for &name in modules {
+        validate_module_key(name).map_err(|message| diagnostic(name, message))?;
+        if !names.insert(name) {
+            return Err(diagnostic(name, "duplicate Luau module"));
+        }
+    }
+
+    let mut output = String::new();
+    let mut arms = String::new();
+    for (index, name) in names.into_iter().enumerate() {
+        let source = bundle
+            .source(name)
+            .ok_or_else(|| diagnostic(name, "missing Luau module"))?;
+        let code = emit_module(name, source, "run", runtime_crate, host)?;
+        let mut module_name = format!("script_{index}");
+        // Keep the lookup's crate path distinct from its generated local modules.
+        if module_name == runtime_crate {
+            module_name.push_str("_module");
+        }
+        writeln!(output, "mod {module_name} {{\n{code}\n}}").unwrap();
+        writeln!(arms, "        {name:?} => Some({module_name}::run),").unwrap();
+    }
+    writeln!(
+        output,
+        "pub type AotEntry = fn(&mut dyn {runtime_crate}::Host, Vec<{runtime_crate}::Value>) -> Result<{runtime_crate}::Value, {runtime_crate}::Error>;"
+    )
+    .unwrap();
+    if arms.is_empty() {
+        output.push_str("pub fn aot_module(_: &str) -> Option<AotEntry> { None }\n");
+    } else {
+        output.push_str("pub fn aot_module(path: &str) -> Option<AotEntry> {\n    match path {\n");
+        output.push_str(&arms);
+        output.push_str("        _ => None,\n    }\n}\n");
+    }
+    Ok(output)
 }
 
 /// Lower a module or isolated callback to Rust against a caller-supplied
@@ -1114,5 +1173,53 @@ impl Target {
                 format!("{{ let value = {expression}; set(host, object{id}, key{id}, value)?; }}")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bundle_tests {
+    use super::*;
+
+    #[test]
+    fn selected_modules_are_lowered_from_the_snapshot_in_sorted_order() {
+        let bundle = SourceBundle::new([
+            ("z.luau", "return 2"),
+            ("unused.luau", "invalid Luau syntax"),
+            ("nested/a.luau", "return 1"),
+        ])
+        .unwrap();
+        let emit = |names: &[&str]| emit_module_bundle(&bundle, names, "adapter", None).unwrap();
+        let first = emit(&["z.luau", "nested/a.luau"]);
+        assert_eq!(first, emit(&["nested/a.luau", "z.luau"]));
+        assert!(first.contains("\"nested/a.luau\" => Some(script_0::run)"));
+        assert!(first.contains("\"z.luau\" => Some(script_1::run)"));
+        assert!(!first.contains("unused.luau"));
+        assert!(emit(&[]).contains("fn aot_module(_: &str) -> Option<AotEntry> { None }"));
+    }
+
+    #[test]
+    fn generated_module_names_do_not_shadow_the_runtime_crate() {
+        let bundle = SourceBundle::new([("a.luau", "return 1")]).unwrap();
+        let output = emit_module_bundle(&bundle, &["a.luau"], "script_0", None).unwrap();
+        assert!(output.contains("mod script_0_module {"));
+        assert!(output.contains("\"a.luau\" => Some(script_0_module::run)"));
+        assert!(!output.contains("mod script_0 {"));
+    }
+
+    #[test]
+    fn reports_invalid_selection_and_preserves_source_diagnostics() {
+        let bundle = SourceBundle::new([("broken.luau", "-- header\nlocal = 3")]).unwrap();
+        let emit =
+            |names: &[&str]| emit_module_bundle(&bundle, names, "adapter", None).unwrap_err();
+        assert!(emit(&["broken.luau", "broken.luau"])
+            .message
+            .contains("duplicate"));
+        assert!(emit(&["../broken.luau"])
+            .message
+            .contains("project-relative"));
+        assert!(emit(&["missing.luau"]).message.contains("missing"));
+        let error = emit(&["broken.luau"]);
+        assert_eq!(error.file, "broken.luau");
+        assert_eq!(error.line, 2);
     }
 }
