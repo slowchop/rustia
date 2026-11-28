@@ -35,13 +35,13 @@
 //!
 //! You should see `The score is 42`.
 //!
-//! - [`insert_global`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.insert_global) gives Luau the starting score, and [`add_fn`](https://rustia.dev/docs/api/rustia/struct.Rustia.html#method.add_fn) lets it call the Rust function.
-//! - [`source_name`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.source_name) gives the script a label that appears in error messages.
-//! - [`eval`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.eval) gives you a value back in Rust. Use [`exec`](https://rustia.dev/docs/api/rustia/struct.Chunk.html#method.exec) when you only want to run the script.
+//! - [`insert_global`](https://docs.rs/rustia/0.2.0/rustia/struct.Rustia.html#method.insert_global) gives Luau the starting score, and [`add_fn`](https://docs.rs/rustia/0.2.0/rustia/struct.Rustia.html#method.add_fn) lets it call the Rust function.
+//! - [`source_name`](https://docs.rs/rustia/0.2.0/rustia/struct.Chunk.html#method.source_name) gives the script a label that appears in error messages.
+//! - [`eval`](https://docs.rs/rustia/0.2.0/rustia/struct.Chunk.html#method.eval) gives you a value back in Rust. Use [`exec`](https://docs.rs/rustia/0.2.0/rustia/struct.Chunk.html#method.exec) when you only want to run the script.
 //!
 //! The example keeps the script in a string so it fits in one file. Read a `.luau` file at runtime if you want to edit it without rebuilding the Rust app.
 //!
-//! From a Rustia checkout, run [the example](https://github.com/slowchop/rustia/blob/main/crates/rustia/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
+//! From a Rustia checkout, run [the example](https://docs.rs/crate/rustia/0.2.0/source/examples/first_script.rs) with `cargo run --locked -p rustia --example first_script`.
 //! <!-- /project-copy: first-script -->
 //!
 //! # Find what you need

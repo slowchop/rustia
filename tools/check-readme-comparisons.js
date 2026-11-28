@@ -14,14 +14,14 @@ function requireFact(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-// The quickstart follows main. Benchmark provenance and other source links
+// The quickstart uses the released Cargo package. Benchmark provenance and other source links
 // still need to resolve against this checkout's history.
 function verifySourceReferences(readme, checkReference) {
   const installs = readme.match(/^cargo add rustia\b[^\r\n]*/gm) ?? [];
   requireFact(
     installs.length === 1 &&
-      /^cargo add rustia --git https:\/\/github\.com\/slowchop\/rustia(?:\.git)? --branch main$/.test(installs[0]),
-    "README must show how to add Rustia from the main Git branch",
+      /^cargo add rustia@\d+\.\d+\.\d+$/.test(installs[0]),
+    "README must show how to add a versioned Rustia release from crates.io",
   );
   for (const match of readme.matchAll(/https:\/\/github\.com\/slowchop\/rustia\/(blob|tree|commit|raw)\/(main|[a-f0-9]{40})(\/[^\s)>\]"`#]+)?/g)) {
     const sourcePath = match[3] ? decodeURIComponent(match[3].slice(1)) : null;
@@ -46,8 +46,8 @@ function checkSourceReferences(readme) {
   verifySourceReferences(readme, checkReference);
   assert.throws(() => verifySourceReferences(`${readme}\nhttps://github.com/slowchop/rustia/blob/main/__missing_current_readme_artifact__`, checkReference),
     /source target is absent/);
-  assert.throws(() => verifySourceReferences(readme.replace("--branch main", "--branch other"), checkReference),
-    /main Git branch/);
+  assert.throws(() => verifySourceReferences(readme.replace(/^cargo add rustia@\d+\.\d+\.\d+$/m, "cargo add rustia --git https://github.com/slowchop/rustia --branch main"), checkReference),
+    /versioned Rustia release from crates.io/);
   const immutable = readme.match(/https:\/\/github\.com\/slowchop\/rustia\/blob\/([a-f0-9]{40})\/[^\s)>]+/);
   requireFact(immutable, "README must link immutable benchmark evidence");
   assert.throws(() => verifySourceReferences(readme.replace(immutable[0],
