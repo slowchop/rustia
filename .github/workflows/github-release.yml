@@ -71,6 +71,28 @@ jobs:
                 END { print (peeled ? peeled : direct) }'
           }
           target=$(tag_target)
+          if [[ -n "$target" && "$target" != "$RELEASE_COMMIT" ]]; then
+            echo "$tag does not point to the verified commit" >&2
+            exit 1
+          fi
+
+          # Drafts can exist before their tags. Only a successful lookup with
+          # no matching release permits creation.
+          release_states=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "'"$tag"'") | .draft')
+          case "$release_states" in
+            false)
+              test "$target" = "$RELEASE_COMMIT"
+              echo "Release $tag already exists at $RELEASE_COMMIT."
+              exit 0
+              ;;
+            "") ;;
+            *)
+              echo "An existing draft or multiple releases match $tag." >&2
+              exit 1
+              ;;
+          esac
+
           if [[ -z "$target" ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
               -f "ref=$ref" -f "sha=$RELEASE_COMMIT" --silent
@@ -78,15 +100,6 @@ jobs:
           if [[ "$(tag_target)" != "$RELEASE_COMMIT" ]]; then
             echo "$tag does not point to the verified commit" >&2
             exit 1
-          fi
-
-          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft); then
-            if [[ "$draft" != false ]]; then
-              echo "A draft already exists for $tag. Review and publish it separately." >&2
-              exit 1
-            fi
-            echo "Release $tag already exists at $RELEASE_COMMIT."
-            exit 0
           fi
 
           flags=()
