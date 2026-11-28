@@ -6,6 +6,7 @@ This directory holds the benchmark crate, workload programs, memory-analysis too
 
 ## Interface
 
+- [COMPETITORS.md](./COMPETITORS.md) records untimed competitor platform checks and standalone probes used by the comparison.
 - [README.md](./README.md) separates the paused source-profile measurement policy from retained trusted-CI protocols. Its timing commands are not developer-machine instructions.
 
 - `Cargo.toml` defines the `script-bench` and `vm-string-memory` binaries and adapter features.

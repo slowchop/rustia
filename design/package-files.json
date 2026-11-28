@@ -17,11 +17,12 @@
       "version": "0.0.1",
       "manifest": "bench/Cargo.toml",
       "publish": false,
-      "file_count": 538,
+      "file_count": 539,
       "files": [
         ".cargo_vcs_info.json",
         "ADAPTERS.md",
         "CLAIMS.md",
+        "COMPETITORS.md",
         "Cargo.lock",
         "Cargo.toml",
         "Cargo.toml.orig",

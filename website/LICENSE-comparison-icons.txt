@@ -1,0 +1,10 @@
+Codeberg favicon by Codeberg e.V., used without modification.
+Source: https://codeberg.org/assets/img/favicon.svg
+License: CC0 1.0 Universal, https://creativecommons.org/publicdomain/zero/1.0/
+Project branding: https://codeberg.org/Codeberg/Design
+
+crates.io favicon from the Rust project, used without modification.
+Source: https://crates.io/favicon.ico
+Cargo logo artwork by the Rust Foundation is licensed under Creative Commons Attribution.
+Policy and attribution terms: https://rustfoundation.org/policy/rust-trademark-policy/
+License: https://creativecommons.org/licenses/by/4.0/
