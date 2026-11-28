@@ -218,7 +218,11 @@ with calls through named captures, local bindings and conditional control
 flow. The host initializes the captures with the interpreter and implements
 the emitted call interface against the same runtime values. The generated
 callback has no interpreter instruction metering. The compiler rejects
-unsupported source before emitting code.
+unsupported source before emitting code. The wider hosted Rust emitter adds
+an adapter checkpoint before every loop body. Trusted embedders can debit
+those units from the same `VmExecution` budget used by interpreter calls.
+Loop units bound compiled control flow. Exact bytecode fuel, instruction
+clock accounting and allocation limits for hosted Rust remain separate.
 
 ## Validation and benchmark scope
 

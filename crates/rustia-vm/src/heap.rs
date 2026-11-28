@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
-use crate::bytecode::{stable_bytes_hash, SharedProgramString};
+use crate::bytecode::{stable_bytes_hash, stable_bytes_hash_parts, SharedProgramString};
 use crate::number::table_key_number_bits;
 use crate::value::{ShortString, Value, ValueKind, SHORT_STRING_CAPACITY};
 
@@ -1777,6 +1777,12 @@ impl VmCell {
         }
     }
 
+    pub(crate) fn find_concatenated_string_atom(&self, lhs: &[u8], rhs: &[u8]) -> Option<u32> {
+        string_index_lookup_matching(&self.root, stable_bytes_hash_parts([lhs, rhs]), |bytes| {
+            bytes.strip_prefix(lhs) == Some(rhs)
+        })
+    }
+
     #[inline]
     pub(crate) fn string_atom_equals_bytes(&mut self, atom: u32, value: &[u8]) -> Option<bool> {
         {
@@ -1815,15 +1821,19 @@ impl VmCell {
     }
 
     pub fn alloc_array_table(&mut self, values: &[Value]) -> u32 {
+        self.try_alloc_array_table(values.to_vec())
+            .expect("table slot limit exceeded")
+    }
+
+    pub(crate) fn try_alloc_array_table(&mut self, values: Vec<Value>) -> Option<u32> {
         self.insert_table_data(TableData {
-            array: values.to_vec(),
+            array: values,
             hash: empty_hash_part(self.table_layout),
             readonly: false,
             metatable: None,
             shape_version: 0,
             mutation_version: 0,
         })
-        .expect("table slot limit exceeded")
     }
 
     /// Allocates a PUC-layout table with pre-sized array and node parts,
@@ -3405,6 +3415,15 @@ impl VmCell {
 
 #[inline]
 fn string_index_lookup(root: &RootData, value: &[u8], stable_hash: u64) -> Option<u32> {
+    string_index_lookup_matching(root, stable_hash, |bytes| bytes == value)
+}
+
+#[inline]
+fn string_index_lookup_matching(
+    root: &RootData,
+    stable_hash: u64,
+    matches: impl Fn(&[u8]) -> bool,
+) -> Option<u32> {
     if root.string_index.is_empty() {
         return None;
     }
@@ -3422,7 +3441,7 @@ fn string_index_lookup(root: &RootData, value: &[u8], stable_hash: u64) -> Optio
             indexed_value.is_some(),
             "string index contains an invalid atom"
         );
-        if indexed_value.is_some_and(|candidate| candidate.as_bytes() == value) {
+        if indexed_value.is_some_and(|candidate| matches(candidate.as_bytes())) {
             return Some(atom);
         }
         position = (position + 1) & (root.string_index.len() - 1);

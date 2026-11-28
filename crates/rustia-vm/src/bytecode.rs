@@ -767,12 +767,21 @@ impl ConstantStorage {
 
 #[inline]
 pub(crate) fn stable_bytes_hash(value: &[u8]) -> u64 {
+    stable_bytes_hash_parts([value])
+}
+
+#[inline]
+pub(crate) fn stable_bytes_hash_parts<const N: usize>(parts: [&[u8]; N]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in value {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    let mut len = 0_u64;
+    for part in parts {
+        len = len.wrapping_add(part.len() as u64);
+        for byte in part {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
     }
-    mix_stable_hash(hash ^ value.len() as u64)
+    mix_stable_hash(hash ^ len)
 }
 
 #[inline]

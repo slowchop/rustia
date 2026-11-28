@@ -166,6 +166,25 @@ impl Vm {
         if let (Ok(mut lhs_text), Ok(rhs_text)) =
             (self.value_to_string(lhs), self.value_to_string(rhs))
         {
+            let result_len = lhs_text.len().saturating_add(rhs_text.len());
+            if let Some(atom) = self
+                .settings
+                .memory_limit_bytes
+                .filter(|_| result_len > crate::value::SHORT_STRING_CAPACITY)
+                .and_then(|_| {
+                    self.heap
+                        .find_concatenated_string_atom(&lhs_text, &rhs_text)
+                })
+            {
+                return Ok(ImplicitStep::Ready(Value::string_atom(atom)));
+            }
+            self.ensure_planned_memory_growth(
+                |vm| vm.heap.planned_owned_string_live_bytes(result_len),
+                &[lhs, rhs],
+            )?;
+            lhs_text
+                .try_reserve_exact(rhs_text.len())
+                .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
             lhs_text.extend_from_slice(&rhs_text);
             return Ok(ImplicitStep::Ready(
                 self.heap.intern_string_value_bytes(&lhs_text),

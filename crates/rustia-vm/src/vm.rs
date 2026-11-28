@@ -25,6 +25,10 @@ pub use scoped_host::VmHostCall;
 
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
+use crate::byte_string::{
+    char_byte, luau_string_sub, repeat_string, reverse_string_bytes, split_parts,
+    string_byte_slice, string_library_index, string_repeat_count, string_repeat_len,
+};
 #[cfg(test)]
 use crate::bytecode::InstructionSource;
 use crate::bytecode::{
@@ -44,10 +48,18 @@ use crate::heap::{
 use crate::hot_ir::{recognize_hot_ir_loops, HotIr, HotIrNumber, HotIrOpKind, HotIrValue};
 #[cfg(test)]
 use crate::hot_ir::{HotIrArrayWrite, HotIrCellClear, HotIrNumberId, HotIrOp, HotIrRegisterWrite};
-use crate::number::{binary, canonicalize_number, NumericOp};
+use crate::number::math::{self, MathBinary, MathMinMax, MathUnary};
+use crate::number::{
+    binary, canonicalize_number, luau_number_to_string, parse_numeric_text,
+    parse_numeric_text_in_base, NumericOp,
+};
 use crate::ownership::{borrow_service, RegistryCell, ServiceCell, Shared, Weak};
 use crate::profile::{GuestSurface, Profile};
 use crate::register_blocks::RegisterBlockPlan;
+use crate::table_operations::{
+    table_concat_index, table_create_size_with_limit, table_find_start, table_insert_position_arg,
+    table_integer_arg, table_move_count, table_move_indices, MAX_LUAU_TABLE_INDEX,
+};
 use crate::tape::{FunctionTape, TapeComparison, TapeOp};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
@@ -58,10 +70,7 @@ use std::num::NonZeroU64;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-const LUAU_TABLE_MAX_SIZE: usize = 1 << 26;
-const MAX_TABLE_CREATE_ARRAY_SIZE: usize = 100_000;
 const MAX_TABLE_UNPACK_RESULTS: usize = 7_999;
-const MAX_LUAU_TABLE_INDEX: f64 = 2_147_483_647.0;
 const READONLY_TABLE_ERROR: &str = "attempt to modify a readonly table";
 const LUAU_UTF8_CHARPATTERN: &[u8] = b"[\0-\x7f\xc2-\xf4][\x80-\xbf]*";
 const LUAU_RECURSIVE_REVERSE_GSUB_PATTERN: &[u8] = b"(.)(.+)";
@@ -563,7 +572,16 @@ impl VmExecution {
         self.fuel
     }
 
-    /// Fuel consumed across every guest call in this shared execution.
+    /// Charge work performed by trusted generated code to this invocation.
+    /// The caller chooses units and accounts for work before the next VM
+    /// operation. This debit does not advance the logical instruction clock
+    /// or trigger collection.
+    #[doc(hidden)]
+    pub fn charge_compiled_work(&mut self, units: u64) -> Result<()> {
+        charge_fuel(&mut self.fuel, self.fuel_limit, units)
+    }
+
+    /// Fuel consumed across interpreted calls and explicit compiled work debits.
     #[doc(hidden)]
     pub const fn fuel_used(&self) -> u64 {
         match (self.fuel_limit, self.fuel) {
@@ -3245,25 +3263,28 @@ impl Vm {
         additional_live_bytes: usize,
         transient_roots: &[Value],
     ) -> Result<()> {
+        self.ensure_planned_memory_growth(|_| additional_live_bytes, transient_roots)
+    }
+
+    fn ensure_planned_memory_growth(
+        &mut self,
+        additional_live_bytes: impl Fn(&mut Self) -> usize,
+        transient_roots: &[Value],
+    ) -> Result<()> {
         let Some(limit) = self.settings.memory_limit_bytes else {
             return Ok(());
         };
-        if self
-            .current_live_bytes()
-            .saturating_add(additional_live_bytes)
-            <= limit
-        {
-            return Ok(());
+        let fits = |vm: &mut Self| {
+            let additional = additional_live_bytes(vm);
+            vm.current_live_bytes().saturating_add(additional) <= limit
+        };
+        if !fits(self) {
+            self.collect_for_memory_limit(transient_roots);
+            if !fits(self) {
+                return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+            }
         }
-        self.collect_for_memory_limit(transient_roots);
-        if self
-            .current_live_bytes()
-            .saturating_add(additional_live_bytes)
-            <= limit
-        {
-            return Ok(());
-        }
-        Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
+        Ok(())
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -8942,10 +8963,7 @@ impl Vm {
         let Some(bytes) = self.string_value_bytes(value)? else {
             return Ok(None);
         };
-        let Ok(text) = std::str::from_utf8(&bytes) else {
-            return Ok(None);
-        };
-        Ok(parse_tonumber_string(text))
+        Ok(parse_numeric_text(&bytes))
     }
 
     fn coerce_to_i32(&mut self, value: Value, expected: &'static str) -> Result<i32> {
@@ -10058,12 +10076,12 @@ impl Vm {
         let puc_constructor = self.profile.is_puc51_compat()
             && instruction.op == Opcode::TableCreate
             && instruction.aux == 0;
-        let size = table_create_size(
+        let size = table_create_size_with_limit(
             self.coerce_register_to_number(registers, instruction.b)?,
             !puc_constructor,
         )?;
         if puc_constructor {
-            let hash_size = table_create_size(
+            let hash_size = table_create_size_with_limit(
                 self.coerce_register_to_number(registers, instruction.c)?,
                 false,
             )?;
@@ -14676,7 +14694,7 @@ impl Vm {
             self.coerce_to_number(args[0])?
         } else {
             let text = self.value_to_string(args[0])?;
-            parse_tonumber_base(&text, base.expect("non-decimal base is present"))
+            parse_numeric_text_in_base(&text, base.expect("non-decimal base is present"))
         };
         Ok(number.map_or_else(Value::nil, Value::number))
     }
@@ -16695,11 +16713,8 @@ impl Vm {
         let value = self
             .coerce_to_number(args[0])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let (mantissa, exponent) = libm::frexp(value);
-        Ok(vec![
-            Value::number(mantissa),
-            Value::number(f64::from(exponent)),
-        ])
+        let (mantissa, exponent) = math::frexp(value);
+        Ok(vec![Value::number(mantissa), Value::number(exponent)])
     }
 
     fn native_math_modf(&mut self, args: &[Value]) -> Result<Vec<Value>> {
@@ -16707,7 +16722,7 @@ impl Vm {
         let value = self
             .coerce_to_number(args[0])?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let (fraction, integer) = libm::modf(value);
+        let (integer, fraction) = math::modf(value);
         Ok(vec![Value::number(integer), Value::number(fraction)])
     }
 
@@ -17181,13 +17196,10 @@ impl Vm {
     }
 
     fn string_char_byte(&mut self, value: Value) -> Result<u8> {
-        let byte = self.coerce_to_i32(value, "number")?;
-        if !(0..=255).contains(&byte) {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "byte value",
-            }));
-        }
-        Ok(byte as u8)
+        let number = self
+            .coerce_to_number(value)?
+            .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
+        char_byte(number)
     }
 
     fn native_utf8_char(&mut self, args: &[Value]) -> Result<Value> {
@@ -18801,23 +18813,19 @@ impl Vm {
 
     fn native_table_move(&mut self, args: &[Value]) -> Result<Value> {
         let bounds = self.table_move_bounds(args)?;
-        let count = table_move_count(bounds.start, bounds.end)?;
-        if count == 0 {
-            return Ok(Value::table(bounds.destination));
-        }
-        table_move_destination_end(bounds.destination_start, count)?;
-
-        let copy_backward = bounds.source == bounds.destination
-            && bounds.destination_start > bounds.start
-            && bounds.destination_start <= bounds.end;
-        if copy_backward {
-            for offset in (0..count).rev() {
-                self.move_table_slot(&bounds, offset)?;
-            }
-        } else {
-            for offset in 0..count {
-                self.move_table_slot(&bounds, offset)?;
-            }
+        let indices = table_move_indices(
+            bounds.start,
+            bounds.end,
+            bounds.destination_start,
+            bounds.source == bounds.destination,
+        )?;
+        for (source, destination) in indices {
+            let value = self.raw_table_get(bounds.source, Value::number(f64::from(source)))?;
+            self.set_table_index(
+                bounds.destination,
+                Value::number(f64::from(destination)),
+                value,
+            )?;
         }
         Ok(Value::table(bounds.destination))
     }
@@ -18840,22 +18848,6 @@ impl Vm {
             end,
             destination_start,
         })
-    }
-
-    fn move_table_slot(&mut self, bounds: &TableMoveBounds, offset: usize) -> Result<()> {
-        let offset = i64::try_from(offset).map_err(|_| {
-            Error::new(ErrorKind::RuntimeError {
-                message: "too many elements to move".to_owned(),
-            })
-        })?;
-        let source_index = i64::from(bounds.start) + offset;
-        let destination_index = i64::from(bounds.destination_start) + offset;
-        let value = self.raw_table_get(bounds.source, Value::number(source_index as f64))?;
-        self.set_table_index(
-            bounds.destination,
-            Value::number(destination_index as f64),
-            value,
-        )
     }
 
     fn native_table_sort(
@@ -19325,18 +19317,7 @@ impl Vm {
         } else {
             start
         };
-        let Some(start_index) =
-            normalize_string_byte_start(text.len(), start, instruction.aux == 3)?
-        else {
-            return Ok(Vec::new());
-        };
-        let Some(end_index) = normalize_string_byte_end(text.len(), end)? else {
-            return Ok(Vec::new());
-        };
-        if end_index < start_index {
-            return Ok(Vec::new());
-        }
-        Ok(text[start_index..=end_index]
+        Ok(string_byte_slice(&text, start, end, instruction.aux == 3)?
             .iter()
             .map(|byte| Value::number(f64::from(*byte)))
             .collect())
@@ -19351,8 +19332,10 @@ impl Vm {
         let text = self.coerce_to_string(registers, instruction.b)?;
         let count = string_repeat_count(get_number(registers, instruction.c)?)?;
         let result_len = string_repeat_len(text.len(), count)?;
-        let growth = self.heap.planned_owned_string_live_bytes(result_len);
-        self.ensure_memory_growth(growth, &[])?;
+        self.ensure_planned_memory_growth(
+            |vm| vm.heap.planned_owned_string_live_bytes(result_len),
+            &[],
+        )?;
         let output = repeat_string(&text, count)?;
         Ok(self.heap.intern_string_value_bytes(&output))
     }
@@ -19401,12 +19384,40 @@ impl Vm {
         } else {
             b",".to_vec()
         };
-        let parts = split_luau_string(&text, &separator)?;
-        let values = parts
-            .iter()
-            .map(|part| self.heap.intern_string_value_bytes(part))
-            .collect::<Vec<_>>();
-        Ok(Value::table(self.heap.alloc_array_table(&values)))
+        let count = if separator.is_empty() {
+            text.len()
+        } else {
+            split_parts(&text, &separator).count()
+        };
+        let table_growth = VmCell::filled_array_table_live_bytes(count);
+        self.ensure_memory_growth(table_growth, &[])?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        for part in split_parts(&text, &separator) {
+            let value = if let Some(short) = Value::short_string(part) {
+                short
+            } else if let Some(atom) = self.heap.find_string_atom_bytes(part) {
+                Value::string_atom(atom)
+            } else {
+                // Account for the reserved result table alongside each new
+                // atom. Earlier parts remain rooted through quota collection.
+                self.ensure_planned_memory_growth(
+                    |vm| {
+                        table_growth
+                            .saturating_add(vm.heap.planned_owned_string_live_bytes(part.len()))
+                    },
+                    &values,
+                )?;
+                self.heap.intern_string_value_bytes(part)
+            };
+            values.push(value);
+        }
+        self.heap
+            .try_alloc_array_table(values)
+            .map(Value::table)
+            .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())
     }
 
     fn math_unary(
@@ -19423,35 +19434,7 @@ impl Vm {
         let value = self
             .coerce_to_number(value)?
             .ok_or_else(|| Error::new(ErrorKind::TypeError { expected: "number" }))?;
-        let result = match op {
-            MathUnary::Floor => libm::floor(value),
-            MathUnary::Ceil => libm::ceil(value),
-            MathUnary::Round => libm::round(value),
-            MathUnary::Sqrt => libm::sqrt(value),
-            MathUnary::Deg => value * (180.0 / LUAU_PI),
-            MathUnary::Rad => value * (LUAU_PI / 180.0),
-            MathUnary::Sin => libm::sin(value),
-            MathUnary::Cos => libm::cos(value),
-            MathUnary::Tan => libm::tan(value),
-            MathUnary::Asin => libm::asin(value),
-            MathUnary::Acos => libm::acos(value),
-            MathUnary::Atan => libm::atan(value),
-            MathUnary::Sinh => libm::sinh(value),
-            MathUnary::Cosh => libm::cosh(value),
-            MathUnary::Tanh => libm::tanh(value),
-            MathUnary::Exp => libm::exp(value),
-            MathUnary::Log10 => libm::log10(value),
-            MathUnary::Sign => {
-                if value > 0.0 {
-                    1.0
-                } else if value < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
-            }
-        };
-        Ok(Value::number(result))
+        Ok(Value::number(op.apply(value)))
     }
 
     fn math_binary(
@@ -19463,12 +19446,7 @@ impl Vm {
         validate_math_arity(instruction, 2, "invalid two-argument math arity")?;
         let lhs = self.math_arg_number(registers, instruction.b, 0)?;
         let rhs = self.math_arg_number(registers, instruction.b, 1)?;
-        let result = match op {
-            MathBinary::Fmod => libm::fmod(lhs, rhs),
-            MathBinary::Pow => libm::pow(lhs, rhs),
-            MathBinary::Atan2 => libm::atan2(lhs, rhs),
-        };
-        Ok(Value::number(result))
+        Ok(Value::number(op.apply(lhs, rhs)))
     }
 
     fn math_log(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19478,26 +19456,25 @@ impl Vm {
             }));
         }
         let value = self.math_arg_number(registers, instruction.b, 0)?;
-        let result = if instruction.aux == 1 {
-            libm::log(value)
+        let base = if instruction.aux == 2 {
+            Some(self.math_arg_number(registers, instruction.b, 1)?)
         } else {
-            let base = self.math_arg_number(registers, instruction.b, 1)?;
-            if base == 2.0 {
-                libm::log2(value)
-            } else if base == 10.0 {
-                libm::log10(value)
-            } else {
-                libm::log(value) / libm::log(base)
-            }
+            None
         };
-        Ok(Value::number(result))
+        Ok(Value::number(math::log(value, base)))
     }
 
     fn math_ldexp(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
         validate_math_arity(instruction, 2, "invalid math.ldexp arity")?;
         let mantissa = self.math_arg_number(registers, instruction.b, 0)?;
-        let exponent = self.math_arg_i32(registers, instruction.b, 1)?;
-        Ok(Value::number(libm::ldexp(mantissa, exponent)))
+        let exponent = self.math_arg_number(registers, instruction.b, 1)?;
+        math::ldexp(mantissa, exponent)
+            .map(Value::number)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::TypeError {
+                    expected: "integer",
+                })
+            })
     }
 
     fn math_predicate(
@@ -19521,19 +19498,13 @@ impl Vm {
         let value = self.math_arg_number(registers, instruction.b, 0)?;
         let min = self.math_arg_number(registers, instruction.b, 1)?;
         let max = self.math_arg_number(registers, instruction.b, 2)?;
-        if min > max || min.is_nan() || max.is_nan() {
-            return Err(Error::new(ErrorKind::TypeError {
-                expected: "max must be greater than or equal to min",
-            }));
-        }
-        let result = if value < min {
-            min
-        } else if value > max {
-            max
-        } else {
-            value
-        };
-        Ok(Value::number(result))
+        math::clamp(value, min, max)
+            .map(Value::number)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::TypeError {
+                    expected: "max must be greater than or equal to min",
+                })
+            })
     }
 
     fn math_map(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19543,9 +19514,9 @@ impl Vm {
         let in_max = self.math_arg_number(registers, instruction.b, 2)?;
         let out_min = self.math_arg_number(registers, instruction.b, 3)?;
         let out_max = self.math_arg_number(registers, instruction.b, 4)?;
-        Ok(Value::number(
-            out_min + (x - in_min) * (out_max - out_min) / (in_max - in_min),
-        ))
+        Ok(Value::number(math::map(
+            x, in_min, in_max, out_min, out_max,
+        )))
     }
 
     fn math_lerp(&mut self, registers: &[Value], instruction: Instruction) -> Result<Value> {
@@ -19553,8 +19524,7 @@ impl Vm {
         let a = self.math_arg_number(registers, instruction.b, 0)?;
         let b = self.math_arg_number(registers, instruction.b, 1)?;
         let t = self.math_arg_number(registers, instruction.b, 2)?;
-        let result = if t == 1.0 { b } else { a + (b - a) * t };
-        Ok(Value::number(result))
+        Ok(Value::number(math::lerp(a, b, t)))
     }
 
     fn math_minmax(
@@ -19567,11 +19537,7 @@ impl Vm {
         let mut result = self.math_arg_number(registers, instruction.b, 0)?;
         for offset in 1..argc {
             let value = self.math_arg_number(registers, instruction.b, offset)?;
-            match op {
-                MathMinMax::Min if value < result => result = value,
-                MathMinMax::Max if value > result => result = value,
-                _ => {}
-            }
+            result = op.step(result, value);
         }
         Ok(Value::number(result))
     }
@@ -19583,21 +19549,6 @@ impl Vm {
             })
         })?;
         self.coerce_register_to_number(registers, register)
-    }
-
-    fn math_arg_i32(&mut self, registers: &[Value], first: u8, offset: u8) -> Result<i32> {
-        let value = self.math_arg_number(registers, first, offset)?;
-        if value.is_finite()
-            && value.fract() == 0.0
-            && value >= f64::from(i32::MIN)
-            && value <= f64::from(i32::MAX)
-        {
-            Ok(value as i32)
-        } else {
-            Err(Error::new(ErrorKind::TypeError {
-                expected: "integer",
-            }))
-        }
     }
 
     fn concat_args(
@@ -22630,248 +22581,6 @@ fn apply_format_width(mut text: Vec<u8>, spec: FormatSpec, numeric: bool) -> Vec
     padded
 }
 
-fn parse_tonumber_string(text: &str) -> Option<f64> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    if parse_nan_string(text) {
-        return Some(canonicalize_number(f64::NAN));
-    }
-    if let Some(number) = parse_hex_number_string(text) {
-        return Some(canonicalize_number(number));
-    }
-    text.parse::<f64>().ok().map(canonicalize_number)
-}
-
-fn parse_nan_string(text: &str) -> bool {
-    let payload = match text.as_bytes() {
-        [b'+', rest @ ..] | [b'-', rest @ ..] => rest,
-        _ => text.as_bytes(),
-    };
-
-    if payload.eq_ignore_ascii_case(b"nan") {
-        return true;
-    }
-
-    if payload.len() < 5 || !payload[..3].eq_ignore_ascii_case(b"nan") || payload[3] != b'(' {
-        return false;
-    }
-
-    let Some(close) = payload[4..]
-        .iter()
-        .position(|byte| *byte == b')')
-        .map(|offset| offset + 4)
-    else {
-        return false;
-    };
-    close + 1 == payload.len()
-}
-
-fn parse_tonumber_base(text: &[u8], base: u32) -> Option<f64> {
-    let text = std::str::from_utf8(text).ok()?.as_bytes();
-    let mut cursor = 0;
-    while text
-        .get(cursor)
-        .is_some_and(|byte| byte.is_ascii_whitespace())
-    {
-        cursor += 1;
-    }
-    if cursor == text.len() {
-        return None;
-    }
-
-    let negative = match text[cursor] {
-        b'+' => {
-            cursor += 1;
-            false
-        }
-        b'-' => {
-            cursor += 1;
-            true
-        }
-        _ => false,
-    };
-
-    if base == 16
-        && text.get(cursor) == Some(&b'0')
-        && text
-            .get(cursor + 1)
-            .is_some_and(|byte| matches!(byte, b'x' | b'X'))
-        && text
-            .get(cursor + 2)
-            .and_then(|byte| tonumber_digit(*byte))
-            .is_some_and(|digit| digit < base)
-    {
-        cursor += 2;
-    }
-
-    let mut value = 0_u64;
-    let mut overflowed = false;
-    let mut parsed_digit = false;
-    while let Some(byte) = text.get(cursor).copied() {
-        let Some(digit) = tonumber_digit(byte) else {
-            break;
-        };
-        if digit >= base {
-            break;
-        }
-        parsed_digit = true;
-        cursor += 1;
-        if !overflowed {
-            match value
-                .checked_mul(u64::from(base))
-                .and_then(|value| value.checked_add(u64::from(digit)))
-            {
-                Some(next) => value = next,
-                None => {
-                    value = u64::MAX;
-                    overflowed = true;
-                }
-            }
-        }
-    }
-
-    if !parsed_digit
-        || text[cursor..]
-            .iter()
-            .any(|byte| !byte.is_ascii_whitespace())
-    {
-        return None;
-    }
-
-    if negative && !overflowed {
-        value = 0_u64.wrapping_sub(value);
-    }
-    Some(canonicalize_number(value as f64))
-}
-
-fn tonumber_digit(byte: u8) -> Option<u32> {
-    match byte {
-        b'0'..=b'9' => Some(u32::from(byte - b'0')),
-        b'a'..=b'z' => Some(u32::from(byte - b'a') + 10),
-        b'A'..=b'Z' => Some(u32::from(byte - b'A') + 10),
-        _ => None,
-    }
-}
-
-fn parse_hex_number_string(text: &str) -> Option<f64> {
-    let (sign, digits) = match text.as_bytes() {
-        [b'+', rest @ ..] => (1.0, std::str::from_utf8(rest).ok()?),
-        [b'-', rest @ ..] => (-1.0, std::str::from_utf8(rest).ok()?),
-        _ => (1.0, text),
-    };
-    let digits = digits
-        .strip_prefix("0x")
-        .or_else(|| digits.strip_prefix("0X"))?;
-
-    let mut cursor = 0;
-    let bytes = digits.as_bytes();
-    let mut value = 0.0;
-    let mut parsed_digit = false;
-    while let Some(digit) = bytes
-        .get(cursor)
-        .and_then(|byte| tonumber_digit(*byte))
-        .filter(|digit| *digit < 16)
-    {
-        value = value * 16.0 + f64::from(digit);
-        parsed_digit = true;
-        cursor += 1;
-    }
-
-    if bytes.get(cursor) == Some(&b'.') {
-        cursor += 1;
-        let mut place = 1.0 / 16.0;
-        while let Some(digit) = bytes
-            .get(cursor)
-            .and_then(|byte| tonumber_digit(*byte))
-            .filter(|digit| *digit < 16)
-        {
-            value += f64::from(digit) * place;
-            place /= 16.0;
-            parsed_digit = true;
-            cursor += 1;
-        }
-    }
-
-    if !parsed_digit {
-        return None;
-    }
-
-    if bytes
-        .get(cursor)
-        .is_some_and(|byte| matches!(byte, b'p' | b'P'))
-    {
-        cursor += 1;
-        let exponent_sign = match bytes.get(cursor) {
-            Some(b'+') => {
-                cursor += 1;
-                1
-            }
-            Some(b'-') => {
-                cursor += 1;
-                -1
-            }
-            _ => 1,
-        };
-        let mut exponent = 0_i32;
-        let mut parsed_exponent_digit = false;
-        while let Some(digit) = bytes
-            .get(cursor)
-            .copied()
-            .filter(u8::is_ascii_digit)
-            .map(|byte| i32::from(byte - b'0'))
-        {
-            exponent = exponent.saturating_mul(10).saturating_add(digit);
-            parsed_exponent_digit = true;
-            cursor += 1;
-        }
-        if !parsed_exponent_digit {
-            return None;
-        }
-        value = libm::ldexp(value, exponent.saturating_mul(exponent_sign));
-    }
-
-    if cursor != bytes.len() {
-        return None;
-    }
-
-    Some(sign * value)
-}
-
-fn luau_number_to_string(value: f64) -> String {
-    let value = canonicalize_number(value);
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value == f64::INFINITY {
-        return "inf".to_owned();
-    }
-    if value == f64::NEG_INFINITY {
-        return "-inf".to_owned();
-    }
-    if value == 0.0 {
-        if value.is_sign_negative() {
-            return "-0".to_owned();
-        }
-        return "0".to_owned();
-    }
-    const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
-    if value.fract() == 0.0 && value.abs() <= MAX_EXACT_INTEGER {
-        return (value as i64).to_string();
-    }
-    let debug = format!("{value:?}");
-    let (negative, magnitude) = debug
-        .strip_prefix('-')
-        .map_or((false, debug.as_str()), |magnitude| (true, magnitude));
-    let mut output =
-        luau_number_magnitude_to_string(magnitude).unwrap_or_else(|| value.to_string());
-    if negative {
-        output.insert(0, '-');
-    }
-    output
-}
-
 /// PUC Lua 5.1 `lua_number2str`: C `sprintf("%.14g")`.
 ///
 /// 14 significant digits, correctly rounded (round half-to-even) via Rust's
@@ -23010,83 +22719,6 @@ mod puc51_number_format_tests {
         assert_eq!(puc51_number_to_string(f64::INFINITY), "inf");
         assert_eq!(puc51_number_to_string(f64::NEG_INFINITY), "-inf");
     }
-}
-
-fn luau_number_magnitude_to_string(magnitude: &str) -> Option<String> {
-    let (mantissa, exponent) = magnitude
-        .split_once('e')
-        .or_else(|| magnitude.split_once('E'))
-        .map_or(Some((magnitude, 0)), |(mantissa, exponent)| {
-            exponent
-                .parse::<i32>()
-                .ok()
-                .map(|exponent| (mantissa, exponent))
-        })?;
-    let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    if integer.is_empty() || !integer.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let mut raw_digits = String::with_capacity(integer.len() + fraction.len());
-    raw_digits.push_str(integer);
-    raw_digits.push_str(fraction);
-    let leading_zeroes = raw_digits
-        .bytes()
-        .position(|byte| byte != b'0')
-        .unwrap_or(raw_digits.len());
-    let mut digits = raw_digits[leading_zeroes..].to_owned();
-    while digits.ends_with('0') {
-        digits.pop();
-    }
-    if digits.is_empty() {
-        return Some("0".to_owned());
-    }
-    let decimal_exponent = exponent + integer.len() as i32 - leading_zeroes as i32 - 1;
-    Some(luau_decimal_digits_to_string(&digits, decimal_exponent))
-}
-
-fn luau_decimal_digits_to_string(digits: &str, decimal_exponent: i32) -> String {
-    if !(-6..21).contains(&decimal_exponent) {
-        return luau_decimal_digits_to_exponent_string(digits, decimal_exponent);
-    }
-
-    let integer_digits = decimal_exponent + 1;
-    if integer_digits <= 0 {
-        let mut output = String::from("0.");
-        output.extend(std::iter::repeat_n('0', (-integer_digits) as usize));
-        output.push_str(digits);
-        return output;
-    }
-
-    let integer_digits = integer_digits as usize;
-    if integer_digits >= digits.len() {
-        let mut output = String::from(digits);
-        output.extend(std::iter::repeat_n('0', integer_digits - digits.len()));
-        return output;
-    }
-
-    let mut output = String::with_capacity(digits.len() + 1);
-    output.push_str(&digits[..integer_digits]);
-    output.push('.');
-    output.push_str(&digits[integer_digits..]);
-    output
-}
-
-fn luau_decimal_digits_to_exponent_string(digits: &str, decimal_exponent: i32) -> String {
-    let mut output = String::with_capacity(digits.len() + 8);
-    output.push_str(&digits[..1]);
-    if digits.len() > 1 {
-        output.push('.');
-        output.push_str(&digits[1..]);
-    }
-    output.push('e');
-    if decimal_exponent >= 0 {
-        output.push('+');
-    }
-    output.push_str(&decimal_exponent.to_string());
-    output
 }
 
 fn format_vector(vector: VectorData) -> String {
@@ -24998,48 +24630,12 @@ impl VectorMinMax {
 }
 
 #[derive(Clone, Copy)]
-enum MathUnary {
-    Floor,
-    Ceil,
-    Round,
-    Sqrt,
-    Deg,
-    Rad,
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Sinh,
-    Cosh,
-    Tanh,
-    Exp,
-    Log10,
-    Sign,
-}
-
-#[derive(Clone, Copy)]
-enum MathBinary {
-    Fmod,
-    Pow,
-    Atan2,
-}
-
-#[derive(Clone, Copy)]
 enum MathPredicate {
     Nan,
     Inf,
     Finite,
 }
 
-#[derive(Clone, Copy)]
-enum MathMinMax {
-    Min,
-    Max,
-}
-
-const LUAU_PI: f64 = f64::from_bits(0x4009_21fb_5444_2d18);
 const PCG32_MULTIPLIER: u64 = 6_364_136_223_846_793_005;
 const PCG32_INCREMENT: u64 = 105 | 1;
 const PERLIN_HASH: [u8; 257] = [
@@ -25619,54 +25215,6 @@ fn table_concat_range(
     Ok((start, end))
 }
 
-fn table_concat_index(value: f64) -> Result<usize> {
-    if !value.is_finite() || value.fract() != 0.0 || !(0.0..=MAX_LUAU_TABLE_INDEX).contains(&value)
-    {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.concat range",
-        }));
-    }
-    Ok(value as usize)
-}
-
-fn table_find_start(value: f64) -> Result<usize> {
-    if !value.is_finite() || value.fract() != 0.0 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.find init",
-        }));
-    }
-    if !(1.0..=MAX_LUAU_TABLE_INDEX).contains(&value) {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "index out of range",
-        }));
-    }
-    Ok(value as usize)
-}
-
-fn table_create_size(value: f64, apply_create_cap: bool) -> Result<usize> {
-    if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.create size",
-        }));
-    }
-    let size = value as i32;
-    if size < 0 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "size out of range",
-        }));
-    }
-    let size = size as usize;
-    if size > LUAU_TABLE_MAX_SIZE {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "table overflow",
-        }));
-    }
-    if apply_create_cap && size > MAX_TABLE_CREATE_ARRAY_SIZE {
-        return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
-    }
-    Ok(size)
-}
-
 /// `luaO_int2fb` + `luaO_fb2int` (lobject.c): PUC constructor array-size
 /// hints are rounded up to the nearest floating-byte value, so the array
 /// part of a 17-element constructor is 18 slots, not 17.
@@ -25696,55 +25244,6 @@ fn table_len_to_i32(len: usize) -> Result<i32> {
             expected: "table overflow",
         })
     })
-}
-
-fn table_integer_arg(value: f64, expected: &'static str) -> Result<i32> {
-    if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
-        return Err(Error::new(ErrorKind::TypeError { expected }));
-    }
-    Ok(value as i32)
-}
-
-fn table_insert_position_arg(value: f64) -> Result<i32> {
-    if value.is_nan() {
-        return Ok(0);
-    }
-    table_integer_arg(value, "integer table.insert position")
-}
-
-fn table_move_count(start: i32, end: i32) -> Result<usize> {
-    if end < start {
-        return Ok(0);
-    }
-    let count = i64::from(end) - i64::from(start) + 1;
-    if count > i64::from(i32::MAX) {
-        return Err(Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        }));
-    }
-    usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        })
-    })
-}
-
-fn table_move_destination_end(destination_start: i32, count: usize) -> Result<i32> {
-    let count = i64::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        })
-    })?;
-    if count == 0 {
-        return Ok(destination_start);
-    }
-    let destination_end = i64::from(destination_start) + count - 1;
-    if destination_end < i64::from(i32::MIN) || destination_end > i64::from(i32::MAX) {
-        return Err(Error::new(ErrorKind::RuntimeError {
-            message: "destination wrap around".to_owned(),
-        }));
-    }
-    Ok(destination_end as i32)
 }
 
 const LUAU_PACK_MAX_ALIGN: usize = 8;
@@ -26337,93 +25836,6 @@ fn pack_runtime_error(message: impl Into<String>) -> Error {
     })
 }
 
-fn string_library_index(value: f64) -> Result<i64> {
-    // The half-open range also rejects NaN and infinities. At either boundary,
-    // f64 spacing exceeds one, so checking before truncation is equivalent.
-    // The checked cast below supplies truncation without a separate operation.
-    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&value) {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer string library index",
-        }));
-    }
-    Ok(value as i64)
-}
-
-fn luau_string_sub(text: &[u8], start: i64, end: i64) -> Result<Vec<u8>> {
-    let len = i64::try_from(text.len()).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let start = if start < 0 { len + start + 1 } else { start }.max(1);
-    let end = if end < 0 { len + end + 1 } else { end }.min(len);
-    if start > end {
-        return Ok(Vec::new());
-    }
-    let start = usize::try_from(start - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub start index underflow",
-        })
-    })?;
-    let end = usize::try_from(end).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub end index underflow",
-        })
-    })?;
-    let bytes = text.get(start..end).ok_or_else(|| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string.sub byte range is out of bounds",
-        })
-    })?;
-    Ok(bytes.to_vec())
-}
-
-fn normalize_string_byte_start(
-    len: usize,
-    index: i64,
-    clamp_to_first: bool,
-) -> Result<Option<usize>> {
-    let len = i64::try_from(len).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let mut one_based = if index < 0 { len + index + 1 } else { index };
-    if one_based < 1 && clamp_to_first && len > 0 {
-        one_based = 1;
-    }
-    if one_based < 1 || one_based > len {
-        return Ok(None);
-    }
-    Ok(Some(usize::try_from(one_based - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string index underflow",
-        })
-    })?))
-}
-
-fn normalize_string_byte_end(len: usize, index: i64) -> Result<Option<usize>> {
-    let len = i64::try_from(len).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string length exceeds i64",
-        })
-    })?;
-    let one_based = if index < 0 { len + index + 1 } else { index };
-    if one_based < 1 {
-        return Ok(None);
-    }
-    let one_based = one_based.min(len);
-    Ok(Some(usize::try_from(one_based - 1).map_err(|_| {
-        Error::new(ErrorKind::InvalidProgram {
-            reason: "string index underflow",
-        })
-    })?))
-}
-
-fn reverse_string_bytes(text: &[u8]) -> Result<Vec<u8>> {
-    Ok(text.iter().rev().copied().collect::<Vec<_>>())
-}
-
 fn encode_luau_utf8_char(codepoint: u32, output: &mut Vec<u8>) {
     if codepoint < 0x80 {
         output.push(codepoint as u8);
@@ -26490,63 +25902,6 @@ fn luau_utf8_posrelat(position: i64, len: i64) -> i64 {
     } else {
         len + position + 1
     }
-}
-
-const MAX_STRING_REPEAT_BYTES: usize = 1 << 30;
-
-fn string_repeat_count(value: f64) -> Result<i64> {
-    if !value.is_finite()
-        || value.fract() != 0.0
-        || value < i64::MIN as f64
-        || value > i64::MAX as f64
-    {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer string.rep count",
-        }));
-    }
-    Ok(value as i64)
-}
-
-fn string_repeat_len(text_len: usize, count: i64) -> Result<usize> {
-    if count <= 0 || text_len == 0 {
-        return Ok(0);
-    }
-    let count = usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::TypeError {
-            expected: "non-negative string.rep count",
-        })
-    })?;
-    let total_len = text_len.checked_mul(count).ok_or_else(|| {
-        Error::new(ErrorKind::TypeError {
-            expected: "string.rep result below allocation limit",
-        })
-    })?;
-    if total_len > MAX_STRING_REPEAT_BYTES {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "string.rep result below allocation limit",
-        }));
-    }
-    Ok(total_len)
-}
-
-fn repeat_string(text: &[u8], count: i64) -> Result<Vec<u8>> {
-    let total_len = string_repeat_len(text.len(), count)?;
-    if total_len == 0 {
-        return Ok(Vec::new());
-    }
-    let count = usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::TypeError {
-            expected: "non-negative string.rep count",
-        })
-    })?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(total_len)
-        .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
-    for _ in 0..count {
-        output.extend_from_slice(text);
-    }
-    Ok(output)
 }
 
 fn luau_string_find_first(
@@ -28375,25 +27730,6 @@ enum SimplePatternAtom {
     Byte(u8),
     Any,
     Control,
-}
-
-fn split_luau_string(text: &[u8], separator: &[u8]) -> Result<Vec<Vec<u8>>> {
-    if separator.is_empty() {
-        return Ok(text.iter().map(|byte| vec![*byte]).collect());
-    }
-
-    let mut parts = Vec::new();
-    let mut start = 0;
-    while let Some(offset) = text[start..]
-        .windows(separator.len())
-        .position(|window| window == separator)
-    {
-        let end = start + offset;
-        parts.push(text[start..end].to_vec());
-        start = end + separator.len();
-    }
-    parts.push(text[start..].to_vec());
-    Ok(parts)
 }
 
 fn get_table(registers: &[Value], register: u8) -> Result<u32> {
@@ -32184,6 +31520,167 @@ mod inline_cache_tests {
             vec![b'x'; 200]
         );
         assert_eq!(vm.current_live_bytes(), before + growth);
+    }
+
+    #[test]
+    fn concatenation_admits_the_result_before_interning() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let left = vm.create_retained_string_bytes(&[b'a'; 100]).unwrap();
+        let right = vm.create_retained_string_bytes(&[b'b'; 100]).unwrap();
+        let lhs = left.value(&vm).unwrap();
+        let rhs = right.value(&vm).unwrap();
+        vm.collect_garbage();
+        let baseline = vm.current_live_bytes();
+        let atoms = vm.heap.string_atom_count();
+        let growth = vm.heap.planned_owned_string_live_bytes(200);
+        let program = Program::new(Function::new(vec![], 0), vec![]);
+        let concat = |vm: &mut Vm| -> Result<Value> {
+            let mut state = vm.begin_execution();
+            let mut execution = Execution {
+                state: &mut state,
+                hosts: &mut RejectHostDispatcher,
+            };
+            let step = vm.concat_operands_step(&program, lhs, rhs, 0, &mut execution)?;
+            vm.finish_implicit_step(step, &mut execution, first_result_or_nil)
+        };
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth - 1);
+        assert!(matches!(
+            concat(&mut vm).unwrap_err().kind,
+            ErrorKind::OutOfMemory
+        ));
+        assert_eq!(vm.heap.string_atom_count(), atoms);
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth);
+        let result = concat(&mut vm).unwrap();
+        let expected: Vec<_> = [b'a'; 100].into_iter().chain([b'b'; 100]).collect();
+        assert_eq!(vm.string_value_bytes(result).unwrap().unwrap(), expected);
+
+        vm.settings.memory_limit_bytes = None;
+        let result = vm.retain_value(result).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+        assert_eq!(
+            concat(&mut vm).unwrap().as_string_atom(),
+            result.value(&vm).unwrap().as_string_atom()
+        );
+    }
+
+    #[test]
+    fn quota_limited_concat_preserves_inline_string_representation() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let atom = vm.heap.intern_string_bytes(b"ab");
+        let _atom_root = vm.retain_value(Value::string_atom(atom)).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+
+        let lhs = Value::short_string(b"a").unwrap();
+        let rhs = Value::short_string(b"b").unwrap();
+        let program = Program::new(Function::new(vec![], 0), vec![]);
+        let mut state = vm.begin_execution();
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut RejectHostDispatcher,
+        };
+        let step = vm
+            .concat_operands_step(&program, lhs, rhs, 0, &mut execution)
+            .unwrap();
+        let result = vm
+            .finish_implicit_step(step, &mut execution, first_result_or_nil)
+            .unwrap();
+        assert_eq!(result.as_short_string().unwrap().as_bytes(), b"ab");
+    }
+
+    #[test]
+    fn split_admits_the_result_array_and_new_atoms_together() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let text = vm.create_retained_string_bytes(&[b'x'; 200]).unwrap();
+        vm.collect_garbage();
+        let text_value = text.value(&vm).unwrap();
+        let baseline = vm.current_live_bytes();
+        let array_growth = VmCell::filled_array_table_live_bytes(200);
+        vm.settings.memory_limit_bytes = Some(baseline + array_growth - 1);
+        let empty = Value::short_string(b"").unwrap();
+        let failure = vm.native_string_split(&[text_value, empty]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + array_growth);
+        let array = vm.native_string_split(&[text_value, empty]).unwrap();
+        let last = vm.raw_table_get_value(array, Value::number(200.)).unwrap();
+        assert_eq!(vm.string_value_bytes(last).unwrap().unwrap(), b"x");
+
+        vm.settings.memory_limit_bytes = None;
+        let mut bytes = [b'v'; 205];
+        bytes[200..].copy_from_slice(b",tail");
+        let text = vm.create_retained_string_bytes(&bytes).unwrap();
+        vm.collect_garbage();
+        let text_value = text.value(&vm).unwrap();
+        let baseline = vm.current_live_bytes();
+        let atoms = vm.heap.string_atom_count();
+        let growth =
+            VmCell::filled_array_table_live_bytes(2) + vm.heap.planned_owned_string_live_bytes(200);
+        vm.settings.memory_limit_bytes = Some(baseline + growth - 1);
+        let failure = vm.native_string_split(&[text_value]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.heap.string_atom_count(), atoms);
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth);
+        let table = vm.native_string_split(&[text_value]).unwrap();
+        let part = vm.raw_table_get_value(table, Value::number(1.)).unwrap();
+        assert_eq!(
+            vm.string_value_bytes(part).unwrap().unwrap(),
+            vec![b'v'; 200]
+        );
+        assert!(vm.current_live_bytes() <= baseline + growth);
+    }
+
+    #[test]
+    fn split_replans_atom_index_growth_after_quota_collection() {
+        const PART_LEN: usize = 65_536;
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut bytes = vec![b'v'; PART_LEN];
+        bytes.extend_from_slice(b",tail");
+        let text = vm.create_retained_string_bytes(&bytes).unwrap();
+        vm.collect_garbage();
+        let count = vm.heap.string_atom_count();
+        let mut roots = Vec::new();
+        for index in count..count.next_power_of_two() {
+            let key = format!("retained-split-test-atom-{index}");
+            roots.push(vm.create_retained_string_bytes(key.as_bytes()).unwrap());
+        }
+
+        let add_garbage = |vm: &mut Vm| {
+            vm.heap
+                .intern_string_bytes(b"unretained-split-test-atom-one");
+            vm.heap
+                .intern_string_bytes(b"unretained-split-test-atom-two");
+        };
+        add_garbage(&mut vm);
+        vm.collect_garbage();
+        let collected_live = vm.current_live_bytes();
+        let collected_growth = vm.heap.planned_owned_string_live_bytes(PART_LEN);
+        add_garbage(&mut vm);
+        let initial_live = vm.current_live_bytes();
+        let initial_growth = vm.heap.planned_owned_string_live_bytes(PART_LEN);
+        let table_growth = VmCell::filled_array_table_live_bytes(2);
+        let limit = collected_live + table_growth + collected_growth - 1;
+        assert!(initial_live + table_growth <= limit, "the table alone fits");
+        assert!(
+            initial_live + table_growth + initial_growth > limit,
+            "the atom admission triggers collection"
+        );
+        assert!(
+            collected_live + table_growth + initial_growth <= limit,
+            "reusing the old estimate would incorrectly admit the split"
+        );
+
+        vm.settings.memory_limit_bytes = Some(limit);
+        let value = text.value(&vm).unwrap();
+        let failure = vm.native_string_split(&[value]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.current_live_bytes(), collected_live);
+        drop(roots);
     }
 
     #[test]
