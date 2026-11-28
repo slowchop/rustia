@@ -14,6 +14,10 @@ Parent: [repository map](../../EGM.md).
   outside this mirrored launch inventory. The public workflow-profile validator
   pins their inputs, run titles, hosted runners, read-only permissions, stage
   gates, protected policy provenance and exact-checkout verification order.
+- [GitHub release](../workflows/github-release.yml) is a separate manual
+  workflow on protected `main`. It verifies the six published crate archives
+  using [the registry verifier](../../tools/verify-published-release.py).
+  Only the subsequent GitHub tag and release job has contents write access.
 
 The source workflow validator checks the required job inventory, hosted runners,
 read-only permissions and event triggers. The `public` event starts both

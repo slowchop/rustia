@@ -140,6 +140,7 @@ node("tools/check-pre-push.js");
 node("tools/check-validated-push.js");
 node("tools/check-workflows.js");
 node("tools/check-workflows.js", "--self-test");
+run("python3", ["tools/check-published-release.py"]);
 run("python3", ["tools/check-browser-correctness.py"]);
 node("tools/check-package-files.js", "--check");
 node("tools/check-publishability.js", "--check");

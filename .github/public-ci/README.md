@@ -28,7 +28,7 @@ controller or replace the existing pull-request workflows.
 The required checks use standard Ubuntu and macOS VMs. They cover the preflight
 stages and aggregate, eight target builds, native Linux and macOS, Node/V8,
 headless WebKit, the browser embedding example and differential smoke. Windows
-uses the standard hosted Windows VM on dispatch. All jobs have read-only source
+uses the standard hosted Windows VM on dispatch. Those correctness jobs have read-only source
 access, pinned actions and checkout credentials disabled. Keep private runner
 groups and benchmark infrastructure outside this repository. Native Intel Mac
 and remote Safari execution are still open platform acceptance items.
@@ -36,3 +36,19 @@ and remote Safari execution are still open platform acceptance items.
 The public launch completed all 16 required jobs on `e54fd4e`. Run
 `node tools/check-workflows.js` to verify the configuration locally.
 The [launch record](../../design/public-source-activation.md) links both runs.
+
+## Create a GitHub release
+
+After all six crates are on crates.io and a maintainer has authorized the
+GitHub release, open **Actions → Rustia GitHub release → Run workflow** on
+`main`. Enter the published version without `v` and the full Git commit SHA.
+The input commit can be on a release branch. The workflow runs the release
+tooling from `main`.
+
+The read-only job checks that every version is present and unyanked, then
+matches each archive to the registry checksum and the clean input commit.
+The write job creates `v<version>` and the GitHub release. It reuses a matching
+tag or an existing published release. A tag pointing elsewhere fails without
+being moved. An existing draft needs a maintainer to review it separately.
+SemVer prerelease versions are marked as GitHub prereleases. Package uploads
+remain a separate step.
