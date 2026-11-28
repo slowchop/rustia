@@ -6,5 +6,9 @@
   "benchmark_bridge": "private-maintainer-cohorts-v1",
   "correctness_ci": "public-hosted",
   "package_publication": false,
-  "visibility_authorized": false
+  "visibility_authorized": false,
+  "website_comparison": {
+    "path": "bench/site-comparison-2026-11-28.json",
+    "sha256": "6ab9671e82615561dd0a840bcffff55ac8047a5ddd4b1267c1634068fe7b8a2e"
+  }
 }

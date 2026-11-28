@@ -99,11 +99,10 @@ builds, correctness tests, and static checks are allowed; their elapsed times ar
 not performance evidence. This source repository has hosted correctness CI only,
 with no `ci-bench` workflow or private runner access. Trusted maintainers can
 manually review and dispatch exact-cohort runtime comparisons through a separate
-private bridge. Its outputs remain private and require independent raw-data review
-before acceptance; they do not update public history or authorize public claims.
-Automatic per-commit/history measurement, landscape refresh, and publication remain
-paused. Only accepted `ci-bench` results can support performance decisions; bridge
-availability alone is not a result.
+private bridge. Review raw data independently before acceptance and retain it
+privately. The public-source profile selects a reviewed aggregate for the
+website charts. Automatic per-commit measurement, history and landscape refresh
+remain paused. Only accepted `ci-bench` results can support performance decisions.
 
 ## Find your way around
 

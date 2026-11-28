@@ -89,3 +89,23 @@ evidence. They do not extend the scope of the Rustia checks above.
 - rquickjs supports bare WebAssembly and runs its upstream test harness in Deno.
   The Web badge refers to browser evidence, so the Deno run is recorded here.
   [rquickjs WebAssembly tests](https://github.com/DelSkayn/rquickjs/blob/65683b3eb/README.md#wasm32-unknown-unknown)
+
+## Expanded runtime comparison
+
+The [chart snapshot](site-comparison-2026-11-28.json) records 85 measured pairs
+across 18 engine configurations and five workloads on Linux x86-64, using Rust
+1.95.0. Each chart shows the median over ten samples from two five-sample
+sweeps run in opposite orders. Steady state measures repeated work in a
+prepared runtime, reported per work unit. Cold start includes preparation and
+the first call. First call measures that initial call alone.
+
+The workloads use engine-specific implementations. Wasmi and Wasmtime run
+shared, handwritten WebAssembly workloads, and Roto sorts using a handwritten
+quadratic implementation. The chart lists skipped pairs and their reasons.
+The figures describe this Linux run. Platform badges describe separate
+correctness evidence.
+
+Timings varied between sweeps, particularly for cold start and first call.
+Small differences can fall within that variation.
+
+[Archived October benchmark results](https://github.com/slowchop/rustia/blob/94c6a34246c8a07badfd7ef88e89c4a9a643919b/bench/RESULTS.md)

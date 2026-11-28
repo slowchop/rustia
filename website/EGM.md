@@ -33,7 +33,8 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   It renders the project table on the homepage and the hosted Rustdoc. The standalone
   guide renders the same Markdown as links. platform-evidence.mjs opens evidence
   grouped by status for pointer, keyboard, and touch users. The homepage charts
-  use only the [retained historical cohort](../bench/history/site-comparison.json).
+  use the [approved expanded snapshot](../bench/site-comparison-2026-11-28.json)
+  pinned by the public-source profile.
   benchmark-measures.mjs controls measure visibility, sorting, times, and tooltips.
   The renderer also generates search and social descriptions from the homepage intro.
   _headers defines the deployed policy.

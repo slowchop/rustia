@@ -272,8 +272,9 @@ correctness jobs no timing authority. Public per-commit/history automation,
 landscape refresh and publication remain **paused**. A separate private maintainer
 bridge admits reviewed, manually dispatched exact-cohort runtime comparisons
 on `ci-bench`, plus the separately reviewed immutable #33 harness-lifetime
-repeatability controls. Independently review raw data; keep outputs private. Bridge
-availability closes no measurement gate and authorizes no public performance claim.
+repeatability controls. Independently review raw data and retain it privately.
+The profile selects a one-time approved aggregate for the expanded Linux
+website charts.
 [Selected profile](public-source-profile.json), [operations](81-benchmark-operations.md).
 
 The harness has **20 workload entries including cross-adapter `string_building` source coverage**.
