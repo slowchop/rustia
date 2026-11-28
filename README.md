@@ -214,7 +214,7 @@ script in the same interpreter. See [what happens when a script fails](https://d
   For WebAssembly without JavaScript imports, set `default-features = false`
   and give [`live()`](https://docs.rs/rustia/0.2.0/rustia/struct.RustiaBuilder.html#method.live)
   your own clocks and seed provider.
-  [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/release/0.2/demos/live-wasm/README.md)
+  [Example without JavaScript imports](https://github.com/slowchop/rustia/blob/main/demos/live-wasm/README.md)
 - **`send`** makes `Rustia` and its live handles `Send`, so you can move
   them together to another thread. Calls still need `&mut Rustia`.
   See [thread ownership](https://docs.rs/rustia/0.2.0/rustia/struct.Rustia.html#threads)
@@ -237,7 +237,7 @@ cargo doc --locked -p rustia --no-deps --open
 - [Read a Luau table into a Rust struct with Serde](https://docs.rs/crate/rustia/0.2.0/source/examples/embedding.rs)
 - [Call methods on a Rust object from Luau](https://docs.rs/crate/rustia/0.2.0/source/examples/mutable_objects.rs)
 - [Show the line that caused a script error](https://docs.rs/crate/rustia/0.2.0/source/examples/diagnostics.rs)
-- [Run Rustia in a browser](https://github.com/slowchop/rustia/blob/release/0.2/demos/web-live/README.md)
+- [Run Rustia in a browser](https://github.com/slowchop/rustia/blob/main/demos/web-live/README.md)
 - [Move an idle interpreter and a retained function to another thread](https://docs.rs/crate/rustia/0.2.0/source/examples/transferable.rs)
 
 [Browse all Rust examples](https://docs.rs/crate/rustia/0.2.0/source/examples/)
@@ -260,7 +260,7 @@ Type `=40 + 2` to see the result and `:quit` to exit.
 
 <a id="compare-luau-projects"></a>
 
-[Compare Luau projects](https://rustia.dev/#luau-comparison) for platform support, hot reload, and replay. The [comparison notes](https://docs.rs/rustia/0.2.0/rustia/#compare-luau-projects) include the sources. See [tested language features](https://github.com/slowchop/rustia/blob/release/0.2/conformance/COVERAGE.md) for Rustia’s Luau compatibility.
+[Compare Luau projects](https://rustia.dev/#luau-comparison) for platform support, hot reload, and replay. The [comparison notes](https://docs.rs/rustia/0.2.0/rustia/#compare-luau-projects) include the sources. See [tested language features](https://github.com/slowchop/rustia/blob/main/conformance/COVERAGE.md) for Rustia’s Luau compatibility.
 
 [Benchmark methodology](https://github.com/slowchop/rustia/blob/da1b8e546d4108d657d875b60ad28dffb354a974/bench/CLAIMS.md)
 
