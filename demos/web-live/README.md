@@ -35,7 +35,8 @@ python3 -m http.server 8788 --bind 127.0.0.1 --directory demos/web-live
 
 Open [the local example](http://127.0.0.1:8788/). Wait for `Ready`, then click
 **Run example**. The page should show `Result: 42`; open the browser's developer
-console to see `Hello from Luau`. The same server hosts the [comparison page and performance chart](http://127.0.0.1:8788/compare.html).
+console to see `Hello from Luau`. The same server hosts the [Luau comparison](http://127.0.0.1:8788/compare.html),
+which links to the [runtime speed charts on rustia.dev](https://rustia.dev/#speed-comparison).
 Stop the server with Ctrl-C.
 
 Generated files live in `pkg/` and `target/`; they are not source files. Serve
