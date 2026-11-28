@@ -1,4 +1,4 @@
-//! Deterministic f64 operations shared by the VM and compiler constant folder.
+//! Deterministic numeric operations shared by the interpreter and compiled code.
 
 /// The single quiet-NaN payload rustia uses for every script-number NaN.
 pub const CANON_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
@@ -115,9 +115,237 @@ pub fn binary(op: NumericOp, lhs: f64, rhs: f64) -> f64 {
     canonicalize_number(value)
 }
 
+/// Convert a Luau byte string using the VM's default numeric coercion.
+pub fn parse_numeric_text(text: &[u8]) -> Option<f64> {
+    let text = std::str::from_utf8(text).ok()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if parse_nan_string(text) {
+        return Some(canonicalize_number(f64::NAN));
+    }
+    if let Some(number) = parse_hex_number_string(text) {
+        return Some(canonicalize_number(number));
+    }
+    text.parse::<f64>().ok().map(canonicalize_number)
+}
+
+fn parse_nan_string(text: &str) -> bool {
+    let payload = match text.as_bytes() {
+        [b'+', rest @ ..] | [b'-', rest @ ..] => rest,
+        _ => text.as_bytes(),
+    };
+
+    if payload.eq_ignore_ascii_case(b"nan") {
+        return true;
+    }
+
+    if payload.len() < 5 || !payload[..3].eq_ignore_ascii_case(b"nan") || payload[3] != b'(' {
+        return false;
+    }
+
+    let Some(close) = payload[4..]
+        .iter()
+        .position(|byte| *byte == b')')
+        .map(|offset| offset + 4)
+    else {
+        return false;
+    };
+    close + 1 == payload.len()
+}
+
+pub(crate) fn parse_tonumber_base(text: &[u8], base: u32) -> Option<f64> {
+    let text = std::str::from_utf8(text).ok()?.as_bytes();
+    let mut cursor = 0;
+    while text
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    if cursor == text.len() {
+        return None;
+    }
+
+    let negative = match text[cursor] {
+        b'+' => {
+            cursor += 1;
+            false
+        }
+        b'-' => {
+            cursor += 1;
+            true
+        }
+        _ => false,
+    };
+
+    if base == 16
+        && text.get(cursor) == Some(&b'0')
+        && text
+            .get(cursor + 1)
+            .is_some_and(|byte| matches!(byte, b'x' | b'X'))
+        && text
+            .get(cursor + 2)
+            .and_then(|byte| tonumber_digit(*byte))
+            .is_some_and(|digit| digit < base)
+    {
+        cursor += 2;
+    }
+
+    let mut value = 0_u64;
+    let mut overflowed = false;
+    let mut parsed_digit = false;
+    while let Some(byte) = text.get(cursor).copied() {
+        let Some(digit) = tonumber_digit(byte) else {
+            break;
+        };
+        if digit >= base {
+            break;
+        }
+        parsed_digit = true;
+        cursor += 1;
+        if !overflowed {
+            match value
+                .checked_mul(u64::from(base))
+                .and_then(|value| value.checked_add(u64::from(digit)))
+            {
+                Some(next) => value = next,
+                None => {
+                    value = u64::MAX;
+                    overflowed = true;
+                }
+            }
+        }
+    }
+
+    if !parsed_digit
+        || text[cursor..]
+            .iter()
+            .any(|byte| !byte.is_ascii_whitespace())
+    {
+        return None;
+    }
+
+    if negative && !overflowed {
+        value = 0_u64.wrapping_sub(value);
+    }
+    Some(canonicalize_number(value as f64))
+}
+
+fn tonumber_digit(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some(u32::from(byte - b'0')),
+        b'a'..=b'z' => Some(u32::from(byte - b'a') + 10),
+        b'A'..=b'Z' => Some(u32::from(byte - b'A') + 10),
+        _ => None,
+    }
+}
+
+fn parse_hex_number_string(text: &str) -> Option<f64> {
+    let (sign, digits) = match text.as_bytes() {
+        [b'+', rest @ ..] => (1.0, std::str::from_utf8(rest).ok()?),
+        [b'-', rest @ ..] => (-1.0, std::str::from_utf8(rest).ok()?),
+        _ => (1.0, text),
+    };
+    let digits = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))?;
+
+    let mut cursor = 0;
+    let bytes = digits.as_bytes();
+    let mut value = 0.0;
+    let mut parsed_digit = false;
+    while let Some(digit) = bytes
+        .get(cursor)
+        .and_then(|byte| tonumber_digit(*byte))
+        .filter(|digit| *digit < 16)
+    {
+        value = value * 16.0 + f64::from(digit);
+        parsed_digit = true;
+        cursor += 1;
+    }
+
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let mut place = 1.0 / 16.0;
+        while let Some(digit) = bytes
+            .get(cursor)
+            .and_then(|byte| tonumber_digit(*byte))
+            .filter(|digit| *digit < 16)
+        {
+            value += f64::from(digit) * place;
+            place /= 16.0;
+            parsed_digit = true;
+            cursor += 1;
+        }
+    }
+
+    if !parsed_digit {
+        return None;
+    }
+
+    if bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b'p' | b'P'))
+    {
+        cursor += 1;
+        let exponent_sign = match bytes.get(cursor) {
+            Some(b'+') => {
+                cursor += 1;
+                1
+            }
+            Some(b'-') => {
+                cursor += 1;
+                -1
+            }
+            _ => 1,
+        };
+        let mut exponent = 0_i32;
+        let mut parsed_exponent_digit = false;
+        while let Some(digit) = bytes
+            .get(cursor)
+            .copied()
+            .filter(u8::is_ascii_digit)
+            .map(|byte| i32::from(byte - b'0'))
+        {
+            exponent = exponent.saturating_mul(10).saturating_add(digit);
+            parsed_exponent_digit = true;
+            cursor += 1;
+        }
+        if !parsed_exponent_digit {
+            return None;
+        }
+        value = libm::ldexp(value, exponent.saturating_mul(exponent_sign));
+    }
+
+    if cursor != bytes.len() {
+        return None;
+    }
+
+    Some(sign * value)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_number, floored_mod, is_integral_bits};
+    use super::{
+        canonicalize_number, floored_mod, is_integral_bits, parse_numeric_text, CANON_NAN_BITS,
+    };
+
+    #[test]
+    fn numeric_text_matches_vm_coercion() {
+        assert_eq!(parse_numeric_text(b" 0x1.8p+2 "), Some(6.0));
+        assert_eq!(parse_numeric_text(b" -2.5e1 "), Some(-25.0));
+        assert_eq!(
+            parse_numeric_text(b"-0x0").unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(
+            parse_numeric_text(b"NaN(payload)").unwrap().to_bits(),
+            CANON_NAN_BITS
+        );
+        assert_eq!(parse_numeric_text(b"1\xff"), None);
+        assert_eq!(parse_numeric_text(b"0x.p1"), None);
+    }
 
     #[test]
     fn ieee_integral_predicate_matches_numeric_integrality() {
