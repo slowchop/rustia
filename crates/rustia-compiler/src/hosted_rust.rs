@@ -83,6 +83,7 @@ pub fn emit_module(
 /// Lower a module or isolated callback to Rust against a caller-supplied
 /// `compiled_runtime` adapter. Unsupported syntax returns a source diagnostic.
 /// Selection, capture binding, VM state and execution remain caller-owned.
+/// Each loop body begins with a call to the adapter's `Host::loop_checkpoint`.
 pub fn emit(
     file: &str,
     source: &[u8],
@@ -338,6 +339,11 @@ impl Emitter<'_> {
 
     fn statement(&mut self, statement: &Stmt, output: &mut String) -> Result<()> {
         let runtime = self.runtime;
+        let checkpoint = if self.standalone {
+            ""
+        } else {
+            "host.loop_checkpoint()?;\n"
+        };
         match statement {
             Stmt::Local { bindings, init, .. } => {
                 let init = self.values(init)?;
@@ -406,7 +412,11 @@ impl Emitter<'_> {
             } => {
                 let condition = self.expr(condition)?;
                 let body = self.loop_body(body)?;
-                writeln!(output, "while ({condition}).truthy() {{\n{body}}}").unwrap();
+                writeln!(
+                    output,
+                    "while ({condition}).truthy() {{\n{checkpoint}{body}}}"
+                )
+                .unwrap();
             }
             Stmt::ForNumeric {
                 variable,
@@ -433,7 +443,7 @@ impl Emitter<'_> {
                      let limit = ({limit}).number()?;\n\
                      let step = ({step}).number()?;\n\
                      while if step > 0.0 {{ current <= limit }} else {{ current >= limit }} {{\n\
-                     let l{variable} = cell(Value::Number(current));\n\
+                     {checkpoint}let l{variable} = cell(Value::Number(current));\n\
                      let next = current + step;\n\
                      current = next;\n{body}}}\n}}"
                 )
@@ -463,7 +473,7 @@ impl Emitter<'_> {
                     "{{\nlet input = {iter};\n\
                      let mut rows = {runtime}::LoopRows::new(host, input)?;\n\
                      while let Some(row) = rows.next_row(host)? {{\n\
-                     let mut row = row.into_iter();\n{bindings}{body}}}\n}}"
+                     {checkpoint}let mut row = row.into_iter();\n{bindings}{body}}}\n}}"
                 )
                 .unwrap();
             }
@@ -510,7 +520,7 @@ impl Emitter<'_> {
                 self.loop_depth -= 1;
                 writeln!(
                     output,
-                    "loop {{\n{body}if ({condition}).truthy() {{ break; }}\n}}"
+                    "loop {{\n{checkpoint}{body}if ({condition}).truthy() {{ break; }}\n}}"
                 )
                 .unwrap();
             }

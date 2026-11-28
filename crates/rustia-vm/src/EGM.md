@@ -35,6 +35,7 @@
 - Plain dispatch attempts the predecoded tape before fetching canonical bytecode. Completed tape runs fall directly into canonical admission at the returned PC, without retrying tape eligibility. Loader-established tape boundaries preserve scalar calls and HotIR-owned backedges. Guard exits refresh roots and enter scalar semantics without retrying fast admission or repeating accounting.
 
 - Recognized array-iterator leaves validate the table handle and reject metatables before the existing boundary calculation. The guard precedes index mutation; general length and lookup APIs are unchanged.
+- The low-level `VmExecution` budget accepts explicit trusted compiled-work debits. A debit shares the interpreter's fuel balance and leaves the instruction clock and collection schedule alone.
 - Core numeric helpers canonicalize arithmetic NaNs and table-key zero representations. Compiled callers share the VM’s numeric text parsing, explicit-base conversion and formatting through the `number` module.
 - The native `string.gmatch` iterator matches `%a+` over ASCII letters and `%w+` over ASCII letters and digits. It advances by byte offsets.
 - String-index conversion accepts the half-open signed-64 range and truncates accepted fractions toward zero; `2^63` is rejected ([numeric-index contract](../../../design/95-numeric-index-contract.md)). The nine dedicated string-opcode bodies share a non-inlined helper within `vm.rs`, preserving register access, fuel charges, and error locations.

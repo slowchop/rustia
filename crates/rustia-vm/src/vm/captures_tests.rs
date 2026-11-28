@@ -331,3 +331,27 @@ fn compiled_numeric_call_defers_to_the_exact_quota_failure() {
         );
     }
 }
+
+#[test]
+fn compiled_work_debits_the_interpreter_budget_without_advancing_the_clock() {
+    let (mut vm, function) = fixture(false, false);
+    let function = function.value(&vm).unwrap();
+    let mut execution = vm.begin_transactional_execution_with_fuel(Some(3));
+    let clock = vm.executed_instructions();
+    execution.charge_compiled_work(1).unwrap();
+    assert_eq!(execution.fuel_remaining(), Some(2));
+    assert_eq!(vm.executed_instructions(), clock);
+
+    let values = vm
+        .call_retained_function_in(function, &[], &mut execution, &mut RejectHostDispatcher)
+        .unwrap();
+    assert_eq!(values[0].as_number(), Some(7.0));
+    assert_eq!(execution.fuel_remaining(), Some(0));
+    let error = execution.charge_compiled_work(1).unwrap_err();
+    assert!(matches!(error.kind, ErrorKind::FuelExhausted { limit: 3 }));
+    assert_eq!(execution.fuel_used(), 3);
+
+    let mut unmetered = vm.begin_transactional_execution_with_fuel(None);
+    unmetered.charge_compiled_work(u64::MAX).unwrap();
+    assert_eq!(unmetered.fuel_remaining(), None);
+}
