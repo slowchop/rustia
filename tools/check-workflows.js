@@ -1307,6 +1307,9 @@ if (fs.existsSync(publicSourceProfilePath)) {
     if (marker.correctness_ci !== "public-hosted") {
       const result = publicProfile.selfTest(root);
       console.log(`public workflow profile self-tests ok (${result.cases} negative fixtures)`);
+    } else {
+      const release = publicProfile.githubReleaseSelfTest(root);
+      console.log(`GitHub release workflow self-tests ok (${release.cases} negative fixtures)`);
     }
     const candidate = require("./check-public-source-candidate.js").selfTest(root);
     console.log(`hosted workflow candidate self-tests ok (${candidate.cases} negative fixtures)`);

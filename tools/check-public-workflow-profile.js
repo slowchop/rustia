@@ -8,7 +8,8 @@ const CORE_FILES = Object.freeze(["ci.yml", "error-fuzz.yml"]);
 const QUICK_FILE = "quick.yml";
 const BULK_FILE = "bulk.yml";
 const STAGED_CORRECTNESS_FILE = "staged-correctness.yml";
-const EXPECTED_FILES = Object.freeze([...CORE_FILES, QUICK_FILE, BULK_FILE, STAGED_CORRECTNESS_FILE]);
+const RELEASE_FILE = "github-release.yml";
+const EXPECTED_FILES = Object.freeze([...CORE_FILES, QUICK_FILE, BULK_FILE, STAGED_CORRECTNESS_FILE, RELEASE_FILE]);
 const QUICK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric target repository identity bound by the controller\n        type: string\n        required: true\n      admission_id:\n        description: Canonical controller admission identity\n        type: string\n        required: true\n      pull_request:\n        description: Numeric source pull-request identity\n        type: string\n        required: true\n      head_repository_id:\n        description: Numeric source repository identity\n        type: string\n        required: true\n      head_repository_full_name:\n        description: Source owner and repository used for the exact checkout\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact source commit to check out\n        type: string\n        required: true\n      quick_intent_digest:\n        description: SHA-256 digest of the canonical Quick intent\n        type: string\n        required: true\n';
 const BULK_TRIGGERS = '"on":\n  workflow_dispatch:\n    inputs:\n      repository_id:\n        description: Numeric repository identity bound by the controller\n        type: string\n        required: true\n      attempt_id:\n        description: Numeric controller attempt identity\n        type: string\n        required: true\n      checkout_sha:\n        description: Exact candidate commit to check out\n        type: string\n        required: true\n      manifest_digest:\n        description: SHA-256 digest of the canonical attempt manifest\n        type: string\n        required: true\n';
 const HOSTED_MAC_SETUP = [
@@ -707,6 +708,122 @@ function checkErrorFuzz(text, mode = "private") {
   requireText(campaign, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", `${label} retained fuzz evidence`);
 }
 
+function checkGithubRelease(text) {
+  const label = ".github/workflows/github-release.yml";
+  const guard = "if: github.repository == 'slowchop/rustia' && github.ref == 'refs/heads/main'";
+  const header = [
+    "name: Rustia GitHub release",
+    "",
+    '"on":',
+    "  workflow_dispatch:",
+    "    inputs:",
+    "      version:",
+    "        description: Published crates.io version, without the v prefix",
+    "        required: true",
+    "        type: string",
+    "      commit:",
+    "        description: Full Git SHA recorded in the published archives",
+    "        required: true",
+    "        type: string",
+    "",
+    "permissions:",
+    "  contents: read",
+    "",
+    "concurrency:",
+    "  group: rustia-github-release-${{ inputs.version }}",
+    "  cancel-in-progress: false",
+    "",
+    "jobs:",
+  ].join("\n");
+  if (!text.startsWith(header + "\n")) reject(`${label} must use the reviewed manual-only header`);
+  checkActionPins(text, label);
+  forbidText(text, "self-hosted", label);
+  if (/^\s*(?:continue-on-error:|uses:\s*\.\/)|\bsecrets\./m.test(text)) {
+    reject(`${label} must fail closed and use only its scoped GitHub token`);
+  }
+  const jobs = jobBlocks(text, label);
+  if ([...jobs.keys()].join(",") !== "verify,publish") reject(`${label} must have only verify and publish jobs`);
+  const verify = jobs.get("verify");
+  requireExactJobHeader(verify, [
+    "  verify:",
+    `    ${guard}`,
+    "    runs-on: ubuntu-24.04",
+    "    timeout-minutes: 10",
+    "    outputs:",
+    "      version: ${{ steps.crates.outputs.version }}",
+    "      commit: ${{ steps.crates.outputs.commit }}",
+    "    steps:",
+  ].join("\n"), label);
+  const verification = exactStepBlocks(verify, ["Checkout release tooling", "Verify six published archives"], label);
+  requireExactStep(verification, "Checkout release tooling", [
+    "      - name: Checkout release tooling",
+    "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+    "        with:",
+    "          ref: ${{ github.sha }}",
+    "          persist-credentials: false",
+  ].join("\n"), label);
+  requireExactStep(verification, "Verify six published archives", [
+    "      - name: Verify six published archives",
+    "        id: crates",
+    "        shell: bash",
+    "        env:",
+    "          RELEASE_VERSION: ${{ inputs.version }}",
+    "          RELEASE_COMMIT: ${{ inputs.commit }}",
+    "        run: |",
+    '          python3 tools/verify-published-release.py "$RELEASE_VERSION" "$RELEASE_COMMIT"',
+    '          printf \'version=%s\\ncommit=%s\\n\' "$RELEASE_VERSION" "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"',
+  ].join("\n"), label);
+  const publish = jobs.get("publish");
+  requireExactJobHeader(publish, [
+    "  publish:",
+    "    needs: verify",
+    `    ${guard}`,
+    "    runs-on: ubuntu-24.04",
+    "    timeout-minutes: 5",
+    "    permissions:",
+    "      contents: write",
+    "    steps:",
+  ].join("\n"), label);
+  const publication = exactStepBlocks(publish, ["Create GitHub tag and release"], label)
+    .get("Create GitHub tag and release");
+  const stepHeader = [
+    "      - name: Create GitHub tag and release",
+    "        shell: bash",
+    "        env:",
+    "          GH_TOKEN: ${{ github.token }}",
+    "          RELEASE_VERSION: ${{ needs.verify.outputs.version }}",
+    "          RELEASE_COMMIT: ${{ needs.verify.outputs.commit }}",
+    "        run: |",
+  ].join("\n");
+  if (!publication.startsWith(stepHeader + "\n")) reject(`${label} must publish from the verified outputs`);
+  if (/\$\{\{/.test(publication.slice(stepHeader.length))) {
+    reject(`${label} must pass expressions through environment variables, outside the publication script`);
+  }
+  forbidText(publication, "cargo publish", label);
+  forbidText(publication, "uses:", label);
+}
+
+function githubReleaseSelfTest(root) {
+  const assert = require("node:assert/strict");
+  const release = fs.readFileSync(path.join(root, ".github/workflows", RELEASE_FILE), "utf8");
+  checkGithubRelease(release);
+  const mutations = [
+    ["  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:"],
+    ["  contents: read", "  contents: write"],
+    ["    needs: verify", "    needs: []"],
+    ["    if: github.repository", "    if: always() && github.repository"],
+    ["ref: ${{ github.sha }}", "ref: ${{ inputs.commit }}"],
+    ["runs-on: ubuntu-24.04", "runs-on: self-hosted"],
+    ["RELEASE_COMMIT: ${{ needs.verify.outputs.commit }}", "RELEASE_COMMIT: ${{ inputs.commit }}"],
+  ];
+  for (const [before, after] of mutations) {
+    const changed = release.replace(before, after);
+    assert.notEqual(changed, release);
+    assert.throws(() => checkGithubRelease(changed), /github-release\.yml/);
+  }
+  return { cases: mutations.length };
+}
+
 function validatePublicProfile({ profile, files, workflows }) {
   if (profile?.schema !== "rustia.public-source-profile.v1" || profile?.state !== "private-rehearsal" ||
       !FULL_COMMIT.test(profile.historical_head ?? "") || profile.historical_host_label !== "ci-bench" ||
@@ -737,8 +854,10 @@ function validatePublicProfile({ profile, files, workflows }) {
     if (typeof workflows[QUICK_FILE] !== "string") reject(`missing active workflow ${QUICK_FILE}`);
     if (typeof workflows[BULK_FILE] !== "string") reject(`missing active workflow ${BULK_FILE}`);
     if (typeof workflows[STAGED_CORRECTNESS_FILE] !== "string") reject(`missing active workflow ${STAGED_CORRECTNESS_FILE}`);
+    if (typeof workflows[RELEASE_FILE] !== "string") reject(`missing active workflow ${RELEASE_FILE}`);
     checkQuick(workflows[QUICK_FILE]);
     checkBulk(workflows[BULK_FILE], workflows[STAGED_CORRECTNESS_FILE]);
+    checkGithubRelease(workflows[RELEASE_FILE]);
   }
   if (files.includes(rehearsalFiles[0])) {
     checkCi(workflows[rehearsalFiles[0]], "rehearsal");
@@ -945,4 +1064,4 @@ function selfTest(root) {
 }
 
 module.exports = { HOSTED_MAC_SETUP, validatePublicProfile, checkCi, checkErrorFuzz, checkQuick, checkBulk, checkStagedCorrectness, readCheckout, selfTest, quickSelfTest, bulkSelfTest,
-  REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };
+  githubReleaseSelfTest, REHEARSAL, REHEARSAL_TRIGGERS, PUBLIC_PR, PUBLIC_MANUAL };

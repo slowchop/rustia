@@ -201,8 +201,10 @@ function selfTest(root) {
     fs.writeFileSync(path.join(temporary, ".github/workflows/quick.yml"), workflows["quick.yml"]);
     workflows["staged-correctness.yml"] = fs.readFileSync(path.join(root, ".github/workflows/staged-correctness.yml"), "utf8");
     fs.writeFileSync(path.join(temporary, ".github/workflows/staged-correctness.yml"), workflows["staged-correctness.yml"]);
+    workflows["github-release.yml"] = fs.readFileSync(path.join(root, ".github/workflows/github-release.yml"), "utf8");
+    fs.writeFileSync(path.join(temporary, ".github/workflows/github-release.yml"), workflows["github-release.yml"]);
     fs.writeFileSync(path.join(temporary, "design/public-source-profile.json"), JSON.stringify({ ...profile, correctness_ci: "public-hosted" }));
-    assert.equal(privateProfile.readCheckout(temporary).files, 5);
+    assert.equal(privateProfile.readCheckout(temporary).files, 6);
     assert.equal(readCheckout(temporary).active, true);
     assert.throws(() => privateProfile.validatePublicProfile({
       profile: { ...profile, correctness_ci: "private-self-hosted" },
