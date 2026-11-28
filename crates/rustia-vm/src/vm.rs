@@ -19351,8 +19351,10 @@ impl Vm {
         let text = self.coerce_to_string(registers, instruction.b)?;
         let count = string_repeat_count(get_number(registers, instruction.c)?)?;
         let result_len = string_repeat_len(text.len(), count)?;
-        let growth = self.heap.planned_owned_string_live_bytes(result_len);
-        self.ensure_memory_growth(growth, &[])?;
+        self.ensure_planned_memory_growth(
+            |vm| vm.heap.planned_owned_string_live_bytes(result_len),
+            &[],
+        )?;
         let output = repeat_string(&text, count)?;
         Ok(self.heap.intern_string_value_bytes(&output))
     }
@@ -31634,6 +31636,74 @@ mod inline_cache_tests {
             vec![b'x'; 200]
         );
         assert_eq!(vm.current_live_bytes(), before + growth);
+    }
+
+    #[test]
+    fn concatenation_admits_the_result_before_interning() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let left = vm.create_retained_string_bytes(&[b'a'; 100]).unwrap();
+        let right = vm.create_retained_string_bytes(&[b'b'; 100]).unwrap();
+        let lhs = left.value(&vm).unwrap();
+        let rhs = right.value(&vm).unwrap();
+        vm.collect_garbage();
+        let baseline = vm.current_live_bytes();
+        let atoms = vm.heap.string_atom_count();
+        let growth = vm.heap.planned_owned_string_live_bytes(200);
+        let program = Program::new(Function::new(vec![], 0), vec![]);
+        let concat = |vm: &mut Vm| -> Result<Value> {
+            let mut state = vm.begin_execution();
+            let mut execution = Execution {
+                state: &mut state,
+                hosts: &mut RejectHostDispatcher,
+            };
+            let step = vm.concat_operands_step(&program, lhs, rhs, 0, &mut execution)?;
+            vm.finish_implicit_step(step, &mut execution, first_result_or_nil)
+        };
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth - 1);
+        assert!(matches!(
+            concat(&mut vm).unwrap_err().kind,
+            ErrorKind::OutOfMemory
+        ));
+        assert_eq!(vm.heap.string_atom_count(), atoms);
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth);
+        let result = concat(&mut vm).unwrap();
+        let expected: Vec<_> = [b'a'; 100].into_iter().chain([b'b'; 100]).collect();
+        assert_eq!(vm.string_value_bytes(result).unwrap().unwrap(), expected);
+
+        vm.settings.memory_limit_bytes = None;
+        let result = vm.retain_value(result).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+        assert_eq!(
+            concat(&mut vm).unwrap().as_string_atom(),
+            result.value(&vm).unwrap().as_string_atom()
+        );
+    }
+
+    #[test]
+    fn quota_limited_concat_preserves_inline_string_representation() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let atom = vm.heap.intern_string_bytes(b"ab");
+        let _atom_root = vm.retain_value(Value::string_atom(atom)).unwrap();
+        vm.settings.memory_limit_bytes = Some(vm.current_live_bytes());
+
+        let lhs = Value::short_string(b"a").unwrap();
+        let rhs = Value::short_string(b"b").unwrap();
+        let program = Program::new(Function::new(vec![], 0), vec![]);
+        let mut state = vm.begin_execution();
+        let mut execution = Execution {
+            state: &mut state,
+            hosts: &mut RejectHostDispatcher,
+        };
+        let step = vm
+            .concat_operands_step(&program, lhs, rhs, 0, &mut execution)
+            .unwrap();
+        let result = vm
+            .finish_implicit_step(step, &mut execution, first_result_or_nil)
+            .unwrap();
+        assert_eq!(result.as_short_string().unwrap().as_bytes(), b"ab");
     }
 
     #[test]
