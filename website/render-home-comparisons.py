@@ -1,7 +1,7 @@
 """Render the shared site header and the homepage comparison charts."""
 
 from argparse import ArgumentParser
-from datetime import datetime, timezone
+from hashlib import sha256
 from html import escape, unescape
 import json
 from decimal import Decimal
@@ -12,7 +12,6 @@ import sys
 
 SITE = Path(__file__).resolve().parent
 README_URL = "https://github.com/slowchop/rustia"
-BENCHMARK_URL = README_URL + "/blob/94c6a34246c8a07badfd7ef88e89c4a9a643919b/bench"
 CHART_ENGINES = {
     "rustia": "Rustia",
     "luaur": "luaur",
@@ -22,14 +21,24 @@ CHART_ENGINES = {
     "koto": "Koto",
     "rhai": "Rhai",
     "roto": "Roto",
+    "ulua": "ulua",
+    "luau-rs": "luau-rs/luau",
+    "mlua-lua54": "mlua + Lua 5.4",
+    "piccolo": "Piccolo",
+    "rune": "Rune",
+    "starlark": "Starlark",
+    "boa": "Boa",
+    "rquickjs": "rquickjs",
+    "wasmi": "Wasmi",
+    "wasmtime": "Wasmtime",
 }
 MARKER = "<!-- home-comparisons -->"
 COMPARISON_HEADER = "| Project | Runs | Written in | Platforms |"
 COMPARISON_LEGEND = "✓ Ran in Rustia checks · B Build or type-check only · U Upstream evidence"
 METRICS = (
-    ("steady", "Steady-state time", "ns_per_unit_min", "µs per work unit"),
-    ("cold", "Cold start", "cold_start_ns_min", "µs"),
-    ("first", "First call", "first_call_ns_min", "µs"),
+    ("steady", "Steady-state time", "µs per work unit"),
+    ("cold", "Cold start", "µs"),
+    ("first", "First call", "µs"),
 )
 ARRAY_CAP = 10
 
@@ -156,22 +165,15 @@ def render_luau_comparison(rows: list[list[str]]) -> str:
     )
 
 
-def read_speed_snapshot(snapshot: dict) -> dict:
-    history = SITE.parent / "bench/history/runs.jsonl"
-    times = {}
-    with history.open(encoding="utf-8") as runs:
-        for line in runs:
-            row = json.loads(line)
-            if (row["commit"] != snapshot["commit"] or row["target"] != snapshot["target"]
-                    or not snapshot["start"] <= row["timestamp_unix"] <= snapshot["end"]
-                    or row["engine"] not in CHART_ENGINES or row["workload"] not in snapshot["workloads"]):
-                continue
-            key = (row["workload"], row["engine"])
-            values = {metric: row[field] / 1000 for metric, _, field, _ in METRICS}
-            if key in times or min(values.values()) <= 0:
-                raise ValueError(f"Invalid benchmark time for {key}")
-            times[key] = values
-    return times
+def read_speed_snapshot() -> tuple[dict, str]:
+    root = SITE.parent
+    profile = json.loads((root / "design/public-source-profile.json").read_text(encoding="utf-8"))
+    publication = profile["website_comparison"]
+    path = publication["path"]
+    data = (root / path).read_bytes()
+    if sha256(data).hexdigest() != publication["sha256"]:
+        raise ValueError("The website comparison differs from the approved snapshot")
+    return json.loads(data), path
 
 
 def render_measure(key, label, value, baseline, scale, units, method):
@@ -208,31 +210,24 @@ def render_measure(key, label, value, baseline, scale, units, method):
 
 
 
-def render_speed_chart(snapshot: dict, times: dict) -> str:
-    short_labels = {
-        "dense_tables": "Build, sum and sort an array",
-        "sparse_tables": "Sparse table reads and writes",
-        "closures_upvalues": "Call a closure",
-        "generic_iteration": "Iterate over tables",
-        "stdlib_math_table": "Math and table appends",
-    }
+def render_speed_chart(snapshot: dict) -> str:
     panels = []
     for workload, info in snapshot["workloads"].items():
-        data = {engine: times[workload, engine] for engine in CHART_ENGINES}
+        data = info["times_us"]
         baseline = data["rustia"]
         scales = {
             metric: baseline[metric] * ARRAY_CAP if workload == "dense_tables"
             else max(values[metric] for values in data.values())
-            for metric, _, _, _ in METRICS
+            for metric, _, _ in METRICS
         }
         items = []
         for engine in sorted(data, key=lambda item: data[item]["steady"]):
             name = escape(CHART_ENGINES[engine])
             values = data[engine]
-            method = "handwritten quadratic sort" if (workload, engine) == ("dense_tables", "roto") else None
+            method = info.get("notes", {}).get(engine)
             bars = "".join(
                 render_measure(metric, label, values[metric], baseline[metric], scales[metric], units, method)
-                for metric, label, _, units in METRICS
+                for metric, label, units in METRICS
             )
             baseline_class = ' speed-baseline' if engine == "rustia" else ""
             sort_data = "".join(f' data-sort-{metric}="{value}"' for metric, value in values.items())
@@ -240,7 +235,13 @@ def render_speed_chart(snapshot: dict, times: dict) -> str:
                 f'<li class="benchmark-engine{baseline_class}"{sort_data}><span>{name}</span>'
                 f'<div class="benchmark-engine-measures">{bars}</div></li>'
             )
-        label = escape(short_labels.get(workload, info["label"]))
+        for engine, reason in info.get("skipped", {}).items():
+            name = escape(CHART_ENGINES[engine])
+            items.append(
+                f'<li class="benchmark-engine benchmark-skipped"><span>{name}</span>'
+                f'<span class="benchmark-skip-reason">Skipped · {escape(reason)}</span></li>'
+            )
+        label = escape(info["label"])
         panels.append(
             f'<div role="group" aria-labelledby="chart-{workload}"><div class="benchmark-card-heading">'
             f'<h4 id="chart-{workload}">{label}</h4>'
@@ -273,18 +274,15 @@ def render_description_metadata(homepage: str) -> str:
 def render_homepage(homepage: str) -> str:
     if homepage.count(MARKER) != 1:
         raise ValueError("Expected exactly one homepage comparison marker")
-    snapshot_path = SITE.parent / "bench/history/site-comparison.json"
-    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    benchmark_date = datetime.fromtimestamp(snapshot["start"], timezone.utc).date().isoformat()
+    snapshot, snapshot_path = read_speed_snapshot()
     comparison = (SITE.parent / "crates/rustia/compare.md").read_text(encoding="utf-8")
     sources_checked = re.search(r"\*\*Sources and details\*\* · Checked ([\w ]+)\.", comparison)[1]
     luau_rows = read_table(comparison, COMPARISON_HEADER)
-    speed_rows = read_speed_snapshot(snapshot)
     luau = render_luau_comparison(luau_rows)
-    chart = render_speed_chart(snapshot, speed_rows)
+    chart = render_speed_chart(snapshot)
     options = []
     sort_options = []
-    for key, label, _, _ in METRICS:
+    for key, label, _ in METRICS:
         checked_attr = " checked" if key == "steady" else ""
         selected = " selected" if key == "steady" else ""
         options.append(
@@ -299,8 +297,8 @@ def render_homepage(homepage: str) -> str:
     {luau}
     {evidence}
     <p><a href="/docs/api/rustia/#compare-luau-projects">Luau comparison sources and notes</a></p>
-    <h3 id="speed-comparison">Historical runtime speed</h3>
-    <p><strong>Lower is better.</strong> 1× is Rustia’s time for that task. Bars follow the selected measures in order. The array chart caps bars at {ARRAY_CAP}×.</p>
+    <h3 id="speed-comparison">Runtime speed</h3>
+    <p><strong>Lower is better.</strong> 1× is Rustia’s time for that task. Bars follow the selected measures in order. Each measure has its own scale. The array chart caps bars at {ARRAY_CAP}× and marks higher times with an arrow.</p>
 <fieldset class="benchmark-measures" id="benchmark-measures">
   <legend>Measures</legend>
   <span id="benchmark-measure-minimum" hidden>Select another measure before turning this one off.</span>
@@ -321,8 +319,8 @@ def render_homepage(homepage: str) -> str:
 </div>
     {chart}
     <div id="benchmark-tooltip" popover="manual" aria-hidden="true"></div>
-    <p>Archived Linux x86-64 snapshot from {benchmark_date} UTC. Each bar uses the best observed time for its measure. Steady state measures repeated work. Cold start includes preparation and the first call. Each engine uses its own version of each task.</p>
-    <p><a href="{BENCHMARK_URL}/RESULTS.md">Exact historical timings on GitHub</a> · <a href="{BENCHMARK_URL}/CLAIMS.md">Benchmark methodology and limitations</a></p>'''
+    <p>Linux x86-64 · {escape(snapshot["date_utc"])} UTC · Median of {snapshot["sample_count"]} samples. Cold start includes preparation and the first call. Workload implementations vary by engine.</p>
+    <p><a href="{README_URL}/blob/main/{escape(snapshot_path)}">Benchmark data</a> · <a href="{README_URL}/blob/main/bench/COMPETITORS.md#expanded-runtime-comparison">Methodology and limitations</a></p>'''
     return render_description_metadata(homepage).replace(MARKER, section)
 
 

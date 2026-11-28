@@ -57,9 +57,10 @@ serves them.
 - A separate private maintainer bridge is available only for manually dispatched,
   reviewed exact-cohort runtime comparisons on `ci-bench`. The #33 harness-lifetime
   repeatability controls use a separately reviewed, immutable private protocol.
-  Keep all outputs private and
-  review raw data independently before accepting a comparison. Bridge availability is
-  not a performance result; private comparisons do not update public history or authorize public claims.
+  Review raw data independently before accepting a comparison. Keep raw evidence
+  private. The public-source profile names the single approved aggregate for the
+  website comparison. See [benchmark operations](design/81-benchmark-operations.md#public-source-profile)
+  for its publication scope.
 - Never run performance benchmarks on the developer's local machine. This includes benchmark examples or binaries, `cargo bench`, timing or profiling scripts, and ad hoc performance comparisons.
 - Local compilation, correctness tests, and static validation are allowed, but their durations must not be treated or reported as performance evidence.
 - Obtain measurements through the separate private maintainer bridge; pushing a source PR
@@ -93,7 +94,7 @@ serves them.
    determinism must reject nondeterminism; do not cripple the shared advanced API for `live()` users.
 
 3. **Measure, don't assert — perf is a number or it didn't happen.** No "this should be faster." Perf claims
-   cite the accepted `ci-bench` results for the workload. New private comparisons stay private. Add a tier/optimisation
+   cite the accepted `ci-bench` results for the workload. The website may display its approved workload-level snapshot. Add a tier/optimisation
    (JIT, inline cache, …) only when a measurement demands it. "Done" means tested + measured, not hoped.
 
 4. **KISS — one core, earn every abstraction.** One portable engine (no per-target forks); no bespoke ops in

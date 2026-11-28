@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("assert/strict");
+const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const fs = require("fs");
 const path = require("path");
@@ -145,6 +146,42 @@ function selfTest(snapshot, history) {
     measuredTimes(history));
 }
 
+
+function validateWebsiteSnapshot(retained) {
+  const profile = JSON.parse(fs.readFileSync(path.join(root, "design/public-source-profile.json"), "utf8"));
+  const publication = profile.website_comparison;
+  assert.match(publication.path, /^bench\/site-comparison-\d{4}-\d{2}-\d{2}\.json$/);
+  const bytes = fs.readFileSync(path.join(root, publication.path));
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), publication.sha256,
+    "website comparison must match the approved snapshot");
+  const snapshot = JSON.parse(bytes);
+  assert.equal(snapshot.schema, "rustia.website-comparison.v1");
+  assert.equal(snapshot.target, "linux-x86_64");
+  assert.equal(snapshot.sample_count, 10);
+  assert.equal(publication.path, `bench/site-comparison-${snapshot.date_utc}.json`);
+  assert.deepEqual(Object.keys(snapshot.workloads).sort(), Object.keys(retained.workloads).sort());
+
+  const engines = new Set(Object.values(snapshot.workloads).flatMap(({ times_us }) => Object.keys(times_us)));
+  assert.equal(engines.size, 18);
+  let pairs = 0;
+  for (const [key, workload] of Object.entries(snapshot.workloads)) {
+    const measured = Object.keys(workload.times_us);
+    const skipped = Object.entries(workload.skipped ?? {});
+    assert.ok(measured.includes("rustia"), `${key} needs a Rustia baseline`);
+    assert.deepEqual([...measured, ...skipped.map(([engine]) => engine)].sort(), [...engines].sort(),
+      `${key} must account for each engine exactly once`);
+    for (const [engine, times] of Object.entries(workload.times_us)) {
+      assert.deepEqual(Object.keys(times).sort(), ["cold", "first", "steady"], `${key}/${engine} measures`);
+      assert.ok(Object.values(times).every(time => Number.isFinite(time) && time > 0),
+        `${key}/${engine} needs three positive times`);
+    }
+    assert.ok(skipped.every(([, reason]) => typeof reason === "string" && reason.trim()),
+      `${key} needs a reason for each skipped pair`);
+    pairs += measured.length;
+  }
+  assert.equal(pairs, 85);
+}
+
 try {
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
   const history = fs.readFileSync(path.join(root, "bench/history/runs.jsonl"), "utf8")
@@ -154,8 +191,9 @@ try {
   selfTest(snapshot, history);
   requireFact(process.argv.length === 2, "usage: node tools/check-readme-comparisons.js");
   validateComparison(snapshot, readCohort(snapshot, history));
+  validateWebsiteSnapshot(snapshot);
   require("./sync-luau-comparison.js").syncComparison();
-  console.log(`README sources reachable and website benchmark evidence valid at ${snapshot.commit.slice(0, 7)}`);
+  console.log(`README sources, the retained cohort at ${snapshot.commit.slice(0, 7)}, and the approved website comparison are valid`);
 } catch (error) {
   console.error(`check-readme-comparisons: ${error.message}`);
   process.exit(1);

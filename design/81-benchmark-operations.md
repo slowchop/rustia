@@ -13,11 +13,16 @@ publication and landscape refresh remain paused. The separate private
 maintainer bridge retains its reviewed exact-cohort intake rules.
 
 The #33 harness-lifetime repeatability controls use a separately reviewed,
-immutable private protocol. Both stay private, do not update public history, and do not
-authorize public performance claims. The committed benchmark records remain
-historical data; they do not establish current runner authority or performance
-stability. Bridge availability does not accept a performance result. No public
-workflow dispatches a benchmark or publishes benchmark data.
+immutable private protocol. Raw results and diagnostics stay private. Public
+workflows run hosted correctness checks.
+
+A one-time maintainer approval covers the
+[28 November expanded Linux comparison](../bench/site-comparison-2026-11-28.json)
+for the website. Independent review checked the retained measurements. The
+public-source profile names the approved aggregate and its SHA-256 digest. A
+site build renders those medians and the associated workload notes. Benchmark
+history, automated publication and headline performance claims remain outside
+that approval.
 `design/public-source-profile.json` records the bridge's narrow
 availability state, while the public workflow, operations-status, and report
 validators enforce the hosted correctness inventory and keep benchmark execution private.
