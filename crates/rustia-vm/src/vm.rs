@@ -56,6 +56,10 @@ use crate::number::{
 use crate::ownership::{borrow_service, RegistryCell, ServiceCell, Shared, Weak};
 use crate::profile::{GuestSurface, Profile};
 use crate::register_blocks::RegisterBlockPlan;
+use crate::table_operations::{
+    table_concat_index, table_create_size_with_limit, table_find_start, table_insert_position_arg,
+    table_integer_arg, table_move_count, table_move_indices, MAX_LUAU_TABLE_INDEX,
+};
 use crate::tape::{FunctionTape, TapeComparison, TapeOp};
 use crate::value::{Value, ValueKind};
 use smallvec::SmallVec;
@@ -66,10 +70,7 @@ use std::num::NonZeroU64;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
-const LUAU_TABLE_MAX_SIZE: usize = 1 << 26;
-const MAX_TABLE_CREATE_ARRAY_SIZE: usize = 100_000;
 const MAX_TABLE_UNPACK_RESULTS: usize = 7_999;
-const MAX_LUAU_TABLE_INDEX: f64 = 2_147_483_647.0;
 const READONLY_TABLE_ERROR: &str = "attempt to modify a readonly table";
 const LUAU_UTF8_CHARPATTERN: &[u8] = b"[\0-\x7f\xc2-\xf4][\x80-\xbf]*";
 const LUAU_RECURSIVE_REVERSE_GSUB_PATTERN: &[u8] = b"(.)(.+)";
@@ -10075,12 +10076,12 @@ impl Vm {
         let puc_constructor = self.profile.is_puc51_compat()
             && instruction.op == Opcode::TableCreate
             && instruction.aux == 0;
-        let size = table_create_size(
+        let size = table_create_size_with_limit(
             self.coerce_register_to_number(registers, instruction.b)?,
             !puc_constructor,
         )?;
         if puc_constructor {
-            let hash_size = table_create_size(
+            let hash_size = table_create_size_with_limit(
                 self.coerce_register_to_number(registers, instruction.c)?,
                 false,
             )?;
@@ -18812,23 +18813,19 @@ impl Vm {
 
     fn native_table_move(&mut self, args: &[Value]) -> Result<Value> {
         let bounds = self.table_move_bounds(args)?;
-        let count = table_move_count(bounds.start, bounds.end)?;
-        if count == 0 {
-            return Ok(Value::table(bounds.destination));
-        }
-        table_move_destination_end(bounds.destination_start, count)?;
-
-        let copy_backward = bounds.source == bounds.destination
-            && bounds.destination_start > bounds.start
-            && bounds.destination_start <= bounds.end;
-        if copy_backward {
-            for offset in (0..count).rev() {
-                self.move_table_slot(&bounds, offset)?;
-            }
-        } else {
-            for offset in 0..count {
-                self.move_table_slot(&bounds, offset)?;
-            }
+        let indices = table_move_indices(
+            bounds.start,
+            bounds.end,
+            bounds.destination_start,
+            bounds.source == bounds.destination,
+        )?;
+        for (source, destination) in indices {
+            let value = self.raw_table_get(bounds.source, Value::number(f64::from(source)))?;
+            self.set_table_index(
+                bounds.destination,
+                Value::number(f64::from(destination)),
+                value,
+            )?;
         }
         Ok(Value::table(bounds.destination))
     }
@@ -18851,22 +18848,6 @@ impl Vm {
             end,
             destination_start,
         })
-    }
-
-    fn move_table_slot(&mut self, bounds: &TableMoveBounds, offset: usize) -> Result<()> {
-        let offset = i64::try_from(offset).map_err(|_| {
-            Error::new(ErrorKind::RuntimeError {
-                message: "too many elements to move".to_owned(),
-            })
-        })?;
-        let source_index = i64::from(bounds.start) + offset;
-        let destination_index = i64::from(bounds.destination_start) + offset;
-        let value = self.raw_table_get(bounds.source, Value::number(source_index as f64))?;
-        self.set_table_index(
-            bounds.destination,
-            Value::number(destination_index as f64),
-            value,
-        )
     }
 
     fn native_table_sort(
@@ -25234,54 +25215,6 @@ fn table_concat_range(
     Ok((start, end))
 }
 
-fn table_concat_index(value: f64) -> Result<usize> {
-    if !value.is_finite() || value.fract() != 0.0 || !(0.0..=MAX_LUAU_TABLE_INDEX).contains(&value)
-    {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.concat range",
-        }));
-    }
-    Ok(value as usize)
-}
-
-fn table_find_start(value: f64) -> Result<usize> {
-    if !value.is_finite() || value.fract() != 0.0 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.find init",
-        }));
-    }
-    if !(1.0..=MAX_LUAU_TABLE_INDEX).contains(&value) {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "index out of range",
-        }));
-    }
-    Ok(value as usize)
-}
-
-fn table_create_size(value: f64, apply_create_cap: bool) -> Result<usize> {
-    if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "integer table.create size",
-        }));
-    }
-    let size = value as i32;
-    if size < 0 {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "size out of range",
-        }));
-    }
-    let size = size as usize;
-    if size > LUAU_TABLE_MAX_SIZE {
-        return Err(Error::new(ErrorKind::TypeError {
-            expected: "table overflow",
-        }));
-    }
-    if apply_create_cap && size > MAX_TABLE_CREATE_ARRAY_SIZE {
-        return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
-    }
-    Ok(size)
-}
-
 /// `luaO_int2fb` + `luaO_fb2int` (lobject.c): PUC constructor array-size
 /// hints are rounded up to the nearest floating-byte value, so the array
 /// part of a 17-element constructor is 18 slots, not 17.
@@ -25311,55 +25244,6 @@ fn table_len_to_i32(len: usize) -> Result<i32> {
             expected: "table overflow",
         })
     })
-}
-
-fn table_integer_arg(value: f64, expected: &'static str) -> Result<i32> {
-    if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
-        return Err(Error::new(ErrorKind::TypeError { expected }));
-    }
-    Ok(value as i32)
-}
-
-fn table_insert_position_arg(value: f64) -> Result<i32> {
-    if value.is_nan() {
-        return Ok(0);
-    }
-    table_integer_arg(value, "integer table.insert position")
-}
-
-fn table_move_count(start: i32, end: i32) -> Result<usize> {
-    if end < start {
-        return Ok(0);
-    }
-    let count = i64::from(end) - i64::from(start) + 1;
-    if count > i64::from(i32::MAX) {
-        return Err(Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        }));
-    }
-    usize::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        })
-    })
-}
-
-fn table_move_destination_end(destination_start: i32, count: usize) -> Result<i32> {
-    let count = i64::try_from(count).map_err(|_| {
-        Error::new(ErrorKind::RuntimeError {
-            message: "too many elements to move".to_owned(),
-        })
-    })?;
-    if count == 0 {
-        return Ok(destination_start);
-    }
-    let destination_end = i64::from(destination_start) + count - 1;
-    if destination_end < i64::from(i32::MIN) || destination_end > i64::from(i32::MAX) {
-        return Err(Error::new(ErrorKind::RuntimeError {
-            message: "destination wrap around".to_owned(),
-        }));
-    }
-    Ok(destination_end as i32)
 }
 
 const LUAU_PACK_MAX_ALIGN: usize = 8;

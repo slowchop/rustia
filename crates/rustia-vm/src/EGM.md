@@ -19,6 +19,7 @@
 
 ## Invariants
 
+- [table_operations.rs](./table_operations.rs) shares table index validation and checked range traversal with compiled callers. The VM retains storage, fuel and table identity.
 - [byte_string.rs](./byte_string.rs) shares byte indexing, slicing, conversion and allocation bounds between VM instructions, native builtins and compiled embedders. Callers own value coercion and storage. The VM splits into borrowed byte slices, admits the result array before reserving its storage, and accounts for new atoms while retaining the earlier pieces.
 
 - [number/math.rs](./number/math.rs) supplies stateless standard math kernels to VM instructions, native builtins and compiled embedders. Callers handle arity, value coercion and stateful libraries.

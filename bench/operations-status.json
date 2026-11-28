@@ -52,9 +52,9 @@
     "measured_commit": "90bc2ae4c397f6e2bbb1af687cc8e30688010123",
     "projected_measured_commit": "df240799de22ea8588865a7f594262053c2e92f1",
     "measured_at_unix": 1792952860,
-    "latest_relevant_commit": "8f1ef82204c86c57d37b28add2031c43662a56e9",
-    "latest_relevant_committed_at_unix": 1795756946,
-    "pending_relevant_commit_count": 127,
+    "latest_relevant_commit": "bb6879805374dcaed9b2223f9aeefb0bbe5d2196",
+    "latest_relevant_committed_at_unix": 1795758694,
+    "pending_relevant_commit_count": 128,
     "next_action": "Public progress history remains paused; private benchmark bridge comparisons do not add rows."
   },
   "landscape": {
