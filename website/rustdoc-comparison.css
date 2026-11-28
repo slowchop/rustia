@@ -1,0 +1,65 @@
+.rustdoc-comparison .home-table {
+  overflow-x: auto;
+  margin-block: 1rem;
+}
+.rustdoc-comparison .home-table table {
+  width: 100%;
+  margin: 0;
+  font-size: .9rem;
+}
+.rustdoc-comparison .home-table th,
+.rustdoc-comparison .home-table td {
+  padding: .35em .65em;
+  text-align: left;
+}
+.rustdoc-comparison .home-table th[scope="row"] {
+  white-space: nowrap;
+}
+.rustdoc-comparison .project-links,
+.rustdoc-comparison .platform-links,
+.rustdoc-comparison .platform-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+}
+.rustdoc-comparison .platform-links { flex-wrap: wrap; }
+.rustdoc-comparison .project-links a {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+.rustdoc-comparison .project-links img { width: 16px; height: 16px; }
+.rustdoc-comparison .platform-icon { width: 20px; height: 20px; }
+.rustdoc-comparison :is(.project-links a, .preview-platform):hover,
+.rustdoc-comparison .preview-platform[aria-expanded="true"] {
+  background: var(--sidebar-background-color-hover);
+}
+.rustdoc-comparison :is(.project-links a, .preview-platform, .home-table):focus-visible {
+  outline: 2px solid var(--link-color);
+  outline-offset: 2px;
+}
+.rustdoc-comparison .platform-evidence-popover {
+  background: var(--main-background-color);
+  color: var(--main-color);
+  border-color: var(--border-color);
+}
+.rustdoc-comparison .platform-evidence-popover p { margin: .35rem 0; }
+.rustdoc-comparison .luau-comparison-narrow { display: none; }
+@media (max-width: 48rem) {
+  .rustdoc-comparison .luau-comparison-wide { display: none; }
+  .rustdoc-comparison .luau-comparison-narrow { display: grid; gap: .4rem; }
+  .rustdoc-comparison .luau-comparison-narrow details {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: .4rem .65rem;
+  }
+  .rustdoc-comparison .luau-comparison-narrow summary { cursor: pointer; font-weight: 600; }
+  .rustdoc-comparison .luau-comparison-narrow dl > div {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: .4rem;
+  }
+  .rustdoc-comparison .luau-comparison-narrow dd { margin: 0; }
+}

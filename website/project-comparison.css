@@ -1,0 +1,58 @@
+.preview-platform {
+  gap: 2px;
+  min-block-size: 24px;
+  padding: 2px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.preview-platform:hover, .preview-platform[aria-expanded="true"] {
+  background: #eee2c5;
+}
+.preview-platform:focus-visible {
+  outline: 2px solid #385740;
+  outline-offset: 2px;
+}
+.preview-platform sup {
+  font-size: .72em;
+  font-weight: 650;
+}
+.platform-evidence-popover {
+  box-sizing: border-box;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  max-inline-size: min(19rem, calc(100vw - 16px));
+  max-block-size: calc(100dvh - 16px);
+  overflow: auto;
+  padding: .65rem .8rem;
+  border: 1px solid #9b8968;
+  border-radius: 6px;
+  background: #fffdf4;
+  color: #17382c;
+  white-space: normal;
+  box-shadow: 0 4px 14px #32281c28;
+  font: .9rem/1.4 system-ui, sans-serif;
+}
+.home-comparison .platform-evidence-popover p {
+  margin: .35rem 0;
+}
+
+.project-links img[src="/icons/codeberg-favicon.svg"] {
+  box-sizing: content-box;
+  padding: 2px;
+  border-radius: 4px;
+  background: #194469;
+  color-scheme: dark;
+}
+
+.platform-evidence-checks {
+  margin: 0;
+  padding-inline-start: 1.15em;
+}
+.platform-evidence-checks li + li {
+  margin-block-start: .3em;
+}

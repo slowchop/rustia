@@ -31,15 +31,16 @@ wasm-bindgen --target web --no-typescript --out-dir dist/pkg \
   "$CARGO_TARGET_DIR/$target/release/rustia_garden.wasm"
 python3 render-home-comparisons.py > dist/index.html
 cp -R ../demos/web-live/icons dist/
-cp github.svg globe.svg dist/icons/
+cp github.svg globe.svg codeberg-favicon.svg crates-io.ico dist/icons/
 cp -R "$rustdoc_target/doc/." dist/docs/api/
+python3 render-home-comparisons.py --rustdoc "$rustdoc_target/doc/rustia/index.html" > dist/docs/api/rustia/index.html
 rm -f dist/docs/api/.lock
 python3 render-home-comparisons.py doc-index.html > dist/docs/index.html
 cp api-index.html dist/docs/api/index.html
 python3 render-home-comparisons.py garden-source.html > dist/docs/examples/garden/index.html
 cp dist/docs/examples/garden/index.html dist/garden-source/index.html
 cp _headers LICENSE-* bevy-icon.png slowchop-logo.png rustia-mark.svg garden.rs bridge.rs codemirror.js garden.css sprite-names.txt \
-  sprite-defs.html garden-fragment.html *.luau dist/
+  sprite-defs.html garden-fragment.html benchmark-charts.css project-comparison.css rustdoc-comparison.css *.luau dist/
 for script in *.mjs; do
   case "$script" in
     check-*) ;;

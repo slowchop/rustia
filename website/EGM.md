@@ -30,10 +30,12 @@ browser workers. The website is a standalone, unpublished Cargo workspace.
   site in dist/, including the facade Rustdoc under /docs/api/.
   render-home-comparisons.py reads table labels, project and platform links,
   and evidence explanations from [the shared Rustdoc comparison](../crates/rustia/compare.md).
-  It adds homepage icon styling and narrow-screen cards. The chart uses the
-  [retained benchmark cohort](../bench/history/site-comparison.json) and links
-  to the archived timings. The renderer
-  also generates search and social descriptions from the homepage intro.
+  It renders the project table on the homepage and the hosted Rustdoc. The standalone
+  guide renders the same Markdown as links. platform-evidence.mjs opens evidence
+  grouped by status for pointer, keyboard, and touch users. The homepage charts
+  use only the [retained historical cohort](../bench/history/site-comparison.json).
+  benchmark-measures.mjs controls measure visibility, sorting, times, and tooltips.
+  The renderer also generates search and social descriptions from the homepage intro.
   _headers defines the deployed policy.
 
 ## Invariants
