@@ -26,7 +26,7 @@ pub use scoped_host::VmHostCall;
 use expanded_calls::{ExpandedCallFlow, ExpandedCallState};
 
 use crate::byte_string::{
-    char_byte, luau_string_sub, repeat_string, reverse_string_bytes, split_luau_string,
+    char_byte, luau_string_sub, repeat_string, reverse_string_bytes, split_parts,
     string_byte_slice, string_library_index, string_repeat_count, string_repeat_len,
 };
 #[cfg(test)]
@@ -3262,25 +3262,28 @@ impl Vm {
         additional_live_bytes: usize,
         transient_roots: &[Value],
     ) -> Result<()> {
+        self.ensure_planned_memory_growth(|_| additional_live_bytes, transient_roots)
+    }
+
+    fn ensure_planned_memory_growth(
+        &mut self,
+        additional_live_bytes: impl Fn(&mut Self) -> usize,
+        transient_roots: &[Value],
+    ) -> Result<()> {
         let Some(limit) = self.settings.memory_limit_bytes else {
             return Ok(());
         };
-        if self
-            .current_live_bytes()
-            .saturating_add(additional_live_bytes)
-            <= limit
-        {
-            return Ok(());
+        let fits = |vm: &mut Self| {
+            let additional = additional_live_bytes(vm);
+            vm.current_live_bytes().saturating_add(additional) <= limit
+        };
+        if !fits(self) {
+            self.collect_for_memory_limit(transient_roots);
+            if !fits(self) {
+                return Err(Error::new(ErrorKind::OutOfMemory).without_source_location());
+            }
         }
-        self.collect_for_memory_limit(transient_roots);
-        if self
-            .current_live_bytes()
-            .saturating_add(additional_live_bytes)
-            <= limit
-        {
-            return Ok(());
-        }
-        Err(Error::new(ErrorKind::OutOfMemory).without_source_location())
+        Ok(())
     }
 
     pub fn register_extension_op(&mut self, op: ExtensionOp) -> Result<u16> {
@@ -19398,12 +19401,40 @@ impl Vm {
         } else {
             b",".to_vec()
         };
-        let parts = split_luau_string(&text, &separator);
-        let values = parts
-            .iter()
-            .map(|part| self.heap.intern_string_value_bytes(part))
-            .collect::<Vec<_>>();
-        Ok(Value::table(self.heap.alloc_array_table(&values)))
+        let count = if separator.is_empty() {
+            text.len()
+        } else {
+            split_parts(&text, &separator).count()
+        };
+        let table_growth = VmCell::filled_array_table_live_bytes(count);
+        self.ensure_memory_growth(table_growth, &[])?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new(ErrorKind::OutOfMemory).without_source_location())?;
+        for part in split_parts(&text, &separator) {
+            let value = if let Some(short) = Value::short_string(part) {
+                short
+            } else if let Some(atom) = self.heap.find_string_atom_bytes(part) {
+                Value::string_atom(atom)
+            } else {
+                // Account for the reserved result table alongside each new
+                // atom. Earlier parts remain rooted through quota collection.
+                self.ensure_planned_memory_growth(
+                    |vm| {
+                        table_growth
+                            .saturating_add(vm.heap.planned_owned_string_live_bytes(part.len()))
+                    },
+                    &values,
+                )?;
+                self.heap.intern_string_value_bytes(part)
+            };
+            values.push(value);
+        }
+        self.heap
+            .try_alloc_array_table(values)
+            .map(Value::table)
+            .ok_or_else(|| Error::new(ErrorKind::OutOfMemory).without_source_location())
     }
 
     fn math_unary(
@@ -31603,6 +31634,99 @@ mod inline_cache_tests {
             vec![b'x'; 200]
         );
         assert_eq!(vm.current_live_bytes(), before + growth);
+    }
+
+    #[test]
+    fn split_admits_the_result_array_and_new_atoms_together() {
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let text = vm.create_retained_string_bytes(&[b'x'; 200]).unwrap();
+        vm.collect_garbage();
+        let text_value = text.value(&vm).unwrap();
+        let baseline = vm.current_live_bytes();
+        let array_growth = VmCell::filled_array_table_live_bytes(200);
+        vm.settings.memory_limit_bytes = Some(baseline + array_growth - 1);
+        let empty = Value::short_string(b"").unwrap();
+        let failure = vm.native_string_split(&[text_value, empty]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + array_growth);
+        let array = vm.native_string_split(&[text_value, empty]).unwrap();
+        let last = vm.raw_table_get_value(array, Value::number(200.)).unwrap();
+        assert_eq!(vm.string_value_bytes(last).unwrap().unwrap(), b"x");
+
+        vm.settings.memory_limit_bytes = None;
+        let mut bytes = [b'v'; 205];
+        bytes[200..].copy_from_slice(b",tail");
+        let text = vm.create_retained_string_bytes(&bytes).unwrap();
+        vm.collect_garbage();
+        let text_value = text.value(&vm).unwrap();
+        let baseline = vm.current_live_bytes();
+        let atoms = vm.heap.string_atom_count();
+        let growth =
+            VmCell::filled_array_table_live_bytes(2) + vm.heap.planned_owned_string_live_bytes(200);
+        vm.settings.memory_limit_bytes = Some(baseline + growth - 1);
+        let failure = vm.native_string_split(&[text_value]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.heap.string_atom_count(), atoms);
+        assert_eq!(vm.current_live_bytes(), baseline);
+
+        vm.settings.memory_limit_bytes = Some(baseline + growth);
+        let table = vm.native_string_split(&[text_value]).unwrap();
+        let part = vm.raw_table_get_value(table, Value::number(1.)).unwrap();
+        assert_eq!(
+            vm.string_value_bytes(part).unwrap().unwrap(),
+            vec![b'v'; 200]
+        );
+        assert!(vm.current_live_bytes() <= baseline + growth);
+    }
+
+    #[test]
+    fn split_replans_atom_index_growth_after_quota_collection() {
+        const PART_LEN: usize = 65_536;
+        let mut vm = Vm::new(Profile::ReproducibleStandard);
+        let mut bytes = vec![b'v'; PART_LEN];
+        bytes.extend_from_slice(b",tail");
+        let text = vm.create_retained_string_bytes(&bytes).unwrap();
+        vm.collect_garbage();
+        let count = vm.heap.string_atom_count();
+        let mut roots = Vec::new();
+        for index in count..count.next_power_of_two() {
+            let key = format!("retained-split-test-atom-{index}");
+            roots.push(vm.create_retained_string_bytes(key.as_bytes()).unwrap());
+        }
+
+        let add_garbage = |vm: &mut Vm| {
+            vm.heap
+                .intern_string_bytes(b"unretained-split-test-atom-one");
+            vm.heap
+                .intern_string_bytes(b"unretained-split-test-atom-two");
+        };
+        add_garbage(&mut vm);
+        vm.collect_garbage();
+        let collected_live = vm.current_live_bytes();
+        let collected_growth = vm.heap.planned_owned_string_live_bytes(PART_LEN);
+        add_garbage(&mut vm);
+        let initial_live = vm.current_live_bytes();
+        let initial_growth = vm.heap.planned_owned_string_live_bytes(PART_LEN);
+        let table_growth = VmCell::filled_array_table_live_bytes(2);
+        let limit = collected_live + table_growth + collected_growth - 1;
+        assert!(initial_live + table_growth <= limit, "the table alone fits");
+        assert!(
+            initial_live + table_growth + initial_growth > limit,
+            "the atom admission triggers collection"
+        );
+        assert!(
+            collected_live + table_growth + initial_growth <= limit,
+            "reusing the old estimate would incorrectly admit the split"
+        );
+
+        vm.settings.memory_limit_bytes = Some(limit);
+        let value = text.value(&vm).unwrap();
+        let failure = vm.native_string_split(&[value]).unwrap_err();
+        assert!(matches!(failure.kind, ErrorKind::OutOfMemory));
+        assert_eq!(vm.current_live_bytes(), collected_live);
+        drop(roots);
     }
 
     #[test]
